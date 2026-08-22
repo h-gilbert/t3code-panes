@@ -3,8 +3,10 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX,
   COMPOSER_FOOTER_WIDE_ACTIONS_COMPACT_BREAKPOINT_PX,
+  COMPOSER_MODEL_PICKER_ICON_ONLY_BREAKPOINT_PX,
   shouldUseCompactComposerPrimaryActions,
   shouldUseCompactComposerFooter,
+  shouldUseIconOnlyComposerModelPicker,
 } from "./composerFooterLayout";
 
 describe("shouldUseCompactComposerFooter", () => {
@@ -47,6 +49,18 @@ describe("shouldUseCompactComposerPrimaryActions", () => {
       shouldUseCompactComposerPrimaryActions(COMPOSER_FOOTER_WIDE_ACTIONS_COMPACT_BREAKPOINT_PX, {
         hasWideActions: true,
       }),
+    ).toBe(false);
+  });
+});
+
+describe("shouldUseIconOnlyComposerModelPicker", () => {
+  it("collapses below the model-picker breakpoint", () => {
+    expect(shouldUseIconOnlyComposerModelPicker(null)).toBe(false);
+    expect(
+      shouldUseIconOnlyComposerModelPicker(COMPOSER_MODEL_PICKER_ICON_ONLY_BREAKPOINT_PX - 1),
+    ).toBe(true);
+    expect(
+      shouldUseIconOnlyComposerModelPicker(COMPOSER_MODEL_PICKER_ICON_ONLY_BREAKPOINT_PX),
     ).toBe(false);
   });
 });

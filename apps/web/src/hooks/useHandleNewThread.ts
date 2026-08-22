@@ -4,7 +4,16 @@ import {
   scopeProjectRef,
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
-import { DEFAULT_RUNTIME_MODE, type ScopedProjectRef, type ThreadId } from "@t3tools/contracts";
+import {
+  DEFAULT_CLAUDE_MODEL,
+  DEFAULT_PROVIDER_REASONING_EFFORT,
+  DEFAULT_RUNTIME_MODE,
+  defaultInstanceIdForDriver,
+  ProviderDriverKind,
+  type ScopedProjectRef,
+  type ThreadId,
+} from "@t3tools/contracts";
+import { createModelSelection } from "@t3tools/shared/model";
 import { useParams, useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import {
@@ -24,6 +33,7 @@ import {
 } from "../logicalProject";
 import { resolveDefaultThreadEnvMode } from "@t3tools/shared/threadEnvMode";
 import { readThreadShell, useProjects, useThread } from "../state/entities";
+import { usePrimaryEnvironmentId } from "../state/environments";
 import { resolveNewDraftStartFromOrigin } from "../lib/chatThreadActions";
 import { readT3ProjectFileDefaultThreadEnvMode } from "../lib/t3ProjectFileDefaults";
 import { primaryServerSettingsAtom } from "../state/server";
@@ -37,6 +47,12 @@ interface NewThreadWorkspaceOptions {
   envMode?: DraftThreadEnvMode;
   startFromOrigin?: boolean;
 }
+
+const DEFAULT_NEW_CHAT_MODEL_SELECTION = createModelSelection(
+  defaultInstanceIdForDriver(ProviderDriverKind.make("claudeAgent")),
+  DEFAULT_CLAUDE_MODEL,
+  [{ id: "effort", value: DEFAULT_PROVIDER_REASONING_EFFORT }],
+);
 
 // The workspace options the caller passed explicitly, shaped for the draft
 // store: absent keys stay absent so they never overwrite existing draft
@@ -74,6 +90,13 @@ export function useNewThreadHandler() {
         envMode?: DraftThreadEnvMode;
         startFromOrigin?: boolean;
         replace?: boolean;
+        /** Create or reuse the draft without changing the current route. */
+        navigate?: boolean;
+        /**
+         * Open this exact fresh draft instead of reusing the project's current empty draft.
+         * Pane workspaces use this so the same project can have several empty composers open.
+         */
+        freshDraft?: { draftId: DraftId; threadId: ThreadId };
         /**
          * Move the viewed draft's typed content (prompt + images) into the
          * draft this request lands on. Set by the draft repo picker: the
@@ -99,11 +122,10 @@ export function useNewThreadHandler() {
         setModelSelection,
       } = useComposerDraftStore.getState();
       const currentRouteTarget = getCurrentRouteTarget();
-      // A new thread carries the user's *working mode* from the thread being
-      // viewed: model (including options like reasoning effort and context
-      // window), permission mode, and interaction mode. Branch, worktree, and
-      // env mode never carry implicitly — those come from the configured
-      // defaults unless the caller passes them explicitly.
+      // New chats use the product model and permission defaults. Interaction
+      // mode still carries so an explicit plan/default choice is not lost;
+      // branch, worktree, and env mode come from configured defaults unless
+      // the caller passes them explicitly.
       const carrySourceShell =
         currentRouteTarget?.kind === "server"
           ? readThreadShell(currentRouteTarget.threadRef)
@@ -119,17 +141,6 @@ export function useNewThreadHandler() {
               : currentRouteTarget.draftId,
           )
         : null;
-      const composerActiveProvider = carrySourceComposer?.activeProvider ?? null;
-      const composerModelSelection = composerActiveProvider
-        ? (carrySourceComposer?.modelSelectionByProvider[composerActiveProvider] ?? null)
-        : null;
-      const carryModelSelection =
-        composerModelSelection ?? carrySourceShell?.modelSelection ?? null;
-      const carryRuntimeMode =
-        carrySourceComposer?.runtimeMode ??
-        carrySourceShell?.runtimeMode ??
-        carrySourceDraft?.runtimeMode ??
-        null;
       const carryInteractionMode =
         carrySourceComposer?.interactionMode ??
         carrySourceShell?.interactionMode ??
@@ -180,6 +191,19 @@ export function useNewThreadHandler() {
       const logicalProjectKey = project
         ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
         : scopedProjectKey(projectRef);
+      const requestedFreshDraft = options?.freshDraft;
+      const existingRequestedDraft = requestedFreshDraft
+        ? getDraftSession(requestedFreshDraft.draftId)
+        : null;
+      if (
+        existingRequestedDraft?.logicalProjectKey === logicalProjectKey &&
+        existingRequestedDraft.promotedTo === null
+      ) {
+        return Promise.resolve({
+          draftId: requestedFreshDraft!.draftId,
+          threadId: existingRequestedDraft.threadId,
+        });
+      }
       const hasBranchOption = options?.branch !== undefined;
       const hasWorktreePathOption = options?.worktreePath !== undefined;
       const hasEnvModeOption = options?.envMode !== undefined;
@@ -202,6 +226,7 @@ export function useNewThreadHandler() {
       // fresh draft instead — the remap in the store preserves invested
       // drafts rather than deleting them.
       const emptyStoredDraftThread =
+        !requestedFreshDraft &&
         reusableStoredDraftThread &&
         !composerDraftHasUserContent(getComposerDraft(reusableStoredDraftThread.draftId))
           ? reusableStoredDraftThread
@@ -270,17 +295,12 @@ export function useNewThreadHandler() {
           if (workspaceContext) {
             setDraftThreadContext(emptyStoredDraftThread.draftId, {
               ...workspaceContext,
-              ...(carryRuntimeMode ? { runtimeMode: carryRuntimeMode } : {}),
+              runtimeMode: DEFAULT_RUNTIME_MODE,
               ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
             });
-            if (carryModelSelection) {
-              // The carried selection is a complete snapshot of the viewed
-              // thread's model state: absent options mean "no options", not
-              // "keep the stale draft's options".
-              setModelSelection(emptyStoredDraftThread.draftId, carryModelSelection, {
-                replaceOptions: true,
-              });
-            }
+            setModelSelection(emptyStoredDraftThread.draftId, DEFAULT_NEW_CHAT_MODEL_SELECTION, {
+              replaceOptions: true,
+            });
           }
           // The workspace context must also ride along here: when projectRef
           // targets a different physical member of the logical project,
@@ -293,7 +313,7 @@ export function useNewThreadHandler() {
             {
               threadId: emptyStoredDraftThread.threadId,
               ...workspaceContext,
-              ...(carryRuntimeMode ? { runtimeMode: carryRuntimeMode } : {}),
+              runtimeMode: DEFAULT_RUNTIME_MODE,
               ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
             },
           );
@@ -312,16 +332,19 @@ export function useNewThreadHandler() {
           ) {
             return opened;
           }
-          await router.navigate({
-            to: "/draft/$draftId",
-            params: { draftId: emptyStoredDraftThread.draftId },
-            replace: options?.replace ?? false,
-          });
+          if (options?.navigate !== false) {
+            await router.navigate({
+              to: "/draft/$draftId",
+              params: { draftId: emptyStoredDraftThread.draftId },
+              replace: options?.replace ?? false,
+            });
+          }
           return opened;
         })();
       }
 
       if (
+        !requestedFreshDraft &&
         latestActiveDraftThread &&
         currentRouteTarget?.kind === "draft" &&
         latestActiveDraftThread.logicalProjectKey === logicalProjectKey &&
@@ -351,8 +374,8 @@ export function useNewThreadHandler() {
         });
       }
 
-      const draftId = newDraftId();
-      const threadId = newThreadId();
+      const draftId = requestedFreshDraft?.draftId ?? newDraftId();
+      const threadId = requestedFreshDraft?.threadId ?? newThreadId();
       const createdAt = new Date().toISOString();
       return (async () => {
         const initialEnvMode = options?.envMode ?? (await resolveDefaultEnvMode());
@@ -362,6 +385,7 @@ export function useNewThreadHandler() {
         // reuse the winner instead, like the synchronous path above does.
         const racedDraft = getDraftSessionByLogicalProjectKey(logicalProjectKey);
         if (
+          !requestedFreshDraft &&
           racedDraft &&
           // Only a draft REGISTERED during the await counts as a raced
           // winner. An invested draft this invocation deliberately declined
@@ -386,11 +410,13 @@ export function useNewThreadHandler() {
             ...pickExplicitWorkspaceOptions(options),
           });
           carryComposerContentTo(racedDraft.draftId);
-          await router.navigate({
-            to: "/draft/$draftId",
-            params: { draftId: racedDraft.draftId },
-            replace: options?.replace ?? false,
-          });
+          if (options?.navigate !== false) {
+            await router.navigate({
+              to: "/draft/$draftId",
+              params: { draftId: racedDraft.draftId },
+              replace: options?.replace ?? false,
+            });
+          }
           return { draftId: racedDraft.draftId, threadId: racedDraft.threadId };
         }
         setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, draftId, {
@@ -405,25 +431,21 @@ export function useNewThreadHandler() {
               envMode: initialEnvMode,
               newWorktreesStartFromOrigin: primaryServerSettings.newWorktreesStartFromOrigin,
             }),
-          runtimeMode: carryRuntimeMode ?? DEFAULT_RUNTIME_MODE,
+          runtimeMode: DEFAULT_RUNTIME_MODE,
           ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
+          preservePreviousDraft: requestedFreshDraft !== undefined,
         });
         applyStickyState(draftId);
-        if (carryModelSelection) {
-          // After sticky state so the viewed thread's exact selection
-          // (model + options like effort and context window) wins over the
-          // globally sticky one. replaceOptions: the carried selection is a
-          // complete snapshot — absent options mean "no options", not "keep
-          // whatever sticky state just wrote".
-          setModelSelection(draftId, carryModelSelection, { replaceOptions: true });
-        }
+        setModelSelection(draftId, DEFAULT_NEW_CHAT_MODEL_SELECTION, { replaceOptions: true });
         carryComposerContentTo(draftId);
 
-        await router.navigate({
-          to: "/draft/$draftId",
-          params: { draftId },
-          replace: options?.replace ?? false,
-        });
+        if (options?.navigate !== false) {
+          await router.navigate({
+            to: "/draft/$draftId",
+            params: { draftId },
+            replace: options?.replace ?? false,
+          });
+        }
         return { draftId, threadId };
       })();
     },
@@ -448,6 +470,8 @@ export function useHandleNewThread() {
       : null,
   );
   const projects = useProjects();
+  const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
   const orderedProjects = useMemo(() => {
     return orderItemsByPreferredIds({
       items: projects,
@@ -459,13 +483,46 @@ export function useHandleNewThread() {
       ],
     });
   }, [projectOrder, projects]);
+  const contextualEnvironmentId = activeThread?.environmentId ?? activeDraftThread?.environmentId;
+  const contextualProjectId = activeThread?.projectId ?? activeDraftThread?.projectId;
+  const preferredProjectRef = useMemo(() => {
+    if (!contextualEnvironmentId || !contextualProjectId) return null;
+    const contextualProjectRef = scopeProjectRef(contextualEnvironmentId, contextualProjectId);
+    const contextualProject = projects.find(
+      (project) =>
+        project.environmentId === contextualEnvironmentId && project.id === contextualProjectId,
+    );
+    if (!contextualProject || !primaryEnvironmentId) return contextualProjectRef;
+    const logicalProjectKey = deriveLogicalProjectKeyFromSettings(
+      contextualProject,
+      projectGroupingSettings,
+    );
+    const localProject = projects.find(
+      (project) =>
+        project.environmentId === primaryEnvironmentId &&
+        deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings) === logicalProjectKey,
+    );
+    return localProject
+      ? scopeProjectRef(localProject.environmentId, localProject.id)
+      : contextualProjectRef;
+  }, [
+    contextualEnvironmentId,
+    contextualProjectId,
+    primaryEnvironmentId,
+    projectGroupingSettings,
+    projects,
+  ]);
+  const defaultProject =
+    orderedProjects.find((project) => project.environmentId === primaryEnvironmentId) ??
+    orderedProjects[0];
   const handleNewThread = useNewThreadHandler();
 
   return {
     activeDraftThread,
     activeThread,
-    defaultProjectRef: orderedProjects[0]
-      ? scopeProjectRef(orderedProjects[0].environmentId, orderedProjects[0].id)
+    preferredProjectRef,
+    defaultProjectRef: defaultProject
+      ? scopeProjectRef(defaultProject.environmentId, defaultProject.id)
       : null,
     handleNewThread,
     routeThreadRef,

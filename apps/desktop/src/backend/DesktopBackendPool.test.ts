@@ -82,6 +82,7 @@ function makePoolLayer(
         ElectronDialog.layer,
         Layer.succeed(DesktopWindow.DesktopWindow, {
           createMain: Effect.die("unexpected window create"),
+          createWorkspaceWindow: Effect.die("unexpected workspace window create"),
           ensureMain: Effect.die("unexpected window ensure"),
           revealOrCreateMain: Effect.die("unexpected window reveal"),
           activate: Effect.die("unexpected window activate"),

@@ -86,10 +86,20 @@ describe("reduceCommandPaletteUiState", () => {
       mode: "command",
       openIntent: { kind: "add-project" },
     });
+    expect(reduceCommandPaletteUiState(filesOpen, { _tag: "OpenAddLocalProject" })).toEqual({
+      open: true,
+      mode: "command",
+      openIntent: { kind: "add-local-project" },
+    });
     expect(reduceCommandPaletteUiState(filesOpen, { _tag: "OpenNewThreadIn" })).toEqual({
       open: true,
       mode: "command",
       openIntent: { kind: "new-thread-in" },
+    });
+    expect(reduceCommandPaletteUiState(filesOpen, { _tag: "OpenResumeThread" })).toEqual({
+      open: true,
+      mode: "command",
+      openIntent: { kind: "resume-thread" },
     });
   });
 

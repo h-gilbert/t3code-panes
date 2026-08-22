@@ -9,6 +9,7 @@ import {
 } from "./chatThreadActions";
 
 const ENVIRONMENT_ID = EnvironmentId.make("environment-1");
+const REMOTE_ENVIRONMENT_ID = EnvironmentId.make("environment-remote");
 const PROJECT_ID = ProjectId.make("project-1");
 const FALLBACK_PROJECT_ID = ProjectId.make("project-2");
 
@@ -49,6 +50,21 @@ describe("chatThreadActions", () => {
     );
 
     expect(projectRef).toEqual(scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID));
+  });
+
+  it("prefers the local project counterpart over an active remote thread", () => {
+    const localProjectRef = scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID);
+    const projectRef = resolveThreadActionProjectRef(
+      createContext({
+        activeThread: {
+          environmentId: REMOTE_ENVIRONMENT_ID,
+          projectId: PROJECT_ID,
+        },
+        preferredProjectRef: localProjectRef,
+      }),
+    );
+
+    expect(projectRef).toEqual(localProjectRef);
   });
 
   it("falls back to the active draft thread project when there is no active thread", () => {

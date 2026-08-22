@@ -6,6 +6,7 @@ import {
 } from "@t3tools/client-runtime/environment";
 import * as Schema from "effect/Schema";
 import {
+  DEFAULT_RUNTIME_MODE,
   defaultInstanceIdForDriver,
   EnvironmentId,
   ProjectId,
@@ -129,6 +130,7 @@ function resetComposerDraftStore() {
     draftsByThreadKey: {},
     draftThreadsByThreadKey: {},
     logicalProjectDraftThreadKeyByLogicalProjectKey: {},
+    retainedDraftThreadKeys: {},
     stickyModelSelectionByProvider: {},
     stickyActiveProvider: null,
   });
@@ -355,6 +357,7 @@ describe("composerDraftStore syncPersistedAttachments", () => {
       draftsByThreadKey: {},
       draftThreadsByThreadKey: {},
       logicalProjectDraftThreadKeyByLogicalProjectKey: {},
+      retainedDraftThreadKeys: {},
       stickyModelSelectionByProvider: {},
       stickyActiveProvider: null,
     });
@@ -410,6 +413,7 @@ describe("composerDraftStore terminal contexts", () => {
       draftsByThreadKey: {},
       draftThreadsByThreadKey: {},
       logicalProjectDraftThreadKeyByLogicalProjectKey: {},
+      retainedDraftThreadKeys: {},
       stickyModelSelectionByProvider: {},
       stickyActiveProvider: null,
     });
@@ -806,7 +810,7 @@ describe("composerDraftStore project draft thread mapping", () => {
       branch: "feature/test",
       worktreePath: "/tmp/worktree-test",
       envMode: "worktree",
-      runtimeMode: "full-access",
+      runtimeMode: DEFAULT_RUNTIME_MODE,
       interactionMode: "default",
       createdAt: "2026-01-01T00:00:00.000Z",
     });
@@ -817,7 +821,7 @@ describe("composerDraftStore project draft thread mapping", () => {
       branch: "feature/test",
       worktreePath: "/tmp/worktree-test",
       envMode: "worktree",
-      runtimeMode: "full-access",
+      runtimeMode: DEFAULT_RUNTIME_MODE,
       interactionMode: "default",
       createdAt: "2026-01-01T00:00:00.000Z",
     });
@@ -940,6 +944,32 @@ describe("composerDraftStore project draft thread mapping", () => {
     );
     expect(useComposerDraftStore.getState().getDraftThread(draftId)).toBeNull();
     expect(draftByKey(draftId)).toBeUndefined();
+  });
+
+  it("keeps a previous empty draft when another active surface still owns it", () => {
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectRef, draftId, { threadId });
+
+    store.setLogicalProjectDraftThreadId(scopedProjectKey(projectRef), projectRef, otherDraftId, {
+      threadId: otherThreadId,
+      preservePreviousDraft: true,
+    });
+
+    expect(store.getDraftThread(draftId)?.threadId).toBe(threadId);
+    expect(store.getDraftThread(otherDraftId)?.threadId).toBe(otherThreadId);
+  });
+
+  it("keeps a retained empty draft across ordinary project remaps", () => {
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectRef, draftId, { threadId });
+    store.retainDraftThread(draftId);
+
+    store.setProjectDraftThreadId(projectRef, otherDraftId, { threadId: otherThreadId });
+
+    expect(store.getDraftThread(draftId)?.threadId).toBe(threadId);
+    expect(store.getDraftThread(otherDraftId)?.threadId).toBe(otherThreadId);
+
+    store.releaseDraftThread(draftId);
   });
 
   it("keeps invested composer drafts alive unmapped when remapping a project to a new draft thread", () => {

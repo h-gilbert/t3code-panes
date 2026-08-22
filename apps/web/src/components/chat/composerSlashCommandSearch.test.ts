@@ -42,6 +42,34 @@ describe("searchSlashCommandItems", () => {
     ]);
   });
 
+  it("keeps T3 resume ahead of a provider command that only mentions resume", () => {
+    const items = [
+      {
+        id: "provider-slash-command:claudeAgent:clear",
+        type: "provider-slash-command",
+        provider: claudeDriver,
+        command: { name: "clear" },
+        label: "/clear",
+        description:
+          "Start a new session with empty context; previous session stays on disk (resumable with /resume)",
+      },
+      {
+        id: "slash:resume",
+        type: "slash-command",
+        command: "resume",
+        label: "/resume",
+        description: "Choose an existing T3 Code thread to resume",
+      },
+    ] satisfies Array<
+      Extract<ComposerCommandItem, { type: "slash-command" | "provider-slash-command" }>
+    >;
+
+    expect(searchSlashCommandItems(items, "resume").map((item) => item.id)).toEqual([
+      "slash:resume",
+      "provider-slash-command:claudeAgent:clear",
+    ]);
+  });
+
   it("supports fuzzy provider command matches", () => {
     const items = [
       {

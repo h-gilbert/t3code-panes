@@ -73,7 +73,7 @@ import {
   type ComposerTasksProgress,
 } from "./ComposerTasksBadge";
 import { compressImageForStash, compressImageToByteLimit } from "../../lib/imageCompression";
-import { isCommandPaletteOpen } from "../../commandPaletteBus";
+import { isCommandPaletteOpen, openCommandPalette } from "../../commandPaletteBus";
 import { getTerminalFocusOwner } from "../../lib/terminalFocus";
 import { resolveShortcutCommand } from "../../keybindings";
 import {
@@ -89,6 +89,7 @@ import { ComposerPendingElementContexts } from "./ComposerPendingElementContexts
 import { ComposerPendingReviewComments } from "./ComposerPendingReviewComments";
 import { ComposerPreviewAnnotationCards } from "./ComposerPreviewAnnotationCards";
 import {
+  shouldUseIconOnlyComposerModelPicker,
   shouldUseCompactComposerPrimaryActions,
   shouldUseCompactComposerFooter,
 } from "../composerFooterLayout";
@@ -107,6 +108,7 @@ import { searchSlashCommandItems } from "./composerSlashCommandSearch";
 import {
   getComposerPromptInjectionState,
   getComposerProviderState,
+  renderProviderTraitsIconPickers,
   renderProviderTraitsMenuContent,
   renderProviderTraitsPicker,
 } from "./composerProviderState";
@@ -416,6 +418,78 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
   );
 });
 
+const CompactComposerModeControls = memo(function CompactComposerModeControls(props: {
+  showInteractionModeToggle: boolean;
+  interactionMode: ProviderInteractionMode;
+  runtimeMode: RuntimeMode;
+  onToggleInteractionMode: () => void;
+  onRuntimeModeChange: (mode: RuntimeMode) => void;
+}) {
+  const runtimeModeOption = runtimeModeConfig[props.runtimeMode];
+  const RuntimeModeIcon = runtimeModeOption.icon;
+
+  return (
+    <>
+      {props.showInteractionModeToggle ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                className="shrink-0 text-secondary-label hover:text-foreground"
+                onClick={props.onToggleInteractionMode}
+                aria-label={props.interactionMode === "plan" ? "Plan mode" : "Chat mode"}
+              />
+            }
+          >
+            {props.interactionMode === "plan" ? (
+              <PencilRulerIcon className="size-3.5" />
+            ) : (
+              <BotIcon className="size-3.5" />
+            )}
+          </TooltipTrigger>
+          <TooltipPopup side="top">
+            {props.interactionMode === "plan" ? "Plan mode" : "Chat mode"}
+          </TooltipPopup>
+        </Tooltip>
+      ) : null}
+      <Tooltip>
+        <Select
+          value={props.runtimeMode}
+          onValueChange={(value) => props.onRuntimeModeChange(value!)}
+        >
+          <TooltipTrigger
+            render={
+              <ComposerSelectControl
+                className="h-7 min-h-7 w-auto gap-0.5 px-1.5"
+                aria-label={`Access: ${runtimeModeOption.label}`}
+              />
+            }
+          >
+            <RuntimeModeIcon className="size-3.5" />
+          </TooltipTrigger>
+          <SelectPopup alignItemWithTrigger={false}>
+            {runtimeModeOptions.map((mode) => {
+              const option = runtimeModeConfig[mode];
+              const OptionIcon = option.icon;
+              return (
+                <SelectItem key={mode} value={mode} hideIndicator>
+                  <span className="inline-flex items-center gap-2">
+                    <OptionIcon className="size-3.5 text-muted-foreground" />
+                    {option.label}
+                  </span>
+                </SelectItem>
+              );
+            })}
+          </SelectPopup>
+        </Select>
+        <TooltipPopup side="top">Access: {runtimeModeOption.label}</TooltipPopup>
+      </Tooltip>
+    </>
+  );
+});
+
 const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(props: {
   compact: boolean;
   activeContextWindow: ReturnType<typeof deriveLatestContextWindowSnapshot>;
@@ -482,6 +556,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
 export interface ChatComposerHandle {
   focusAtEnd: () => void;
   focusAt: (cursor: number) => void;
+  startTypingAtEnd: (text: string) => boolean;
   addDroppedFiles: (files: File[]) => void;
   insertTextAtEnd: (text: string, options?: { ensureLeadingBoundary?: boolean }) => boolean;
   openModelPicker: () => void;
@@ -538,6 +613,7 @@ export interface ChatComposerProps {
   activeThread: Thread | undefined;
   isServerThread: boolean;
   isLocalDraftThread: boolean;
+  compactLayout?: boolean;
   forceExpandedOnMobile: boolean;
   projectSelectionRequired: boolean;
 
@@ -590,6 +666,7 @@ export interface ChatComposerProps {
   activeThreadActivities: Thread["activities"] | undefined;
 
   // Misc
+  compactEnvironmentControl?: ReactNode;
   resolvedTheme: "light" | "dark";
   settings: UnifiedSettings;
   keybindings: ResolvedKeybindingsConfig;
@@ -650,6 +727,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeThread,
     isServerThread: _isServerThread,
     isLocalDraftThread: _isLocalDraftThread,
+    compactLayout = false,
     forceExpandedOnMobile,
     projectSelectionRequired,
     phase,
@@ -678,6 +756,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeProjectDefaultModelSelection,
     activeThreadModelSelection,
     activeThreadActivities,
+    compactEnvironmentControl,
     resolvedTheme,
     settings,
     keybindings,
@@ -780,6 +859,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       providerStatuses,
       explicitSelectedInstanceId,
     ) ??
+    providerInstanceEntries.find(
+      (entry) => entry.driverKind === ProviderDriverKind.make("claudeAgent"),
+    )?.driverKind ??
     providerInstanceEntries[0]?.driverKind ??
     ProviderDriverKind.make("unconfigured");
   const requestedDriverKind: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
@@ -979,8 +1061,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     null,
   );
   const [isDragOverComposer, setIsDragOverComposer] = useState(false);
-  const [isComposerFooterCompact, setIsComposerFooterCompact] = useState(false);
-  const [isComposerPrimaryActionsCompact, setIsComposerPrimaryActionsCompact] = useState(false);
+  const [isComposerFooterCompact, setIsComposerFooterCompact] = useState(compactLayout);
+  const [isComposerPrimaryActionsCompact, setIsComposerPrimaryActionsCompact] =
+    useState(compactLayout);
+  const [isComposerModelPickerIconOnly, setIsComposerModelPickerIconOnly] = useState(false);
   const [isComposerModelPickerOpen, setIsComposerModelPickerOpen] = useState(false);
   const [isComposerFocused, setIsComposerFocused] = useState(false);
   const [composerSubmissionError, setComposerSubmissionError] = useState<string | null>(null);
@@ -1080,6 +1164,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     if (composerTrigger.kind === "slash-command") {
       const builtInSlashCommandItems = [
+        {
+          id: "slash:resume",
+          type: "slash-command",
+          command: "resume",
+          label: "/resume",
+          description: "Choose an existing T3 Code thread to resume",
+        },
         {
           id: "slash:model",
           type: "slash-command",
@@ -1265,6 +1356,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     planModeEnabled: settings.planModeEnabled,
   });
   const providerTraitsPicker = renderProviderTraitsPicker({
+    provider: selectedProvider,
+    instanceId: selectedInstanceId,
+    ...(routeKind === "server" ? { threadRef: routeThreadRef } : {}),
+    ...(routeKind === "draft" && draftId ? { draftId } : {}),
+    model: selectedModel,
+    models: selectedProviderModels,
+    modelOptions: composerModelOptions?.[selectedInstanceId],
+    prompt,
+    onPromptChange: setPromptFromTraits,
+    planModeEnabled: settings.planModeEnabled,
+  });
+  const providerTraitsIconPickers = renderProviderTraitsIconPickers({
     provider: selectedProvider,
     instanceId: selectedInstanceId,
     ...(routeKind === "server" ? { threadRef: routeThreadRef } : {}),
@@ -1492,23 +1595,28 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     const measureComposerFormWidth = () => composerForm.clientWidth;
     const measureFooterCompactness = () => {
       const composerFormWidth = measureComposerFormWidth();
-      const footerCompact = shouldUseCompactComposerFooter(composerFormWidth, {
-        hasWideActions: composerFooterHasWideActions,
-      });
-      const primaryActionsCompact =
-        footerCompact &&
-        shouldUseCompactComposerPrimaryActions(composerFormWidth, {
+      const footerCompact =
+        compactLayout ||
+        shouldUseCompactComposerFooter(composerFormWidth, {
           hasWideActions: composerFooterHasWideActions,
         });
+      const primaryActionsCompact =
+        compactLayout ||
+        (footerCompact &&
+          shouldUseCompactComposerPrimaryActions(composerFormWidth, {
+            hasWideActions: composerFooterHasWideActions,
+          }));
       return {
         primaryActionsCompact,
         footerCompact,
+        modelPickerIconOnly: shouldUseIconOnlyComposerModelPicker(composerFormWidth),
       };
     };
 
     const initialCompactness = measureFooterCompactness();
     setIsComposerPrimaryActionsCompact(initialCompactness.primaryActionsCompact);
     setIsComposerFooterCompact(initialCompactness.footerCompact);
+    setIsComposerModelPickerIconOnly(initialCompactness.modelPickerIconOnly);
     if (typeof ResizeObserver === "undefined") return;
 
     const observer = new ResizeObserver(() => {
@@ -1521,13 +1629,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       setIsComposerFooterCompact((previous) =>
         previous === nextCompactness.footerCompact ? previous : nextCompactness.footerCompact,
       );
+      setIsComposerModelPickerIconOnly((previous) =>
+        previous === nextCompactness.modelPickerIconOnly
+          ? previous
+          : nextCompactness.modelPickerIconOnly,
+      );
     });
 
     observer.observe(composerForm);
     return () => {
       observer.disconnect();
     };
-  }, [activeThreadId, composerFooterActionLayoutKey, composerFooterHasWideActions]);
+  }, [activeThreadId, compactLayout, composerFooterActionLayoutKey, composerFooterHasWideActions]);
 
   // ------------------------------------------------------------------
   // Image persist effect
@@ -1757,6 +1870,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return;
       }
       if (item.type === "slash-command") {
+        if (item.command === "resume") {
+          const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
+            expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+            focusEditorAfterReplace: false,
+          });
+          if (applied) {
+            setComposerHighlightedItemId(null);
+            openCommandPalette({ open: "resume-thread" });
+          }
+          return;
+        }
         if (item.command === "model") {
           const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
             expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
@@ -1891,6 +2015,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         event?.preventDefault();
         return;
       }
+      if (/^\/resume\s*$/i.test(promptRef.current.trim())) {
+        event?.preventDefault();
+        const snapshot = readComposerSnapshot();
+        const applied = applyPromptReplacement(0, snapshot.value.length, "", {
+          expectedText: snapshot.value,
+          focusEditorAfterReplace: false,
+        });
+        if (applied) {
+          setComposerHighlightedItemId(null);
+          openCommandPalette({ open: "resume-thread" });
+        }
+        return;
+      }
       // A send while a pasted image is still compressing would strand that
       // image: the turn snapshot wouldn't include it, and it would surface
       // in the *next* draft instead. Only oversized images hit this — small
@@ -1930,6 +2067,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       noProviderAvailable,
       onSend,
       promptRef,
+      applyPromptReplacement,
+      readComposerSnapshot,
       shouldBlurMobileComposerOnSubmit,
     ],
   );
@@ -2586,6 +2725,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     );
   };
 
+  const startTypingAtEnd = (text: string): boolean => {
+    if (
+      text.length === 0 ||
+      isConnecting ||
+      isComposerApprovalState ||
+      pendingUserInputs.length > 0 ||
+      projectSelectionRequired
+    ) {
+      return false;
+    }
+    return composerEditorRef.current?.startTypingAtEnd(text) ?? false;
+  };
+
   // File-tree drags land as mentions. Handled in the capture phase so the
   // editor never sees the drop; the load-bearing rules (native stop, "move"
   // effect, no eager focus) live in makeComposerMentionDragHandlers.
@@ -2685,6 +2837,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       focusAt: (cursor: number) => {
         composerEditorRef.current?.focusAt(cursor);
       },
+      startTypingAtEnd,
       addDroppedFiles: (files: File[]) => {
         void addComposerImages(files);
         focusComposer();
@@ -2985,8 +3138,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         ) : null}
         <div
           data-chat-composer-main-surface="true"
+          data-chat-composer-compact={compactLayout ? "true" : "false"}
           className={cn(
-            "group relative z-10 rounded-[22px] p-px transition-colors duration-200",
+            "group relative z-10 p-px transition-colors duration-200",
+            compactLayout ? "rounded-xl" : "rounded-[22px]",
             composerProviderState.composerFrameClassName,
           )}
         >
@@ -2995,7 +3150,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             data-chat-composer-surface="true"
             data-chat-composer-mobile-collapsed={isComposerCollapsedMobile ? "true" : "false"}
             className={cn(
-              "rounded-[20px] transition-[background-color] duration-200",
+              "transition-[background-color] duration-200",
+              compactLayout ? "rounded-[11px]" : "rounded-[20px]",
               isDragOverComposer ? "bg-accent/45 ring-1 ring-primary/70" : null,
               projectSelectionRequired ? "opacity-75" : null,
               composerProviderState.composerSurfaceClassName,
@@ -3050,8 +3206,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             <div
               ref={setComposerMenuAnchor}
               className={cn(
-                "relative px-3 pb-2 sm:px-4",
-                "pt-3.5 sm:pt-4",
+                "relative",
+                compactLayout ? "px-3 py-3" : "px-3 pt-3.5 pb-2 sm:px-4 sm:pt-4",
                 isComposerApprovalState && "pb-3 sm:pb-4",
                 isComposerCollapsedMobile && "hidden",
               )}
@@ -3221,7 +3377,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       : []
                   }
                   skills={selectedProviderStatus?.skills ?? []}
-                  {...(showMobilePendingAnswerActions ? { className: "max-sm:pb-11" } : {})}
+                  className={cn(
+                    compactLayout && "max-h-[3.75rem]! min-h-5! text-[13px] leading-5",
+                    showMobilePendingAnswerActions && "max-sm:pb-11",
+                  )}
                   onRemoveTerminalContext={removeComposerTerminalContextFromDraft}
                   onChange={onPromptChange}
                   onCommandKeyDown={onComposerCommandKey}
@@ -3287,13 +3446,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 data-chat-composer-footer="true"
                 data-chat-composer-footer-compact={isComposerFooterCompact ? "true" : "false"}
                 className={cn(
-                  "flex min-w-0 flex-nowrap items-center justify-between gap-2 overflow-visible px-3 pb-3 sm:px-4 sm:pb-4",
+                  "flex min-w-0 flex-nowrap items-center justify-between gap-2 overflow-visible",
+                  compactLayout ? "px-3 pb-2.5" : "px-3 pb-3 sm:px-4 sm:pb-4",
                   pendingUserInputs.length > 0 && "pt-2",
                   isComposerFooterCompact ? "gap-1.5" : "gap-2 sm:gap-0",
                   showMobilePendingAnswerActions && "hidden sm:flex",
                 )}
               >
                 <div className="-m-1 -ms-3.5 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 ps-3.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  {compactLayout ? compactEnvironmentControl : null}
                   {noProviderAvailable ? (
                     <Button
                       type="button"
@@ -3309,6 +3470,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   ) : (
                     <ProviderModelPicker
                       compact={isComposerFooterCompact}
+                      iconOnly={isComposerModelPickerIconOnly}
                       activeInstanceId={selectedInstanceId}
                       model={selectedModelForPickerWithCustomFallback}
                       lockedProvider={lockedProvider}
@@ -3333,7 +3495,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     />
                   )}
 
-                  {isComposerFooterCompact ? (
+                  {compactLayout ? (
+                    <>
+                      {providerTraitsIconPickers}
+                      <CompactComposerModeControls
+                        interactionMode={interactionMode}
+                        runtimeMode={runtimeMode}
+                        showInteractionModeToggle={
+                          composerProviderControls.showInteractionModeToggle
+                        }
+                        onToggleInteractionMode={toggleInteractionMode}
+                        onRuntimeModeChange={handleRuntimeModeChange}
+                      />
+                    </>
+                  ) : isComposerFooterCompact ? (
                     <CompactComposerControlsMenu
                       interactionMode={interactionMode}
                       runtimeMode={runtimeMode}

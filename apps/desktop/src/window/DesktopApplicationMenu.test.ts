@@ -72,6 +72,9 @@ const desktopUpdatesLayer = Layer.succeed(DesktopUpdates.DesktopUpdates, {
 const makeDesktopWindowLayer = (selectedAction: Deferred.Deferred<string>) =>
   Layer.succeed(DesktopWindow.DesktopWindow, {
     createMain: Effect.die("unexpected createMain"),
+    createWorkspaceWindow: Deferred.succeed(selectedAction, "new-workspace-window").pipe(
+      Effect.as({} as Electron.BrowserWindow),
+    ),
     ensureMain: Effect.die("unexpected ensureMain"),
     revealOrCreateMain: Effect.die("unexpected revealOrCreateMain"),
     activate: Effect.void,
@@ -121,6 +124,36 @@ const configureMenu = (
   );
 
 describe("DesktopApplicationMenu", () => {
+  it.effect("opens an independent workspace window with Cmd+N", () =>
+    Effect.gen(function* () {
+      const selectedAction = yield* Deferred.make<string>();
+      const applicationMenuTemplate =
+        yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
+
+      yield* configureMenu(selectedAction, applicationMenuTemplate);
+
+      const template = yield* Deferred.await(applicationMenuTemplate);
+      const fileMenu = template.find((item) => item.label === "File");
+      assert.isDefined(fileMenu);
+      if (!Array.isArray(fileMenu.submenu)) {
+        throw new Error("Expected File menu submenu to be an array.");
+      }
+      const newWindowItem = fileMenu.submenu.find((item) => item.label === "New Workspace Window");
+      assert.isDefined(newWindowItem);
+      assert.equal(newWindowItem.accelerator, "CmdOrCtrl+N");
+      if (typeof newWindowItem.click !== "function") {
+        throw new Error("Expected New Workspace Window menu item to have a click handler.");
+      }
+
+      newWindowItem.click(
+        {} as Electron.MenuItem,
+        {} as Electron.BrowserWindow,
+        {} as KeyboardEvent,
+      );
+      assert.equal(yield* Deferred.await(selectedAction), "new-workspace-window");
+    }),
+  );
+
   it.effect("installs the native menu and routes Settings through DesktopWindow", () =>
     Effect.gen(function* () {
       const selectedAction = yield* Deferred.make<string>();

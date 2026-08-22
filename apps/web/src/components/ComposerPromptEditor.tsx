@@ -869,6 +869,7 @@ export interface ComposerPromptEditorHandle {
   focus: () => void;
   focusAt: (cursor: number) => void;
   focusAtEnd: () => void;
+  startTypingAtEnd: (text: string) => boolean;
   readSnapshot: () => {
     value: string;
     cursor: number;
@@ -1692,6 +1693,20 @@ function ComposerPromptEditorInner({
           ),
         );
       },
+      startTypingAtEnd: (text: string) => {
+        const rootElement = editor.getRootElement();
+        if (!rootElement || text.length === 0) return false;
+        rootElement.focus({ preventScroll: true });
+        editor.update(() => {
+          const value = $getRoot().getTextContent();
+          $setSelectionAtComposerOffset(collapseExpandedComposerCursor(value, value.length));
+          const selection = $getSelection();
+          if ($isRangeSelection(selection)) {
+            selection.insertText(text);
+          }
+        });
+        return true;
+      },
       readSnapshot,
     }),
     [focusAt, readSnapshot],
@@ -1765,7 +1780,7 @@ function ComposerPromptEditorInner({
           }
           placeholder={
             terminalContexts.length > 0 ? null : (
-              <div className="pointer-events-none absolute inset-0 leading-relaxed text-placeholder">
+              <div className="pointer-events-none absolute inset-0 truncate leading-relaxed text-placeholder">
                 {placeholder}
               </div>
             )

@@ -1,5 +1,6 @@
 import {
   type ApprovalRequestId,
+  DEFAULT_PROVIDER_REASONING_EFFORT,
   DEFAULT_MODEL,
   defaultInstanceIdForDriver,
   type EnvironmentId,
@@ -22,6 +23,7 @@ import {
   RuntimeMode,
   TerminalOpenInput,
 } from "@t3tools/contracts";
+import { canCreateProjectInEnvironment } from "@t3tools/client-runtime/operations/projects";
 import {
   connectionStatusTitle,
   type EnvironmentConnectionPresentation,
@@ -64,6 +66,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type RefObject,
 } from "react";
 import { flushSync } from "react-dom";
 import { useNavigate } from "@tanstack/react-router";
@@ -164,6 +167,7 @@ import {
 } from "@t3tools/client-runtime/state/subagentRuntime";
 import { DiffWorkerPoolProvider } from "./DiffWorkerPoolProvider";
 import { BranchToolbar } from "./BranchToolbar";
+import { BranchToolbarEnvironmentSelector } from "./BranchToolbarEnvironmentSelector";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
@@ -184,7 +188,7 @@ import {
   nextProjectScriptId,
   projectScriptIdFromCommand,
 } from "~/projectScripts";
-import { newDraftId, newMessageId, newThreadId } from "~/lib/utils";
+import { newDraftId, newMessageId, newProjectId, newThreadId } from "~/lib/utils";
 import { useBrowserHistoryStore } from "~/browserHistoryStore";
 import { registerFaviconProjectForThread } from "~/browserFaviconStore";
 import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
@@ -209,6 +213,7 @@ import {
   deriveLogicalProjectKeyFromSettings,
   selectProjectGroupingSettings,
 } from "../logicalProject";
+import { getAutomaticRemoteProjectDestination } from "../remoteProjectProvisioning";
 import { buildPhysicalToLogicalProjectKeyMap } from "../sidebarProjectGrouping";
 import { buildDraftThreadRouteParams } from "../threadRoutes";
 import {
@@ -234,6 +239,7 @@ import { environmentCatalog } from "../connection/catalog";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { projectEnvironment } from "../state/projects";
+import { sourceControlEnvironment } from "../state/sourceControl";
 import { useEnvironmentQuery } from "../state/query";
 import {
   primaryServerAvailableEditorsAtom,
@@ -268,7 +274,9 @@ import { PanelLayoutControls, RightPanelMaximizeControl } from "./chat/PanelLayo
 import { type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { NoActiveThreadState } from "./NoActiveThreadState";
 import { WorkspacePageHeader } from "./WorkspacePageHeader";
+import { DEFAULT_WORKSPACE_KEY, useWorkspacePaneStore } from "../workspacePaneStore";
 import {
+  resolveEnvironmentOptionLabel,
   resolveEffectiveEnvMode,
   resolveLocalCheckoutBranchMismatch,
   shouldShowComposerContextStrip,
@@ -489,13 +497,29 @@ function eventPathContainsSelector(event: Event, selector: string): boolean {
   return path.some((target) => target instanceof Element && target.closest(selector));
 }
 
-function shouldTypeToFocusComposer(event: KeyboardEvent): boolean {
+export function shouldTypeToFocusComposer(
+  event: KeyboardEvent,
+  options?: { redirectFromUnfocusedWorkspacePane?: boolean },
+): boolean {
   if (event.defaultPrevented || event.isComposing) return false;
   if (event.metaKey || event.ctrlKey || event.altKey) return false;
   if (event.key.length !== 1) return false;
 
-  if (eventPathContainsSelector(event, TYPE_TO_FOCUS_EDITABLE_SELECTOR)) return false;
-  if (eventPathContainsSelector(event, TYPE_TO_FOCUS_INTERACTIVE_SELECTOR)) return false;
+  const eventCameFromUnfocusedWorkspacePane =
+    options?.redirectFromUnfocusedWorkspacePane === true &&
+    eventPathContainsSelector(event, '[data-workspace-pane][data-focused="false"]');
+  if (
+    !eventCameFromUnfocusedWorkspacePane &&
+    eventPathContainsSelector(event, TYPE_TO_FOCUS_EDITABLE_SELECTOR)
+  ) {
+    return false;
+  }
+  if (
+    !eventCameFromUnfocusedWorkspacePane &&
+    eventPathContainsSelector(event, TYPE_TO_FOCUS_INTERACTIVE_SELECTOR)
+  ) {
+    return false;
+  }
   if (document.querySelector(TYPE_TO_FOCUS_FLOATING_LAYER_SELECTOR)) return false;
 
   // The right-panel surface launcher claims its shortcut letters while it is
@@ -530,6 +554,11 @@ type ChatViewProps =
       onDiffPanelOpen?: () => void;
       reserveTitleBarControlInset?: boolean;
       forceExpandedMobileComposer?: boolean;
+      /** Whether this view owns global keyboard shortcuts in a multi-pane workspace. */
+      isPaneFocused?: boolean;
+      /** Renders auxiliary surfaces as overlays so a narrow pane keeps a useful chat width. */
+      embeddedPane?: boolean;
+      composerHandleRef?: RefObject<ChatComposerHandle | null>;
       threadSyncPhase?: ThreadSyncPhase | null;
       routeKind: "server";
       draftId?: never;
@@ -540,6 +569,11 @@ type ChatViewProps =
       onDiffPanelOpen?: () => void;
       reserveTitleBarControlInset?: boolean;
       forceExpandedMobileComposer?: boolean;
+      /** Whether this view owns global keyboard shortcuts in a multi-pane workspace. */
+      isPaneFocused?: boolean;
+      /** Renders auxiliary surfaces as overlays so a narrow pane keeps a useful chat width. */
+      embeddedPane?: boolean;
+      composerHandleRef?: RefObject<ChatComposerHandle | null>;
       threadSyncPhase?: never;
       routeKind: "draft";
       draftId: DraftId;
@@ -1219,7 +1253,7 @@ function releaseChatTimelineAnchor<T extends { readonly messageId: MessageId | n
   return current.messageId === null ? current : { ...current, messageId: null };
 }
 
-function ChatViewContent(props: ChatViewProps) {
+export function ChatViewContent(props: ChatViewProps) {
   const {
     environmentId,
     threadId,
@@ -1227,6 +1261,8 @@ function ChatViewContent(props: ChatViewProps) {
     onDiffPanelOpen,
     reserveTitleBarControlInset = true,
     forceExpandedMobileComposer = false,
+    isPaneFocused = true,
+    embeddedPane = false,
   } = props;
   const draftId = routeKind === "draft" ? props.draftId : null;
   const threadSyncPhase = routeKind === "server" ? (props.threadSyncPhase ?? null) : null;
@@ -1237,7 +1273,11 @@ function ChatViewContent(props: ChatViewProps) {
     [environmentId, threadId],
   );
   const routeThreadKey = useMemo(() => scopedThreadKey(routeThreadRef), [routeThreadRef]);
+  const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
   const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
+  const cloneRepository = useAtomCommand(sourceControlEnvironment.cloneRepository, {
+    reportFailure: false,
+  });
   const upsertKeybinding = useAtomCommand(serverEnvironment.upsertKeybinding, {
     reportFailure: false,
   });
@@ -1367,7 +1407,8 @@ function ChatViewContent(props: ChatViewProps) {
   const composerTerminalContextsRef = useRef<TerminalContextDraft[]>([]);
   const composerElementContextsRef = useRef<ElementContextDraft[]>([]);
   const localComposerRef = useRef<ChatComposerHandle | null>(null);
-  const composerRef = useComposerHandleContext() ?? localComposerRef;
+  const contextComposerRef = useComposerHandleContext();
+  const composerRef = props.composerHandleRef ?? contextComposerRef ?? localComposerRef;
   const [isWorkspaceFileDragActive, setIsWorkspaceFileDragActive] = useState(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
@@ -1405,7 +1446,8 @@ function ChatViewContent(props: ChatViewProps) {
   >({});
   const [pendingUserInputQuestionIndexByRequestId, setPendingUserInputQuestionIndexByRequestId] =
     useState<Record<string, number>>({});
-  const shouldUseRightPanelSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
+  const viewportRequiresRightPanelSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
+  const shouldUseRightPanelSheet = embeddedPane || viewportRequiresRightPanelSheet;
   const [terminalFocusRequestId, setTerminalFocusRequestId] = useState(0);
   const [pullRequestDialogState, setPullRequestDialogState] =
     useState<PullRequestDialogState | null>(null);
@@ -1731,13 +1773,14 @@ function ChatViewContent(props: ChatViewProps) {
   // timestamp backwards).
   useEffect(() => {
     const completedAt = serverThread?.latestTurn?.completedAt;
-    if (!serverThread?.id || !completedAt) return;
+    if (!isPaneFocused || !serverThread?.id || !completedAt) return;
     markThreadVisited(
       scopedThreadKey(scopeThreadRef(serverThread.environmentId, serverThread.id)),
       completedAt,
     );
   }, [
     markThreadVisited,
+    isPaneFocused,
     serverThread?.environmentId,
     serverThread?.id,
     serverThread?.latestTurn?.completedAt,
@@ -1775,6 +1818,21 @@ function ChatViewContent(props: ChatViewProps) {
     ? `${activeProject.environmentId}:${activeProject.workspaceRoot}`
     : null;
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
+  const openPaneWorkspace = useCallback(() => {
+    if (activeProject) {
+      useWorkspacePaneStore
+        .getState()
+        .setPaneProject(
+          DEFAULT_WORKSPACE_KEY,
+          0,
+          deriveLogicalProjectKeyFromSettings(activeProject, projectGroupingSettings),
+        );
+    }
+    void navigate({
+      to: "/workspace",
+      search: { workspace: DEFAULT_WORKSPACE_KEY },
+    });
+  }, [activeProject, navigate, projectGroupingSettings]);
   const clientSettingsHydrated = useClientSettingsHydrated();
   const [pendingFileSurfaceIdsByProject, setPendingFileSurfaceIdsByProject] = useState<
     ReadonlyMap<string, ReadonlySet<string>>
@@ -1927,13 +1985,55 @@ function ChatViewContent(props: ChatViewProps) {
     return envs;
   }, [activeProject, allProjects, projectGroupingSettings, primaryEnvironmentId, environmentById]);
   const hasMultipleEnvironments = logicalProjectEnvironments.length > 1;
+  const compactRunOnEnvironments = useMemo(() => {
+    if (!activeProject) return [];
+    const canonicalKey = activeProject.repositoryIdentity?.canonicalKey ?? null;
+    return environments
+      .flatMap((environment) => {
+        const matchingProject = allProjects.find(
+          (project) =>
+            project.environmentId === environment.environmentId &&
+            (project.id === activeProject.id ||
+              (canonicalKey !== null && project.repositoryIdentity?.canonicalKey === canonicalKey)),
+        );
+        const isActiveEnvironment = environment.environmentId === activeThread?.environmentId;
+        if (
+          !matchingProject &&
+          (canonicalKey === null || !canCreateProjectInEnvironment(environment.connection.phase)) &&
+          !isActiveEnvironment
+        ) {
+          return [];
+        }
+        const isPrimary = environment.environmentId === primaryEnvironmentId;
+        return [
+          {
+            environmentId: environment.environmentId,
+            projectId: matchingProject?.id ?? null,
+            label: resolveEnvironmentOptionLabel({
+              isPrimary,
+              environmentId: environment.environmentId,
+              runtimeLabel: environment.label,
+            }),
+            isPrimary,
+          },
+        ];
+      })
+      .sort((left, right) => {
+        if (left.isPrimary !== right.isPrimary) return left.isPrimary ? -1 : 1;
+        return left.label.localeCompare(right.label);
+      });
+  }, [activeProject, activeThread?.environmentId, allProjects, environments, primaryEnvironmentId]);
+  const composerEnvironmentOptions = embeddedPane
+    ? compactRunOnEnvironments
+    : logicalProjectEnvironments;
+  const hasMultipleComposerEnvironments = composerEnvironmentOptions.length > 1;
   const activeEnvironmentOption =
-    logicalProjectEnvironments.find(
+    composerEnvironmentOptions.find(
       (environment) => environment.environmentId === activeThread?.environmentId,
     ) ?? null;
   const showComposerEnvironmentIndicator = shouldShowEnvironmentIndicator({
     activeEnvironment: activeEnvironmentOption,
-    canPickEnvironment: hasMultipleEnvironments,
+    canPickEnvironment: hasMultipleComposerEnvironments,
   });
 
   const openPullRequestDialog = useCallback(
@@ -2615,7 +2715,11 @@ function ChatViewContent(props: ChatViewProps) {
   const draftHeroDockRequested =
     activeThreadKey !== null && dockedDraftHeroThreadKey === activeThreadKey;
   const isDraftHeroState =
-    isLocalDraftThread && timelineEntries.length === 0 && !isWorking && !draftHeroDockRequested;
+    !embeddedPane &&
+    isLocalDraftThread &&
+    timelineEntries.length === 0 &&
+    !isWorking &&
+    !draftHeroDockRequested;
   const [
     attachDraftHeroTransitionGroupRef,
     attachDraftHeroComposerAnchorRef,
@@ -2777,23 +2881,138 @@ function ChatViewContent(props: ChatViewProps) {
     (activeThread.messages.length > 0 ||
       (activeThread.session !== null && activeThread.session.status !== "stopped")),
   );
+  const [provisioningEnvironmentId, setProvisioningEnvironmentId] = useState<EnvironmentId | null>(
+    null,
+  );
 
-  // Handle environment change for draft threads.  When the user picks a
-  // different environment we update the draft context to point at the physical
-  // project in that environment while keeping the same logical project.
+  // Drafts can move to an existing checkout or materialize the current Git
+  // repository on another connected environment. Started threads remain bound
+  // to the machine that owns their files and provider process.
   const onEnvironmentChange = useCallback(
-    (nextEnvironmentId: EnvironmentId) => {
-      if (envLocked || !draftId) return;
-      const target = logicalProjectEnvironments.find(
+    async (nextEnvironmentId: EnvironmentId) => {
+      if (envLocked || !draftId || provisioningEnvironmentId !== null) return;
+      const target = composerEnvironmentOptions.find(
         (env) => env.environmentId === nextEnvironmentId,
       );
       if (!target) return;
-      setDraftThreadContext(draftId, {
-        projectRef: scopeProjectRef(target.environmentId, target.projectId),
+
+      if (target.projectId !== null) {
+        setDraftThreadContext(draftId, {
+          projectRef: scopeProjectRef(target.environmentId, target.projectId),
+        });
+        return;
+      }
+
+      const remoteUrl = activeProject?.repositoryIdentity?.locator.remoteUrl;
+      const targetEnvironment = environments.find(
+        (environment) => environment.environmentId === nextEnvironmentId,
+      );
+      if (!activeProject || !remoteUrl || !targetEnvironment) return;
+
+      const baseDirectory =
+        targetEnvironment.serverConfig?.settings.addProjectBaseDirectory?.trim();
+      if (!baseDirectory) {
+        toastManager.add({
+          type: "error",
+          title: `Choose a workspace location for ${target.label}`,
+          description:
+            "Set “Add project starts in” for this computer in Settings before preparing remote projects.",
+        });
+        return;
+      }
+
+      const destinationPath = getAutomaticRemoteProjectDestination({
+        baseDirectory,
+        owner: activeProject.repositoryIdentity?.owner,
+        remoteUrl,
+        workspaceRoot: activeProject.workspaceRoot,
       });
+
+      setProvisioningEnvironmentId(nextEnvironmentId);
+      try {
+        const cloneResult = await cloneRepository({
+          environmentId: nextEnvironmentId,
+          input: { remoteUrl, destinationPath },
+        });
+        if (cloneResult._tag === "Failure") {
+          if (!isAtomCommandInterrupted(cloneResult)) {
+            const error = squashAtomCommandFailure(cloneResult);
+            toastManager.add(
+              stackedThreadToast({
+                type: "error",
+                title: `Could not prepare ${target.label}`,
+                description:
+                  error instanceof Error ? error.message : "The repository could not be cloned.",
+              }),
+            );
+          }
+          return;
+        }
+
+        const projectId = newProjectId();
+        const createResult = await createProject({
+          environmentId: nextEnvironmentId,
+          input: {
+            projectId,
+            title: activeProject.title,
+            workspaceRoot: cloneResult.value.cwd,
+            createWorkspaceRootIfMissing: true,
+            defaultModelSelection: null,
+          },
+        });
+        if (createResult._tag === "Failure") {
+          if (!isAtomCommandInterrupted(createResult)) {
+            const error = squashAtomCommandFailure(createResult);
+            toastManager.add(
+              stackedThreadToast({
+                type: "error",
+                title: `Cloned on ${target.label}, but could not add the project`,
+                description:
+                  error instanceof Error
+                    ? error.message
+                    : `Add ${cloneResult.value.cwd} as a project to continue.`,
+              }),
+            );
+          }
+          return;
+        }
+
+        setDraftThreadContext(draftId, {
+          projectRef: scopeProjectRef(nextEnvironmentId, projectId),
+          envMode: "worktree",
+          startFromOrigin: true,
+        });
+        toastManager.add({
+          type: "success",
+          title: `Ready on ${target.label}`,
+          description: `${activeProject.title} was cloned to ${cloneResult.value.cwd}.`,
+        });
+      } finally {
+        setProvisioningEnvironmentId(null);
+      }
     },
-    [draftId, envLocked, logicalProjectEnvironments, setDraftThreadContext],
+    [
+      activeProject,
+      cloneRepository,
+      composerEnvironmentOptions,
+      createProject,
+      draftId,
+      envLocked,
+      environments,
+      provisioningEnvironmentId,
+      setDraftThreadContext,
+    ],
   );
+  const compactEnvironmentControl =
+    embeddedPane && showComposerEnvironmentIndicator && activeThread ? (
+      <BranchToolbarEnvironmentSelector
+        envLocked={envLocked}
+        environmentId={activeThread.environmentId}
+        availableEnvironments={composerEnvironmentOptions}
+        provisioningEnvironmentId={provisioningEnvironmentId}
+        {...(hasMultipleComposerEnvironments ? { onEnvironmentChange } : {})}
+      />
+    ) : null;
 
   const activeTerminalGroup =
     terminalUiState.terminalGroups.find(
@@ -3801,10 +4020,13 @@ function ChatViewContent(props: ChatViewProps) {
       return getAnchoredTurnMetrics({
         state,
         anchorIndex,
-        composerOverlayHeight,
+        composerOverlayHeight: 0,
         anchorOffset: CHAT_LIST_ANCHOR_OFFSET,
       });
     },
+    // The composer now consumes layout space instead of overlapping the list,
+    // but a height change still needs to re-run anchored-turn positioning once
+    // LegendList has measured its smaller viewport.
     [composerOverlayHeight],
   );
   const timelineRealContentOverflowsViewport = useCallback(
@@ -3828,12 +4050,11 @@ function ChatViewContent(props: ChatViewProps) {
       }
 
       const realContentBottom = lastRowTop + Math.max(1, lastRowHeight);
-      const visibleScrollLength = Math.max(
-        0,
-        (state.scrollLength ?? 0) - composerOverlayHeight - CHAT_LIST_ANCHOR_OFFSET,
-      );
+      const visibleScrollLength = Math.max(0, (state.scrollLength ?? 0) - CHAT_LIST_ANCHOR_OFFSET);
       return realContentBottom > visibleScrollLength;
     },
+    // Refresh gesture listeners when the composer changes the physical list
+    // viewport, even though its height no longer needs subtracting here.
     [composerOverlayHeight],
   );
   // Live-follow stays active after send/thread-open until an actual list scroll
@@ -3883,8 +4104,7 @@ function ChatViewContent(props: ChatViewProps) {
         // up, and a gesture landing in that window while still pinned would
         // otherwise break follow with no scroll event left to re-arm it.
         const viewportIsAwayFromEnd = () =>
-          resolveTimelineIsAtEnd(legendListRef.current?.getState(), composerOverlayHeight) ===
-          false;
+          resolveTimelineIsAtEnd(legendListRef.current?.getState()) === false;
         // Only an upward wheel is a navigation intent; wheeling down while
         // following either does nothing (at the end) or moves toward it.
         const handleWheel = (event: WheelEvent) => {
@@ -4798,6 +5018,7 @@ function ChatViewContent(props: ChatViewProps) {
 
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
+      if (!isPaneFocused) return;
       if (preventRepeatedTerminalCloseShortcut(event, keybindings)) {
         event.stopPropagation();
         return;
@@ -4825,9 +5046,11 @@ function ChatViewContent(props: ChatViewProps) {
       if (
         !shortcutContext.terminalFocus &&
         !shortcutContext.modelPickerOpen &&
-        shouldTypeToFocusComposer(event)
+        shouldTypeToFocusComposer(event, {
+          redirectFromUnfocusedWorkspacePane: embeddedPane,
+        })
       ) {
-        if (composerRef.current?.insertTextAtEnd(event.key)) {
+        if (composerRef.current?.startTypingAtEnd(event.key)) {
           event.preventDefault();
           event.stopPropagation();
           return;
@@ -4953,6 +5176,7 @@ function ChatViewContent(props: ChatViewProps) {
     splitTerminal,
     splitPanelTerminal,
     keybindings,
+    isPaneFocused,
     onToggleDiff,
     toggleRightPanel,
     toggleRightPanelMaximized,
@@ -6059,10 +6283,17 @@ function ChatViewContent(props: ChatViewProps) {
         scheduleComposerFocus();
         return;
       }
-      const nextModelSelection: ModelSelection = {
+      const defaultReasoningOption =
+        resolvedDriverKind === ProviderDriverKind.make("claudeAgent")
+          ? { id: "effort", value: DEFAULT_PROVIDER_REASONING_EFFORT }
+          : resolvedDriverKind === ProviderDriverKind.make("codex")
+            ? { id: "reasoningEffort", value: DEFAULT_PROVIDER_REASONING_EFFORT }
+            : null;
+      const nextModelSelection: ModelSelection = createModelSelection(
         instanceId,
-        model: resolvedModel,
-      };
+        resolvedModel,
+        defaultReasoningOption ? [defaultReasoningOption] : undefined,
+      );
       const modelChangeBlockReason = getStartedThreadModelChangeBlockReason({
         providers: providerStatuses,
         hasStartedSession: activeThread.session !== null,
@@ -6084,10 +6315,14 @@ function ChatViewContent(props: ChatViewProps) {
         nextModelSelection,
       );
       setStickyComposerModelSelection(nextModelSelection);
+      if (defaultReasoningOption) {
+        handleRuntimeModeChange("auto");
+      }
       scheduleComposerFocus();
     },
     [
       activeThread,
+      handleRuntimeModeChange,
       lockedProvider,
       scheduleComposerFocus,
       setComposerDraftModelSelection,
@@ -6328,6 +6563,32 @@ function ChatViewContent(props: ChatViewProps) {
   });
   const externalComposerDrawerAttached =
     composerBannerItems.length > 0 || Boolean(threadSyncPhase && !activeEnvironmentUnavailable);
+  const composerContextToolbar =
+    !embeddedPane && showComposerContextStrip ? (
+      <BranchToolbar
+        environmentId={activeThread.environmentId}
+        threadId={activeThread.id}
+        showGitControls={isGitRepo}
+        {...(routeKind === "draft" && draftId ? { draftId } : {})}
+        onEnvModeChange={onEnvModeChange}
+        startFromOrigin={startFromOrigin}
+        onStartFromOriginChange={onStartFromOriginChange}
+        {...(canOverrideServerThreadEnvMode ? { effectiveEnvModeOverride: envMode } : {})}
+        {...(canOverrideServerThreadEnvMode
+          ? {
+              activeThreadBranchOverride: activeThreadBranch,
+              onActiveThreadBranchOverrideChange: setPendingServerThreadBranch,
+            }
+          : {})}
+        envLocked={envLocked}
+        onComposerFocusRequest={scheduleComposerFocus}
+        {...(canCheckoutPullRequestIntoThread
+          ? { onCheckoutPullRequestRequest: openPullRequestDialog }
+          : {})}
+        {...(hasMultipleEnvironments ? { onEnvironmentChange } : {})}
+        availableEnvironments={logicalProjectEnvironments}
+      />
+    ) : null;
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
@@ -6339,43 +6600,46 @@ function ChatViewContent(props: ChatViewProps) {
         )}
         data-chat-column-maximized-away={rightPanelMaximized ? "true" : "false"}
       >
-        {/* Top bar */}
-        <WorkspacePageHeader
-          data-chat-header
-          electron={isElectron}
-          reserveNativeControls={reserveTitleBarControlInset && !inlineRightPanelOwnsTitleBar}
-          className="relative bg-background"
-        >
-          {!rightPanelOpen ? panelLayoutControls : null}
-          <ChatHeader
-            {...(!supportsPullRequests || threadRepository === null
-              ? {}
-              : { onOpenPullRequest: openThreadPullRequest })}
-            activeThreadEnvironmentId={activeThread.environmentId}
-            activeThreadId={activeThread.id}
-            {...(routeKind === "draft" && draftId ? { draftId } : {})}
-            activeThreadTitle={activeThread.title}
-            isServerThread={isServerThread}
-            changeRequest={activeThreadChangeRequest}
-            activeProjectName={activeProject?.title}
-            activeProjectCwd={activeProject?.workspaceRoot ?? null}
-            activeProjectFaviconPath={activeProject?.faviconPath ?? null}
-            openInCwd={gitCwd}
-            activeProjectScripts={activeProject?.scripts}
-            preferredScriptId={
-              activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
-            }
-            keybindings={keybindings}
-            availableEditors={availableEditors}
-            rightPanelOpen={rightPanelOpen}
-            gitCwd={gitCwd}
-            onNewThreadInProject={handleNewThreadInActiveProject}
-            onRunProjectScript={runProjectScript}
-            onAddProjectScript={saveProjectScript}
-            onUpdateProjectScript={updateProjectScript}
-            onDeleteProjectScript={deleteProjectScript}
-          />
-        </WorkspacePageHeader>
+        {/* A pane already supplies its own project and window controls. */}
+        {!embeddedPane ? (
+          <WorkspacePageHeader
+            data-chat-header
+            electron={isElectron}
+            reserveNativeControls={reserveTitleBarControlInset && !inlineRightPanelOwnsTitleBar}
+            className="relative bg-background"
+          >
+            {!rightPanelOpen ? panelLayoutControls : null}
+            <ChatHeader
+              {...(!supportsPullRequests || threadRepository === null
+                ? {}
+                : { onOpenPullRequest: openThreadPullRequest })}
+              activeThreadEnvironmentId={activeThread.environmentId}
+              activeThreadId={activeThread.id}
+              {...(routeKind === "draft" && draftId ? { draftId } : {})}
+              activeThreadTitle={activeThread.title}
+              isServerThread={isServerThread}
+              changeRequest={activeThreadChangeRequest}
+              activeProjectName={activeProject?.title}
+              activeProjectCwd={activeProject?.workspaceRoot ?? null}
+              activeProjectFaviconPath={activeProject?.faviconPath ?? null}
+              openInCwd={gitCwd}
+              activeProjectScripts={activeProject?.scripts}
+              preferredScriptId={
+                activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
+              }
+              keybindings={keybindings}
+              availableEditors={availableEditors}
+              rightPanelOpen={rightPanelOpen}
+              onOpenWorkspace={openPaneWorkspace}
+              gitCwd={gitCwd}
+              onNewThreadInProject={handleNewThreadInActiveProject}
+              onRunProjectScript={runProjectScript}
+              onAddProjectScript={saveProjectScript}
+              onUpdateProjectScript={updateProjectScript}
+              onDeleteProjectScript={deleteProjectScript}
+            />
+          </WorkspacePageHeader>
+        ) : null}
 
         <ThreadErrorBanner
           error={visibleThreadError}
@@ -6419,64 +6683,72 @@ function ChatViewContent(props: ChatViewProps) {
             </div>
             {/* Messages Wrapper */}
             <div className="relative flex min-h-0 flex-1 flex-col">
-              {/* Messages — LegendList handles virtualization and scrolling internally */}
-              <MessagesTimeline
-                agentPanelModel={agentPanelModel}
-                onOpenAgents={addAgentsSurface}
-                key={activeThread.id}
-                isWorking={isWorking}
-                workingStepLabel={workingStepLabel}
-                activeTurnStartedAt={activeWorkStartedAt}
-                listRef={legendListRef}
-                timelineEntries={timelineEntries}
-                latestTurn={activeLatestTurn}
-                runningTurnId={
-                  activeThread.session?.status === "running"
-                    ? activeThread.session.activeTurnId
-                    : null
-                }
-                turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
-                activeThreadEnvironmentId={activeThread.environmentId}
-                routeThreadKey={routeThreadKey}
-                onOpenTurnDiff={onOpenTurnDiff}
-                revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
-                onRevertUserMessage={onRevertUserMessage}
-                isRevertingCheckpoint={isRevertingCheckpoint}
-                onImageExpand={onExpandTimelineImage}
-                markdownCwd={gitCwd ?? undefined}
-                resolvedTheme={resolvedTheme}
-                timestampFormat={timestampFormat}
-                workspaceRoot={activeWorkspaceRoot}
-                skills={activeProviderStatus?.skills ?? EMPTY_PROVIDER_SKILLS}
-                anchorMessageId={timelineAnchorMessageId}
-                onAnchorReady={onTimelineAnchorReady}
-                contentInsetEndAdjustment={composerOverlayHeight}
-                liveFollowEnabled={timelineLiveFollowEnabled}
-                onIsAtEndChange={onIsAtEndChange}
-                onManualNavigation={cancelTimelineLiveFollowForUserNavigation}
-                hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}
-                topFadeEnabled={!hasTimelineTopBanner}
-                loadEarlier={loadEarlierTurns}
-              />
+              <div className="relative min-h-0 flex-1">
+                {/* Messages — LegendList handles virtualization and scrolling internally */}
+                <MessagesTimeline
+                  agentPanelModel={agentPanelModel}
+                  onOpenAgents={addAgentsSurface}
+                  key={activeThread.id}
+                  isWorking={isWorking}
+                  workingStepLabel={workingStepLabel}
+                  activeTurnStartedAt={activeWorkStartedAt}
+                  listRef={legendListRef}
+                  timelineEntries={timelineEntries}
+                  latestTurn={activeLatestTurn}
+                  runningTurnId={
+                    activeThread.session?.status === "running"
+                      ? activeThread.session.activeTurnId
+                      : null
+                  }
+                  turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
+                  activeThreadEnvironmentId={activeThread.environmentId}
+                  routeThreadKey={routeThreadKey}
+                  onOpenTurnDiff={onOpenTurnDiff}
+                  revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
+                  onRevertUserMessage={onRevertUserMessage}
+                  isRevertingCheckpoint={isRevertingCheckpoint}
+                  onImageExpand={onExpandTimelineImage}
+                  markdownCwd={gitCwd ?? undefined}
+                  resolvedTheme={resolvedTheme}
+                  timestampFormat={timestampFormat}
+                  workspaceRoot={activeWorkspaceRoot}
+                  skills={activeProviderStatus?.skills ?? EMPTY_PROVIDER_SKILLS}
+                  anchorMessageId={timelineAnchorMessageId}
+                  onAnchorReady={onTimelineAnchorReady}
+                  contentInsetEndAdjustment={0}
+                  liveFollowEnabled={timelineLiveFollowEnabled}
+                  onIsAtEndChange={onIsAtEndChange}
+                  onManualNavigation={cancelTimelineLiveFollowForUserNavigation}
+                  hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}
+                  topFadeEnabled={!hasTimelineTopBanner}
+                  loadEarlier={loadEarlierTurns}
+                />
 
-              {/* scroll to end pill — shown when user has scrolled away from the live edge */}
-              {showScrollToBottom && (
-                <div
-                  className="pointer-events-none absolute left-1/2 z-30 flex -translate-x-1/2 justify-center py-1.5"
-                  style={{ bottom: composerOverlayHeight + 4 }}
-                >
-                  <Button
-                    aria-label="Scroll to end"
-                    onClick={() => scrollToEnd(true)}
-                    className="pointer-events-auto gap-1.5 rounded-full px-3 text-muted-foreground hover:text-foreground"
-                    size="xs"
-                    variant="glass"
-                  >
-                    <ChevronDownIcon className="size-3.5" />
-                    Scroll to end
-                  </Button>
-                </div>
-              )}
+                {/* scroll to end pill — shown when user has scrolled away from the live edge */}
+                {showScrollToBottom && (
+                  <div className="pointer-events-none absolute bottom-1 left-1/2 z-30 flex -translate-x-1/2 justify-center py-1.5">
+                    <Button
+                      aria-label="Scroll to end"
+                      onClick={() => scrollToEnd(true)}
+                      className="pointer-events-auto gap-1.5 rounded-full px-3 text-muted-foreground hover:text-foreground"
+                      size="xs"
+                      variant="glass"
+                    >
+                      <ChevronDownIcon className="size-3.5" />
+                      Scroll to end
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              {/* The composer floats visually, but this measured spacer keeps
+                  the timeline's actual viewport entirely above it. */}
+              <div
+                aria-hidden="true"
+                data-chat-composer-layout-spacer="true"
+                className="shrink-0"
+                style={{ height: isDraftHeroState ? 0 : composerOverlayHeight }}
+              />
             </div>
 
             {/* Input bar — centered hero while a draft has no messages, docked at the bottom otherwise */}
@@ -6491,7 +6763,12 @@ function ChatViewContent(props: ChatViewProps) {
             >
               <div
                 ref={attachDraftHeroTransitionGroupRef}
-                className="w-full ps-[calc(env(safe-area-inset-left)+0.75rem)] pe-[calc(env(safe-area-inset-right)+0.75rem)] sm:ps-[calc(env(safe-area-inset-left)+1.25rem)] sm:pe-[calc(env(safe-area-inset-right)+1.25rem)]"
+                className={cn(
+                  "w-full",
+                  embeddedPane
+                    ? "px-3"
+                    : "ps-[calc(env(safe-area-inset-left)+0.75rem)] pe-[calc(env(safe-area-inset-right)+0.75rem)] sm:ps-[calc(env(safe-area-inset-left)+1.25rem)] sm:pe-[calc(env(safe-area-inset-right)+1.25rem)]",
+                )}
               >
                 <div className="pointer-events-auto relative z-10">
                   {isDraftHeroState ? (
@@ -6509,6 +6786,7 @@ function ChatViewContent(props: ChatViewProps) {
                         <DraftHeroHeadline
                           activeProjectRef={activeProjectRef}
                           activeProjectTitle={activeProject?.title ?? null}
+                          compact={embeddedPane}
                         />
                       </div>
                       <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
@@ -6530,11 +6808,19 @@ function ChatViewContent(props: ChatViewProps) {
                     <div
                       className={cn(
                         "chat-composer-glass-shell relative mx-auto w-full max-w-3xl",
+                        embeddedPane && "max-w-none",
                         externalComposerDrawerAttached && "chat-composer-glass-shell-attached",
-                        showComposerContextStrip && "chat-composer-glass-shell-with-context",
+                        showComposerContextStrip &&
+                          !embeddedPane &&
+                          "chat-composer-glass-shell-with-context",
                       )}
                     >
-                      <div className="chat-composer-glass-host relative z-10 w-full rounded-[22px]">
+                      <div
+                        className={cn(
+                          "chat-composer-glass-host relative z-10 w-full",
+                          embeddedPane ? "rounded-xl" : "rounded-[22px]",
+                        )}
+                      >
                         <div ref={attachDraftHeroComposerAnchorRef} className="relative z-10">
                           <ChatComposer
                             composerRef={composerRef}
@@ -6548,6 +6834,7 @@ function ChatViewContent(props: ChatViewProps) {
                             activeThread={activeThread}
                             isServerThread={isServerThread}
                             isLocalDraftThread={isLocalDraftThread}
+                            compactLayout={embeddedPane}
                             forceExpandedOnMobile={forceExpandedMobileComposer && isDraftHeroState}
                             projectSelectionRequired={isLocalDraftThread && activeProject === null}
                             phase={phase}
@@ -6579,6 +6866,7 @@ function ChatViewContent(props: ChatViewProps) {
                             }
                             activeThreadModelSelection={activeThread?.modelSelection}
                             activeThreadActivities={activeThread?.activities}
+                            compactEnvironmentControl={compactEnvironmentControl}
                             resolvedTheme={resolvedTheme}
                             settings={settings}
                             keybindings={keybindings}
@@ -6619,42 +6907,19 @@ function ChatViewContent(props: ChatViewProps) {
                           data-terminal-open={terminalUiState.terminalOpen ? "true" : undefined}
                           className="relative z-0"
                         >
-                          {showComposerContextStrip && (
-                            <div className="pointer-events-auto">
-                              <BranchToolbar
-                                environmentId={activeThread.environmentId}
-                                threadId={activeThread.id}
-                                showGitControls={isGitRepo}
-                                {...(routeKind === "draft" && draftId ? { draftId } : {})}
-                                onEnvModeChange={onEnvModeChange}
-                                startFromOrigin={startFromOrigin}
-                                onStartFromOriginChange={onStartFromOriginChange}
-                                {...(canOverrideServerThreadEnvMode
-                                  ? { effectiveEnvModeOverride: envMode }
-                                  : {})}
-                                {...(canOverrideServerThreadEnvMode
-                                  ? {
-                                      activeThreadBranchOverride: activeThreadBranch,
-                                      onActiveThreadBranchOverrideChange:
-                                        setPendingServerThreadBranch,
-                                    }
-                                  : {})}
-                                envLocked={envLocked}
-                                onComposerFocusRequest={scheduleComposerFocus}
-                                {...(canCheckoutPullRequestIntoThread
-                                  ? { onCheckoutPullRequestRequest: openPullRequestDialog }
-                                  : {})}
-                                {...(hasMultipleEnvironments ? { onEnvironmentChange } : {})}
-                                availableEnvironments={logicalProjectEnvironments}
-                              />
-                            </div>
-                          )}
+                          {!embeddedPane && composerContextToolbar ? (
+                            <div className="pointer-events-auto">{composerContextToolbar}</div>
+                          ) : null}
                         </div>
                       </div>
                     </div>
                     <div
                       aria-hidden
-                      className="h-[calc(env(safe-area-inset-bottom)+1rem)] sm:h-[calc(env(safe-area-inset-bottom)+1.25rem)]"
+                      className={cn(
+                        embeddedPane
+                          ? "h-2"
+                          : "h-[calc(env(safe-area-inset-bottom)+1rem)] sm:h-[calc(env(safe-area-inset-bottom)+1.25rem)]",
+                      )}
                     />
                   </div>
                 </div>

@@ -7,6 +7,7 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 
 import * as Electron from "electron";
+import { randomUUID } from "node:crypto";
 
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts";
 
@@ -30,6 +31,7 @@ import * as ElectronApp from "../electron/ElectronApp.ts";
 import { makeQuitHoldHandler } from "./QuitHold.ts";
 
 const TITLEBAR_HEIGHT = 40;
+const DEFAULT_MAIN_WORKSPACE_ID = "main";
 const TITLEBAR_COLOR = "#01000000"; // #00000000 does not work correctly on Linux
 const TITLEBAR_LIGHT_SYMBOL_COLOR = "#1f2937";
 const TITLEBAR_DARK_SYMBOL_COLOR = "#f8fafc";
@@ -78,6 +80,7 @@ export class DesktopWindow extends Context.Service<
   DesktopWindow,
   {
     readonly createMain: Effect.Effect<Electron.BrowserWindow, DesktopWindowError>;
+    readonly createWorkspaceWindow: Effect.Effect<Electron.BrowserWindow, DesktopWindowError>;
     readonly ensureMain: Effect.Effect<Electron.BrowserWindow, DesktopWindowError>;
     readonly revealOrCreateMain: Effect.Effect<Electron.BrowserWindow, DesktopWindowError>;
     readonly activate: Effect.Effect<void, DesktopWindowError>;
@@ -186,6 +189,18 @@ export function isSameOriginRendererNavigation(input: {
 }): boolean {
   try {
     return new URL(input.applicationUrl).origin === new URL(input.navigationUrl).origin;
+  } catch {
+    return false;
+  }
+}
+
+export function isWorkspaceRendererWindow(input: {
+  readonly applicationUrl: string;
+  readonly navigationUrl: string;
+}): boolean {
+  if (!isSameOriginRendererNavigation(input)) return false;
+  try {
+    return new URL(input.navigationUrl).pathname === "/workspace";
   } catch {
     return false;
   }
@@ -314,17 +329,18 @@ export const make = Effect.gen(function* () {
   const currentMainWindow = electronWindow.currentMainOrFirst.pipe(Effect.flatMap(withoutSplash));
   const focusedMainWindow = electronWindow.focusedMainOrFirst.pipe(Effect.flatMap(withoutSplash));
 
-  const createWindow = Effect.fn("desktop.window.createWindow")(function* (): Effect.fn.Return<
-    Electron.BrowserWindow,
-    DesktopWindowError
-  > {
+  const createWindow = Effect.fn("desktop.window.createWindow")(function* (
+    initialPath = "/",
+    restorePersistedBounds = true,
+  ): Effect.fn.Return<Electron.BrowserWindow, DesktopWindowError> {
     yield* previewManager.getBrowserSession();
     const applicationUrl = getDesktopUrl(environment.isDevelopment);
+    const initialUrl = new URL(initialPath, applicationUrl).href;
     const iconPaths = yield* assets.iconPaths;
     const iconOption = getIconOption(iconPaths, environment.platform);
     const shouldUseDarkColors = yield* electronTheme.shouldUseDarkColors;
     const persistedSettings = yield* desktopSettings.get;
-    const persistedBounds = persistedSettings.mainWindowBounds;
+    const persistedBounds = restorePersistedBounds ? persistedSettings.mainWindowBounds : null;
     const displayBoundsResult = yield* Effect.sync(() => {
       try {
         return {
@@ -526,6 +542,17 @@ export const make = Effect.gen(function* () {
     });
 
     window.webContents.setWindowOpenHandler(({ url }) => {
+      if (isWorkspaceRendererWindow({ applicationUrl, navigationUrl: url })) {
+        return {
+          action: "allow",
+          overrideBrowserWindowOptions: {
+            width: 1600,
+            height: 1000,
+            minWidth: 900,
+            minHeight: 600,
+          },
+        };
+      }
       if (Option.isSome(ElectronShell.parseSafeExternalUrl(url))) {
         void runPromise(electronShell.openExternal(url));
       }
@@ -620,7 +647,7 @@ export const make = Effect.gen(function* () {
       if (window.isDestroyed()) {
         return;
       }
-      void window.loadURL(applicationUrl).catch(() => undefined);
+      void window.loadURL(initialUrl).catch(() => undefined);
     };
     const scheduleDevelopmentLoadRetry = () => {
       if (developmentLoadRetryFiber !== undefined || window.isDestroyed()) {
@@ -759,11 +786,20 @@ export const make = Effect.gen(function* () {
   });
 
   const createMain = Effect.gen(function* () {
-    const window = yield* createWindow();
+    const window = yield* createWindow(`/workspace?workspace=${DEFAULT_MAIN_WORKSPACE_ID}`);
     yield* electronWindow.setMain(window);
     yield* logWindowInfo("main window created");
     return window;
   }).pipe(Effect.withSpan("desktop.window.createMain"));
+
+  const createWorkspaceWindow = Effect.gen(function* () {
+    // Let the OS place secondary windows. Reusing the saved main-window x/y
+    // puts the new window exactly over the current one, making Cmd+N look like
+    // it did nothing when both workspaces have the same initial layout.
+    const window = yield* createWindow(`/workspace?workspace=${randomUUID()}`, false);
+    yield* logWindowInfo("workspace window created");
+    return window;
+  }).pipe(Effect.withSpan("desktop.window.createWorkspaceWindow"));
 
   const ensureMain = Effect.gen(function* () {
     const existingWindow = yield* currentMainWindow;
@@ -835,6 +871,7 @@ export const make = Effect.gen(function* () {
 
   return DesktopWindow.of({
     createMain,
+    createWorkspaceWindow,
     ensureMain,
     revealOrCreateMain,
     activate: Effect.gen(function* () {

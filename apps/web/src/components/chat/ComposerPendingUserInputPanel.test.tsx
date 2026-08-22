@@ -53,6 +53,7 @@ describe("ComposerPendingUserInputPanel", () => {
   it("starts expanded so the question and its options are visible", () => {
     const markup = renderPanel();
 
+    expect(markup).toContain('data-pending-user-input-panel="true"');
     expect(markup).toContain("Approach");
     expect(markup).toContain("Which approach should the migration take?");
     expect(markup).toContain("Incremental");

@@ -84,6 +84,24 @@ it.effect("parses keybinding rules", () =>
     });
     assert.strictEqual(parsedThemeEditor.command, "themeEditor.toggle");
 
+    const parsedWorkspacePaneCount = yield* decode(KeybindingRule, {
+      key: "mod+alt+6",
+      command: "workspace.paneCount.6",
+    });
+    assert.strictEqual(parsedWorkspacePaneCount.command, "workspace.paneCount.6");
+
+    const parsedWorkspaceLayout = yield* decode(KeybindingRule, {
+      key: "mod+alt+g",
+      command: "workspace.layout.grid",
+    });
+    assert.strictEqual(parsedWorkspaceLayout.command, "workspace.layout.grid");
+
+    const parsedWorkspaceNewWindow = yield* decode(KeybindingRule, {
+      key: "mod+alt+n",
+      command: "workspace.newWindow",
+    });
+    assert.strictEqual(parsedWorkspaceNewWindow.command, "workspace.newWindow");
+
     const parsedLocal = yield* decode(KeybindingRule, {
       key: "mod+shift+n",
       command: "chat.newLocal",

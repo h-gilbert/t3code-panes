@@ -121,8 +121,13 @@ function codexAccountEmail(account: CodexSchema.V2GetAccountResponse["account"])
 export function mapCodexModelCapabilities(
   model: CodexSchema.V2ModelListResponse__Model,
 ): ModelCapabilities {
+  const defaultReasoningEffort = model.supportedReasoningEfforts.some(
+    ({ reasoningEffort }) => reasoningEffort === "medium",
+  )
+    ? "medium"
+    : model.defaultReasoningEffort;
   const reasoningOptions = model.supportedReasoningEfforts.map(({ reasoningEffort }) =>
-    reasoningEffort === model.defaultReasoningEffort
+    reasoningEffort === defaultReasoningEffort
       ? {
           id: reasoningEffort,
           label: reasoningEffortLabel(reasoningEffort),

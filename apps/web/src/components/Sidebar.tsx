@@ -66,7 +66,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
-import { useParams, useRouter } from "@tanstack/react-router";
+import { useLocation, useParams, useRouter } from "@tanstack/react-router";
 
 import {
   isAtomCommandInterrupted,
@@ -118,6 +118,12 @@ import {
   resolveThreadRouteTarget,
 } from "../threadRoutes";
 import { formatRelativeTimeLabel, parseTimestampDate } from "../timestampFormat";
+import {
+  DEFAULT_WORKSPACE_KEY,
+  isWorkspacePath,
+  selectProjectWorkspaceLayout,
+  useWorkspacePaneStore,
+} from "../workspacePaneStore";
 import type { SidebarThreadSummary } from "../types";
 import { cn } from "~/lib/utils";
 import { buildThreadActionMenuItems } from "./threadActionMenu.logic";
@@ -1810,10 +1816,33 @@ export default function Sidebar() {
   const routeDraftThread = useComposerDraftStore((store) =>
     routeTarget?.kind === "draft" ? store.getDraftSession(routeTarget.draftId) : null,
   );
-  const routeThreadRef = useMemo(
+  const routedThreadRef = useMemo(
     () => resolveActiveThreadRouteRef(routeTarget, routeDraftThread),
     [routeDraftThread, routeTarget],
   );
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const locationSearch = useLocation({
+    select: (location) => location.search as Record<string, unknown>,
+  });
+  const workspaceActive = isWorkspacePath(pathname);
+  const activeWorkspaceKey =
+    workspaceActive && typeof locationSearch.workspace === "string"
+      ? locationSearch.workspace
+      : DEFAULT_WORKSPACE_KEY;
+  const activeWorkspaceLayout = useWorkspacePaneStore((state) =>
+    selectProjectWorkspaceLayout(state, activeWorkspaceKey),
+  );
+  const assignWorkspaceThread = useWorkspacePaneStore((state) => state.assignThread);
+  const setWorkspacePaneProject = useWorkspacePaneStore((state) => state.setPaneProject);
+  const activeWorkspaceProjectKey =
+    activeWorkspaceLayout.projectKeys[activeWorkspaceLayout.focusedPaneIndex] ?? null;
+  const workspaceFocusedPaneTarget =
+    activeWorkspaceLayout.panes[activeWorkspaceLayout.focusedPaneIndex];
+  const workspaceFocusedThreadRef =
+    workspaceFocusedPaneTarget && !("draftId" in workspaceFocusedPaneTarget)
+      ? workspaceFocusedPaneTarget
+      : null;
+  const routeThreadRef = workspaceActive ? workspaceFocusedThreadRef : routedThreadRef;
   const routeThreadKey = routeThreadRef ? scopedThreadKey(routeThreadRef) : null;
   const routeTargetRef = useRef(routeTarget);
   routeTargetRef.current = routeTarget;
@@ -1944,6 +1973,10 @@ export default function Sidebar() {
       setProjectScopeKey(null);
     }
   }, [projectScopeKey, scopedProjectGroup]);
+  useEffect(() => {
+    if (!workspaceActive) return;
+    setProjectScopeKey(activeWorkspaceProjectKey);
+  }, [activeWorkspaceProjectKey, workspaceActive]);
   // Count-only subscription: the parent needs "are there draft rows" for the
   // empty state, while SidebarDraftBlock owns the per-keystroke content
   // subscription. Selecting a number keeps typing in a draft composer from
@@ -2307,12 +2340,63 @@ export default function Sidebar() {
       if (isMobile) {
         setOpenMobile(false);
       }
+      if (workspaceActive) {
+        const thread = threadByKeyRef.current.get(scopedThreadKey(threadRef));
+        const threadProjectGroup = thread
+          ? projectGroups.find((group) =>
+              group.memberProjectRefs.some(
+                (ref) =>
+                  ref.environmentId === thread.environmentId && ref.projectId === thread.projectId,
+              ),
+            )
+          : null;
+        if (threadProjectGroup) {
+          setWorkspacePaneProject(
+            activeWorkspaceKey,
+            activeWorkspaceLayout.focusedPaneIndex,
+            threadProjectGroup.projectKey,
+          );
+        }
+        assignWorkspaceThread(activeWorkspaceKey, threadRef);
+        return;
+      }
       void router.navigate({
         to: "/$environmentId/$threadId",
         params: buildThreadRouteParams(threadRef),
       });
     },
-    [clearSelection, isMobile, router, setOpenMobile, setSelectionAnchor],
+    [
+      assignWorkspaceThread,
+      activeWorkspaceKey,
+      activeWorkspaceLayout.focusedPaneIndex,
+      clearSelection,
+      isMobile,
+      projectGroups,
+      router,
+      setOpenMobile,
+      setSelectionAnchor,
+      setWorkspacePaneProject,
+      workspaceActive,
+    ],
+  );
+
+  const handleProjectScopeChange = useCallback(
+    (value: string) => {
+      const nextProjectKey = value === "all" ? null : value;
+      setProjectScopeKey(nextProjectKey);
+      if (!workspaceActive) return;
+      setWorkspacePaneProject(
+        activeWorkspaceKey,
+        activeWorkspaceLayout.focusedPaneIndex,
+        nextProjectKey,
+      );
+    },
+    [
+      activeWorkspaceKey,
+      activeWorkspaceLayout.focusedPaneIndex,
+      setWorkspacePaneProject,
+      workspaceActive,
+    ],
   );
 
   const navigateToDraft = useCallback(
@@ -3349,6 +3433,7 @@ export default function Sidebar() {
         void startNewThreadFromContext({
           activeDraftThread: newThreadContext.activeDraftThread,
           activeThread: newThreadContext.activeThread ?? undefined,
+          preferredProjectRef: newThreadContext.preferredProjectRef,
           defaultProjectRef: newThreadContext.defaultProjectRef,
           handleNewThread: newThreadContext.handleNewThread,
         });
@@ -3478,7 +3563,11 @@ export default function Sidebar() {
                   <MenuTrigger
                     render={
                       <SidebarMenuButton
-                        aria-label="Filter threads by project"
+                        aria-label={
+                          workspaceActive
+                            ? "Choose project for focused pane"
+                            : "Filter threads by project"
+                        }
                         className="min-w-0 flex-1 ps-[calc(var(--sidebar-row-content-inset)-1px)] focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
                       />
                     }
@@ -3494,16 +3583,15 @@ export default function Sidebar() {
                       <FolderIcon className="size-4 shrink-0" />
                     )}
                     <span className="min-w-0 flex-1 truncate">
-                      {scopedProjectGroup?.displayName ?? "All projects"}
+                      {scopedProjectGroup?.displayName ??
+                        (workspaceActive ? "Select project" : "All projects")}
                     </span>
                     <ChevronDownIcon className="-mr-px size-4 shrink-0" />
                   </MenuTrigger>
                   <MenuPopup align="start" className="w-(--anchor-width)">
                     <MenuRadioGroup
                       value={projectScopeKey ?? "all"}
-                      onValueChange={(value) =>
-                        setProjectScopeKey(value === "all" ? null : (value as string))
-                      }
+                      onValueChange={handleProjectScopeChange}
                     >
                       <MenuRadioItem
                         value="all"
@@ -3511,7 +3599,9 @@ export default function Sidebar() {
                         className="h-8 min-h-8 px-1 py-0 text-sm font-medium [&>span:last-child]:flex [&>span:last-child]:min-w-0 [&>span:last-child]:items-center [&>span:last-child]:gap-2"
                       >
                         <FolderIcon className="size-4 shrink-0" />
-                        <span className="min-w-0 truncate text-sm">All projects</span>
+                        <span className="min-w-0 truncate text-sm">
+                          {workspaceActive ? "No project" : "All projects"}
+                        </span>
                       </MenuRadioItem>
                       {projectGroups.map((project) => {
                         const scopeKey = project.projectKey;

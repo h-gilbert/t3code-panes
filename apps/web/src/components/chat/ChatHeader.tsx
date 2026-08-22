@@ -11,7 +11,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import type { ChangeRequestSettleSource } from "@t3tools/client-runtime/state/thread-settled";
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, PanelsTopLeftIcon } from "lucide-react";
 import {
   memo,
   useCallback,
@@ -43,6 +43,7 @@ import {
   WorkspaceBreadcrumbSeparator,
 } from "../WorkspaceBreadcrumb";
 import { cn } from "~/lib/utils";
+import { Button } from "../ui/button";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -62,6 +63,7 @@ interface ChatHeaderProps {
   keybindings: ResolvedKeybindingsConfig;
   availableEditors: ReadonlyArray<EditorId>;
   rightPanelOpen: boolean;
+  onOpenWorkspace: () => void;
   gitCwd: string | null;
   readonly onOpenPullRequest?: ((number: number) => void) | undefined;
   onNewThreadInProject: () => void;
@@ -123,6 +125,7 @@ export const ChatHeader = memo(function ChatHeader({
   keybindings,
   availableEditors,
   rightPanelOpen,
+  onOpenWorkspace,
   gitCwd,
   onOpenPullRequest,
   onNewThreadInProject,
@@ -318,6 +321,10 @@ export const ChatHeader = memo(function ChatHeader({
           rightPanelOpen ? "pr-0" : "pr-16",
         )}
       >
+        <Button size="sm" onClick={onOpenWorkspace}>
+          <PanelsTopLeftIcon />
+          Workspace
+        </Button>
         {activeProjectScripts && (
           <ProjectScriptsControl
             scripts={activeProjectScripts}

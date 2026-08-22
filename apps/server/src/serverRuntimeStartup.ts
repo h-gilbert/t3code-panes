@@ -1,6 +1,7 @@
 import {
   CommandId,
-  DEFAULT_MODEL,
+  DEFAULT_CLAUDE_MODEL,
+  DEFAULT_PROVIDER_REASONING_EFFORT,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   type ModelSelection,
   ProjectId,
@@ -167,8 +168,9 @@ export const launchStartupHeartbeat = recordStartupHeartbeat.pipe(
 );
 
 export const getAutoBootstrapDefaultModelSelection = (): ModelSelection => ({
-  instanceId: ProviderInstanceId.make("codex"),
-  model: DEFAULT_MODEL,
+  instanceId: ProviderInstanceId.make("claudeAgent"),
+  model: DEFAULT_CLAUDE_MODEL,
+  options: [{ id: "effort", value: DEFAULT_PROVIDER_REASONING_EFFORT }],
 });
 
 export const resolveWelcomeBase = Effect.gen(function* () {

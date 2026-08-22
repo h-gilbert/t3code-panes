@@ -122,6 +122,11 @@ npx t3 serve --tailscale-serve --tailscale-serve-port 8443
 Once paired, add projects normally: open the Command Palette and choose **Add Project**, then pick
 the environment the project lives on. Every saved environment is offered, not only the local one.
 
+Set **Add project starts in** independently on each environment to control where remotely cloned
+projects live. Pane workspaces use this directory when the **Run on** menu prepares a Git project on
+another connected environment. The menu asks you to configure this setting instead of falling back
+to an arbitrary home-directory checkout.
+
 ### Option 3: Desktop-Managed SSH Launch
 
 Use this when you want the desktop app to start or reuse T3 Code on another machine over SSH.

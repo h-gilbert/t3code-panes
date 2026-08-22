@@ -13,6 +13,7 @@ import {
 } from "~/sidebarProjectGrouping";
 import { useProjects, useThreadShells } from "~/state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
+import { cn } from "~/lib/utils";
 import { sortLogicalProjectsForSidebar } from "../Sidebar.logic";
 import {
   Menu,
@@ -28,11 +29,13 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 interface DraftHeroHeadlineProps {
   readonly activeProjectRef: ScopedProjectRef | null;
   readonly activeProjectTitle: string | null;
+  readonly compact?: boolean;
 }
 
 export function DraftHeroHeadline({
   activeProjectRef,
   activeProjectTitle,
+  compact = false,
 }: DraftHeroHeadlineProps) {
   const projects = useProjects();
   const threads = useThreadShells();
@@ -167,7 +170,12 @@ export function DraftHeroHeadline({
   );
 
   return (
-    <h1 className="mx-auto w-full max-w-5xl text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
+    <h1
+      className={cn(
+        "mx-auto w-full max-w-5xl text-center font-normal text-foreground tracking-tight",
+        compact ? "text-lg" : "text-2xl sm:text-3xl",
+      )}
+    >
       {hasResolvedProject ? (
         <>What should we build in {projectSelector}?</>
       ) : canChooseProject ? (

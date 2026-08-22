@@ -354,6 +354,7 @@ interface ComposerDraftStoreState {
   draftsByThreadKey: Record<string, ComposerThreadDraftState>;
   draftThreadsByThreadKey: Record<string, DraftThreadState>;
   logicalProjectDraftThreadKeyByLogicalProjectKey: Record<string, string>;
+  retainedDraftThreadKeys: Record<string, true>;
   stickyModelSelectionByProvider: Partial<Record<ProviderInstanceId, ModelSelection>>;
   stickyActiveProvider: ProviderInstanceId | null;
   /** Returns the editable composer content for a draft session or server thread. */
@@ -371,6 +372,9 @@ interface ComposerDraftStoreState {
   getDraftThread: (threadRef: ComposerThreadTarget) => DraftThreadState | null;
   listDraftThreadKeys: () => string[];
   hasDraftThreadsInEnvironment: (environmentId: EnvironmentId) => boolean;
+  /** Retains an otherwise-empty draft while an active surface owns it. */
+  retainDraftThread: (draftId: DraftId) => void;
+  releaseDraftThread: (draftId: DraftId) => void;
   /** Creates or updates the draft session tracked for a logical project. */
   setLogicalProjectDraftThreadId: (
     logicalProjectKey: string,
@@ -385,6 +389,8 @@ interface ComposerDraftStoreState {
       startFromOrigin?: boolean;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
+      /** Keep the previously mapped empty draft alive for another active surface. */
+      preservePreviousDraft?: boolean;
     },
   ) => void;
   /** Creates or updates the draft session tracked for a concrete project ref. */
@@ -1879,6 +1885,7 @@ function partializeComposerDraftStoreState(
       .filter(
         ([threadKey, draftThread]) =>
           mappedDraftKeys.has(threadKey) ||
+          state.retainedDraftThreadKeys[threadKey] === true ||
           isDraftThreadPromoting(draftThread) ||
           composerDraftHasUserContent(state.draftsByThreadKey[threadKey]),
       )
@@ -2255,6 +2262,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
         draftsByThreadKey: {},
         draftThreadsByThreadKey: {},
         logicalProjectDraftThreadKeyByLogicalProjectKey: {},
+        retainedDraftThreadKeys: {},
         stickyModelSelectionByProvider: {},
         stickyActiveProvider: null,
         getComposerDraft: (target) => getComposerDraftState(get(), target),
@@ -2341,6 +2349,24 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
           Object.values(get().draftThreadsByThreadKey).some(
             (draftThread) => draftThread.environmentId === environmentId,
           ),
+        retainDraftThread: (draftId) =>
+          set((state) =>
+            state.retainedDraftThreadKeys[draftId]
+              ? state
+              : {
+                  retainedDraftThreadKeys: {
+                    ...state.retainedDraftThreadKeys,
+                    [draftId]: true,
+                  },
+                },
+          ),
+        releaseDraftThread: (draftId) =>
+          set((state) => {
+            if (!state.retainedDraftThreadKeys[draftId]) return state;
+            const { [draftId]: _released, ...retainedDraftThreadKeys } =
+              state.retainedDraftThreadKeys;
+            return { retainedDraftThreadKeys };
+          }),
         setLogicalProjectDraftThreadId: (logicalProjectKey, projectRef, draftId, options) => {
           const normalizedLogicalProjectKey = logicalProjectDraftKey(logicalProjectKey);
           if (normalizedLogicalProjectKey.length === 0 || draftId.length === 0) {
@@ -2374,14 +2400,15 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               previousThreadKeyForLogicalProject === undefined
                 ? undefined
                 : nextDraftThreadsByThreadKey[previousThreadKeyForLogicalProject];
-            // A remap only garbage-collects the previous draft when the user
-            // never invested content in it. A draft with typed text or
-            // attachments stays alive unmapped — the sidebar draft rows list
-            // every such session, so "new thread" can mint a fresh draft
-            // without destroying the one the user walked away from.
+            // A remap only garbage-collects the previous draft when no active
+            // surface retains it and the user never invested content in it.
+            // Invested drafts stay alive unmapped for the sidebar; retained
+            // drafts stay alive for surfaces such as workspace panes.
             if (
               previousThreadKeyForLogicalProject &&
               previousThreadKeyForLogicalProject !== draftId &&
+              options?.preservePreviousDraft !== true &&
+              !state.retainedDraftThreadKeys[previousThreadKeyForLogicalProject] &&
               !isComposerThreadKeyInUse(
                 nextLogicalProjectDraftThreadKeyByLogicalProjectKey,
                 previousThreadKeyForLogicalProject,

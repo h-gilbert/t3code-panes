@@ -917,6 +917,20 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     z-index: 0;
   }
 
+  /* Questions need to read as a complete card above the answer field. Unlike
+     compact status drawers, their final option should not sit inside the
+     composer's attachment overlap. */
+  .chat-composer-top-drawer:has([data-pending-user-input-panel="true"]) {
+    margin-bottom: 0.5rem;
+    padding-bottom: 0;
+
+    &::before {
+      border-radius: 16px;
+      -webkit-mask-image: none;
+      mask-image: none;
+    }
+  }
+
   :is(.chat-composer-drawer-surface, .chat-composer-top-drawer)[data-variant="error"] {
     --chat-composer-attached-outline: color-mix(in srgb, var(--error) 32%, transparent);
     --chat-composer-attached-tint: color-mix(in srgb, var(--error) 8%, transparent);

@@ -26,6 +26,7 @@ import { Route as SettingsArchivedRouteImport } from './routes/settings.archived
 import { Route as SettingsAppearanceRouteImport } from './routes/settings.appearance'
 import { Route as ProjectsProjectKeyRouteImport } from './routes/projects.$projectKey'
 import { Route as ConnectCallbackRouteImport } from './routes/connect_.callback'
+import { Route as ChatWorkspaceRouteImport } from './routes/_chat.workspace'
 import { Route as ChatPullRequestsRouteImport } from './routes/_chat.pull-requests'
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
 import { Route as ChatEnvironmentIdThreadIdRouteImport } from './routes/_chat.$environmentId.$threadId'
@@ -114,6 +115,11 @@ const ConnectCallbackRoute = ConnectCallbackRouteImport.update({
   path: '/connect/callback',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ChatWorkspaceRoute = ChatWorkspaceRouteImport.update({
+  id: '/workspace',
+  path: '/workspace',
+  getParentRoute: () => ChatRoute,
+} as any)
 const ChatPullRequestsRoute = ChatPullRequestsRouteImport.update({
   id: '/pull-requests',
   path: '/pull-requests',
@@ -138,6 +144,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRouteWithChildren
   '/usage': typeof UsageRoute
   '/pull-requests': typeof ChatPullRequestsRoute
+  '/workspace': typeof ChatWorkspaceRoute
   '/connect/callback': typeof ConnectCallbackRoute
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
@@ -158,6 +165,7 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRouteWithChildren
   '/usage': typeof UsageRoute
   '/pull-requests': typeof ChatPullRequestsRoute
+  '/workspace': typeof ChatWorkspaceRoute
   '/connect/callback': typeof ConnectCallbackRoute
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
@@ -181,6 +189,7 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRouteWithChildren
   '/usage': typeof UsageRoute
   '/_chat/pull-requests': typeof ChatPullRequestsRoute
+  '/_chat/workspace': typeof ChatWorkspaceRoute
   '/connect_/callback': typeof ConnectCallbackRoute
   '/projects/$projectKey': typeof ProjectsProjectKeyRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
@@ -205,6 +214,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/usage'
     | '/pull-requests'
+    | '/workspace'
     | '/connect/callback'
     | '/projects/$projectKey'
     | '/settings/appearance'
@@ -225,6 +235,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/usage'
     | '/pull-requests'
+    | '/workspace'
     | '/connect/callback'
     | '/projects/$projectKey'
     | '/settings/appearance'
@@ -247,6 +258,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/usage'
     | '/_chat/pull-requests'
+    | '/_chat/workspace'
     | '/connect_/callback'
     | '/projects/$projectKey'
     | '/settings/appearance'
@@ -394,6 +406,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConnectCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_chat/workspace': {
+      id: '/_chat/workspace'
+      path: '/workspace'
+      fullPath: '/workspace'
+      preLoaderRoute: typeof ChatWorkspaceRouteImport
+      parentRoute: typeof ChatRoute
+    }
     '/_chat/pull-requests': {
       id: '/_chat/pull-requests'
       path: '/pull-requests'
@@ -420,6 +439,7 @@ declare module '@tanstack/react-router' {
 
 interface ChatRouteChildren {
   ChatPullRequestsRoute: typeof ChatPullRequestsRoute
+  ChatWorkspaceRoute: typeof ChatWorkspaceRoute
   ChatIndexRoute: typeof ChatIndexRoute
   ChatEnvironmentIdThreadIdRoute: typeof ChatEnvironmentIdThreadIdRoute
   ChatDraftDraftIdRoute: typeof ChatDraftDraftIdRoute
@@ -427,6 +447,7 @@ interface ChatRouteChildren {
 
 const ChatRouteChildren: ChatRouteChildren = {
   ChatPullRequestsRoute: ChatPullRequestsRoute,
+  ChatWorkspaceRoute: ChatWorkspaceRoute,
   ChatIndexRoute: ChatIndexRoute,
   ChatEnvironmentIdThreadIdRoute: ChatEnvironmentIdThreadIdRoute,
   ChatDraftDraftIdRoute: ChatDraftDraftIdRoute,

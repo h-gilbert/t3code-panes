@@ -1,12 +1,15 @@
 import type { EnvironmentConnectionPhase } from "../connection/presentation.ts";
-import type {
-  CommandId,
-  EnvironmentId,
-  OrchestrationCommand,
-  ProjectId,
-  SourceControlDiscoveryResult,
-  SourceControlProviderKind,
-  SourceControlRepositoryInfo,
+import {
+  DEFAULT_CLAUDE_MODEL,
+  DEFAULT_PROVIDER_REASONING_EFFORT,
+  ProviderInstanceId,
+  type CommandId,
+  type EnvironmentId,
+  type OrchestrationCommand,
+  type ProjectId,
+  type SourceControlDiscoveryResult,
+  type SourceControlProviderKind,
+  type SourceControlRepositoryInfo,
 } from "@t3tools/contracts";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
@@ -292,7 +295,11 @@ export function buildProjectCreateCommand(input: {
     title: inferProjectTitleFromPath(input.workspaceRoot),
     workspaceRoot: input.workspaceRoot,
     createWorkspaceRootIfMissing: true,
-    defaultModelSelection: null,
+    defaultModelSelection: {
+      instanceId: ProviderInstanceId.make("claudeAgent"),
+      model: DEFAULT_CLAUDE_MODEL,
+      options: [{ id: "effort", value: DEFAULT_PROVIDER_REASONING_EFFORT }],
+    },
     createdAt: input.createdAt,
   };
 }

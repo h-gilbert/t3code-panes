@@ -21,6 +21,14 @@ function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): o
 
 export const AVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter(isAvailableProviderOption);
 
+const PROVIDER_MODEL_NAME_QUALIFIERS: Partial<Record<ProviderDriverKind, readonly string[]>> = {
+  [ProviderDriverKind.make("codex")]: ["Codex", "OpenAI"],
+  [ProviderDriverKind.make("claudeAgent")]: ["Claude", "Anthropic"],
+  [ProviderDriverKind.make("opencode")]: ["OpenCode"],
+  [ProviderDriverKind.make("cursor")]: ["Cursor"],
+  [ProviderDriverKind.make("grok")]: ["Grok", "xAI"],
+};
+
 export type ModelEsque = {
   slug: string;
   name: string;
@@ -49,6 +57,20 @@ export function getDisplayModelName(
 ): string {
   const name = options?.preferShortName && model.shortName ? model.shortName : model.name;
   return stripLeadingQualifier(name, model.subProvider);
+}
+
+export function getProviderIndependentModelName(
+  model: ModelEsque,
+  driverKind: ProviderDriverKind,
+  providerDisplayName: string,
+  options?: { preferShortName?: boolean },
+): string {
+  let name = getDisplayModelName(model, options);
+  const qualifiers = [providerDisplayName, ...(PROVIDER_MODEL_NAME_QUALIFIERS[driverKind] ?? [])];
+  for (const qualifier of qualifiers) {
+    name = stripLeadingQualifier(name, qualifier);
+  }
+  return name;
 }
 
 export function getTriggerDisplayModelName(model: ModelEsque): string {

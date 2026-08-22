@@ -370,7 +370,10 @@ export function resolveRemoteT3CliPackageSpec(input: {
   readonly isDevelopment?: boolean;
 }): string {
   const appVersion = input.appVersion.trim();
-  if (!input.isDevelopment && PUBLISHABLE_T3_VERSION_PATTERN.test(appVersion)) {
+  if (
+    PUBLISHABLE_T3_VERSION_PATTERN.test(appVersion) &&
+    (!input.isDevelopment || !appVersion.endsWith("-dev"))
+  ) {
     return `t3@${appVersion}`;
   }
 

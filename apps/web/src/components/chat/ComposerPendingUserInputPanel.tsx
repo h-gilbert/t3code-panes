@@ -167,6 +167,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
 
   return (
     <Collapsible
+      data-pending-user-input-panel="true"
       className="py-2"
       open={!isCollapsed}
       onOpenChange={(open) => {

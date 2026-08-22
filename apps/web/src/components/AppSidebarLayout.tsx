@@ -12,9 +12,11 @@ import { useLocation, useNavigate } from "@tanstack/react-router";
 import { isElectron } from "../env";
 import { getLocalStorageItem, removeLocalStorageItem } from "../hooks/useLocalStorage";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
-import { cn, isMacPlatform } from "../lib/utils";
+import { cn } from "../lib/utils";
 import { primaryServerKeybindingsAtom } from "../state/server";
+import { isWorkspacePath } from "../workspacePaneStore";
 import { useEnvironmentIdentificationMode, useLegacySidebarEnabled } from "../hooks/useSettings";
+import { useDesktopFullscreen } from "../hooks/useDesktopFullscreen";
 import LegacyThreadSidebar from "./LegacySidebar";
 import ThreadSidebar from "./Sidebar";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
@@ -64,7 +66,7 @@ function readInitialThreadSidebarWidth(): number {
   }
 }
 
-function SidebarControl() {
+function SidebarControl({ hidden }: { readonly hidden: boolean }) {
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { toggleSidebar } = useSidebar();
   const isSidebarVisible = useSidebarVisibility();
@@ -94,6 +96,8 @@ function SidebarControl() {
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [keybindings, toggleSidebar]);
+
+  if (hidden) return null;
 
   return (
     // The right-side layout controls carry mr-px (border compensation inside
@@ -143,7 +147,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   // sidebar is active.
   const pathname = useLocation({ select: (location) => location.pathname });
   const isOnSettings = pathname === "/settings" || pathname.startsWith("/settings/");
-  const isMacosDesktop = isElectron && isMacPlatform(navigator.platform);
+  const { isMacosDesktop, isWindowFullscreen } = useDesktopFullscreen();
   const [sidebarWidth, setSidebarWidth] = useState(readInitialThreadSidebarWidth);
   // Subscribed rather than read once: the clamp must track live window size,
   // and a clamped drag ends with an unchanged width, which skips the re-render
@@ -158,35 +162,12 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     }
     setSidebarWidth(resolveInitialThreadSidebarWidth(null, viewportWidth));
   };
-  const [isWindowFullscreen, setIsWindowFullscreen] = useState(() => {
-    const getWindowFullscreenState = window.desktopBridge?.getWindowFullscreenState;
-    return isMacosDesktop && typeof getWindowFullscreenState === "function"
-      ? getWindowFullscreenState()
-      : false;
-  });
   const sidebarProviderStyle = {
     "--sidebar-width": `${sidebarWidth}px`,
     ...(isMacosDesktop && !isWindowFullscreen
       ? { "--workspace-controls-left": MACOS_TRAFFIC_LIGHTS_LEFT_INSET }
       : {}),
   } as CSSProperties;
-
-  useEffect(() => {
-    if (!isMacosDesktop) return;
-    const bridge = window.desktopBridge;
-    if (!bridge) return;
-    const { getWindowFullscreenState, onWindowFullscreenStateChange } = bridge;
-    if (
-      typeof getWindowFullscreenState !== "function" ||
-      typeof onWindowFullscreenStateChange !== "function"
-    ) {
-      return;
-    }
-
-    const unsubscribe = onWindowFullscreenStateChange(setIsWindowFullscreen);
-    setIsWindowFullscreen(getWindowFullscreenState());
-    return unsubscribe;
-  }, [isMacosDesktop]);
 
   useEffect(() => {
     const onMenuAction = window.desktopBridge?.onMenuAction;
@@ -209,7 +190,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   }, [navigate, pathname]);
 
   return (
-    <SidebarProvider className="h-dvh! min-h-0!" defaultOpen style={sidebarProviderStyle}>
+    <SidebarProvider className="h-dvh! min-h-0!" defaultOpen={false} style={sidebarProviderStyle}>
       <ProjectProjectionRetention />
       <Sidebar
         side="left"
@@ -239,7 +220,9 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         <SidebarRail onDoubleClick={resetSidebarWidth} />
       </Sidebar>
       {children}
-      <SidebarControl />
+      <SidebarControl
+        hidden={isWorkspacePath(pathname) && (!isMacosDesktop || isWindowFullscreen)}
+      />
     </SidebarProvider>
   );
 }

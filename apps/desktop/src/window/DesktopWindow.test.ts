@@ -94,7 +94,7 @@ function makeFakeBrowserWindow() {
     isMaximized: vi.fn(() => false),
     isMinimized: vi.fn(() => false),
     isVisible: vi.fn(() => true),
-    loadURL: vi.fn(() => Promise.resolve()),
+    loadURL: vi.fn((_url: string) => Promise.resolve()),
     maximize: vi.fn(),
     on: vi.fn((eventName: string, listener: (...args: readonly unknown[]) => void) => {
       windowListeners.set(eventName, listener);
@@ -432,6 +432,27 @@ describe("DesktopWindow", () => {
     );
   });
 
+  it("recognizes only same-origin workspace windows", () => {
+    assert.isTrue(
+      DesktopWindow.isWorkspaceRendererWindow({
+        applicationUrl: "t3code://app/",
+        navigationUrl: "t3code://app/workspace?project=one",
+      }),
+    );
+    assert.isFalse(
+      DesktopWindow.isWorkspaceRendererWindow({
+        applicationUrl: "t3code://app/",
+        navigationUrl: "t3code://app/settings",
+      }),
+    );
+    assert.isFalse(
+      DesktopWindow.isWorkspaceRendererWindow({
+        applicationUrl: "t3code://app/",
+        navigationUrl: "https://example.com/workspace",
+      }),
+    );
+  });
+
   it.effect("does not open a development window until the backend is ready", () =>
     Effect.gen(function* () {
       const fakeWindow = makeFakeBrowserWindow();
@@ -459,7 +480,9 @@ describe("DesktopWindow", () => {
         assert.isTrue(createdWindowOptions[0]?.disableAutoHideCursor);
         assert.isFalse(createdWindowOptions[0]?.webPreferences?.backgroundThrottling);
         assert.deepEqual(fakeWindow.setAutoHideCursor.mock.calls, [[false]]);
-        assert.deepEqual(fakeWindow.loadURL.mock.calls[0], ["t3code-dev://app/"]);
+        assert.deepEqual(fakeWindow.loadURL.mock.calls[0], [
+          "t3code-dev://app/workspace?workspace=main",
+        ]);
         assert.equal(fakeWindow.openDevTools.mock.calls.length, 1);
       }).pipe(Effect.provide(layer));
     }),
@@ -571,6 +594,42 @@ describe("DesktopWindow", () => {
         assert.equal(createdWindowOptions[0]?.height, 880);
         assert.equal(createdWindowOptions[0]?.x, 120);
         assert.equal(createdWindowOptions[0]?.y, 80);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("lets the OS place new workspace windows instead of covering the current window", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const createdWindowOptions: Electron.BrowserWindowConstructorOptions[] = [];
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+        createdWindowOptions,
+        desktopSettings: {
+          ...DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS,
+          mainWindowBounds: { x: 120, y: 80, width: 1320, height: 880 },
+        },
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+        yield* desktopWindow.createWorkspaceWindow;
+
+        assert.equal(createdWindowOptions[0]?.x, 120);
+        assert.equal(createdWindowOptions[0]?.y, 80);
+        assert.equal(createdWindowOptions[1]?.width, 1100);
+        assert.equal(createdWindowOptions[1]?.height, 780);
+        assert.isUndefined(createdWindowOptions[1]?.x);
+        assert.isUndefined(createdWindowOptions[1]?.y);
+        assert.match(
+          String(fakeWindow.loadURL.mock.calls[1]?.[0]),
+          /^t3code-dev:\/\/app\/workspace\?workspace=[0-9a-f-]+$/,
+        );
       }).pipe(Effect.provide(layer));
     }),
   );
@@ -1053,8 +1112,8 @@ describe("DesktopWindow", () => {
 
         yield* TestClock.adjust(100);
         assert.deepEqual(fakeWindow.loadURL.mock.calls, [
-          ["t3code-dev://app/"],
-          ["t3code-dev://app/"],
+          ["t3code-dev://app/workspace?workspace=main"],
+          ["t3code-dev://app/workspace?workspace=main"],
         ]);
         assert.equal(fakeWindow.reload.mock.calls.length, 0);
 

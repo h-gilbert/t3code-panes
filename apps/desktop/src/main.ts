@@ -94,7 +94,7 @@ const resolveDesktopSshCliRunner = (
   }
   return {
     packageSpec: resolveRemoteT3CliPackageSpec({
-      appVersion: environment.appVersion,
+      appVersion: environment.isDevelopment ? serverPackageJson.version : environment.appVersion,
       updateChannel: settings.updateChannel,
       isDevelopment: environment.isDevelopment,
     }),

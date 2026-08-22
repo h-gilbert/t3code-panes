@@ -16,7 +16,7 @@ import {
 } from "@t3tools/shared/model";
 import { memo, useCallback, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
-import { ZapIcon } from "lucide-react";
+import { BotIcon, BrainIcon, GaugeIcon, SlidersHorizontalIcon, ZapIcon } from "lucide-react";
 import { buttonVariants } from "../ui/button";
 import {
   Menu,
@@ -221,6 +221,7 @@ export interface TraitsMenuContentProps {
   planModeEnabled: boolean;
   triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
   triggerClassName?: string;
+  descriptorIds?: ReadonlyArray<string>;
 }
 
 export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
@@ -233,6 +234,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
   modelOptions,
   allowPromptInjectedEffort = true,
   planModeEnabled,
+  descriptorIds,
   ...persistence
 }: TraitsMenuContentProps & TraitsPersistence) {
   const setProviderModelOptions = useComposerDraftStore((store) => store.setProviderModelOptions);
@@ -274,6 +276,12 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
   const updateDescriptors = (nextDescriptors: ReadonlyArray<ProviderOptionDescriptor>) => {
     updateModelOptions(buildProviderOptionSelectionsFromDescriptors(nextDescriptors));
   };
+  const visibleSelectDescriptors = descriptorIds
+    ? selectDescriptors.filter((descriptor) => descriptorIds.includes(descriptor.id))
+    : selectDescriptors;
+  const visibleBooleanDescriptors = descriptorIds
+    ? booleanDescriptors.filter((descriptor) => descriptorIds.includes(descriptor.id))
+    : booleanDescriptors;
 
   const handleSelectChange = (
     descriptor: Extract<ProviderOptionDescriptor, { type: "select" }>,
@@ -296,13 +304,16 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     updateDescriptors(replaceDescriptorCurrentValue(descriptors, descriptor.id, value));
   };
 
-  if (!hasAnyControls) {
+  if (
+    !hasAnyControls ||
+    (visibleSelectDescriptors.length === 0 && visibleBooleanDescriptors.length === 0)
+  ) {
     return null;
   }
 
   return (
     <>
-      {selectDescriptors.map((descriptor, index) => {
+      {visibleSelectDescriptors.map((descriptor, index) => {
         const selectedValue =
           ultrathinkPromptControlled && descriptor.id === primarySelectDescriptor?.id
             ? "ultrathink"
@@ -360,12 +371,12 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
           </div>
         );
       })}
-      {booleanDescriptors.map((descriptor, index) => {
+      {visibleBooleanDescriptors.map((descriptor, index) => {
         const selectedValue = descriptor.currentValue === true ? "on" : "off";
 
         return (
           <div key={descriptor.id}>
-            {index > 0 || selectDescriptors.length > 0 ? <MenuDivider /> : null}
+            {index > 0 || visibleSelectDescriptors.length > 0 ? <MenuDivider /> : null}
             <MenuGroup>
               <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">
                 {descriptor.label}
@@ -392,6 +403,59 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
       })}
     </>
   );
+});
+
+function compactTraitIcon(descriptor: ProviderOptionDescriptor) {
+  const key = `${descriptor.id} ${descriptor.label}`.toLowerCase();
+  if (key.includes("context")) return GaugeIcon;
+  if (key.includes("reason") || key.includes("think") || key.includes("effort")) return BrainIcon;
+  if (key.includes("agent")) return BotIcon;
+  if (key.includes("fast")) return ZapIcon;
+  return SlidersHorizontalIcon;
+}
+
+export const TraitsIconPickers = memo(function TraitsIconPickers(
+  props: TraitsMenuContentProps & TraitsPersistence,
+) {
+  const { descriptors } = getTraitsSectionVisibility({
+    provider: props.provider,
+    models: props.models,
+    model: props.model,
+    prompt: props.prompt,
+    modelOptions: props.modelOptions,
+    allowPromptInjectedEffort: props.allowPromptInjectedEffort ?? true,
+    planModeEnabled: props.planModeEnabled,
+  });
+
+  return descriptors.map((descriptor) => {
+    const Icon = compactTraitIcon(descriptor);
+    const currentLabel =
+      descriptor.type === "boolean"
+        ? descriptor.currentValue === true
+          ? "On"
+          : "Off"
+        : getProviderOptionCurrentLabel(descriptor);
+    const ariaLabel = currentLabel ? `${descriptor.label}: ${currentLabel}` : descriptor.label;
+    return (
+      <Menu key={descriptor.id}>
+        <MenuTrigger
+          render={
+            <ComposerControl
+              className="shrink-0 gap-0.5 px-1.5 text-secondary-label hover:text-foreground"
+              aria-label={ariaLabel}
+              title={ariaLabel}
+            />
+          }
+        >
+          <Icon className="size-3.5" aria-hidden />
+          <ComposerControlChevron />
+        </MenuTrigger>
+        <MenuPopup align="start">
+          <TraitsMenuContent {...props} descriptorIds={[descriptor.id]} />
+        </MenuPopup>
+      </Menu>
+    );
+  });
 });
 
 /**

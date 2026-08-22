@@ -223,7 +223,11 @@ describe("add project shared logic", () => {
       title: "repo",
       workspaceRoot: "/work/repo",
       createWorkspaceRootIfMissing: true,
-      defaultModelSelection: null,
+      defaultModelSelection: {
+        instanceId: "claudeAgent",
+        model: "claude-opus-4-8",
+        options: [{ id: "effort", value: "medium" }],
+      },
     });
   });
 });

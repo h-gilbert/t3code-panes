@@ -1,6 +1,6 @@
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { LinkIcon, PlusIcon, RotateCcwIcon } from "lucide-react";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
+import { LinkIcon, PanelsTopLeftIcon, PlusIcon, RotateCcwIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { openCommandPalette } from "../commandPaletteBus";
@@ -18,6 +18,8 @@ import {
 import { useEnvironments } from "../state/environments";
 import { APP_DISPLAY_NAME } from "~/branding";
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
+import { DEFAULT_WORKSPACE_KEY } from "../workspacePaneStore";
+import { isElectron } from "../env";
 
 function ChatIndexRouteView() {
   const { authGateState } = Route.useRouteContext();
@@ -119,7 +121,14 @@ function NoProjectsHero() {
                 Add a project to start your first thread.
               </EmptyDescription>
               <div className="mt-6 flex justify-center">
-                <Button size="sm" onClick={openAddProject}>
+                <Button
+                  render={<Link to="/workspace" search={{ workspace: DEFAULT_WORKSPACE_KEY }} />}
+                  size="sm"
+                >
+                  <PanelsTopLeftIcon className="size-4" />
+                  Workspace
+                </Button>
+                <Button className="ml-2" size="sm" variant="outline" onClick={openAddProject}>
                   <PlusIcon className="size-4" />
                   Add project
                 </Button>
@@ -133,6 +142,15 @@ function NoProjectsHero() {
 }
 
 export const Route = createFileRoute("/_chat/")({
+  beforeLoad: () => {
+    if (isElectron) {
+      throw redirect({
+        to: "/workspace",
+        search: { workspace: DEFAULT_WORKSPACE_KEY },
+        replace: true,
+      });
+    }
+  },
   component: ChatIndexRouteView,
 });
 

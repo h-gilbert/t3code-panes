@@ -25,8 +25,14 @@ import { primaryServerKeybindingsAtom } from "~/state/server";
 function ChatRouteGlobalShortcuts() {
   const clearSelection = useThreadSelectionStore((state) => state.clearSelection);
   const selectedThreadKeysSize = useThreadSelectionStore((state) => state.selectedThreadKeys.size);
-  const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread, routeThreadRef } =
-    useHandleNewThread();
+  const {
+    activeDraftThread,
+    activeThread,
+    preferredProjectRef,
+    defaultProjectRef,
+    handleNewThread,
+    routeThreadRef,
+  } = useHandleNewThread();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const legacySidebarEnabled = useLegacySidebarEnabled();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
@@ -83,6 +89,7 @@ function ChatRouteGlobalShortcuts() {
         void startNewThreadFromContext({
           activeDraftThread,
           activeThread: activeThread ?? undefined,
+          preferredProjectRef,
           defaultProjectRef,
           handleNewThread,
         });
@@ -102,6 +109,7 @@ function ChatRouteGlobalShortcuts() {
         void startNewThreadFromContext({
           activeDraftThread,
           activeThread: activeThread ?? undefined,
+          preferredProjectRef,
           defaultProjectRef,
           handleNewThread,
         });
@@ -163,6 +171,7 @@ function ChatRouteGlobalShortcuts() {
     handleNewThread,
     keybindings,
     defaultProjectRef,
+    preferredProjectRef,
     previewOpen,
     projectGroupCount,
     routeThreadRef,

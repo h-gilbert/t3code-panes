@@ -195,6 +195,90 @@ it.effect("clones a looked-up repository into the requested destination", () =>
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
+it.effect("refreshes an existing checkout when its origin matches the requested repository", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const parent = yield* fs.makeTempDirectoryScoped({
+      prefix: "t3-source-control-existing-parent-",
+    });
+    const destinationPath = `${parent}/t3code`;
+    yield* fs.makeDirectory(destinationPath);
+    yield* fs.writeFileString(`${destinationPath}/README.md`, "existing checkout");
+    const gitCalls: Array<{ cwd: string; args: ReadonlyArray<string> }> = [];
+
+    yield* Effect.gen(function* () {
+      const service = yield* SourceControlRepositoryService.SourceControlRepositoryService;
+      const result = yield* service.cloneRepository({
+        remoteUrl: CLONE_URLS.url,
+        destinationPath,
+      });
+
+      assert.deepStrictEqual(result, {
+        cwd: destinationPath,
+        remoteUrl: CLONE_URLS.url,
+        repository: null,
+      });
+      assert.deepStrictEqual(gitCalls, [
+        { cwd: destinationPath, args: ["remote", "get-url", "origin"] },
+        { cwd: destinationPath, args: ["fetch", "--prune", "origin"] },
+      ]);
+    }).pipe(
+      Effect.provide(
+        makeLayer({
+          git: {
+            execute: (input) =>
+              Effect.sync(() => {
+                gitCalls.push({ cwd: input.cwd, args: input.args });
+                return input.args[0] === "remote"
+                  ? { ...processOutput(), stdout: CLONE_URLS.sshUrl }
+                  : processOutput();
+              }),
+          },
+        }),
+      ),
+    );
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect("refuses to adopt a non-empty destination with a different origin", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const parent = yield* fs.makeTempDirectoryScoped({
+      prefix: "t3-source-control-mismatch-parent-",
+    });
+    const destinationPath = `${parent}/t3code`;
+    yield* fs.makeDirectory(destinationPath);
+    yield* fs.writeFileString(`${destinationPath}/README.md`, "different checkout");
+
+    yield* Effect.gen(function* () {
+      const service = yield* SourceControlRepositoryService.SourceControlRepositoryService;
+      const error = yield* Effect.flip(
+        service.cloneRepository({
+          remoteUrl: CLONE_URLS.url,
+          destinationPath,
+        }),
+      );
+
+      assert.strictEqual(
+        error.detail,
+        "Destination path already exists and is not the requested repository.",
+      );
+    }).pipe(
+      Effect.provide(
+        makeLayer({
+          git: {
+            execute: () =>
+              Effect.succeed({
+                ...processOutput(),
+                stdout: "git@github.com:someone-else/t3code.git",
+              }),
+          },
+        }),
+      ),
+    );
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
 it.effect("preserves destination probe failures instead of treating them as missing paths", () => {
   const fileSystemCause = PlatformError.systemError({
     _tag: "PermissionDenied",

@@ -56,6 +56,11 @@ const zoomMainWindow = Effect.fn("desktop.menu.zoomMainWindow")(function* (
   yield* desktopWindow.zoomMain(direction);
 });
 
+const createWorkspaceWindow = Effect.gen(function* () {
+  const desktopWindow = yield* DesktopWindow.DesktopWindow;
+  yield* desktopWindow.createWorkspaceWindow;
+}).pipe(Effect.withSpan("desktop.menu.createWorkspaceWindow"));
+
 const checkForUpdatesFromMenu = Effect.gen(function* () {
   const updates = yield* DesktopUpdates.DesktopUpdates;
   const electronDialog = yield* ElectronDialog.ElectronDialog;
@@ -134,6 +139,9 @@ export const make = Effect.gen(function* () {
     const settingsClick = () => {
       runMenuEffect("open-settings", dispatchMenuAction("open-settings"));
     };
+    const newWorkspaceWindowClick = () => {
+      runMenuEffect("new-workspace-window", createWorkspaceWindow);
+    };
     const zoomClick = (direction: DesktopWindow.MainWindowZoomDirection) => () => {
       runMenuEffect(`zoom-${direction}`, zoomMainWindow(direction));
     };
@@ -170,6 +178,12 @@ export const make = Effect.gen(function* () {
       {
         label: "File",
         submenu: [
+          {
+            label: "New Workspace Window",
+            accelerator: "CmdOrCtrl+N",
+            click: newWorkspaceWindowClick,
+          },
+          { type: "separator" },
           ...(environment.platform === "darwin"
             ? []
             : [

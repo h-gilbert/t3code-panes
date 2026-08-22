@@ -18,6 +18,7 @@ import {
   type SourceControlRepositoryInfo,
   type SourceControlRepositoryLookupInput,
 } from "@t3tools/contracts";
+import { normalizeGitRemoteUrl } from "@t3tools/shared/git";
 
 import { ServerConfig } from "../config.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
@@ -144,6 +145,7 @@ export const make = Effect.gen(function* () {
   const prepareDestination = Effect.fn("SourceControlRepositoryService.prepareDestination")(
     function* (destinationPath: string) {
       const normalizedDestination = yield* normalizeDestinationPath(destinationPath);
+      let hasContents = false;
       if (yield* fileSystem.exists(normalizedDestination)) {
         const entries = yield* fileSystem
           .readDirectory(normalizedDestination, { recursive: false })
@@ -158,13 +160,7 @@ export const make = Effect.gen(function* () {
                 }),
             ),
           );
-        if (entries.length > 0) {
-          return yield* new SourceControlRepositoryError({
-            operation: "cloneRepository",
-            provider: "unknown",
-            detail: "Destination path already exists and is not empty.",
-          });
-        }
+        hasContents = entries.length > 0;
       } else {
         yield* fileSystem.makeDirectory(path.dirname(normalizedDestination), { recursive: true });
       }
@@ -173,6 +169,7 @@ export const make = Effect.gen(function* () {
         destinationPath: normalizedDestination,
         parentPath: path.dirname(normalizedDestination),
         directoryName: path.basename(normalizedDestination),
+        hasContents,
       };
     },
   );
@@ -201,6 +198,45 @@ export const make = Effect.gen(function* () {
         provider,
         detail: "Enter a repository path or clone URL before cloning.",
       });
+    }
+
+    if (preparedDestination.hasContents) {
+      const existingRemote = yield* git
+        .execute({
+          operation: "SourceControlRepositoryService.cloneRepository.existingRemote",
+          cwd: preparedDestination.destinationPath,
+          args: ["remote", "get-url", "origin"],
+          timeoutMs: 10_000,
+          maxOutputBytes: 16 * 1024,
+        })
+        .pipe(
+          Effect.map((result) => result.stdout.trim()),
+          Effect.orElseSucceed(() => null),
+        );
+      if (
+        !existingRemote ||
+        normalizeGitRemoteUrl(existingRemote) !== normalizeGitRemoteUrl(remoteUrl)
+      ) {
+        return yield* new SourceControlRepositoryError({
+          operation: "cloneRepository",
+          provider,
+          detail: "Destination path already exists and is not the requested repository.",
+        });
+      }
+
+      yield* git.execute({
+        operation: "SourceControlRepositoryService.cloneRepository.refreshExisting",
+        cwd: preparedDestination.destinationPath,
+        args: ["fetch", "--prune", "origin"],
+        timeoutMs: 120_000,
+        maxOutputBytes: 256 * 1024,
+      });
+
+      return {
+        cwd: preparedDestination.destinationPath,
+        remoteUrl,
+        repository,
+      };
     }
 
     yield* git.execute({
