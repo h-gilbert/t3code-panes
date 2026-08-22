@@ -451,7 +451,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     const config = resolveChatListAnchoredEndSpace(
       rows,
       anchorMessageId,
-      (row) => (row.kind === "message" ? row.message.id : null),
+      (row) => (row.kind === "message" && row.message.role === "user" ? row.message.id : null),
       {
         anchorOffset: CHAT_LIST_ANCHOR_OFFSET,
       },
