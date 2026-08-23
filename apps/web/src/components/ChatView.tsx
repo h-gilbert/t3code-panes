@@ -302,6 +302,7 @@ import {
   threadChangeRequestSnapshotsAtom,
 } from "./ThreadStatusIndicators";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
+import { ComposerWorkingStatus } from "./chat/ComposerWorkingStatus";
 import { ThreadSyncStatusPill } from "./chat/ThreadSyncStatusPill";
 import {
   DRAFT_HERO_TRANSITION_ANIMATION_ID,
@@ -6830,6 +6831,11 @@ export function ChatViewContent(props: ChatViewProps) {
                 )}
               >
                 <div className="pointer-events-auto relative z-10">
+                  {!isDraftHeroState &&
+                  (phase === "running" || isSendBusy) &&
+                  activeWorkStartedAt ? (
+                    <ComposerWorkingStatus startedAt={activeWorkStartedAt} />
+                  ) : null}
                   {isDraftHeroState ? (
                     <div className="absolute inset-x-0 bottom-full z-0">
                       <div
