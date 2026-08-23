@@ -14,7 +14,10 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { buildSshChildEnvironment, type SshAuthOptions } from "./auth.ts";
 import { SshCommandError, SshInvalidTargetError } from "./errors.ts";
 
-const PUBLISHABLE_T3_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
+// Desktop builds can carry local prerelease suffixes (for example,
+// `0.0.33-panes.9`) that were never published as `t3` packages. Only stable
+// and release-pipeline nightly versions are safe to request exactly from npm.
+const PUBLISHED_T3_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-nightly\.\d{8}\.\d+)?$/u;
 const DEFAULT_SSH_COMMAND_TIMEOUT_MS = 60_000;
 const MAX_SSH_ERROR_OUTPUT_LENGTH = 4_000;
 
@@ -371,7 +374,7 @@ export function resolveRemoteT3CliPackageSpec(input: {
 }): string {
   const appVersion = input.appVersion.trim();
   if (
-    PUBLISHABLE_T3_VERSION_PATTERN.test(appVersion) &&
+    PUBLISHED_T3_VERSION_PATTERN.test(appVersion) &&
     (!input.isDevelopment || !appVersion.endsWith("-dev"))
   ) {
     return `t3@${appVersion}`;

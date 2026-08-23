@@ -117,6 +117,20 @@ describe("ssh command", () => {
       );
       assert.equal(
         resolveRemoteT3CliPackageSpec({
+          appVersion: "0.0.33-panes.9",
+          updateChannel: "latest",
+        }),
+        "t3@latest",
+      );
+      assert.equal(
+        resolveRemoteT3CliPackageSpec({
+          appVersion: "0.0.33-local.1",
+          updateChannel: "nightly",
+        }),
+        "t3@nightly",
+      );
+      assert.equal(
+        resolveRemoteT3CliPackageSpec({
           appVersion: "0.0.17",
           updateChannel: "nightly",
           isDevelopment: true,

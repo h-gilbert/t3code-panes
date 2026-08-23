@@ -338,16 +338,18 @@ NODE
 }
 
 ensure_remote_node_path() {
-  if command -v node >/dev/null 2>&1 && remote_node_satisfies_engine >/dev/null 2>&1; then
-    return 0
-  fi
-
+  # Even when the inherited Node already satisfies the engine range, user
+  # executables such as a locally installed t3 CLI still need to be visible.
   prepend_path_if_dir "$HOME/.local/bin"
   prepend_path_if_dir "$HOME/bin"
   prepend_path_if_dir "/opt/homebrew/bin"
   prepend_path_if_dir "/usr/local/bin"
   prepend_path_if_dir "/usr/bin"
   prepend_path_if_dir "/bin"
+
+  if command -v node >/dev/null 2>&1 && remote_node_satisfies_engine >/dev/null 2>&1; then
+    return 0
+  fi
 
   if [ -z "\${VOLTA_HOME:-}" ]; then
     VOLTA_HOME="$HOME/.volta"
