@@ -3112,6 +3112,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         });
         return;
       case "status":
+        // Claude can deliver a trailing `status:requesting` after the result
+        // that settled an interrupted turn. Once completeTurn has cleared the
+        // local turn, that heartbeat no longer describes active work; emitting
+        // it would leave the durable session `running` with no active turn.
+        if (!context.turnState) {
+          return;
+        }
         yield* offerRuntimeEvent({
           ...base,
           type: "session.state.changed",

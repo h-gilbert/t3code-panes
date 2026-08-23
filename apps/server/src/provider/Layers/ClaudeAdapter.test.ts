@@ -1014,6 +1014,17 @@ describe("ClaudeAdapterLive", () => {
         uuid: "result-real",
       } as unknown as SDKMessage);
 
+      // Interrupts can race with Claude's internal task notification. The SDK
+      // then emits this stale request heartbeat after the result that settled
+      // the turn; it must not put the session back into a running state.
+      harness.query.emit({
+        type: "system",
+        subtype: "status",
+        status: "requesting",
+        session_id: "sdk-session-1",
+        uuid: "status-after-result",
+      } as unknown as SDKMessage);
+
       // Second result with no turn in flight — the shape the resume
       // handshake (system/init + result(num_turns: 0)) delivers, and the
       // same completeTurn branch every no-turnState result lands in. This
@@ -1041,6 +1052,13 @@ describe("ClaudeAdapterLive", () => {
         assert.equal(String(completed.turnId), String(turn.turnId));
         assert.equal(completed.payload.state, "completed");
       }
+      assert.equal(
+        runtimeEvents.some(
+          (event) =>
+            event.type === "session.state.changed" && event.payload.reason === "status:requesting",
+        ),
+        false,
+      );
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
