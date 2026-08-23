@@ -1913,6 +1913,7 @@ const make = Effect.gen(function* () {
             commandId: yield* providerCommandId(event, "thread-meta-update"),
             threadId: thread.id,
             title: event.payload.name,
+            titleSource: "auto",
           });
         }
       }

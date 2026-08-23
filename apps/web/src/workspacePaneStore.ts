@@ -87,6 +87,98 @@ export function assignWorkspaceThread(
   return { panes: next as unknown as WorkspacePanes, focusedPaneIndex: paneIndex };
 }
 
+interface IndexedWorkspacePane {
+  readonly originalIndex: WorkspacePaneIndex;
+  readonly target: WorkspacePaneTarget | null;
+  readonly projectKey: string | null;
+}
+
+export function resizeWorkspaceLayoutPaneCount(
+  layout: ProjectWorkspaceLayout,
+  paneCount: WorkspacePaneCount,
+): ProjectWorkspaceLayout {
+  if (paneCount >= layout.paneCount) {
+    return paneCount === layout.paneCount ? layout : { ...layout, paneCount };
+  }
+
+  const visibleSlots: IndexedWorkspacePane[] = Array.from(
+    { length: layout.paneCount },
+    (_, index) => ({
+      originalIndex: index as WorkspacePaneIndex,
+      target: layout.panes[index] ?? null,
+      projectKey: layout.projectKeys[index] ?? null,
+    }),
+  );
+  const occupiedSlots = visibleSlots.filter((slot) => slot.target !== null);
+  const focusedOccupiedSlot = occupiedSlots.find(
+    (slot) => slot.originalIndex === layout.focusedPaneIndex,
+  );
+  let retainedOccupiedSlots = occupiedSlots.slice(0, paneCount);
+
+  // When more threads are open than the smaller layout can show, retain the
+  // focused one and evict the last otherwise-retained pane. The remaining
+  // occupied panes stay just beyond the visible range and reappear if the
+  // workspace is expanded again.
+  if (focusedOccupiedSlot !== undefined && !retainedOccupiedSlots.includes(focusedOccupiedSlot)) {
+    retainedOccupiedSlots = [...retainedOccupiedSlots.slice(0, -1), focusedOccupiedSlot].sort(
+      (left, right) => left.originalIndex - right.originalIndex,
+    );
+  }
+
+  const retainedSet = new Set(retainedOccupiedSlots);
+  const configuredEmptySlots = visibleSlots.filter(
+    (slot) => slot.target === null && slot.projectKey !== null,
+  );
+  const blankSlots = visibleSlots.filter(
+    (slot) => slot.target === null && slot.projectKey === null,
+  );
+  const retainedVisibleSlots = [
+    ...retainedOccupiedSlots,
+    ...configuredEmptySlots,
+    ...blankSlots,
+  ].slice(0, paneCount);
+  for (const slot of retainedVisibleSlots) {
+    retainedSet.add(slot);
+  }
+
+  const hiddenExistingSlots = visibleSlots.filter((slot) => !retainedSet.has(slot));
+  const previouslyHiddenSlots: IndexedWorkspacePane[] = Array.from(
+    { length: WORKSPACE_PANE_COUNT - layout.paneCount },
+    (_, offset) => {
+      const index = layout.paneCount + offset;
+      return {
+        originalIndex: index as WorkspacePaneIndex,
+        target: layout.panes[index] ?? null,
+        projectKey: layout.projectKeys[index] ?? null,
+      };
+    },
+  );
+  const reorderedSlots = [
+    ...retainedVisibleSlots,
+    ...hiddenExistingSlots,
+    ...previouslyHiddenSlots,
+  ];
+  const focusedPaneIndex = retainedVisibleSlots.findIndex(
+    (slot) => slot.originalIndex === layout.focusedPaneIndex,
+  );
+  const maximizedPaneIndex =
+    layout.maximizedPaneIndex === null
+      ? null
+      : retainedVisibleSlots.findIndex((slot) => slot.originalIndex === layout.maximizedPaneIndex);
+
+  return {
+    ...layout,
+    panes: reorderedSlots.map((slot) => slot.target),
+    projectKeys: reorderedSlots.map((slot) => slot.projectKey),
+    paneCount,
+    focusedPaneIndex: (focusedPaneIndex >= 0 ? focusedPaneIndex : 0) as WorkspacePaneIndex,
+    maximizedPaneIndex:
+      maximizedPaneIndex !== null && maximizedPaneIndex >= 0
+        ? (maximizedPaneIndex as WorkspacePaneIndex)
+        : null,
+  };
+}
+
 function updateProjectLayout(
   state: WorkspacePaneState,
   projectKey: string,
@@ -187,15 +279,9 @@ export const useWorkspacePaneStore = create<WorkspacePaneState>()(
         ),
       setPaneCount: (projectKey, paneCount) =>
         set((state) =>
-          updateProjectLayout(state, projectKey, (layout) => ({
-            ...layout,
-            paneCount,
-            focusedPaneIndex: layout.focusedPaneIndex < paneCount ? layout.focusedPaneIndex : 0,
-            maximizedPaneIndex:
-              layout.maximizedPaneIndex !== null && layout.maximizedPaneIndex >= paneCount
-                ? null
-                : layout.maximizedPaneIndex,
-          })),
+          updateProjectLayout(state, projectKey, (layout) =>
+            resizeWorkspaceLayoutPaneCount(layout, paneCount),
+          ),
         ),
       setLayoutMode: (projectKey, layoutMode) =>
         set((state) =>

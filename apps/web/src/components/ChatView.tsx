@@ -337,6 +337,7 @@ import {
   resolveSendEnvMode,
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
+  shouldResumeTimelineFollowForComposerInput,
   shouldWriteThreadErrorToCurrentServerThread,
   startNewThreadForProject,
   waitForStartedServerThread,
@@ -4020,13 +4021,10 @@ export function ChatViewContent(props: ChatViewProps) {
       return getAnchoredTurnMetrics({
         state,
         anchorIndex,
-        composerOverlayHeight: 0,
+        composerOverlayHeight,
         anchorOffset: CHAT_LIST_ANCHOR_OFFSET,
       });
     },
-    // The composer now consumes layout space instead of overlapping the list,
-    // but a height change still needs to re-run anchored-turn positioning once
-    // LegendList has measured its smaller viewport.
     [composerOverlayHeight],
   );
   const timelineRealContentOverflowsViewport = useCallback(
@@ -4050,11 +4048,12 @@ export function ChatViewContent(props: ChatViewProps) {
       }
 
       const realContentBottom = lastRowTop + Math.max(1, lastRowHeight);
-      const visibleScrollLength = Math.max(0, (state.scrollLength ?? 0) - CHAT_LIST_ANCHOR_OFFSET);
+      const visibleScrollLength = Math.max(
+        0,
+        (state.scrollLength ?? 0) - composerOverlayHeight - CHAT_LIST_ANCHOR_OFFSET,
+      );
       return realContentBottom > visibleScrollLength;
     },
-    // Refresh gesture listeners when the composer changes the physical list
-    // viewport, even though its height no longer needs subtracting here.
     [composerOverlayHeight],
   );
   // Live-follow stays active after send/thread-open until an actual list scroll
@@ -4073,6 +4072,18 @@ export function ChatViewContent(props: ChatViewProps) {
       void legendListRef.current?.scrollToEnd?.({ animated });
     });
   }, []);
+  const resumeTimelineFollowForComposerInput = useCallback(() => {
+    if (
+      !shouldResumeTimelineFollowForComposerInput({
+        isWorking,
+        liveFollowEnabled: timelineLiveFollowEnabled,
+        isAtEnd: isAtEndRef.current,
+      })
+    ) {
+      return;
+    }
+    scrollToEnd(false);
+  }, [isWorking, scrollToEnd, timelineLiveFollowEnabled]);
   useEffect(() => {
     let removeListeners: (() => void) | null = null;
     let frame: number | null = null;
@@ -4104,7 +4115,8 @@ export function ChatViewContent(props: ChatViewProps) {
         // up, and a gesture landing in that window while still pinned would
         // otherwise break follow with no scroll event left to re-arm it.
         const viewportIsAwayFromEnd = () =>
-          resolveTimelineIsAtEnd(legendListRef.current?.getState()) === false;
+          resolveTimelineIsAtEnd(legendListRef.current?.getState(), composerOverlayHeight) ===
+          false;
         // Only an upward wheel is a navigation intent; wheeling down while
         // following either does nothing (at the end) or moves toward it.
         const handleWheel = (event: WheelEvent) => {
@@ -6715,18 +6727,22 @@ export function ChatViewContent(props: ChatViewProps) {
                   skills={activeProviderStatus?.skills ?? EMPTY_PROVIDER_SKILLS}
                   anchorMessageId={timelineAnchorMessageId}
                   onAnchorReady={onTimelineAnchorReady}
-                  contentInsetEndAdjustment={0}
+                  contentInsetEndAdjustment={composerOverlayHeight}
                   liveFollowEnabled={timelineLiveFollowEnabled}
                   onIsAtEndChange={onIsAtEndChange}
                   onManualNavigation={cancelTimelineLiveFollowForUserNavigation}
                   hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}
                   topFadeEnabled={!hasTimelineTopBanner}
+                  compactMinimap={embeddedPane}
                   loadEarlier={loadEarlierTurns}
                 />
 
                 {/* scroll to end pill — shown when user has scrolled away from the live edge */}
                 {showScrollToBottom && (
-                  <div className="pointer-events-none absolute bottom-1 left-1/2 z-30 flex -translate-x-1/2 justify-center py-1.5">
+                  <div
+                    className="pointer-events-none absolute left-1/2 z-30 flex -translate-x-1/2 justify-center py-1.5"
+                    style={{ bottom: composerOverlayHeight + 4 }}
+                  >
                     <Button
                       aria-label="Scroll to end"
                       onClick={() => scrollToEnd(true)}
@@ -6740,21 +6756,13 @@ export function ChatViewContent(props: ChatViewProps) {
                   </div>
                 )}
               </div>
-
-              {/* The composer floats visually, but this measured spacer keeps
-                  the timeline's actual viewport entirely above it. */}
-              <div
-                aria-hidden="true"
-                data-chat-composer-layout-spacer="true"
-                className="shrink-0"
-                style={{ height: isDraftHeroState ? 0 : composerOverlayHeight }}
-              />
             </div>
 
             {/* Input bar — centered hero while a draft has no messages, docked at the bottom otherwise */}
             <div
               ref={setComposerOverlayElement}
               data-chat-composer-overlay="true"
+              onInputCapture={resumeTimelineFollowForComposerInput}
               className={
                 isDraftHeroState
                   ? "pointer-events-none absolute inset-0 z-20 flex items-center"
@@ -6808,7 +6816,6 @@ export function ChatViewContent(props: ChatViewProps) {
                     <div
                       className={cn(
                         "chat-composer-glass-shell relative mx-auto w-full max-w-3xl",
-                        embeddedPane && "max-w-none",
                         externalComposerDrawerAttached && "chat-composer-glass-shell-attached",
                         showComposerContextStrip &&
                           !embeddedPane &&

@@ -874,6 +874,7 @@ const make = Effect.gen(function* () {
           commandId: yield* serverCommandId("thread-title-rename"),
           threadId: input.threadId,
           title: generated.title,
+          titleSource: "auto",
         });
       }).pipe(
         Effect.catchCause((cause) =>
@@ -1112,6 +1113,30 @@ const make = Effect.gen(function* () {
           ...generationInput,
         }).pipe(Effect.forkScoped);
       }
+    } else if (thread.titleSource !== "manual" && thread.titleRegeneration == null) {
+      // Keep auto-generated titles useful as a thread develops. The pending
+      // marker makes rapid follow-ups coalesce into one generation request;
+      // an explicit rename flips the source to manual and permanently opts
+      // the thread out of this automatic refresh path.
+      yield* orchestrationEngine
+        .dispatch({
+          type: "thread.meta.update",
+          commandId: yield* serverCommandId("thread-title-auto-regenerate"),
+          threadId: event.payload.threadId,
+          regenerateTitle: true,
+        })
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning(
+              "provider command reactor failed to queue automatic thread title regeneration",
+              {
+                threadId: event.payload.threadId,
+                cause: Cause.pretty(cause),
+              },
+            ),
+          ),
+          Effect.forkScoped,
+        );
     }
 
     const handleTurnStartFailure = (cause: Cause.Cause<unknown>) => {

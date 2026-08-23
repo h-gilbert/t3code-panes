@@ -28,6 +28,8 @@ export const ProjectionThread = Schema.Struct({
   threadId: ThreadId,
   projectId: ProjectId,
   title: Schema.String,
+  // Optional for rows/test fixtures from before title provenance existed.
+  titleSource: Schema.optional(Schema.Literals(["auto", "manual"])),
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,

@@ -77,6 +77,7 @@ The most common defect in this repo is a change that works on the path you teste
 ## Dev servers
 
 - `vp i` installs. Worktrees get this from the t3.json setup script; if module resolution looks broken, it probably did not run.
+- In this checkout, when the developer asks to "start the dev build" or "start the dev version" without naming a surface, launch the macOS Electron app with `vp run dev:desktop --home-dir .t3`. Keep that process alive for iteration. The explicit project-local `.t3` preserves the working desktop connection catalog, including Fred and its remote provider/model availability, and must override any ambient `T3CODE_HOME`. Use web or mobile instead only when the developer explicitly asks for that surface.
 - `vp run dev` starts server and web. In a worktree, state defaults to that worktree's gitignored `.t3`, which deliberately outranks an ambient `T3CODE_HOME` so you cannot land on shared state by accident. An explicit `--home-dir` still wins.
 - Ports derive from the worktree path and are stable across restarts, but read the real ones from the `[dev-runner]` line since occupied ports shift.
 - Sharing over the tailnet is three steps: run `vp run dev --share` in the background, wait for the `pairingUrl:` line in its output, paste that full URL (token included) in your reply. Do not wire up `tailscale serve` by hand for this, and do not open the URL yourself.

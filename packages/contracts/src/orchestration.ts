@@ -379,6 +379,9 @@ export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
+  /** Whether the current title may be refreshed from the conversation. */
+  // Optional for compatibility with cached read models from older servers.
+  titleSource: Schema.optional(Schema.Literals(["auto", "manual"])),
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode.pipe(
@@ -767,6 +770,8 @@ const ThreadMetaUpdateCommand = Schema.Struct({
   commandId: CommandId,
   threadId: ThreadId,
   title: Schema.optional(TrimmedNonEmptyString),
+  /** Internal marker for generated title writes; omitted title writes are manual. */
+  titleSource: Schema.optional(Schema.Literals(["auto", "manual"])),
   regenerateTitle: Schema.optional(Schema.Literal(true)),
   modelSelection: Schema.optional(ModelSelection),
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
@@ -1205,6 +1210,7 @@ export const ThreadPinReorderedPayload = Schema.Struct({
 export const ThreadMetaUpdatedPayload = Schema.Struct({
   threadId: ThreadId,
   title: Schema.optional(TrimmedNonEmptyString),
+  titleSource: Schema.optional(Schema.Literals(["auto", "manual"])),
   /** Intent marker consumed by the title-generation reactor. Keeping this on
       the existing event lets older clients safely ignore the new field. */
   regenerateTitle: Schema.optional(Schema.Literal(true)),

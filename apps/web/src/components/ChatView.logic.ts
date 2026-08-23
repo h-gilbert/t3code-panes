@@ -577,3 +577,11 @@ export function hasServerAcknowledgedLocalDispatch(input: {
     input.localDispatch.sessionUpdatedAt !== (session?.updatedAt ?? null)
   );
 }
+
+export function shouldResumeTimelineFollowForComposerInput(input: {
+  readonly isWorking: boolean;
+  readonly liveFollowEnabled: boolean;
+  readonly isAtEnd: boolean;
+}): boolean {
+  return input.isWorking && (!input.liveFollowEnabled || !input.isAtEnd);
+}

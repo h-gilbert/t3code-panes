@@ -14,7 +14,7 @@ import {
 
 const EMPTY_AGENT_PANEL_MODEL = emptyAgentPanelModel();
 const NOOP_OPEN_AGENTS = () => {};
-import { resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
+import { CHAT_LIST_ANCHOR_OFFSET, resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
 import {
   createContext,
   Fragment,
@@ -86,6 +86,7 @@ import {
   workEntryIsVisibleInGroup,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
+  TIMELINE_MINIMAP_COMPACT_HIT_STRIP_WIDTH,
   TIMELINE_MINIMAP_MIN_ITEMS,
   type TimelineLatestTurn,
 } from "./MessagesTimeline.logic";
@@ -238,6 +239,8 @@ interface MessagesTimelineProps {
   onManualNavigation: () => void;
   hideEmptyPlaceholder?: boolean;
   topFadeEnabled?: boolean;
+  /** Keep a compact message navigator visible when the timeline is embedded in a workspace pane. */
+  compactMinimap?: boolean;
   /** Non-null when older turns exist beyond the loaded window. */
   loadEarlier?: { readonly loading: boolean; readonly onLoadEarlier: () => void } | null;
 }
@@ -277,6 +280,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onManualNavigation,
   hideEmptyPlaceholder = false,
   topFadeEnabled = false,
+  compactMinimap = false,
   loadEarlier = null,
 }: MessagesTimelineProps) {
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
@@ -421,8 +425,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const [timelineViewportElement, setTimelineViewportElement] = useState<HTMLDivElement | null>(
     null,
   );
-  const [minimapHasPersistentGutter, setMinimapHasPersistentGutter] = useState(false);
-  const [minimapHitStripWidth, setMinimapHitStripWidth] = useState(0);
+  const [minimapHasPersistentGutter, setMinimapHasPersistentGutter] = useState(compactMinimap);
+  const [minimapHitStripWidth, setMinimapHitStripWidth] = useState(
+    compactMinimap ? TIMELINE_MINIMAP_COMPACT_HIT_STRIP_WIDTH : 0,
+  );
   const handleAnchorReady = useCallback(
     (info: { anchorIndex: number | undefined }) => {
       if (anchorMessageId !== null && info.anchorIndex !== undefined) {
@@ -432,11 +438,19 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [anchorMessageId, onAnchorReady],
   );
   const anchoredEndSpace = useMemo(() => {
-    const config = resolveChatListAnchoredEndSpace(rows, anchorMessageId, (row) =>
-      row.kind === "message" ? row.message.id : null,
+    const config = resolveChatListAnchoredEndSpace(
+      rows,
+      anchorMessageId,
+      (row) => (row.kind === "message" ? row.message.id : null),
+      {
+        // LegendList treats anchored end space as owning the bottom inset.
+        // Include the overlaid composer in the anchor offset so a growing
+        // live turn stops above it instead of streaming underneath it.
+        anchorOffset: CHAT_LIST_ANCHOR_OFFSET + contentInsetEndAdjustment,
+      },
     );
     return config ? { ...config, onReady: handleAnchorReady } : undefined;
-  }, [anchorMessageId, handleAnchorReady, rows]);
+  }, [anchorMessageId, contentInsetEndAdjustment, handleAnchorReady, rows]);
 
   const handleScroll = useCallback(() => {
     const state = listRef.current?.getState?.();
@@ -480,11 +494,16 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
     const measure = () => {
       const viewportWidth = timelineViewportElement.getBoundingClientRect().width;
-      const nextHasPersistentGutter = resolveTimelineMinimapHasPersistentGutter(viewportWidth);
+      const nextHasPersistentGutter =
+        compactMinimap || resolveTimelineMinimapHasPersistentGutter(viewportWidth);
       setMinimapHasPersistentGutter((current) =>
         current === nextHasPersistentGutter ? current : nextHasPersistentGutter,
       );
-      setMinimapHitStripWidth(resolveTimelineMinimapHitStripWidth(viewportWidth));
+      setMinimapHitStripWidth(
+        compactMinimap
+          ? TIMELINE_MINIMAP_COMPACT_HIT_STRIP_WIDTH
+          : resolveTimelineMinimapHitStripWidth(viewportWidth),
+      );
     };
 
     const frame = requestAnimationFrame(measure);
@@ -496,7 +515,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       cancelAnimationFrame(frame);
       observer.disconnect();
     };
-  }, [timelineViewportElement, rows.length]);
+  }, [compactMinimap, timelineViewportElement, rows.length]);
 
   const sharedState = useMemo<TimelineRowSharedState>(
     () => ({
@@ -587,7 +606,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             maintainVisibleContentPosition={maintainVisibleContentPosition}
             onScroll={handleScroll}
             className={cn(
-              "scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain px-3 [overflow-anchor:none] sm:px-5",
+              "scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain [overflow-anchor:none]",
+              compactMinimap ? "pr-3 pl-12 sm:pr-5 sm:pl-12" : "px-3 sm:px-5",
               topFadeEnabled && "topbar-scroll-fade",
             )}
             ListHeaderComponent={
@@ -607,6 +627,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           />
           <TimelineMinimap
             items={minimapItems}
+            compact={compactMinimap}
             hasPersistentGutter={minimapHasPersistentGutter}
             hitStripWidth={minimapHitStripWidth}
             stripMap={minimapStripMap}
@@ -708,12 +729,14 @@ function timelineMinimapEventTargetsPreview(target: EventTarget): boolean {
 }
 
 function TimelineMinimap({
+  compact,
   hasPersistentGutter,
   hitStripWidth,
   items,
   stripMap,
   onSelect,
 }: {
+  compact: boolean;
   hasPersistentGutter: boolean;
   hitStripWidth: number;
   items: ReadonlyArray<TimelineMinimapItem>;
@@ -776,21 +799,24 @@ function TimelineMinimap({
   return (
     <div
       className={cn(
-        "group/minimap pointer-events-none absolute inset-y-0 left-0 z-40 hidden w-18 [@media(pointer:fine)]:block",
+        "group/minimap pointer-events-none absolute inset-y-0 left-0 z-40 hidden [@media(pointer:fine)]:block",
+        compact ? "w-12" : "w-18",
         hasPersistentGutter
           ? "opacity-100"
           : "opacity-0 transition-opacity duration-150 hover:opacity-100 focus-within:opacity-100",
       )}
       data-testid="timeline-minimap"
+      data-compact={compact ? "true" : "false"}
       data-persistent-gutter={hasPersistentGutter ? "true" : "false"}
     >
       <div className="relative h-full w-full select-none">
         <button
           aria-label={`Jump to message: ${activeItem?.userText ?? "User message"}`}
           className={cn(
-            "absolute top-1/2 left-3 -translate-y-1/2 cursor-pointer bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70",
-            // The strip is width-capped to the side gutter so it never overlays
-            // the centered content column; with no usable gutter it goes inert.
+            "absolute top-1/2 -translate-y-1/2 cursor-pointer bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70",
+            compact ? "left-2" : "left-3",
+            // Full timelines cap the strip to their natural gutter. Embedded
+            // timelines reserve a compact gutter of their own.
             hitStripWidth > 0 ? "pointer-events-auto" : "pointer-events-none",
           )}
           onBlur={() => setActiveIndex(null)}
@@ -874,7 +900,10 @@ function TimelineMinimap({
           })}
           {activeItem ? (
             <span
-              className="pointer-events-auto absolute left-8 w-80 cursor-text select-text"
+              className={cn(
+                "pointer-events-auto absolute cursor-text select-text",
+                compact ? "left-7 w-64" : "left-8 w-80",
+              )}
               data-minimap-preview
               onMouseMove={(event) => event.stopPropagation()}
               style={{

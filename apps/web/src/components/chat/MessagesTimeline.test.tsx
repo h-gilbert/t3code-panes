@@ -236,6 +236,31 @@ function buildAssistantTimelineEntry(text: string) {
 }
 
 describe("MessagesTimeline", () => {
+  it("keeps the message navigator visible in a compact workspace pane", () => {
+    const firstEntry = buildUserTimelineEntry("First question");
+    const secondEntry = {
+      ...buildUserTimelineEntry("Second question"),
+      id: "entry-2",
+      message: {
+        ...buildUserTimelineEntry("Second question").message,
+        id: MessageId.make("message-2"),
+      },
+    };
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        compactMinimap
+        timelineEntries={[firstEntry, secondEntry]}
+      />,
+    );
+
+    expect(markup).toContain('data-testid="timeline-minimap"');
+    expect(markup).toContain('data-compact="true"');
+    expect(markup).toContain('data-persistent-gutter="true"');
+    expect(markup).toContain("pr-3 pl-12 sm:pr-5 sm:pl-12");
+    expect(markup).toContain("pointer-events-auto");
+  });
+
   it("renders the worked-for row at assistant response text size", () => {
     const turnId = TurnId.make("turn-with-fold");
     const assistantEntry = buildAssistantTimelineEntry("Done.");
@@ -466,7 +491,7 @@ describe("MessagesTimeline", () => {
     );
 
     expect(markup).toContain('data-anchor-index="1"');
-    expect(markup).toContain('data-anchor-offset="16"');
+    expect(markup).toContain('data-anchor-offset="160"');
     expect(markup).toContain('data-anchor-on-ready="true"');
     expect(markup).not.toContain("data-anchor-max-size=");
     expect(markup).toContain('data-content-inset-end="144"');

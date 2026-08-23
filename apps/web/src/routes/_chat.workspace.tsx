@@ -1,7 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { createFileRoute } from "@tanstack/react-router";
-import type { ScopedProjectRef, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import type { ScopedProjectRef, ScopedThreadRef } from "@t3tools/contracts";
 import {
   ChevronDownIcon,
   Columns3Icon,
@@ -32,6 +32,7 @@ import {
   DropdownMenuTrigger,
 } from "../components/ui/menu";
 import { SidebarInset } from "../components/ui/sidebar";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { resolveShortcutCommand } from "../keybindings";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isModelPickerOpen } from "../modelPickerVisibility";
@@ -60,15 +61,18 @@ import {
   type WorkspacePaneIndex,
   type WorkspacePaneTarget,
 } from "../workspacePaneStore";
+import { resolveWorkspacePaneThreadTitle } from "../workspacePaneTitle";
 import { cn } from "~/lib/utils";
 import { newDraftId, newThreadId } from "../lib/utils";
 
 function EmptyWorkspacePane({
   paneNumber,
   projectSelected,
+  onNewThread,
 }: {
   readonly paneNumber: number;
   readonly projectSelected: boolean;
+  readonly onNewThread: (() => void) | null;
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 bg-background px-6 text-center">
@@ -79,17 +83,30 @@ function EmptyWorkspacePane({
           ? "Choose a thread from this project in the sidebar."
           : "Choose a project for this pane, then select one of its threads."}
       </p>
+      {onNewThread ? (
+        <Button size="sm" variant="outline" onClick={onNewThread}>
+          New thread
+        </Button>
+      ) : null}
     </div>
   );
 }
 
 function WorkspacePaneThreadTitle({ threadRef }: { readonly threadRef: ScopedThreadRef }) {
-  const thread = useThreadShell(threadRef);
+  const shell = useThreadShell(threadRef);
+  const detail = useThreadDetail(threadRef);
+  const title = resolveWorkspacePaneThreadTitle(detail, shell);
+  const displayTitle = title ?? "Loading thread…";
 
   return (
-    <span className="min-w-0 flex-1 truncate text-center text-foreground" title={thread?.title}>
-      {thread?.title ?? "Loading thread…"}
-    </span>
+    <Tooltip>
+      <TooltipTrigger
+        render={<span className="min-w-0 flex-1 truncate text-center text-foreground" />}
+      >
+        {displayTitle}
+      </TooltipTrigger>
+      <TooltipPopup side="bottom">{displayTitle}</TooltipPopup>
+    </Tooltip>
   );
 }
 
@@ -232,11 +249,19 @@ function WorkspacePane({
   const toggleMaximize = useWorkspacePaneStore((state) => state.toggleMaximize);
   const handleNewThread = useNewThreadHandler();
   const [pendingProjectRef, setPendingProjectRef] = useState<ScopedProjectRef | null>(null);
-  const pendingFreshDraftRef = useRef<{
-    projectKey: string;
-    draftId: DraftId;
-    threadId: ThreadId;
-  } | null>(null);
+  const draftRequestVersionRef = useRef(0);
+  const openFreshDraft = useCallback(
+    (projectRef: ScopedProjectRef) => {
+      const requestVersion = ++draftRequestVersionRef.current;
+      const freshDraft = { draftId: newDraftId(), threadId: newThreadId() };
+      void handleNewThread(projectRef, { navigate: false, freshDraft }).then((opened) => {
+        if (draftRequestVersionRef.current === requestVersion && opened) {
+          assignDraft(workspaceKey, opened.draftId, index);
+        }
+      });
+    },
+    [assignDraft, handleNewThread, index, workspaceKey],
+  );
   const selectProject = useCallback(
     (projectRef: ScopedProjectRef) => {
       const project = projects.find((candidate) =>
@@ -252,8 +277,9 @@ function WorkspacePane({
       }
       setPendingProjectRef(null);
       setPaneProject(workspaceKey, index, project.projectKey);
+      openFreshDraft(projectRef);
     },
-    [index, projects, setPaneProject, workspaceKey],
+    [index, openFreshDraft, projects, setPaneProject, workspaceKey],
   );
   const openProjectPicker = useCallback(
     () => openCommandPalette({ open: "add-local-project", onProjectSelected: selectProject }),
@@ -270,45 +296,17 @@ function WorkspacePane({
     }
   }, [pendingProjectRef, selectProject]);
 
-  useEffect(() => {
-    if (paneTarget) {
-      pendingFreshDraftRef.current = null;
-      return;
+  const startNewThread = useCallback(() => {
+    if (selectedProject) {
+      openFreshDraft(scopeProjectRef(selectedProject.environmentId, selectedProject.id));
     }
-    if (!projectKey) {
-      pendingFreshDraftRef.current = null;
-      return;
-    }
-    const project = projects.find((candidate) => candidate.projectKey === projectKey);
-    const projectRef = project ? scopeProjectRef(project.environmentId, project.id) : null;
-    if (!projectRef) {
-      return;
-    }
-    const pendingFreshDraft =
-      pendingFreshDraftRef.current?.projectKey === projectKey
-        ? pendingFreshDraftRef.current
-        : {
-            projectKey,
-            draftId: newDraftId(),
-            threadId: newThreadId(),
-          };
-    pendingFreshDraftRef.current = pendingFreshDraft;
-    let cancelled = false;
-    void handleNewThread(projectRef, {
-      navigate: false,
-      freshDraft: {
-        draftId: pendingFreshDraft.draftId,
-        threadId: pendingFreshDraft.threadId,
-      },
-    }).then((opened) => {
-      if (!cancelled && opened) {
-        assignDraft(workspaceKey, opened.draftId, index);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [assignDraft, handleNewThread, index, paneTarget, projectKey, projects, workspaceKey]);
+  }, [openFreshDraft, selectedProject]);
+  const handleClearPane = useCallback(() => {
+    // Invalidate a project selection that is still preparing its draft so it
+    // cannot repopulate the pane after the user clears it.
+    draftRequestVersionRef.current += 1;
+    clearPane(workspaceKey, index);
+  }, [clearPane, index, workspaceKey]);
 
   return (
     <section
@@ -415,7 +413,7 @@ function WorkspacePane({
               variant="ghost"
               aria-label="Clear pane"
               title="Clear pane"
-              onClick={() => clearPane(workspaceKey, index)}
+              onClick={handleClearPane}
             >
               <XIcon className="size-3" />
             </Button>
@@ -437,7 +435,11 @@ function WorkspacePane({
           composerHandleRef={composerHandleRef}
         />
       ) : (
-        <EmptyWorkspacePane paneNumber={index + 1} projectSelected={projectKey !== null} />
+        <EmptyWorkspacePane
+          paneNumber={index + 1}
+          projectSelected={projectKey !== null}
+          onNewThread={selectedProject ? startNewThread : null}
+        />
       )}
     </section>
   );

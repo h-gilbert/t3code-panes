@@ -110,6 +110,7 @@ export function resolveTimelineMinimapHasPersistentGutter(viewportWidth: number)
 
 export const TIMELINE_MINIMAP_HIT_STRIP_LEFT = 12;
 export const TIMELINE_MINIMAP_HIT_STRIP_MAX_WIDTH = 40;
+export const TIMELINE_MINIMAP_COMPACT_HIT_STRIP_WIDTH = 32;
 export const TIMELINE_MINIMAP_EXPANDED_HIT_STRIP_WIDTH = "22rem";
 
 /**

@@ -8,6 +8,7 @@ import {
   WORKSPACE_PANE_COUNT,
   assignWorkspaceThread,
   isWorkspacePath,
+  resizeWorkspaceLayoutPaneCount,
   selectProjectWorkspaceLayout,
   useWorkspacePaneStore,
   type WorkspacePanes,
@@ -106,6 +107,18 @@ describe("window workspace layouts", () => {
     expect(layout.focusedPaneIndex).toBe(2);
   });
 
+  it("clears a thread or draft while retaining the pane's selected project", () => {
+    useWorkspacePaneStore.setState({ layoutsByProjectKey: {} });
+    const actions = useWorkspacePaneStore.getState();
+    actions.setPaneProject("window-a", 2, "directory-project-key");
+    actions.assignDraft("window-a", "draft-1" as DraftId, 2);
+    actions.clearPane("window-a", 2);
+
+    const layout = selectProjectWorkspaceLayout(useWorkspacePaneStore.getState(), "window-a");
+    expect(layout.projectKeys[2]).toBe("directory-project-key");
+    expect(layout.panes[2]).toBeNull();
+  });
+
   it("keeps different drafts for the same project in separate panes", () => {
     useWorkspacePaneStore.setState({ layoutsByProjectKey: {} });
     const actions = useWorkspacePaneStore.getState();
@@ -120,5 +133,64 @@ describe("window workspace layouts", () => {
       "directory-project-key",
     ]);
     expect(layout.panes.slice(0, 2)).toEqual([{ draftId: "draft-1" }, { draftId: "draft-2" }]);
+  });
+
+  it("packs occupied panes before empty panes when shrinking", () => {
+    const firstThread = scopeThreadRef("environment-1" as EnvironmentId, ThreadId.make("thread-1"));
+    const secondThread = scopeThreadRef(
+      "environment-1" as EnvironmentId,
+      ThreadId.make("thread-2"),
+    );
+    const thirdThread = scopeThreadRef("environment-1" as EnvironmentId, ThreadId.make("thread-3"));
+    const panes = [...EMPTY_PANES];
+    panes[0] = firstThread;
+    panes[3] = secondThread;
+    panes[5] = thirdThread;
+    const projectKeys = Array.from({ length: WORKSPACE_PANE_COUNT }, () => null as string | null);
+    projectKeys[0] = "project-1";
+    projectKeys[3] = "project-2";
+    projectKeys[5] = "project-3";
+
+    const resized = resizeWorkspaceLayoutPaneCount(
+      {
+        ...DEFAULT_PROJECT_WORKSPACE_LAYOUT,
+        panes,
+        projectKeys,
+        paneCount: 6,
+        focusedPaneIndex: 5,
+      },
+      4,
+    );
+
+    expect(resized.panes.slice(0, 4)).toEqual([firstThread, secondThread, thirdThread, null]);
+    expect(resized.projectKeys.slice(0, 4)).toEqual(["project-1", "project-2", "project-3", null]);
+    expect(resized.focusedPaneIndex).toBe(2);
+  });
+
+  it("retains the focused thread and keeps overflow available when shrinking", () => {
+    const threads = Array.from({ length: 5 }, (_, index) =>
+      scopeThreadRef("environment-1" as EnvironmentId, ThreadId.make(`thread-${index + 1}`)),
+    );
+    const panes = [...EMPTY_PANES];
+    for (const [index, thread] of threads.entries()) {
+      panes[index] = thread;
+    }
+
+    const shrunk = resizeWorkspaceLayoutPaneCount(
+      {
+        ...DEFAULT_PROJECT_WORKSPACE_LAYOUT,
+        panes,
+        paneCount: 6,
+        focusedPaneIndex: 4,
+      },
+      4,
+    );
+
+    expect(shrunk.panes.slice(0, 4)).toEqual([threads[0], threads[1], threads[2], threads[4]]);
+    expect(shrunk.focusedPaneIndex).toBe(3);
+    expect(shrunk.panes[4]).toEqual(threads[3]);
+
+    const expanded = resizeWorkspaceLayoutPaneCount(shrunk, 5);
+    expect(expanded.panes.slice(0, 5)).toContain(threads[3]);
   });
 });

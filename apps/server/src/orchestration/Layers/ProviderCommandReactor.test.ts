@@ -712,6 +712,131 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.title).toBe("Generated title");
   });
 
+  it("automatically refreshes a generated title on a later turn", async () => {
+    const harness = await createHarness();
+    const seededTitle = "Please investigate reconnect failures after restar...";
+    harness.generateThreadTitle
+      .mockReturnValueOnce(Effect.succeed({ title: "Reconnect failures" }))
+      .mockReturnValueOnce(Effect.succeed({ title: "Reconnect recovery behavior" }));
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.make("cmd-thread-title-auto-seed"),
+        threadId: ThreadId.make("thread-1"),
+        title: seededTitle,
+      }),
+    );
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-auto-first"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-auto-first"),
+          role: "user",
+          text: "Please investigate reconnect failures.",
+          attachments: [],
+        },
+        titleSeed: seededTitle,
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+    await waitFor(
+      async () => (await harness.readModel()).threads[0]?.title === "Reconnect failures",
+    );
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-auto-second"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-auto-second"),
+          role: "user",
+          text: "Now focus on recovery after the session restarts.",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:01.000Z",
+      }),
+    );
+    await waitFor(() => harness.generateThreadTitle.mock.calls.length === 2);
+    await harness.drain();
+
+    expect(harness.generateThreadTitle.mock.calls[1]?.[0]).toMatchObject({
+      previousTitle: "Reconnect failures",
+      message: expect.stringContaining("Now focus on recovery"),
+    });
+    expect((await harness.readModel()).threads[0]?.title).toBe("Reconnect recovery behavior");
+  });
+
+  it("does not automatically refresh a manually renamed thread", async () => {
+    const harness = await createHarness();
+    const seededTitle = "Please investigate reconnect failures after restar...";
+    harness.generateThreadTitle.mockReturnValue(Effect.succeed({ title: "Reconnect failures" }));
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.make("cmd-thread-title-manual-seed"),
+        threadId: ThreadId.make("thread-1"),
+        title: seededTitle,
+      }),
+    );
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-manual-first"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-manual-first"),
+          role: "user",
+          text: "Please investigate reconnect failures.",
+          attachments: [],
+        },
+        titleSeed: seededTitle,
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+    await waitFor(
+      async () => (await harness.readModel()).threads[0]?.title === "Reconnect failures",
+    );
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.make("cmd-thread-title-manual-rename"),
+        threadId: ThreadId.make("thread-1"),
+        title: "My reconnect investigation",
+      }),
+    );
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-manual-second"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-manual-second"),
+          role: "user",
+          text: "Continue with the recovery details.",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:01.000Z",
+      }),
+    );
+    await harness.drain();
+
+    expect(harness.generateThreadTitle).toHaveBeenCalledTimes(1);
+    expect((await harness.readModel()).threads[0]?.title).toBe("My reconnect investigation");
+  });
+
   it("regenerates a thread title from the current conversation", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";

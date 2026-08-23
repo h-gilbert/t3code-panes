@@ -828,7 +828,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         type: "thread.meta-updated",
         payload: {
           threadId: command.threadId,
-          ...(command.title !== undefined ? { title: command.title } : {}),
+          ...(command.title !== undefined
+            ? {
+                title: command.title,
+                // Explicit title edits are manual unless an internal caller
+                // marks the write as generated.
+                titleSource: command.titleSource ?? "manual",
+              }
+            : {}),
           ...(command.regenerateTitle === true
             ? {
                 regenerateTitle: true as const,
@@ -870,7 +877,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         type: "thread.meta-updated",
         payload: {
           threadId: command.threadId,
-          ...(requestIsCurrent && command.title !== undefined ? { title: command.title } : {}),
+          ...(requestIsCurrent && command.title !== undefined
+            ? { title: command.title, titleSource: "auto" as const }
+            : {}),
           ...(requestIsCurrent ? { titleRegeneration: null } : {}),
           updatedAt: requestIsCurrent ? occurredAt : thread.updatedAt,
         },

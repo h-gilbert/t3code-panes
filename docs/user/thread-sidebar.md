@@ -21,4 +21,7 @@ pill** fallback because their colors are not controlled by T3 Code.
 
 To generate a fresh title from the conversation, open a thread's context menu and choose
 **Regenerate title**. While T3 Code is generating it, the action reads **Regenerating…** and cannot
-be selected again. The option is hidden when the connected environment needs a server update.
+be selected again. New threads use GPT Luna to generate a concise title from the first message,
+then refresh that title after later messages as the conversation's subject becomes clearer. If you
+rename a thread yourself, automatic refreshes stop for that thread. The option is hidden when the
+connected environment needs a server update.
