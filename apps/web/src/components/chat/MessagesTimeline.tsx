@@ -221,7 +221,6 @@ interface MessagesTimelineProps {
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   anchorMessageId: MessageId | null;
   onAnchorReady: (messageId: MessageId, anchorIndex: number) => void;
-  contentInsetEndAdjustment: number;
   /**
    * Whether the timeline should keep pinning to the live edge as content
    * grows. Off while the user is reading history; LegendList's own
@@ -269,7 +268,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   skills = EMPTY_TIMELINE_SKILLS,
   anchorMessageId,
   onAnchorReady,
-  contentInsetEndAdjustment,
   liveFollowEnabled,
   onLiveTailSizeChange,
   onIsAtEndChange,
@@ -442,14 +440,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       anchorMessageId,
       (row) => (row.kind === "message" ? row.message.id : null),
       {
-        // LegendList treats anchored end space as owning the bottom inset.
-        // Include the overlaid composer in the anchor offset so a growing
-        // live turn stops above it instead of streaming underneath it.
-        anchorOffset: CHAT_LIST_ANCHOR_OFFSET + contentInsetEndAdjustment,
+        anchorOffset: CHAT_LIST_ANCHOR_OFFSET,
       },
     );
     return config ? { ...config, onReady: handleAnchorReady } : undefined;
-  }, [anchorMessageId, contentInsetEndAdjustment, handleAnchorReady, rows]);
+  }, [anchorMessageId, handleAnchorReady, rows]);
 
   const handleItemSizeChanged = useCallback(
     ({ index }: { index: number }) => {
@@ -466,7 +461,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
   const handleScroll = useCallback(() => {
     const state = listRef.current?.getState?.();
-    const isAtEnd = resolveTimelineIsAtEnd(state, contentInsetEndAdjustment);
+    const isAtEnd = resolveTimelineIsAtEnd(state);
     if (isAtEnd !== undefined) {
       onIsAtEndChange(isAtEnd);
     }
@@ -492,7 +487,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
       strip.dataset.inView = inView ? "true" : "false";
     }
-  }, [contentInsetEndAdjustment, listRef, minimapItems, minimapStripMap, onIsAtEndChange]);
+  }, [listRef, minimapItems, minimapStripMap, onIsAtEndChange]);
 
   useEffect(() => {
     const frame = requestAnimationFrame(handleScroll);
@@ -606,7 +601,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             estimatedItemSize={90}
             initialScrollAtEnd
             {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
-            contentInsetEndAdjustment={contentInsetEndAdjustment}
             maintainScrollAtEnd={
               anchoredEndSpace || !liveFollowEnabled || disclosureToggleSettling
                 ? false

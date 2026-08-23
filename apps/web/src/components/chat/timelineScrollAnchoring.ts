@@ -37,12 +37,10 @@ export function getRowBottom(state: TimelineListMeasurementState, index: number)
 export function getAnchoredTurnMetrics({
   state,
   anchorIndex,
-  composerOverlayHeight,
   anchorOffset,
 }: {
   readonly state: TimelineListMeasurementState;
   readonly anchorIndex: number;
-  readonly composerOverlayHeight: number;
   readonly anchorOffset: number;
 }): AnchoredTurnMetrics | null {
   if (state.data.length === 0) {
@@ -56,10 +54,7 @@ export function getAnchoredTurnMetrics({
     return null;
   }
 
-  const usableViewportHeight = Math.max(
-    0,
-    state.scrollLength - composerOverlayHeight - anchorOffset,
-  );
+  const usableViewportHeight = Math.max(0, state.scrollLength - anchorOffset);
   const turnHeight = Math.max(0, lastBottom - anchorTop);
   const visibleUsableBottom = state.scroll + usableViewportHeight;
   const targetScrollToRevealEnd = Math.max(0, lastBottom - usableViewportHeight);

@@ -102,6 +102,7 @@ import {
 } from "../session-logic";
 import { type LegendListRef } from "@legendapp/list/react";
 import { getAnchoredTurnMetrics, type TimelineScrollMode } from "./chat/timelineScrollAnchoring";
+import { shouldInterruptThreadOnEscape } from "./chat/escapeToInterrupt";
 import {
   buildPendingUserInputAnswers,
   derivePendingUserInputProgress,
@@ -128,6 +129,8 @@ import {
 import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
+import { isPreviewFocused } from "../lib/previewFocus";
+import { useThreadSelectionStore } from "../threadSelectionStore";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
@@ -1470,8 +1473,9 @@ export function ChatViewContent(props: ChatViewProps) {
     LastInvokedScriptByProjectSchema,
   );
   const legendListRef = useRef<LegendListRef | null>(null);
-  const [composerOverlayElement, setComposerOverlayElement] = useState<HTMLDivElement | null>(null);
-  const [composerOverlayHeight, setComposerOverlayHeight] = useState(0);
+  const chatViewElementRef = useRef<HTMLDivElement | null>(null);
+  const [composerElement, setComposerElement] = useState<HTMLDivElement | null>(null);
+  const [composerHeight, setComposerHeight] = useState(0);
   const isAtEndRef = useRef(true);
   const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
   const attachmentPreviewPromotionInFlightByMessageIdRef = useRef<Record<string, true>>({});
@@ -1479,12 +1483,12 @@ export function ChatViewContent(props: ChatViewProps) {
   const terminalUiOpenByThreadRef = useRef<Record<string, boolean>>({});
 
   useLayoutEffect(() => {
-    if (!composerOverlayElement) return;
+    if (!composerElement) return;
 
     const updateHeight = () => {
-      const nextHeight = Math.ceil(composerOverlayElement.getBoundingClientRect().height);
+      const nextHeight = Math.ceil(composerElement.getBoundingClientRect().height);
       if (nextHeight <= 0) return;
-      setComposerOverlayHeight((currentHeight) =>
+      setComposerHeight((currentHeight) =>
         currentHeight === nextHeight ? currentHeight : nextHeight,
       );
     };
@@ -1493,9 +1497,9 @@ export function ChatViewContent(props: ChatViewProps) {
     if (typeof ResizeObserver === "undefined") return;
 
     const observer = new ResizeObserver(updateHeight);
-    observer.observe(composerOverlayElement);
+    observer.observe(composerElement);
     return () => observer.disconnect();
-  }, [composerOverlayElement]);
+  }, [composerElement]);
 
   const terminalUiState = useTerminalUiStateStore((state) =>
     selectThreadTerminalUiState(state.terminalUiStateByThreadKey, routeThreadRef),
@@ -4011,53 +4015,43 @@ export function ChatViewContent(props: ChatViewProps) {
     cancelTimelineLiveFollowForUserNavigationRef.current =
       cancelTimelineLiveFollowForUserNavigation;
   }, [cancelTimelineLiveFollowForUserNavigation]);
-  const getActiveTimelineTurnMetrics = useCallback(
-    (list?: LegendListRef | null) => {
-      const resolvedList = list ?? legendListRef.current;
-      const anchorIndex = activeTimelineAnchorIndexRef.current;
-      const state = resolvedList?.getState();
-      if (!resolvedList || !state || anchorIndex === null) {
-        return null;
-      }
+  const getActiveTimelineTurnMetrics = useCallback((list?: LegendListRef | null) => {
+    const resolvedList = list ?? legendListRef.current;
+    const anchorIndex = activeTimelineAnchorIndexRef.current;
+    const state = resolvedList?.getState();
+    if (!resolvedList || !state || anchorIndex === null) {
+      return null;
+    }
 
-      return getAnchoredTurnMetrics({
-        state,
-        anchorIndex,
-        composerOverlayHeight,
-        anchorOffset: CHAT_LIST_ANCHOR_OFFSET,
-      });
-    },
-    [composerOverlayHeight],
-  );
-  const timelineRealContentOverflowsViewport = useCallback(
-    (list?: LegendListRef | null) => {
-      const resolvedList = list ?? legendListRef.current;
-      const state = resolvedList?.getState();
-      if (!resolvedList || !state || state.data.length === 0) {
-        return false;
-      }
+    return getAnchoredTurnMetrics({
+      state,
+      anchorIndex,
+      anchorOffset: CHAT_LIST_ANCHOR_OFFSET,
+    });
+  }, []);
+  const timelineRealContentOverflowsViewport = useCallback((list?: LegendListRef | null) => {
+    const resolvedList = list ?? legendListRef.current;
+    const state = resolvedList?.getState();
+    if (!resolvedList || !state || state.data.length === 0) {
+      return false;
+    }
 
-      const lastRowIndex = state.data.length - 1;
-      const lastRowTop = state.positionAtIndex(lastRowIndex);
-      const lastRowHeight = state.sizeAtIndex(lastRowIndex);
-      if (
-        typeof lastRowTop !== "number" ||
-        typeof lastRowHeight !== "number" ||
-        !Number.isFinite(lastRowTop) ||
-        !Number.isFinite(lastRowHeight)
-      ) {
-        return false;
-      }
+    const lastRowIndex = state.data.length - 1;
+    const lastRowTop = state.positionAtIndex(lastRowIndex);
+    const lastRowHeight = state.sizeAtIndex(lastRowIndex);
+    if (
+      typeof lastRowTop !== "number" ||
+      typeof lastRowHeight !== "number" ||
+      !Number.isFinite(lastRowTop) ||
+      !Number.isFinite(lastRowHeight)
+    ) {
+      return false;
+    }
 
-      const realContentBottom = lastRowTop + Math.max(1, lastRowHeight);
-      const visibleScrollLength = Math.max(
-        0,
-        (state.scrollLength ?? 0) - composerOverlayHeight - CHAT_LIST_ANCHOR_OFFSET,
-      );
-      return realContentBottom > visibleScrollLength;
-    },
-    [composerOverlayHeight],
-  );
+    const realContentBottom = lastRowTop + Math.max(1, lastRowHeight);
+    const visibleScrollLength = Math.max(0, (state.scrollLength ?? 0) - CHAT_LIST_ANCHOR_OFFSET);
+    return realContentBottom > visibleScrollLength;
+  }, []);
   // Live-follow stays active after send/thread-open until an actual list scroll
   // gesture opts out.
   const scrollToEnd = useCallback((animated = false) => {
@@ -4117,8 +4111,7 @@ export function ChatViewContent(props: ChatViewProps) {
         // up, and a gesture landing in that window while still pinned would
         // otherwise break follow with no scroll event left to re-arm it.
         const viewportIsAwayFromEnd = () =>
-          resolveTimelineIsAtEnd(legendListRef.current?.getState(), composerOverlayHeight) ===
-          false;
+          resolveTimelineIsAtEnd(legendListRef.current?.getState()) === false;
         // Only an upward wheel is a navigation intent; wheeling down while
         // following either does nothing (at the end) or moves toward it.
         const handleWheel = (event: WheelEvent) => {
@@ -4193,7 +4186,7 @@ export function ChatViewContent(props: ChatViewProps) {
       }
       removeListeners?.();
     };
-  }, [activeThread?.id, composerOverlayHeight, timelineRealContentOverflowsViewport]);
+  }, [activeThread?.id, timelineRealContentOverflowsViewport]);
 
   const onTimelineAnchorReady = useCallback((messageId: MessageId, anchorIndex: number) => {
     // Anchored-end space can be remeasured when the turn completes. Once the
@@ -4210,7 +4203,11 @@ export function ChatViewContent(props: ChatViewProps) {
       return;
     }
     positionedTimelineAnchorRef.current = messageId;
-    settledTimelineAnchorRef.current = null;
+    // Docking the composer changes the list viewport. An animated anchor
+    // scroll can be interrupted by that resize and leave live-tail reveals
+    // waiting forever for its promise to settle, so position the prompt in a
+    // single layout step before streaming follow begins.
+    settledTimelineAnchorRef.current = messageId;
     const positionAnchor = (remainingAttempts: number) => {
       requestAnimationFrame(() => {
         if (positionedTimelineAnchorRef.current !== messageId) {
@@ -4223,19 +4220,12 @@ export function ChatViewContent(props: ChatViewProps) {
           }
           return;
         }
-        void list
-          .scrollToIndex({
-            index: anchorIndex,
-            animated: true,
-            viewPosition: 0,
-            viewOffset: CHAT_LIST_ANCHOR_OFFSET,
-          })
-          .then(() => {
-            if (positionedTimelineAnchorRef.current !== messageId) {
-              return;
-            }
-            settledTimelineAnchorRef.current = messageId;
-          });
+        void list.scrollToIndex({
+          index: anchorIndex,
+          animated: false,
+          viewPosition: 0,
+          viewOffset: CHAT_LIST_ANCHOR_OFFSET,
+        });
       });
     };
     requestAnimationFrame(() => positionAnchor(12));
@@ -4283,6 +4273,11 @@ export function ChatViewContent(props: ChatViewProps) {
     if (timelineScrollModeRef.current === "free-scrolling") {
       return;
     }
+
+    // While follow remains armed, transient list geometry (including anchored
+    // end space) must never surface a stale manual-navigation affordance.
+    showScrollDebouncer.current.cancel();
+    setShowScrollToBottom(false);
 
     if (activeTimelineEndRevealFrameRef.current !== null) {
       cancelAnimationFrame(activeTimelineEndRevealFrameRef.current);
@@ -5758,7 +5753,7 @@ export function ChatViewContent(props: ChatViewProps) {
     }
   };
 
-  const onInterrupt = async () => {
+  const onInterrupt = useCallback(async () => {
     if (!activeThread) return;
     const result = await interruptThreadTurn({
       environmentId,
@@ -5771,7 +5766,48 @@ export function ChatViewContent(props: ChatViewProps) {
         error instanceof Error ? error.message : "Failed to interrupt the current turn.",
       );
     }
-  };
+  }, [activeThread, environmentId, interruptThreadTurn, setThreadError]);
+
+  useEffect(() => {
+    const handleEscapeToInterrupt = (event: globalThis.KeyboardEvent) => {
+      const target = event.target;
+      const escapeOwnedByOverlay =
+        target instanceof Element &&
+        target.closest('[role="dialog"], [aria-modal="true"], [data-slot$="popup"]') !== null;
+      const focusOutsidePane =
+        target instanceof Element &&
+        target !== document.body &&
+        !chatViewElementRef.current?.contains(target);
+      if (
+        !shouldInterruptThreadOnEscape({
+          key: event.key,
+          defaultPrevented: event.defaultPrevented,
+          repeat: event.repeat,
+          isComposing: event.isComposing,
+          hasModifier: event.metaKey || event.ctrlKey || event.altKey || event.shiftKey,
+          isPaneFocused,
+          isThreadRunning: isWorking,
+          commandPaletteOpen: isCommandPaletteOpen(),
+          terminalFocused: getTerminalFocusOwner() !== null,
+          previewFocused: isPreviewFocused(),
+          modelPickerOpen: composerRef.current?.isModelPickerOpen() ?? false,
+          escapeOwnedByOverlay,
+          focusOutsidePane,
+          threadSelectionActive: useThreadSelectionStore.getState().hasSelection(),
+        })
+      ) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      void onInterrupt();
+    };
+
+    // Bubble phase lets dialogs and menus consume Escape before the thread
+    // shortcut sees it.
+    window.addEventListener("keydown", handleEscapeToInterrupt);
+    return () => window.removeEventListener("keydown", handleEscapeToInterrupt);
+  }, [composerRef, isPaneFocused, isWorking, onInterrupt]);
 
   const onRespondToApproval = useCallback(
     async (requestId: ApprovalRequestId, decision: ProviderApprovalDecision) => {
@@ -6615,7 +6651,10 @@ export function ChatViewContent(props: ChatViewProps) {
     ) : null;
 
   return (
-    <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
+    <div
+      ref={chatViewElementRef}
+      className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"
+    >
       {rightPanelOpen && !shouldUseRightPanelSheet ? panelLayoutControls : null}
       <div
         className={cn(
@@ -6738,7 +6777,6 @@ export function ChatViewContent(props: ChatViewProps) {
                   skills={activeProviderStatus?.skills ?? EMPTY_PROVIDER_SKILLS}
                   anchorMessageId={timelineAnchorMessageId}
                   onAnchorReady={onTimelineAnchorReady}
-                  contentInsetEndAdjustment={composerOverlayHeight}
                   liveFollowEnabled={timelineLiveFollowEnabled}
                   onLiveTailSizeChange={scheduleActiveTimelineEndReveal}
                   onIsAtEndChange={onIsAtEndChange}
@@ -6753,7 +6791,7 @@ export function ChatViewContent(props: ChatViewProps) {
                 {showScrollToBottom && (
                   <div
                     className="pointer-events-none absolute left-1/2 z-30 flex -translate-x-1/2 justify-center py-1.5"
-                    style={{ bottom: composerOverlayHeight + 4 }}
+                    style={{ bottom: 4 }}
                   >
                     <Button
                       aria-label="Scroll to end"
@@ -6772,13 +6810,14 @@ export function ChatViewContent(props: ChatViewProps) {
 
             {/* Input bar — centered hero while a draft has no messages, docked at the bottom otherwise */}
             <div
-              ref={setComposerOverlayElement}
-              data-chat-composer-overlay="true"
+              ref={setComposerElement}
+              data-chat-composer-overlay={isDraftHeroState ? "true" : undefined}
+              data-chat-composer-layout={isDraftHeroState ? undefined : "true"}
               onInputCapture={resumeTimelineFollowForComposerInput}
               className={
                 isDraftHeroState
                   ? "pointer-events-none absolute inset-0 z-20 flex items-center"
-                  : "pointer-events-none absolute inset-x-0 bottom-0 z-20 pt-1.5 sm:pt-2"
+                  : "pointer-events-none relative z-20 shrink-0 pt-1.5 sm:pt-2"
               }
             >
               <div
@@ -6950,7 +6989,7 @@ export function ChatViewContent(props: ChatViewProps) {
                 key={`${activeThreadKey}:${activePreviewMiniPlayer.tabId}`}
                 threadRef={activeThreadRef}
                 tabId={activePreviewMiniPlayer.tabId}
-                bottomInset={isDraftHeroState ? 0 : composerOverlayHeight}
+                bottomInset={isDraftHeroState ? 0 : composerHeight}
               />
             ) : null}
 

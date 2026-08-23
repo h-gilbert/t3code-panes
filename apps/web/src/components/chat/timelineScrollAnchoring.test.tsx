@@ -31,17 +31,16 @@ describe("timeline scroll anchoring", () => {
     expect(getRowBottom(state, 1)).toBe(160);
   });
 
-  it("treats the active turn as fitting when it fits above the composer", () => {
+  it("treats the active turn as fitting when it fits in the timeline viewport", () => {
     const state = buildState({
       positions: [0, 300, 460],
       sizes: [240, 80, 140],
-      scrollLength: 760,
+      scrollLength: 580,
     });
 
     const metrics = getAnchoredTurnMetrics({
       state,
       anchorIndex: 1,
-      composerOverlayHeight: 180,
       anchorOffset: 16,
     });
 
@@ -57,13 +56,12 @@ describe("timeline scroll anchoring", () => {
       positions: [0, 1720, 1880],
       sizes: [1600, 80, 120],
       scroll: 1900,
-      scrollLength: 760,
+      scrollLength: 580,
     });
 
     const metrics = getAnchoredTurnMetrics({
       state,
       anchorIndex: 1,
-      composerOverlayHeight: 180,
       anchorOffset: 16,
     });
 
@@ -77,13 +75,12 @@ describe("timeline scroll anchoring", () => {
       positions: [0, 900, 1180],
       sizes: [800, 220, 300],
       scroll: 900,
-      scrollLength: 760,
+      scrollLength: 580,
     });
 
     const metrics = getAnchoredTurnMetrics({
       state,
       anchorIndex: 1,
-      composerOverlayHeight: 180,
       anchorOffset: 16,
     });
 
@@ -97,13 +94,12 @@ describe("timeline scroll anchoring", () => {
       positions: [0, 900, 1180],
       sizes: [800, 220, 360],
       scroll: 900,
-      scrollLength: 760,
+      scrollLength: 580,
     });
 
     const metrics = getAnchoredTurnMetrics({
       state,
       anchorIndex: 1,
-      composerOverlayHeight: 180,
       anchorOffset: 16,
     });
 
@@ -112,27 +108,20 @@ describe("timeline scroll anchoring", () => {
     expect(metrics?.scrollDeltaToRevealEnd).toBe(76);
   });
 
-  it("subtracts composer height from usable viewport height", () => {
+  it("uses the list viewport directly because the composer is outside it", () => {
     const state = buildState({
       positions: [0, 300],
       sizes: [120, 470],
       scrollLength: 700,
     });
 
-    const withoutComposer = getAnchoredTurnMetrics({
+    const metrics = getAnchoredTurnMetrics({
       state,
       anchorIndex: 1,
-      composerOverlayHeight: 0,
-      anchorOffset: 16,
-    });
-    const withComposer = getAnchoredTurnMetrics({
-      state,
-      anchorIndex: 1,
-      composerOverlayHeight: 220,
       anchorOffset: 16,
     });
 
-    expect(withoutComposer?.overflowsUsableViewport).toBe(false);
-    expect(withComposer?.overflowsUsableViewport).toBe(true);
+    expect(metrics?.usableViewportHeight).toBe(684);
+    expect(metrics?.overflowsUsableViewport).toBe(false);
   });
 });
