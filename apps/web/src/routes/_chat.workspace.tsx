@@ -38,7 +38,7 @@ import { isTerminalFocused } from "../lib/terminalFocus";
 import { isModelPickerOpen } from "../modelPickerVisibility";
 import { resolveThreadRouteRenderState } from "../threadRoutes";
 import { resolveThreadSyncPhase } from "../threadSync";
-import { useThreadDetail, useThreadShell, useThreadStatus } from "../state/entities";
+import { useThreadDetail, useThreadRefs, useThreadShell, useThreadStatus } from "../state/entities";
 import { useEnvironmentQuery } from "../state/query";
 import { useProjects } from "../state/entities";
 import { usePrimaryEnvironmentId } from "../state/environments";
@@ -48,7 +48,11 @@ import { useClientSettings } from "../hooks/useSettings";
 import { useDesktopFullscreen } from "../hooks/useDesktopFullscreen";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { selectProjectGroupingSettings } from "../logicalProject";
-import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
+import {
+  markPromotedDraftThreadByRef,
+  useComposerDraftStore,
+  type DraftId,
+} from "../composerDraftStore";
 import {
   buildSidebarProjectSnapshots,
   type SidebarProjectSnapshot,
@@ -61,7 +65,10 @@ import {
   type WorkspacePaneIndex,
   type WorkspacePaneTarget,
 } from "../workspacePaneStore";
-import { resolveWorkspacePaneThreadTitle } from "../workspacePaneTitle";
+import {
+  resolveWorkspaceDraftThreadRef,
+  resolveWorkspacePaneThreadTitle,
+} from "../workspacePaneTitle";
 import { cn } from "~/lib/utils";
 import { newDraftId, newThreadId } from "../lib/utils";
 
@@ -107,6 +114,18 @@ function WorkspacePaneThreadTitle({ threadRef }: { readonly threadRef: ScopedThr
       </TooltipTrigger>
       <TooltipPopup side="bottom">{displayTitle}</TooltipPopup>
     </Tooltip>
+  );
+}
+
+function WorkspacePaneDraftTitle({ draftId }: { readonly draftId: DraftId }) {
+  const draftSession = useComposerDraftStore((state) => state.getDraftSession(draftId));
+  const threadRefs = useThreadRefs();
+  const serverThreadRef = resolveWorkspaceDraftThreadRef(draftSession, threadRefs);
+
+  return serverThreadRef ? (
+    <WorkspacePaneThreadTitle threadRef={serverThreadRef} />
+  ) : (
+    <span className="min-w-0 flex-1 truncate text-center text-muted-foreground">New thread</span>
   );
 }
 
@@ -180,6 +199,8 @@ function WorkspaceDraftPane({
   readonly composerHandleRef: RefObject<ChatComposerHandle | null>;
 }) {
   const draftSession = useComposerDraftStore((state) => state.getDraftSession(draftId));
+  const threadRefs = useThreadRefs();
+  const inferredThreadRef = resolveWorkspaceDraftThreadRef(draftSession, threadRefs);
   const retainDraftThread = useComposerDraftStore((state) => state.retainDraftThread);
   const releaseDraftThread = useComposerDraftStore((state) => state.releaseDraftThread);
   const assignThread = useWorkspacePaneStore((state) => state.assignThread);
@@ -194,6 +215,11 @@ function WorkspaceDraftPane({
     if (draftSession || !useComposerDraftStore.persist.hasHydrated()) return;
     clearPane(workspaceKey, index);
   }, [clearPane, draftSession, index, workspaceKey]);
+
+  useEffect(() => {
+    if (!inferredThreadRef || draftSession?.promotedTo) return;
+    markPromotedDraftThreadByRef(inferredThreadRef);
+  }, [draftSession?.promotedTo, inferredThreadRef]);
 
   useEffect(() => {
     if (draftSession?.promotedTo) {
@@ -387,9 +413,7 @@ function WorkspacePane({
         {paneTarget && "threadId" in paneTarget ? (
           <WorkspacePaneThreadTitle threadRef={paneTarget} />
         ) : paneTarget ? (
-          <span className="min-w-0 flex-1 truncate text-center text-muted-foreground">
-            New thread
-          </span>
+          <WorkspacePaneDraftTitle draftId={paneTarget.draftId} />
         ) : (
           <span className="min-w-0 flex-1" />
         )}
