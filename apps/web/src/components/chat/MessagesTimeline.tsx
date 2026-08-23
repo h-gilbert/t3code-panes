@@ -229,6 +229,8 @@ interface MessagesTimelineProps {
    * scroll-mode refs whenever the user drifts near the bottom.
    */
   liveFollowEnabled: boolean;
+  /** Recheck the live edge after LegendList has measured a growing live row. */
+  onLiveTailSizeChange: () => void;
   onIsAtEndChange: (isAtEnd: boolean) => void;
   onManualNavigation: () => void;
   hideEmptyPlaceholder?: boolean;
@@ -269,6 +271,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onAnchorReady,
   contentInsetEndAdjustment,
   liveFollowEnabled,
+  onLiveTailSizeChange,
   onIsAtEndChange,
   onManualNavigation,
   hideEmptyPlaceholder = false,
@@ -281,6 +284,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const [disclosureToggleSettling, setDisclosureToggleSettling] = useState(false);
   const [minimapStripMap] = useState(() => new Map<string, HTMLSpanElement>());
   const disclosureAnchorKeyRef = useRef<string | null>(null);
+  const disclosureToggleSettlingRef = useRef(false);
   const disclosureSettleFrameRef = useRef<number | null>(null);
   const disclosureSettleSecondFrameRef = useRef<number | null>(null);
 
@@ -297,6 +301,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
   const suspendEndScrollMaintenanceForDisclosure = useCallback((anchorKey: string) => {
     disclosureAnchorKeyRef.current = anchorKey;
+    disclosureToggleSettlingRef.current = true;
     setDisclosureToggleSettling(true);
     if (disclosureSettleFrameRef.current !== null) {
       cancelAnimationFrame(disclosureSettleFrameRef.current);
@@ -307,6 +312,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     disclosureSettleFrameRef.current = requestAnimationFrame(() => {
       disclosureSettleSecondFrameRef.current = requestAnimationFrame(() => {
         disclosureAnchorKeyRef.current = null;
+        disclosureToggleSettlingRef.current = false;
         setDisclosureToggleSettling(false);
         disclosureSettleFrameRef.current = null;
         disclosureSettleSecondFrameRef.current = null;
@@ -444,6 +450,19 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     );
     return config ? { ...config, onReady: handleAnchorReady } : undefined;
   }, [anchorMessageId, contentInsetEndAdjustment, handleAnchorReady, rows]);
+
+  const handleItemSizeChanged = useCallback(
+    ({ index }: { index: number }) => {
+      if (!liveFollowEnabled || disclosureToggleSettlingRef.current) {
+        return;
+      }
+      if (anchoredEndSpace !== undefined && index < anchoredEndSpace.anchorIndex) {
+        return;
+      }
+      onLiveTailSizeChange();
+    },
+    [anchoredEndSpace, liveFollowEnabled, onLiveTailSizeChange],
+  );
 
   const handleScroll = useCallback(() => {
     const state = listRef.current?.getState?.();
@@ -594,6 +613,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                 : TIMELINE_MAINTAIN_SCROLL_AT_END
             }
             maintainVisibleContentPosition={maintainVisibleContentPosition}
+            onItemSizeChanged={handleItemSizeChanged}
             onScroll={handleScroll}
             className={cn(
               "scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain [overflow-anchor:none]",

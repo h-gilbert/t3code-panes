@@ -38,10 +38,14 @@ vi.mock("@legendapp/list/react", async () => {
           size?: boolean;
           shouldRestorePosition?: (item: { id: string }) => boolean;
         };
+    onItemSizeChanged?: (info: { index: number }) => void;
     ref?: Ref<LegendListRef>;
   }) => {
     if (props.anchoredEndSpace) {
       props.anchoredEndSpace.onReady?.({ anchorIndex: props.anchoredEndSpace.anchorIndex });
+    }
+    if (props.data.length > 0) {
+      props.onItemSizeChanged?.({ index: props.data.length - 1 });
     }
     return (
       <div
@@ -195,6 +199,7 @@ function buildProps() {
     onAnchorReady: () => {},
     contentInsetEndAdjustment: 0,
     liveFollowEnabled: true,
+    onLiveTailSizeChange: () => {},
     onIsAtEndChange: () => {},
     onManualNavigation: () => {},
   };
@@ -547,6 +552,31 @@ describe("MessagesTimeline", () => {
         />,
       ),
     ).not.toContain('data-maintain-scroll-at-end="enabled"');
+  });
+
+  it("reports measured live-tail growth only while follow is enabled", () => {
+    const onLiveTailSizeChange = vi.fn();
+    const timelineEntries = [buildUserTimelineEntry("Newest prompt.")];
+
+    renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        onLiveTailSizeChange={onLiveTailSizeChange}
+        timelineEntries={timelineEntries}
+      />,
+    );
+    expect(onLiveTailSizeChange).toHaveBeenCalledOnce();
+
+    onLiveTailSizeChange.mockClear();
+    renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        liveFollowEnabled={false}
+        onLiveTailSizeChange={onLiveTailSizeChange}
+        timelineEntries={timelineEntries}
+      />,
+    );
+    expect(onLiveTailSizeChange).not.toHaveBeenCalled();
   });
 
   it("renders collapse controls for long user messages", () => {

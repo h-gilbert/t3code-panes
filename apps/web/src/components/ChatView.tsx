@@ -3988,6 +3988,8 @@ export function ChatViewContent(props: ChatViewProps) {
   const positionedTimelineAnchorRef = useRef<MessageId | null>(null);
   const settledTimelineAnchorRef = useRef<MessageId | null>(null);
   const activeTimelineAnchorIndexRef = useRef<number | null>(null);
+  const activeTimelineEndRevealFrameRef = useRef<number | null>(null);
+  const activeTimelineEndRevealSecondFrameRef = useRef<number | null>(null);
   const anchorUserScrollGenerationRef = useRef(0);
   const liveFollowUserScrollGenerationRef = useRef<number | null>(0);
   // Manual navigation stops live-follow without removing anchored end space.
@@ -4269,23 +4271,34 @@ export function ChatViewContent(props: ChatViewProps) {
   }, []);
 
   // Anchored end space intentionally disables LegendList's normal end-follow so
-  // the sent message can stay near the top. T3 only owns streaming adjustments
-  // during that mode; LegendList owns ordinary end-follow everywhere else.
-  useEffect(() => {
+  // the sent message can stay near the top. T3 owns tail-size corrections in
+  // that mode; LegendList owns ordinary end-follow everywhere else.
+  const scheduleActiveTimelineEndReveal = useCallback(() => {
     if (!activeThread?.id) {
       return;
     }
     if (liveFollowUserScrollGenerationRef.current !== anchorUserScrollGenerationRef.current) {
       return;
     }
-    if (timelineScrollModeRef.current !== "anchoring-new-turn") {
+    if (timelineScrollModeRef.current === "free-scrolling") {
       return;
     }
 
-    let secondFrame: number | null = null;
-    const frame = requestAnimationFrame(() => {
-      secondFrame = requestAnimationFrame(() => {
+    if (activeTimelineEndRevealFrameRef.current !== null) {
+      cancelAnimationFrame(activeTimelineEndRevealFrameRef.current);
+    }
+    if (activeTimelineEndRevealSecondFrameRef.current !== null) {
+      cancelAnimationFrame(activeTimelineEndRevealSecondFrameRef.current);
+    }
+    activeTimelineEndRevealFrameRef.current = requestAnimationFrame(() => {
+      activeTimelineEndRevealFrameRef.current = null;
+      activeTimelineEndRevealSecondFrameRef.current = requestAnimationFrame(() => {
+        activeTimelineEndRevealSecondFrameRef.current = null;
         if (liveFollowUserScrollGenerationRef.current !== anchorUserScrollGenerationRef.current) {
+          return;
+        }
+        if (timelineScrollModeRef.current === "following-end") {
+          void legendListRef.current?.scrollToEnd?.({ animated: false });
           return;
         }
         if (pendingTimelineAnchorRef.current !== null) {
@@ -4311,14 +4324,22 @@ export function ChatViewContent(props: ChatViewProps) {
         void list.scrollToOffset({ offset: nextOffset, animated: false });
       });
     });
+  }, [activeThread?.id, getActiveTimelineTurnMetrics]);
 
+  useEffect(() => {
+    scheduleActiveTimelineEndReveal();
+  }, [scheduleActiveTimelineEndReveal, timelineEntries]);
+
+  useEffect(() => {
     return () => {
-      cancelAnimationFrame(frame);
-      if (secondFrame !== null) {
-        cancelAnimationFrame(secondFrame);
+      if (activeTimelineEndRevealFrameRef.current !== null) {
+        cancelAnimationFrame(activeTimelineEndRevealFrameRef.current);
+      }
+      if (activeTimelineEndRevealSecondFrameRef.current !== null) {
+        cancelAnimationFrame(activeTimelineEndRevealSecondFrameRef.current);
       }
     };
-  }, [activeThread?.id, timelineEntries, getActiveTimelineTurnMetrics]);
+  }, []);
 
   useEffect(() => {
     setPullRequestDialogState(null);
@@ -6719,6 +6740,7 @@ export function ChatViewContent(props: ChatViewProps) {
                   onAnchorReady={onTimelineAnchorReady}
                   contentInsetEndAdjustment={composerOverlayHeight}
                   liveFollowEnabled={timelineLiveFollowEnabled}
+                  onLiveTailSizeChange={scheduleActiveTimelineEndReveal}
                   onIsAtEndChange={onIsAtEndChange}
                   onManualNavigation={cancelTimelineLiveFollowForUserNavigation}
                   hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}

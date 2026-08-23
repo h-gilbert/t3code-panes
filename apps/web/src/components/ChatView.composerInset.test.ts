@@ -8,6 +8,7 @@ describe("chat timeline composer inset", () => {
     const source = NodeFS.readFileSync(new URL("./ChatView.tsx", import.meta.url), "utf8");
 
     expect(source).toContain("contentInsetEndAdjustment={composerOverlayHeight}");
+    expect(source).toContain("onLiveTailSizeChange={scheduleActiveTimelineEndReveal}");
     expect(source).toContain("composerOverlayHeight,\n        anchorOffset");
     expect(source).toContain("style={{ bottom: composerOverlayHeight + 4 }}");
     expect(source).not.toContain('data-chat-composer-layout-spacer="true"');
