@@ -6393,15 +6393,6 @@ export function ChatViewContent(props: ChatViewProps) {
   const onExpandTimelineImage = useCallback((preview: ExpandedImagePreview) => {
     setExpandedImage(preview);
   }, []);
-  const onOpenTurnDiff = useCallback(
-    (turnId: TurnId, filePath?: string) => {
-      if (!isServerThread || !activeThreadRef) return;
-      useDiffPanelStore.getState().selectTurn(activeThreadRef, turnId, filePath);
-      useRightPanelStore.getState().open(activeThreadRef, "diff");
-      onDiffPanelOpen?.();
-    },
-    [activeThreadRef, isServerThread, onDiffPanelOpen],
-  );
   // Both the Map and the revert handler are read from refs at call-time so
   // the callback reference is fully stable and never busts context identity.
   const revertTurnCountRef = useRef(revertTurnCountByUserMessageId);
@@ -6715,7 +6706,6 @@ export function ChatViewContent(props: ChatViewProps) {
                   turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
                   activeThreadEnvironmentId={activeThread.environmentId}
                   routeThreadKey={routeThreadKey}
-                  onOpenTurnDiff={onOpenTurnDiff}
                   revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
                   onRevertUserMessage={onRevertUserMessage}
                   isRevertingCheckpoint={isRevertingCheckpoint}

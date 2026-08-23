@@ -182,7 +182,6 @@ function buildProps() {
     runningTurnId: null,
     turnDiffSummaryByAssistantMessageId: new Map(),
     routeThreadKey: "environment-local:thread-1",
-    onOpenTurnDiff: () => {},
     revertTurnCountByUserMessageId: new Map(),
     onRevertUserMessage: () => {},
     isRevertingCheckpoint: false,
@@ -315,7 +314,7 @@ describe("MessagesTimeline", () => {
     expect(fadedMarkup).toContain("topbar-scroll-fade");
   });
 
-  it("keeps assistant changed-files headers sticky below the thread header", () => {
+  it("does not render assistant changed-files summaries", () => {
     const assistantMessageId = MessageId.make("message-assistant-with-files");
     const turnId = TurnId.make("turn-with-files");
     const markup = renderToStaticMarkup(
@@ -362,14 +361,9 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain("sticky top-2 z-10");
-    expect(markup).not.toContain("self-start");
-    expect(markup).toContain("whitespace-nowrap");
-    expect(markup).toContain("!size-[22px]");
-    expect(markup).toContain("size-3");
-    expect(markup).toContain('aria-label="Collapse all folders"');
-    expect(markup).toContain('aria-label="Open diff"');
-    expect(markup).toContain("1 changed file");
+    expect(markup).toContain("Updated the fixture.");
+    expect(markup).not.toContain('aria-label="Open diff"');
+    expect(markup).not.toContain("1 changed file");
   });
 
   it("treats only the strict list end as the live edge", async () => {
