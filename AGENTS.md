@@ -84,6 +84,23 @@ The most common defect in this repo is a change that works on the path you teste
 - The web app requires pairing. Hand over the pairing URL, not the bare origin. A URL without its token is useless to whoever you gave it to. If the token got consumed, mint a fresh one with `node apps/server/src/bin.ts pair` — note it carries standard scopes, while the startup URL carries admin scopes (needed for Settings → Connections management).
 - Stop what you started, by the PID you tracked. See rule 1.
 
+### Promoting dev changes to the installed macOS app
+
+- When the developer asks to update their installed/running release from this checkout, follow
+  [`docs/operations/local-desktop-promotion.md`](docs/operations/local-desktop-promotion.md). This
+  is a local promotion, not a GitHub release and not permission to commit, push, tag, or publish.
+- Iterate and verify in `dev:desktop` first. Package only once after the developer is satisfied; do
+  not rebuild a DMG/ZIP for every edit.
+- Preserve the production workspace. Before restarting, inspect whether main turns, subagents, or
+  managed terminals are active and agree on a safe restart boundary. Closing a desktop window must
+  not be treated as authorization to stop remote work.
+- Use the existing artifact builder and the package manager cache. Do not temporarily edit
+  `pnpm-workspace.yaml`, dependency versions, or lockfiles to work around a slow download. If a
+  staged install fails, diagnose or warm the exact dependency cache and retry the same packaging
+  step instead of repeatedly rebuilding application bundles.
+- There is currently no `promote:desktop` command. Do not claim or invoke one until it exists. The
+  intended future command is described in the runbook.
+
 ## Test data
 
 An empty database is a bad test. Seed your worktree's `.t3` with a copy of real data instead of pointing at live state:

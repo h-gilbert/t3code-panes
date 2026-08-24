@@ -39,3 +39,6 @@ node_modules/
 *.log
 .env*
 !.env.example
+
+# Local pnpm store created by sandboxed installs
+.pnpm-store/
