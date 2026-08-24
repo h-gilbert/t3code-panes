@@ -46,6 +46,10 @@ interface Props {
   deviceToolbarVisible: boolean;
   /** Switches between fill-panel mode and a fixed responsive viewport. */
   onToggleDeviceToolbar: () => void;
+  /** Fills the page's login form from the user's saved logins. */
+  onFillLogin?: (() => void) | undefined;
+  /** Opens the save-login dialog for the current site. */
+  onSaveLogin?: (() => void) | undefined;
   /** Whether the separate native always-on-top preview window is open. */
   nativePictureInPicture: boolean;
   /** Toggles the optional native always-on-top preview window. */
@@ -64,6 +68,8 @@ export function PreviewMoreMenu({
   colorScheme,
   deviceToolbarVisible,
   onToggleDeviceToolbar,
+  onFillLogin,
+  onSaveLogin,
   nativePictureInPicture,
   onNativePictureInPicture,
 }: Props) {
@@ -107,6 +113,16 @@ export function PreviewMoreMenu({
         <MenuItem onClick={onToggleDeviceToolbar} disabled={tabDisabled}>
           {deviceToolbarVisible ? "Hide device toolbar" : "Show device toolbar"}
         </MenuItem>
+        {onFillLogin ? (
+          <MenuItem onClick={onFillLogin} disabled={tabDisabled}>
+            Fill saved login
+          </MenuItem>
+        ) : null}
+        {onSaveLogin ? (
+          <MenuItem onClick={onSaveLogin} disabled={tabDisabled}>
+            Save login for this site…
+          </MenuItem>
+        ) : null}
         <MenuSub>
           <MenuSubTrigger disabled={tabDisabled}>Appearance</MenuSubTrigger>
           <MenuSubPopup className="min-w-32">

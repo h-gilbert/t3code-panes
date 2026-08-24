@@ -1,4 +1,6 @@
 import {
+  PreviewAutomationAutofillInput,
+  PreviewAutomationAutofillResult,
   PreviewAutomationClickInput,
   PreviewAutomationCloseInput,
   PreviewAutomationCloseResult,
@@ -206,6 +208,17 @@ export const PreviewRecordingStopTool = safeBrowserTool(
   }).annotate(Tool.Title, "Stop browser recording"),
 );
 
+export const PreviewAutofillTool = browserTool(
+  Tool.make("preview_autofill", {
+    description:
+      "Fill the current page's login form from the user's saved browser logins. Logins are bound to the exact page origin and profile; the password is typed directly into the page and never returned. Returns filled=false with a reason when no saved login matches, several match (pass username), or the page has no login fields.",
+    parameters: PreviewAutomationAutofillInput,
+    success: PreviewAutomationAutofillResult,
+    failure: PreviewAutomationError,
+    dependencies,
+  }).annotate(Tool.Title, "Autofill saved login"),
+);
+
 export const PreviewCloseTool = safeBrowserTool(
   Tool.make("preview_close", {
     description:
@@ -232,6 +245,7 @@ export const PreviewToolkit = Toolkit.make(
   PreviewWaitForTool,
   PreviewRecordingStartTool,
   PreviewRecordingStopTool,
+  PreviewAutofillTool,
   PreviewCloseTool,
 );
 
@@ -249,6 +263,7 @@ export const PreviewStandardToolkit = Toolkit.make(
   PreviewWaitForTool,
   PreviewRecordingStartTool,
   PreviewRecordingStopTool,
+  PreviewAutofillTool,
   PreviewCloseTool,
 );
 

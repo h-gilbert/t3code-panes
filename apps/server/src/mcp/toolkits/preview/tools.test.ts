@@ -86,3 +86,15 @@ it("registers preview_close in both agent-facing toolkits", () => {
   };
   expect(Object.keys(resultSchema.properties ?? {})).toEqual(["tabId", "closed"]);
 });
+
+it("registers preview_autofill and its result never carries a password field", () => {
+  const tool = PreviewToolkit.tools.preview_autofill;
+  expect(tool).toBeDefined();
+  expect(PreviewStandardToolkit.tools.preview_autofill).toBeDefined();
+  const resultSchema = Tool.getJsonSchemaFromSchema(tool.successSchema) as {
+    readonly properties?: Record<string, unknown>;
+  };
+  const keys = Object.keys(resultSchema.properties ?? {});
+  expect(keys).toContain("filled");
+  expect(keys).not.toContain("password");
+});

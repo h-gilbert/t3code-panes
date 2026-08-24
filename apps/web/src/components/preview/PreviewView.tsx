@@ -60,6 +60,17 @@ import {
   useActiveBrowserRecordingTabIds,
 } from "~/browser/browserRecording";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
+import {
+  Dialog,
+  DialogClose,
+  DialogFooter,
+  DialogHeader,
+  DialogPopup,
+  DialogTitle,
+} from "~/components/ui/dialog";
+import { Button } from "~/components/ui/button";
+import { Input } from "~/components/ui/input";
+import { Label } from "~/components/ui/label";
 
 interface Props {
   threadRef: ScopedThreadRef;
@@ -143,6 +154,68 @@ export function PreviewView({
   const controller = desktopOverlay?.controller ?? "none";
   const viewport = snapshot?.viewport ?? FILL_PREVIEW_VIEWPORT;
   const browserDefaults = useBrowserDefaults();
+  const [saveLoginOpen, setSaveLoginOpen] = useState(false);
+  const [saveLoginUsername, setSaveLoginUsername] = useState("");
+  const [saveLoginPassword, setSaveLoginPassword] = useState("");
+  // Named-profile tabs read and write that profile's logins; shared and
+  // ephemeral tabs use the shared set.
+  const loginProfile = snapshot?.browserScope?.startsWith("profile:")
+    ? snapshot.browserScope.slice("profile:".length)
+    : null;
+  const handleFillLogin = useCallback(() => {
+    if (!previewBridge || !runtimeTabId) return;
+    void previewBridge.browserCredentials
+      .autofill({ tabId: runtimeTabId, profile: loginProfile })
+      .then((result) => {
+        if (result.filled) return;
+        toastManager.add({
+          type: "info",
+          title:
+            result.reason === "no-credential"
+              ? "No saved login for this site"
+              : result.reason === "ambiguous-credential"
+                ? "Several logins saved for this site"
+                : result.reason === "no-fields"
+                  ? "No login form on this page"
+                  : "Saved logins are unavailable",
+          description:
+            result.reason === "no-credential"
+              ? "Use “Save login for this site…” to add one."
+              : result.reason === "ambiguous-credential"
+                ? "Remove the ones you no longer use, or ask the agent to fill a specific username."
+                : result.reason === "no-fields"
+                  ? "Open the site's sign-in page first."
+                  : "OS keychain encryption is not available on this machine.",
+        });
+      })
+      .catch(() => {
+        toastManager.add({ type: "error", title: "Unable to fill the login" });
+      });
+  }, [loginProfile, runtimeTabId]);
+  const handleSaveLogin = useCallback(() => {
+    if (!previewBridge || !url) return;
+    const username = saveLoginUsername.trim();
+    if (username.length === 0 || saveLoginPassword.length === 0) return;
+    void previewBridge.browserCredentials
+      .save({ url, profile: loginProfile, username, password: saveLoginPassword })
+      .then((saved) => {
+        setSaveLoginOpen(false);
+        setSaveLoginUsername("");
+        setSaveLoginPassword("");
+        toastManager.add({
+          type: "success",
+          title: `Login saved for ${saved.origin}`,
+          description: "Stored encrypted with the OS keychain. Agents can now autofill it here.",
+        });
+      })
+      .catch(() => {
+        toastManager.add({
+          type: "error",
+          title: "Unable to save the login",
+          description: "OS keychain encryption may be unavailable on this machine.",
+        });
+      });
+  }, [loginProfile, saveLoginPassword, saveLoginUsername, url]);
   const panelRect = useBrowserSurfaceStore((state) =>
     runtimeTabId ? (state.byTabId[runtimeTabId]?.rect ?? null) : null,
   );
@@ -694,6 +767,8 @@ export function PreviewView({
               onToggleDeviceToolbar={handleToggleDeviceToolbar}
               nativePictureInPicture={desktopOverlay?.pictureInPicture ?? false}
               onNativePictureInPicture={handleNativePictureInPicture}
+              onFillLogin={handleFillLogin}
+              onSaveLogin={url ? () => setSaveLoginOpen(true) : undefined}
             />
           ) : null
         }
@@ -744,6 +819,55 @@ export function PreviewView({
           </div>
         ) : null}
       </div>
+
+      <Dialog open={saveLoginOpen} onOpenChange={setSaveLoginOpen}>
+        <DialogPopup className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Save login for this site</DialogTitle>
+          </DialogHeader>
+          <form
+            className="flex flex-col gap-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              handleSaveLogin();
+            }}
+          >
+            <p className="text-xs text-muted-foreground">
+              Stored encrypted with the OS keychain and bound to this site
+              {loginProfile ? ` in the “${loginProfile}” profile` : ""}. Agents can autofill it here
+              without seeing the password.
+            </p>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="preview-save-login-username">Username or email</Label>
+              <Input
+                id="preview-save-login-username"
+                autoComplete="off"
+                value={saveLoginUsername}
+                onChange={(event) => setSaveLoginUsername(event.target.value)}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="preview-save-login-password">Password</Label>
+              <Input
+                id="preview-save-login-password"
+                type="password"
+                autoComplete="off"
+                value={saveLoginPassword}
+                onChange={(event) => setSaveLoginPassword(event.target.value)}
+              />
+            </div>
+            <DialogFooter>
+              <DialogClose render={<Button variant="ghost" type="button" />}>Cancel</DialogClose>
+              <Button
+                type="submit"
+                disabled={saveLoginUsername.trim().length === 0 || saveLoginPassword.length === 0}
+              >
+                Save login
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogPopup>
+      </Dialog>
     </div>
   );
 }

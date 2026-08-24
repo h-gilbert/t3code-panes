@@ -21,5 +21,7 @@ For browser work, first call \`preview_status\`. If no automation-capable previe
 
 The browser keeps cookies and logins between sessions, so sites the user has signed in to stay signed in — prefer the default shared session for work on the user's accounts. Pass \`profile\` to \`preview_open\` for a separate persistent cookie space, or \`ephemeral: true\` when a test must start from a logged-out, storage-free state.
 
+When a page shows a login form, call \`preview_autofill\` — it types the user's saved login for that exact site directly into the page; the password is never shown to you. If it reports no saved login, ask the user to sign in themselves or save the login via the browser menu. Never ask the user to paste a password into the conversation.
+
 Do not switch to global browser skills, Chrome, Node REPL browser automation, standalone Playwright, or agent-browser merely because the preview is initially closed or a first call fails. Use an alternative browser system only when the T3 preview tools are absent, the user explicitly requests another browser, or \`preview_open\` returns an explicit unsupported/unavailable error. A failed T3 preview tool call should be inspected and retried with corrected arguments when the error is actionable.
 `;

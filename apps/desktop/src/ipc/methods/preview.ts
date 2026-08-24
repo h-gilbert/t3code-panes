@@ -17,6 +17,10 @@ import {
   DesktopPreviewSetColorSchemeInputSchema,
   DesktopPreviewCreateTabInputSchema,
   DesktopPreviewTabInputSchema,
+  DesktopBrowserAutofillInputSchema,
+  DesktopBrowserAutofillResultSchema,
+  DesktopBrowserCredentialSaveInputSchema,
+  DesktopBrowserCredentialSummarySchema,
   DesktopPreviewWebviewConfigSchema,
   PreviewAnnotationSubmissionResultSchema,
   PreviewAutomationSnapshot,
@@ -214,6 +218,49 @@ export const clearCache = DesktopIpc.makeIpcMethod({
   }),
 });
 
+export const listBrowserCredentials = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_CREDENTIALS_LIST_CHANNEL,
+  payload: Schema.Void,
+  result: Schema.Array(DesktopBrowserCredentialSummarySchema),
+  handler: Effect.fn("desktop.ipc.preview.credentials.list")(function* () {
+    const manager = yield* PreviewManager.PreviewManager;
+    return yield* manager.listBrowserCredentials;
+  }),
+});
+
+export const saveBrowserCredential = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_CREDENTIALS_SAVE_CHANNEL,
+  payload: DesktopBrowserCredentialSaveInputSchema,
+  result: DesktopBrowserCredentialSummarySchema,
+  handler: Effect.fn("desktop.ipc.preview.credentials.save")(function* (input) {
+    const manager = yield* PreviewManager.PreviewManager;
+    return yield* manager.saveBrowserCredential(input);
+  }),
+});
+
+export const deleteBrowserCredential = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_CREDENTIALS_DELETE_CHANNEL,
+  payload: Schema.Struct({ id: Schema.String }),
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.preview.credentials.delete")(function* ({ id }) {
+    const manager = yield* PreviewManager.PreviewManager;
+    yield* manager.deleteBrowserCredential(id);
+  }),
+});
+
+export const autofillBrowserCredential = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_CREDENTIALS_AUTOFILL_CHANNEL,
+  payload: DesktopBrowserAutofillInputSchema,
+  result: DesktopBrowserAutofillResultSchema,
+  handler: Effect.fn("desktop.ipc.preview.credentials.autofill")(function* (input) {
+    const manager = yield* PreviewManager.PreviewManager;
+    return yield* manager.automationAutofill(input.tabId, {
+      profile: input.profile,
+      ...(input.username === undefined ? {} : { username: input.username }),
+    });
+  }),
+});
+
 export const getPreviewConfig = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_GET_CONFIG_CHANNEL,
   payload: DesktopPreviewConfigInputSchema,
@@ -391,6 +438,10 @@ export const methods = [
   clearCookies,
   clearCache,
   getPreviewConfig,
+  listBrowserCredentials,
+  saveBrowserCredential,
+  deleteBrowserCredential,
+  autofillBrowserCredential,
   setAnnotationTheme,
   pickElement,
   cancelPickElement,

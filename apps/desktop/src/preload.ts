@@ -194,6 +194,13 @@ contextBridge.exposeInMainWorld("desktopBridge", {
         environmentId,
         ...(browserScope === undefined ? {} : { browserScope }),
       }),
+    browserCredentials: {
+      list: () => ipcRenderer.invoke(IpcChannels.PREVIEW_CREDENTIALS_LIST_CHANNEL),
+      save: (input) => ipcRenderer.invoke(IpcChannels.PREVIEW_CREDENTIALS_SAVE_CHANNEL, input),
+      delete: (id) => ipcRenderer.invoke(IpcChannels.PREVIEW_CREDENTIALS_DELETE_CHANNEL, { id }),
+      autofill: (input) =>
+        ipcRenderer.invoke(IpcChannels.PREVIEW_CREDENTIALS_AUTOFILL_CHANNEL, input),
+    },
     setAnnotationTheme: (theme) =>
       ipcRenderer.invoke(IpcChannels.PREVIEW_SET_ANNOTATION_THEME_CHANNEL, { theme }),
     pickElement: (tabId) => ipcRenderer.invoke(IpcChannels.PREVIEW_PICK_ELEMENT_CHANNEL, { tabId }),

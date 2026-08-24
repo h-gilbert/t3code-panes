@@ -6,6 +6,7 @@ import {
   FILL_PREVIEW_VIEWPORT,
   PREVIEW_AUTOMATION_OPERATIONS,
   type EnvironmentId,
+  type PreviewAutomationAutofillInput,
   type PreviewAutomationNavigateInput,
   type PreviewAutomationOpenInput,
   type PreviewAutomationResizeInput,
@@ -679,6 +680,19 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
               );
             }
             return { ...artifact, tabId: stopTabId };
+          }
+          case "autofill": {
+            const input = request.input as PreviewAutomationAutofillInput;
+            const ready = await requireReadyTab();
+            const scope = readThreadPreviewState(threadRef).sessions[ready.tabId]?.browserScope;
+            // Ephemeral tabs look up the shared profile's logins: a fresh
+            // session followed by an autofill sign-in is the expected flow.
+            const profile = scope?.startsWith("profile:") ? scope.slice("profile:".length) : null;
+            return await ready.bridge.browserCredentials.autofill({
+              tabId: ready.runtimeTabId,
+              profile,
+              ...(input.username ? { username: input.username } : {}),
+            });
           }
           case "close": {
             const closeTabId = tabId;

@@ -45,6 +45,7 @@ export const PREVIEW_AUTOMATION_OPERATIONS = [
   "resize",
   "setColorScheme",
   "close",
+  "autofill",
 ] as const;
 
 export const PreviewAutomationOperation = Schema.Literals(PREVIEW_AUTOMATION_OPERATIONS);
@@ -73,6 +74,33 @@ export const PreviewAutomationCloseResult = Schema.Struct({
   closed: Schema.Boolean,
 });
 export type PreviewAutomationCloseResult = typeof PreviewAutomationCloseResult.Type;
+
+export const PreviewAutomationAutofillInput = Schema.Struct({
+  ...PreviewAutomationTabTargetFields,
+  username: Schema.optional(
+    TrimmedNonEmptyString.annotate({
+      description:
+        "Username selecting between multiple saved logins for the page's origin. Omit when the origin has only one saved login.",
+    }),
+  ).annotate({
+    description:
+      "Username selecting between multiple saved logins for the page's origin. Omit when the origin has only one saved login.",
+  }),
+}).annotate({
+  description:
+    "Fills the current page's login form from the user's saved browser logins. Credentials are bound to the exact page origin and are typed directly into the page — the password is never returned.",
+});
+export type PreviewAutomationAutofillInput = typeof PreviewAutomationAutofillInput.Type;
+
+export const PreviewAutomationAutofillResult = Schema.Struct({
+  filled: Schema.Boolean,
+  origin: Schema.NullOr(Schema.String),
+  username: Schema.optional(Schema.String),
+  reason: Schema.optional(
+    Schema.Literals(["no-credential", "ambiguous-credential", "no-fields", "unavailable"]),
+  ),
+});
+export type PreviewAutomationAutofillResult = typeof PreviewAutomationAutofillResult.Type;
 
 export const PreviewAutomationStatus = Schema.Struct({
   available: Schema.Boolean,

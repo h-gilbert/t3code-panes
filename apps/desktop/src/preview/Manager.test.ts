@@ -2,6 +2,7 @@ import { it as effectIt } from "@effect/vitest";
 import type { DesktopPreviewRecordingFrame } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Cause from "effect/Cause";
+import * as BrowserCredentials from "./BrowserCredentials.ts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -133,8 +134,18 @@ const fileSystemLayer = FileSystem.layerNoop({
     }),
 });
 
+// Manager only forwards to the credential store; its own behaviour is
+// covered in BrowserCredentials.test.ts.
+const browserCredentialsLayer = Layer.mock(BrowserCredentials.BrowserCredentials)({
+  list: Effect.succeed([]),
+  save: () => Effect.die("unused in Manager tests"),
+  delete: () => Effect.void,
+  resolveForFill: () => Effect.succeed({ reason: "no-credential" as const }),
+});
+
 const layer = PreviewManager.layer.pipe(
   Layer.provideMerge(browserSessionLayer),
+  Layer.provideMerge(browserCredentialsLayer),
   Layer.provideMerge(environmentLayer),
   Layer.provideMerge(fileSystemLayer),
   Layer.provideMerge(Path.layer),

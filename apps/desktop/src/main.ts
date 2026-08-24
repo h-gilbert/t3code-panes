@@ -57,6 +57,7 @@ import * as DesktopSshPasswordPrompts from "./ssh/DesktopSshPasswordPrompts.ts";
 import * as DesktopState from "./app/DesktopState.ts";
 import * as DesktopTelemetryPublisher from "./telemetry/DesktopTelemetryPublisher.ts";
 import * as DesktopUpdates from "./updates/DesktopUpdates.ts";
+import * as BrowserCredentials from "./preview/BrowserCredentials.ts";
 import * as BrowserSession from "./preview/BrowserSession.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as DesktopWindow from "./window/DesktopWindow.ts";
@@ -149,6 +150,7 @@ const desktopServerExposureLayer = DesktopServerExposure.layer.pipe(
 
 const desktopPreviewLayer = PreviewManager.layer.pipe(
   Layer.provideMerge(BrowserSession.layer),
+  Layer.provideMerge(BrowserCredentials.layer),
   Layer.provideMerge(desktopFoundationLayer),
 );
 

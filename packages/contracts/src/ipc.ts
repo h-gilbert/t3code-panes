@@ -670,6 +670,81 @@ export const DesktopPreviewWebviewConfigSchema: Schema.Codec<DesktopPreviewWebvi
     preloadUrl: Schema.NullOr(Schema.String),
   });
 
+/**
+ * A saved browser login as surfaced to management UI. The password never
+ * leaves the desktop main process: summaries carry identity fields only, and
+ * autofill types the secret directly into the guest page.
+ */
+export interface DesktopBrowserCredentialSummary {
+  id: string;
+  /** Exact origin (scheme://host[:port]) the login is bound to. */
+  origin: string;
+  /** Named browser profile the login belongs to; null is the shared profile. */
+  profile: string | null;
+  username: string;
+  updatedAt: string;
+}
+
+export const DesktopBrowserCredentialSummarySchema: Schema.Codec<DesktopBrowserCredentialSummary> =
+  Schema.Struct({
+    id: Schema.String,
+    origin: Schema.String,
+    profile: Schema.NullOr(Schema.String),
+    username: Schema.String,
+    updatedAt: Schema.String,
+  });
+
+export interface DesktopBrowserCredentialSaveInput {
+  /** Any URL on the site; the desktop stores its exact origin. */
+  url: string;
+  profile: string | null;
+  username: string;
+  password: string;
+}
+
+export const DesktopBrowserCredentialSaveInputSchema: Schema.Codec<DesktopBrowserCredentialSaveInput> =
+  Schema.Struct({
+    url: Schema.String,
+    profile: Schema.NullOr(Schema.String),
+    username: Schema.String,
+    password: Schema.String,
+  });
+
+export interface DesktopBrowserAutofillInput {
+  tabId: string;
+  /** Browser profile of the tab; null is the shared profile. */
+  profile: string | null;
+  /** Selects between multiple logins for one origin. Omit for the only one. */
+  username?: string | undefined;
+}
+
+export const DesktopBrowserAutofillInputSchema: Schema.Codec<DesktopBrowserAutofillInput> =
+  Schema.Struct({
+    tabId: Schema.String,
+    profile: Schema.NullOr(Schema.String),
+    username: Schema.optional(Schema.String),
+  });
+
+export interface DesktopBrowserAutofillResult {
+  filled: boolean;
+  /** Present when filled=false. */
+  reason?: "no-credential" | "ambiguous-credential" | "no-fields" | "unavailable" | undefined;
+  /** Origin of the live page the fill targeted. */
+  origin: string | null;
+  /** Username that was filled, when one was. */
+  username?: string | undefined;
+}
+
+export const DesktopBrowserAutofillResultSchema: Schema.Codec<DesktopBrowserAutofillResult> =
+  Schema.Struct({
+    filled: Schema.Boolean,
+    reason: Schema.optional(
+      Schema.Literals(["no-credential", "ambiguous-credential", "no-fields", "unavailable"]),
+    ),
+    origin: Schema.NullOr(Schema.String),
+    username: Schema.optional(Schema.String),
+  });
+
 export interface DesktopPreviewAnnotationTheme {
   colorScheme: "light" | "dark";
   radius: string;
@@ -1196,6 +1271,14 @@ export interface DesktopPreviewBridge {
     browserScope?: string,
   ) => Promise<DesktopPreviewWebviewConfig>;
   setAnnotationTheme: (theme: DesktopPreviewAnnotationTheme) => Promise<void>;
+  /** Saved browser logins. Passwords stay in the desktop main process. */
+  browserCredentials: {
+    list: () => Promise<readonly DesktopBrowserCredentialSummary[]>;
+    save: (input: DesktopBrowserCredentialSaveInput) => Promise<DesktopBrowserCredentialSummary>;
+    delete: (id: string) => Promise<void>;
+    /** Fill the live page's login form from the store; origin-bound. */
+    autofill: (input: DesktopBrowserAutofillInput) => Promise<DesktopBrowserAutofillResult>;
+  };
   /**
    * Activate the in-page element picker for the given tab. Resolves with
    * the picked annotation and its attach/send intent, or `null` when the

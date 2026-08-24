@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect";
 import type {
+  PreviewAutomationAutofillResult,
   PreviewAutomationCloseResult,
   PreviewAutomationOperation,
   PreviewAutomationOpenInput,
@@ -93,6 +94,8 @@ const handlers = {
   preview_recording_stop: (input) =>
     invokeTargeted<PreviewAutomationRecordingArtifact>("recordingStop", input ?? {}),
   preview_close: (input) => invokeTargeted<PreviewAutomationCloseResult>("close", input ?? {}),
+  preview_autofill: (input) =>
+    invokeTargeted<PreviewAutomationAutofillResult>("autofill", input ?? {}),
 } satisfies Parameters<typeof PreviewToolkit.toLayer>[0];
 
 const { preview_snapshot, ...standardHandlers } = handlers;

@@ -52,6 +52,8 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import { PREVIEW_PICTURE_IN_PICTURE_FRAME_CHANNEL } from "../ipc/channels.ts";
+import { buildAutofillExpression, decodeAutofillOutcome } from "./AutofillScript.ts";
+import * as BrowserCredentials from "./BrowserCredentials.ts";
 import * as BrowserSession from "./BrowserSession.ts";
 import {
   ANNOTATION_CAPTURED_CHANNEL,
@@ -4113,6 +4115,27 @@ export class PreviewManager extends Context.Service<
       tabId: string,
       input: PreviewAutomationEvaluateInput,
     ) => Effect.Effect<unknown, PreviewManagerError>;
+    readonly automationAutofill: (
+      tabId: string,
+      input: {
+        readonly profile: string | null;
+        readonly username?: string | undefined;
+      },
+    ) => Effect.Effect<
+      import("@t3tools/contracts").DesktopBrowserAutofillResult,
+      PreviewManagerError
+    >;
+    readonly listBrowserCredentials: Effect.Effect<
+      ReadonlyArray<import("@t3tools/contracts").DesktopBrowserCredentialSummary>,
+      PreviewManagerError
+    >;
+    readonly saveBrowserCredential: (
+      input: import("@t3tools/contracts").DesktopBrowserCredentialSaveInput,
+    ) => Effect.Effect<
+      import("@t3tools/contracts").DesktopBrowserCredentialSummary,
+      PreviewManagerError
+    >;
+    readonly deleteBrowserCredential: (id: string) => Effect.Effect<void, PreviewManagerError>;
     readonly automationWaitFor: (
       tabId: string,
       input: PreviewAutomationWaitForInput,
@@ -4130,6 +4153,7 @@ export class PreviewManager extends Context.Service<
 export const make = Effect.gen(function* PreviewManagerMake() {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const browserSession = yield* BrowserSession.BrowserSession;
+  const browserCredentials = yield* BrowserCredentials.BrowserCredentials;
   const operations = yield* makeNativeOperations(
     environment.browserArtifactsDir,
     environment.path.join(environment.dirname, "preview-pip-preload.cjs"),
@@ -4205,6 +4229,54 @@ export const make = Effect.gen(function* PreviewManagerMake() {
     automationPress: operations.automationPress,
     automationScroll: operations.automationScroll,
     automationEvaluate: operations.automationEvaluate,
+    listBrowserCredentials: browserCredentials.list.pipe(
+      Effect.mapError(
+        (cause) => new PreviewOperationError({ operation: "listBrowserCredentials", cause }),
+      ),
+    ),
+    saveBrowserCredential: (input) =>
+      browserCredentials
+        .save(input)
+        .pipe(
+          Effect.mapError(
+            (cause) => new PreviewOperationError({ operation: "saveBrowserCredential", cause }),
+          ),
+        ),
+    deleteBrowserCredential: (id) =>
+      browserCredentials
+        .delete(id)
+        .pipe(
+          Effect.mapError(
+            (cause) => new PreviewOperationError({ operation: "deleteBrowserCredential", cause }),
+          ),
+        ),
+    automationAutofill: Effect.fn("PreviewManager.automationAutofill")(function* (tabId, input) {
+      const status = yield* operations.automationStatus(tabId);
+      const origin = status.url ? BrowserCredentials.normalizeCredentialOrigin(status.url) : null;
+      if (!origin) {
+        return { filled: false, reason: "no-credential", origin: null } as const;
+      }
+      // The store re-checks (origin, profile) exactly; the password for one
+      // site can never be typed into another.
+      const resolved = yield* browserCredentials
+        .resolveForFill({ origin, profile: input.profile, username: input.username })
+        .pipe(
+          Effect.mapError(
+            (cause) => new PreviewOperationError({ operation: "automationAutofill", cause }),
+          ),
+        );
+      if ("reason" in resolved) {
+        return { filled: false, reason: resolved.reason, origin } as const;
+      }
+      const outcome = decodeAutofillOutcome(
+        yield* operations.automationEvaluate(tabId, {
+          expression: buildAutofillExpression(resolved.username, resolved.password),
+        }),
+      );
+      return outcome?.filled
+        ? ({ filled: true, origin, username: resolved.username } as const)
+        : ({ filled: false, reason: "no-fields", origin } as const);
+    }),
     automationWaitFor: operations.automationWaitFor,
     subscribeStateChanges: operations.subscribeStateChanges,
     subscribePointerEvents: operations.subscribePointerEvents,
