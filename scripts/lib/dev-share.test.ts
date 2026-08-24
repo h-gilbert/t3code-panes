@@ -27,11 +27,16 @@ const encode = (value: string) => Stream.make(new TextEncoder().encode(value));
  * test set the outcome of the `off` (pre-clear) and `serve` calls separately —
  * they are the same subcommand and are told apart by the trailing `off`.
  */
-const spawnerLayer = (input: { readonly off?: CallResult; readonly serve?: CallResult }) =>
+const spawnerLayer = (input: {
+  readonly off?: CallResult;
+  readonly serve?: CallResult;
+  readonly onCall?: (args: ReadonlyArray<string>) => void;
+}) =>
   Layer.succeed(
     ChildProcessSpawner.ChildProcessSpawner,
     ChildProcessSpawner.make((command) => {
       const args = "args" in command ? (command.args as ReadonlyArray<string>) : [];
+      input.onCall?.(args);
       const result: CallResult = args.includes("status")
         ? { exitCode: 0 }
         : args.includes("off")
@@ -99,6 +104,23 @@ describe("shareDevServer", () => {
 
       assert.equal(shared.host, "host.example.ts.net");
       assert.equal(shared.url, "https://host.example.ts.net:5788/");
+    }),
+  );
+
+  it.effect("proxies to localhost so macOS IPv6 Vite listeners remain reachable", () =>
+    Effect.gen(function* () {
+      const calls: Array<ReadonlyArray<string>> = [];
+      yield* shareDevServer({ webPort: 5788 }).pipe(
+        Effect.provide(
+          spawnerLayer({
+            off: { exitCode: 1, stderr: NO_HANDLER_STDERR },
+            onCall: (args) => calls.push(args),
+          }),
+        ),
+      );
+
+      const serve = calls.find((args) => args.includes("serve") && !args.includes("off"));
+      assert.include(serve ?? [], "http://localhost:5788");
     }),
   );
 

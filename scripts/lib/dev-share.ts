@@ -195,7 +195,14 @@ export const shareDevServer = Effect.fn("devShare.shareDevServer")(function* (in
     });
   }
 
-  yield* ensureTailscaleServe({ localPort: input.webPort, servePort: input.webPort }).pipe(
+  // Vite's `localhost` listener resolves to ::1 on current macOS releases.
+  // Keep the proxy target hostname-based as well; pinning it to the tailscale
+  // helper's IPv4 default makes a healthy shared server time out on those Macs.
+  yield* ensureTailscaleServe({
+    localHost: "localhost",
+    localPort: input.webPort,
+    servePort: input.webPort,
+  }).pipe(
     Effect.mapError((error) => {
       const explanation = explainCommandFailure(error);
       return new DevServeFailedError({
