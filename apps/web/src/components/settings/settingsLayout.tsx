@@ -26,6 +26,11 @@ const SettingsSearchTargetContext = createContext<SettingsSearchTargetContextVal
   targetId: null,
   onTargetHandled: noop,
 });
+const SettingsPageEmbeddedContext = createContext(false);
+
+export function SettingsPageEmbedded({ children }: { readonly children: ReactNode }) {
+  return <SettingsPageEmbeddedContext value>{children}</SettingsPageEmbeddedContext>;
+}
 
 export function SettingsSearchTargetProvider({
   targetId,
@@ -199,6 +204,23 @@ export function SettingsRow({
   );
 }
 
+export function SettingsAnchor({
+  id,
+  children,
+  className,
+}: {
+  readonly id: string;
+  readonly children: ReactNode;
+  readonly className?: string;
+}) {
+  const targetRef = useSettingsSearchTarget<HTMLDivElement>(id);
+  return (
+    <div ref={targetRef} id={id} tabIndex={-1} className={className}>
+      {children}
+    </div>
+  );
+}
+
 export function SettingResetButton({
   label,
   disabled = false,
@@ -240,12 +262,17 @@ export function SettingsPageContainer({
   className?: string;
   width?: WorkspacePageWidth;
 }) {
+  const embedded = useContext(SettingsPageEmbeddedContext);
   const navigate = useNavigate();
   const hash = useLocation({ select: (location) => location.hash });
   const targetId = hash.replace(/^#/, "") || null;
   const clearTargetHash = useCallback(() => {
     void navigate({ hash: "", replace: true, resetScroll: false, hashScrollIntoView: false });
   }, [navigate]);
+
+  if (embedded) {
+    return <div className={cn("flex flex-col gap-12", className)}>{children}</div>;
+  }
 
   return (
     <SettingsSearchTargetProvider targetId={targetId} onTargetHandled={clearTargetHash}>

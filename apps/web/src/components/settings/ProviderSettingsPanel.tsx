@@ -255,6 +255,7 @@ export function ProviderSettingsPanel() {
                           tooltipText={statusText}
                           dotClassName={connectionPhaseDotClassName(environment.connection.phase)}
                           pingClassName={connectionPhasePingClassName(environment.connection.phase)}
+                          interactive={false}
                         />
                         <span className="truncate text-sm font-medium text-foreground">
                           {environment.label}

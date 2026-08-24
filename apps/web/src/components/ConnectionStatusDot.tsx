@@ -27,12 +27,14 @@ type ConnectionStatusDotProps = {
   tooltipText?: string | null;
   dotClassName: string;
   pingClassName?: string | null;
+  interactive?: boolean;
 };
 
 export function ConnectionStatusDot({
   tooltipText,
   dotClassName,
   pingClassName,
+  interactive = true,
 }: ConnectionStatusDotProps) {
   const dotContent = (
     <>
@@ -56,7 +58,7 @@ export function ConnectionStatusDot({
     );
   }
 
-  const dot = (
+  const dot = interactive ? (
     <button
       type="button"
       aria-label={tooltipText}
@@ -64,6 +66,14 @@ export function ConnectionStatusDot({
     >
       {dotContent}
     </button>
+  ) : (
+    <span
+      role="img"
+      aria-label={tooltipText}
+      className="relative flex size-3 shrink-0 cursor-help items-center justify-center rounded-full"
+    >
+      {dotContent}
+    </span>
   );
 
   return (

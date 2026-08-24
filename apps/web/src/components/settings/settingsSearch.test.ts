@@ -36,10 +36,17 @@ const ITEMS: ReadonlyArray<SettingsSearchItem> = [
 ];
 
 describe("searchSettings", () => {
-  it("matches only setting titles", () => {
+  it("matches setting titles and section names", () => {
     expect(searchSettings("word", ITEMS).map((item) => item.id)).toEqual(["word-wrap"]);
     expect(searchSettings("network", ITEMS).map((item) => item.id)).toEqual(["network-access"]);
-    expect(searchSettings("connections", ITEMS)).toEqual([]);
+    expect(searchSettings("connections", ITEMS)).toEqual([
+      {
+        id: "settings-section-connections",
+        title: "Connections",
+        to: "/settings/connections",
+        targetId: "settings-connections",
+      },
+    ]);
     expect(searchSettings("claude", ITEMS)).toEqual([]);
   });
 
@@ -47,6 +54,15 @@ describe("searchSettings", () => {
     expect(searchSettings("  WORD   WRAP  ", ITEMS).map((item) => item.id)).toEqual(["word-wrap"]);
     expect(searchSettings("glass").map((item) => item.id)).toEqual(["setting-glass-opacity"]);
     expect(searchSettings("xyzzy")).toEqual([]);
+  });
+
+  it("routes a partial section-name match to the consolidated section", () => {
+    expect(searchSettings("connec")[0]).toEqual({
+      id: "settings-section-connections",
+      title: "Connections",
+      to: "/settings/connections",
+      targetId: "settings-connections",
+    });
   });
 
   it("keeps catalog order for multiple title matches", () => {

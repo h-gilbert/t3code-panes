@@ -11,10 +11,22 @@ import { useCallback, useEffect, useState } from "react";
 
 import { useSettingsRestore } from "../components/settings/SettingsPanels";
 import { SettingsBreadcrumb } from "../components/settings/SettingsBreadcrumb";
+import { AllSettingsPage } from "../components/settings/AllSettingsPage";
 import { Button } from "../components/ui/button";
 import { SidebarInset } from "../components/ui/sidebar";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { isElectron } from "../env";
+
+const LEGACY_SETTINGS_SECTION_ANCHORS: Readonly<Record<string, string>> = {
+  "/settings/general": "settings-general",
+  "/settings/appearance": "settings-appearance",
+  "/settings/keybindings": "settings-keybindings",
+  "/settings/providers": "settings-providers",
+  "/settings/integrations": "settings-integrations",
+  "/settings/source-control": "settings-source-control",
+  "/settings/connections": "settings-connections",
+  "/settings/archived": "settings-archive",
+};
 
 function RestoreDefaultsButton({ onRestored }: { onRestored: () => void }) {
   const { changedSettingLabels, restoreDefaults } = useSettingsRestore(onRestored);
@@ -37,7 +49,8 @@ function SettingsContentLayout() {
   const navigate = useNavigate();
   const canGoBack = useCanGoBack();
   const [restoreSignal, setRestoreSignal] = useState(0);
-  const showRestoreDefaults = location.pathname === "/settings/general";
+  const showDiagnostics = location.pathname === "/settings/diagnostics";
+  const showRestoreDefaults = !showDiagnostics;
   const handleRestored = () => setRestoreSignal((value) => value + 1);
   const navigateBackWithinApp = useCallback(() => {
     if (canGoBack) {
@@ -73,7 +86,7 @@ function SettingsContentLayout() {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
         <WorkspacePageHeader electron={isElectron}>
           <div className="flex w-full items-center gap-3">
-            <SettingsBreadcrumb pathname={location.pathname} />
+            <SettingsBreadcrumb pathname={showDiagnostics ? location.pathname : "/settings"} />
             {showRestoreDefaults ? (
               <div className="ms-auto flex items-center gap-2">
                 <RestoreDefaultsButton onRestored={handleRestored} />
@@ -83,7 +96,7 @@ function SettingsContentLayout() {
         </WorkspacePageHeader>
 
         <div key={restoreSignal} className="min-h-0 flex flex-1 flex-col">
-          <Outlet />
+          {showDiagnostics ? <Outlet /> : <AllSettingsPage />}
         </div>
       </div>
     </SidebarInset>
@@ -103,8 +116,9 @@ export const Route = createFileRoute("/settings")({
       throw redirect({ to: "/pair", replace: true });
     }
 
-    if (location.pathname === "/settings") {
-      throw redirect({ to: "/settings/general", replace: true });
+    const sectionAnchor = LEGACY_SETTINGS_SECTION_ANCHORS[location.pathname];
+    if (sectionAnchor) {
+      throw redirect({ to: "/settings", hash: sectionAnchor, replace: true });
     }
   },
   component: SettingsRouteLayout,

@@ -35,6 +35,17 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/archived": "Archive",
 };
 
+const SETTINGS_SECTION_TARGETS: Readonly<Record<SettingsPath, string>> = {
+  "/settings/general": "settings-general",
+  "/settings/appearance": "settings-appearance",
+  "/settings/keybindings": "settings-keybindings",
+  "/settings/providers": "settings-providers",
+  "/settings/integrations": "settings-integrations",
+  "/settings/source-control": "settings-source-control",
+  "/settings/connections": "settings-connections",
+  "/settings/archived": "settings-archive",
+};
+
 /**
  * Every searchable setting, in result order. This catalog is the single
  * source of truth for anchor ids and visible titles: panels render both via
@@ -279,9 +290,32 @@ export function searchSettings(
   const normalizedQuery = normalizeSearchText(query);
   if (normalizedQuery.length === 0) return [];
 
-  return items.filter(
+  const matchingItems = items.filter(
     (item) =>
       (isElectron || item.desktopOnly !== true) &&
       normalizeSearchText(item.title).includes(normalizedQuery),
   );
+  const itemPaths = new Set(items.map((item) => item.to));
+  const matchingSections = (
+    Object.entries(SETTINGS_SECTION_LABELS) as Array<[SettingsPath, string]>
+  ).flatMap(([to, title]) => {
+    if (!itemPaths.has(to) || !normalizeSearchText(title).includes(normalizedQuery)) return [];
+    if (
+      matchingItems.some(
+        (item) => item.to === to && normalizeSearchText(item.title) === normalizeSearchText(title),
+      )
+    ) {
+      return [];
+    }
+    return [
+      {
+        id: `settings-section-${to.slice("/settings/".length)}`,
+        title,
+        to,
+        targetId: SETTINGS_SECTION_TARGETS[to],
+      },
+    ];
+  });
+
+  return [...matchingSections, ...matchingItems];
 }
