@@ -99,6 +99,15 @@ export class ThreadSnoozeBlockedError extends Schema.TaggedErrorClass<ThreadSnoo
   }
 }
 
+export function shouldBlockThreadArchive(
+  session: { readonly status: string; readonly activeTurnId: unknown | null } | null | undefined,
+  options: { readonly allowRunning?: boolean } = {},
+): boolean {
+  return (
+    options.allowRunning !== true && session?.status === "running" && session.activeTurnId != null
+  );
+}
+
 /** Key that sorts before every arranged pinned thread, so a fresh pin lands
     at the top of the run. Undefined (keyless, sorts with the legacy block)
     when key math can't produce one — pinning must never fail on placement. */
@@ -207,11 +216,14 @@ export function useThreadActions() {
   }, [router]);
 
   const archiveThread = useCallback(
-    async (target: ScopedThreadRef, opts: { onArchived?: () => void } = {}) => {
+    async (
+      target: ScopedThreadRef,
+      opts: { onArchived?: () => void; allowRunning?: boolean } = {},
+    ) => {
       const resolved = resolveThreadTarget(target);
       if (!resolved) return AsyncResult.success(undefined);
       const { thread, threadRef } = resolved;
-      if (thread.session?.status === "running" && thread.session.activeTurnId != null) {
+      if (shouldBlockThreadArchive(thread.session, opts)) {
         return AsyncResult.failure(
           Cause.fail(
             new ThreadArchiveBlockedError({

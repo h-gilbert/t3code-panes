@@ -65,6 +65,42 @@ export interface WorkspacePaneState {
   resetWorkspace: (projectKey: string) => void;
 }
 
+export function migratePersistedWorkspacePaneState(
+  persistedState: unknown,
+): Pick<WorkspacePaneState, "layoutsByProjectKey"> {
+  if (!persistedState || typeof persistedState !== "object") {
+    return { layoutsByProjectKey: {} };
+  }
+  const rawLayouts = (persistedState as { layoutsByProjectKey?: unknown }).layoutsByProjectKey;
+  if (!rawLayouts || typeof rawLayouts !== "object" || Array.isArray(rawLayouts)) {
+    return { layoutsByProjectKey: {} };
+  }
+
+  const layoutsByProjectKey = {
+    ...(rawLayouts as Record<string, ProjectWorkspaceLayout>),
+  };
+  for (const [storedKey, layout] of Object.entries(layoutsByProjectKey)) {
+    const markerIndex = storedKey.indexOf("?workspace=");
+    if (markerIndex <= 0) continue;
+    const canonicalKey = storedKey.slice(0, markerIndex);
+    const encodedWorkspaceKey = storedKey.slice(markerIndex + "?workspace=".length);
+    let workspaceKey: string;
+    try {
+      workspaceKey = decodeURIComponent(encodedWorkspaceKey);
+    } catch {
+      continue;
+    }
+    if (workspaceKey !== canonicalKey) continue;
+
+    // A previous desktop route bug duplicated the workspace query inside the
+    // persisted key. That alias was the actively edited layout, so it wins
+    // over any older canonical snapshot during the one-time migration.
+    layoutsByProjectKey[canonicalKey] = layout;
+    delete layoutsByProjectKey[storedKey];
+  }
+  return { layoutsByProjectKey };
+}
+
 export function assignWorkspaceThread(
   panes: WorkspacePanes,
   threadRef: ScopedThreadRef,
@@ -298,10 +334,12 @@ export const useWorkspacePaneStore = create<WorkspacePaneState>()(
     }),
     {
       name: WORKSPACE_PANE_STORAGE_KEY,
+      version: 1,
       storage: createJSONStorage(() =>
         resolveStorage(typeof localStorage === "undefined" ? null : localStorage),
       ),
       partialize: ({ layoutsByProjectKey }) => ({ layoutsByProjectKey }),
+      migrate: migratePersistedWorkspacePaneState,
     },
   ),
 );

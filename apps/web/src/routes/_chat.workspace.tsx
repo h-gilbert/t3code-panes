@@ -1,9 +1,11 @@
 import { useAtomValue } from "@effect/atom-react";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { createFileRoute } from "@tanstack/react-router";
 import type { ScopedProjectRef, ScopedThreadRef } from "@t3tools/contracts";
 import {
   ChevronDownIcon,
+  CircleCheckIcon,
   Columns3Icon,
   FolderOpenIcon,
   Grid2X2Icon,
@@ -23,6 +25,15 @@ import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider";
 import { Button } from "../components/ui/button";
 import {
+  AlertDialog,
+  AlertDialogClose,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogPopup,
+  AlertDialogTitle,
+} from "../components/ui/alert-dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
@@ -33,6 +44,7 @@ import {
 } from "../components/ui/menu";
 import { SidebarInset } from "../components/ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
+import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { resolveShortcutCommand } from "../keybindings";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isModelPickerOpen } from "../modelPickerVisibility";
@@ -41,12 +53,13 @@ import { resolveThreadSyncPhase } from "../threadSync";
 import { useThreadDetail, useThreadRefs, useThreadShell, useThreadStatus } from "../state/entities";
 import { useEnvironmentQuery } from "../state/query";
 import { useProjects } from "../state/entities";
-import { usePrimaryEnvironmentId } from "../state/environments";
+import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import { environmentShell } from "../state/shell";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { useClientSettings } from "../hooks/useSettings";
 import { useDesktopFullscreen } from "../hooks/useDesktopFullscreen";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
+import { useThreadActions } from "../hooks/useThreadActions";
 import { selectProjectGroupingSettings } from "../logicalProject";
 import {
   markPromotedDraftThreadByRef,
@@ -58,7 +71,6 @@ import {
   type SidebarProjectSnapshot,
 } from "../sidebarProjectGrouping";
 import {
-  DEFAULT_WORKSPACE_KEY,
   selectProjectWorkspaceLayout,
   useWorkspacePaneStore,
   type WorkspacePaneCount,
@@ -69,6 +81,7 @@ import {
   resolveWorkspaceDraftThreadRef,
   resolveWorkspacePaneThreadTitle,
 } from "../workspacePaneTitle";
+import { workspaceThreadNeedsFinishConfirmation } from "../workspacePaneLifecycle";
 import { cn } from "~/lib/utils";
 import { newDraftId, newThreadId } from "../lib/utils";
 
@@ -258,6 +271,8 @@ function WorkspacePane({
   focused,
   maximized,
   composerHandleRef,
+  environmentLabel,
+  archiveThread,
 }: {
   readonly workspaceKey: string;
   readonly index: WorkspacePaneIndex;
@@ -267,6 +282,8 @@ function WorkspacePane({
   readonly focused: boolean;
   readonly maximized: boolean;
   readonly composerHandleRef: RefObject<ChatComposerHandle | null>;
+  readonly environmentLabel: string;
+  readonly archiveThread: ReturnType<typeof useThreadActions>["archiveThread"];
 }) {
   const focusPane = useWorkspacePaneStore((state) => state.focusPane);
   const clearPane = useWorkspacePaneStore((state) => state.clearPane);
@@ -275,7 +292,11 @@ function WorkspacePane({
   const toggleMaximize = useWorkspacePaneStore((state) => state.toggleMaximize);
   const handleNewThread = useNewThreadHandler();
   const [pendingProjectRef, setPendingProjectRef] = useState<ScopedProjectRef | null>(null);
+  const [finishConfirmOpen, setFinishConfirmOpen] = useState(false);
+  const [finishing, setFinishing] = useState(false);
   const draftRequestVersionRef = useRef(0);
+  const serverThreadRef = paneTarget && "threadId" in paneTarget ? paneTarget : null;
+  const serverThreadShell = useThreadShell(serverThreadRef);
   const openFreshDraft = useCallback(
     (projectRef: ScopedProjectRef) => {
       const requestVersion = ++draftRequestVersionRef.current;
@@ -333,6 +354,35 @@ function WorkspacePane({
     draftRequestVersionRef.current += 1;
     clearPane(workspaceKey, index);
   }, [clearPane, index, workspaceKey]);
+  const hasActiveWork = workspaceThreadNeedsFinishConfirmation(serverThreadShell);
+  const finishThread = useCallback(async () => {
+    if (!serverThreadRef || finishing) return;
+    setFinishing(true);
+    const result = await archiveThread(serverThreadRef, {
+      allowRunning: true,
+    });
+    setFinishing(false);
+    if (result._tag === "Failure") {
+      const error = squashAtomCommandFailure(result);
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Could not finish thread",
+          description: error instanceof Error ? error.message : "The thread was not archived.",
+        }),
+      );
+      return;
+    }
+    setFinishConfirmOpen(false);
+    clearPane(workspaceKey, index);
+  }, [archiveThread, clearPane, finishing, index, serverThreadRef, workspaceKey]);
+  const handleFinishThread = useCallback(() => {
+    if (hasActiveWork) {
+      setFinishConfirmOpen(true);
+      return;
+    }
+    void finishThread();
+  }, [finishThread, hasActiveWork]);
 
   return (
     <section
@@ -418,6 +468,18 @@ function WorkspacePane({
           <span className="min-w-0 flex-1" />
         )}
         <div className="ml-auto flex items-center gap-0.5">
+          {serverThreadRef ? (
+            <Button
+              size="icon-micro"
+              variant="ghost"
+              aria-label="Finish thread and stop resources"
+              title="Finish thread and stop resources"
+              disabled={finishing}
+              onClick={handleFinishThread}
+            >
+              <CircleCheckIcon className="size-3" />
+            </Button>
+          ) : null}
           <Button
             size="icon-micro"
             variant="ghost"
@@ -435,8 +497,8 @@ function WorkspacePane({
             <Button
               size="icon-micro"
               variant="ghost"
-              aria-label="Clear pane"
-              title="Clear pane"
+              aria-label="Remove from pane — thread keeps running"
+              title="Remove from pane — thread keeps running"
               onClick={handleClearPane}
             >
               <XIcon className="size-3" />
@@ -444,6 +506,30 @@ function WorkspacePane({
           ) : null}
         </div>
       </div>
+      <AlertDialog
+        open={finishConfirmOpen}
+        onOpenChange={(open) => {
+          if (!finishing) setFinishConfirmOpen(open);
+        }}
+      >
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Finish this thread?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This stops ongoing agent work and managed terminals on {environmentLabel}, then
+              archives the thread. Processes detached outside T3 may continue running.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogClose render={<Button variant="outline" disabled={finishing} />}>
+              Cancel
+            </AlertDialogClose>
+            <Button variant="destructive" disabled={finishing} onClick={() => void finishThread()}>
+              {finishing ? "Finishing…" : "Finish and archive"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
       {paneTarget && "draftId" in paneTarget ? (
         <WorkspaceDraftPane
           workspaceKey={workspaceKey}
@@ -469,10 +555,15 @@ function WorkspacePane({
   );
 }
 
-function ProjectPaneWorkspace() {
-  const search = Route.useSearch();
-  const workspaceKey = search.workspace ?? DEFAULT_WORKSPACE_KEY;
+export function ProjectPaneWorkspace({
+  workspaceKey,
+  active = true,
+}: {
+  readonly workspaceKey: string;
+  readonly active?: boolean;
+}) {
   const projects = useProjects();
+  const { environments } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { isMacosDesktop, isWindowFullscreen } = useDesktopFullscreen();
@@ -493,6 +584,12 @@ function ProjectPaneWorkspace() {
   const setPaneCount = useWorkspacePaneStore((state) => state.setPaneCount);
   const setLayoutMode = useWorkspacePaneStore((state) => state.setLayoutMode);
   const resetWorkspace = useWorkspacePaneStore((state) => state.resetWorkspace);
+  const { archiveThread } = useThreadActions();
+  const environmentLabelById = useMemo(
+    () =>
+      new Map(environments.map((environment) => [environment.environmentId, environment.label])),
+    [environments],
+  );
   const { panes, projectKeys, paneCount, layoutMode, focusedPaneIndex, maximizedPaneIndex } =
     layout;
   const visiblePanes = panes.slice(0, paneCount);
@@ -505,6 +602,8 @@ function ProjectPaneWorkspace() {
   }, []);
 
   useEffect(() => {
+    if (!active) return;
+
     const onWindowKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isCommandPaletteOpen()) return;
       const currentFocusedPaneIndex = selectProjectWorkspaceLayout(
@@ -568,6 +667,7 @@ function ProjectPaneWorkspace() {
     window.addEventListener("keydown", onWindowKeyDown, { capture: true });
     return () => window.removeEventListener("keydown", onWindowKeyDown, { capture: true });
   }, [
+    active,
     keybindings,
     openWorkspaceWindow,
     paneComposerHandleRefs,
@@ -681,9 +781,15 @@ function ProjectPaneWorkspace() {
                 paneTarget={paneTarget}
                 projectKey={projectKeys[index] ?? null}
                 projects={projectGroups}
-                focused={focusedPaneIndex === index}
+                focused={active && focusedPaneIndex === index}
                 maximized={maximizedPaneIndex === index}
                 composerHandleRef={paneComposerHandleRefs[index]!}
+                environmentLabel={
+                  paneTarget && "environmentId" in paneTarget
+                    ? (environmentLabelById.get(paneTarget.environmentId) ?? "its environment")
+                    : "its environment"
+                }
+                archiveThread={archiveThread}
               />
             );
           })}
@@ -697,5 +803,5 @@ export const Route = createFileRoute("/_chat/workspace")({
   validateSearch: (search: Record<string, unknown>) => ({
     workspace: typeof search.workspace === "string" ? search.workspace : undefined,
   }),
-  component: ProjectPaneWorkspace,
+  component: () => null,
 });

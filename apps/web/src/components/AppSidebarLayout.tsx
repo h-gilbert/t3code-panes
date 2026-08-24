@@ -2,6 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import * as Schema from "effect/Schema";
 import {
   useEffect,
+  useRef,
   useState,
   useSyncExternalStore,
   type CSSProperties,
@@ -9,18 +10,17 @@ import {
 } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 
-import { isElectron } from "../env";
 import { getLocalStorageItem, removeLocalStorageItem } from "../hooks/useLocalStorage";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import { cn } from "../lib/utils";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { isWorkspacePath } from "../workspacePaneStore";
+import { resolveRetainedWorkspaceKey } from "../workspaceRouteRetention";
+import { ProjectPaneWorkspace } from "../routes/_chat.workspace";
 import { useEnvironmentIdentificationMode, useLegacySidebarEnabled } from "../hooks/useSettings";
 import { useDesktopFullscreen } from "../hooks/useDesktopFullscreen";
 import LegacyThreadSidebar from "./LegacySidebar";
 import ThreadSidebar from "./Sidebar";
-import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
-import { SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import {
   resolveSidebarStageFocusRingOffsetClass,
   useSidebarStageBackdropVariant,
@@ -143,10 +143,17 @@ function ProjectProjectionRetention() {
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const legacySidebarEnabled = useLegacySidebarEnabled();
-  // Settings routes show the settings nav in place of whichever thread
-  // sidebar is active.
-  const pathname = useLocation({ select: (location) => location.pathname });
-  const isOnSettings = pathname === "/settings" || pathname.startsWith("/settings/");
+  const location = useLocation();
+  const pathname = location.pathname;
+  const isOnWorkspace = isWorkspacePath(pathname);
+  const retainedWorkspaceKeyRef = useRef<string | null>(null);
+  const search = location.search as Record<string, unknown>;
+  retainedWorkspaceKeyRef.current = resolveRetainedWorkspaceKey({
+    pathname,
+    workspaceSearch: search.workspace,
+    previousWorkspaceKey: retainedWorkspaceKeyRef.current,
+  });
+  const retainedWorkspaceKey = retainedWorkspaceKeyRef.current;
   const { isMacosDesktop, isWindowFullscreen } = useDesktopFullscreen();
   const [sidebarWidth, setSidebarWidth] = useState(readInitialThreadSidebarWidth);
   // Subscribed rather than read once: the clamp must track live window size,
@@ -207,19 +214,18 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
           onResize: setSidebarWidth,
         }}
       >
-        {isOnSettings ? (
-          <>
-            <SidebarChromeHeader isElectron={isElectron} />
-            <SettingsSidebarNav pathname={pathname} />
-          </>
-        ) : legacySidebarEnabled ? (
-          <LegacyThreadSidebar />
-        ) : (
-          <ThreadSidebar />
-        )}
+        {legacySidebarEnabled ? <LegacyThreadSidebar /> : <ThreadSidebar />}
         <SidebarRail onDoubleClick={resetSidebarWidth} />
       </Sidebar>
-      {children}
+      {retainedWorkspaceKey ? (
+        <div
+          className={isOnWorkspace ? "flex min-h-0 min-w-0 flex-1" : "hidden"}
+          aria-hidden={isOnWorkspace ? undefined : true}
+        >
+          <ProjectPaneWorkspace workspaceKey={retainedWorkspaceKey} active={isOnWorkspace} />
+        </div>
+      ) : null}
+      {isOnWorkspace ? null : children}
       <SidebarControl
         hidden={isWorkspacePath(pathname) && (!isMacosDesktop || isWindowFullscreen)}
       />

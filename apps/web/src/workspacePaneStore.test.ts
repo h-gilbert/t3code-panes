@@ -8,6 +8,7 @@ import {
   WORKSPACE_PANE_COUNT,
   assignWorkspaceThread,
   isWorkspacePath,
+  migratePersistedWorkspacePaneState,
   resizeWorkspaceLayoutPaneCount,
   selectProjectWorkspaceLayout,
   useWorkspacePaneStore,
@@ -44,6 +45,32 @@ describe("isWorkspacePath", () => {
     expect(isWorkspacePath("/workspace")).toBe(true);
     expect(isWorkspacePath("/workspace/layout")).toBe(true);
     expect(isWorkspacePath("/environment/thread")).toBe(false);
+  });
+});
+
+describe("migratePersistedWorkspacePaneState", () => {
+  it("moves the duplicated desktop workspace key back to its canonical key", () => {
+    const staleLayout = { ...DEFAULT_PROJECT_WORKSPACE_LAYOUT, paneCount: 2 as const };
+    const activeLayout = { ...DEFAULT_PROJECT_WORKSPACE_LAYOUT, paneCount: 4 as const };
+
+    expect(
+      migratePersistedWorkspacePaneState({
+        layoutsByProjectKey: {
+          main: staleLayout,
+          "main?workspace=main": activeLayout,
+        },
+      }).layoutsByProjectKey,
+    ).toEqual({ main: activeLayout });
+  });
+
+  it("leaves unrelated named workspaces intact", () => {
+    const layout = { ...DEFAULT_PROJECT_WORKSPACE_LAYOUT, paneCount: 3 as const };
+
+    expect(
+      migratePersistedWorkspacePaneState({
+        layoutsByProjectKey: { "window-a": layout },
+      }).layoutsByProjectKey,
+    ).toEqual({ "window-a": layout });
   });
 });
 

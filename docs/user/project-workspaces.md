@@ -10,7 +10,12 @@ The project name in each pane header is the project menu. A project represents a
 logical group of the same repository across environments). The generated thread title appears next
 to the project name and updates everywhere when the thread is renamed or its title is regenerated.
 Focusing a pane filters the sidebar to that project; choosing a thread in the sidebar assigns it to
-the focused pane. Use the pane header to maximize it temporarily or clear its assigned thread.
+the focused pane. Use the pane header to maximize it temporarily. The X removes the thread from
+that pane without stopping its work, including work running on another environment. Use **Finish
+thread and stop resources** when you are done: T3 Code archives the thread and stops its provider
+session and managed terminals on the environment that owns it. If the thread is active or waiting
+for you, T3 Code asks for confirmation first. Processes launched outside T3 Code are not managed by
+this action.
 
 When the selected project has matching checkouts on more than one connected environment, use the
 computer menu to the left of the model selector to choose where a new thread runs. The choice is
