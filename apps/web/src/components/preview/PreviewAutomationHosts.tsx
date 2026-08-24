@@ -374,6 +374,11 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
               state,
               request.tabId,
               input.reuseExistingTab ?? true,
+              input.ephemeral
+                ? "ephemeral"
+                : input.profile
+                  ? `profile:${input.profile}`
+                  : undefined,
             );
             let activeSnapshot = activeTabId
               ? (state.sessions[activeTabId] ?? state.snapshot ?? undefined)
@@ -386,6 +391,8 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
                 input: {
                   threadId: request.threadId,
                   ...(resolvedInputUrl ? { url: resolvedInputUrl } : {}),
+                  ...(input.profile ? { profile: input.profile } : {}),
+                  ...(input.ephemeral ? { ephemeral: true } : {}),
                   // An agent that didn't state a size gets the user's
                   // configured default, same as a hand-opened tab.
                   viewport: browserDefaultOpenViewport(await resolveBrowserDefaults()),

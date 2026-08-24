@@ -56,4 +56,23 @@ describe("preview automation target selection", () => {
     expect(resolvePreviewAutomationOpenTab(state, undefined, true)).toBe(uiActive.tabId);
     expect(resolvePreviewAutomationOpenTab(state, agentTab.tabId, false)).toBeNull();
   });
+
+  it("never reuses a tab from a different storage scope", () => {
+    const sharedTab = snapshot("tab_shared");
+    const state = { snapshot: sharedTab, sessions: { [sharedTab.tabId]: sharedTab } };
+
+    // An ephemeral request always means a fresh partition — reusing any
+    // existing tab would silently hand the agent stored cookies.
+    expect(resolvePreviewAutomationOpenTab(state, undefined, true, "ephemeral")).toBeNull();
+    // A profile request must not land in the shared tab.
+    expect(resolvePreviewAutomationOpenTab(state, undefined, true, "profile:work")).toBeNull();
+
+    const profiledTab = { ...snapshot("tab_work"), browserScope: "profile:work" };
+    const profiledState = { snapshot: profiledTab, sessions: { [profiledTab.tabId]: profiledTab } };
+    expect(resolvePreviewAutomationOpenTab(profiledState, undefined, true, "profile:work")).toBe(
+      profiledTab.tabId,
+    );
+    // No stated scope keeps the historical reuse behaviour.
+    expect(resolvePreviewAutomationOpenTab(profiledState, undefined, true)).toBe(profiledTab.tabId);
+  });
 });

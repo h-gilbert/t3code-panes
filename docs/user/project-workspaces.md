@@ -50,5 +50,10 @@ header bar stays visible: drag it to move the preview, and use the header button
 the right panel, pop it into a separate window, expand it to fill the T3 Code window, or close the
 browser. Agents can also close the browser themselves when they finish with it.
 
+The shared browser keeps cookies and logins between sessions, so signing in to a site once keeps
+it available for later agent work. An agent can also open a tab under a named profile — a separate
+persistent cookie space — or as an ephemeral session that starts with no stored data and is
+discarded when the app quits.
+
 Workspace assignments and layouts are stored locally in the browser or desktop app. Clearing local
 storage resets them.

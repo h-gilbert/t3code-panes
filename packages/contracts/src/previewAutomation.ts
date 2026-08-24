@@ -8,6 +8,7 @@ import {
   PreviewViewportPresetId,
   PreviewViewportSetting,
   PreviewViewportSize,
+  PreviewBrowserProfileName,
 } from "./preview.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 
@@ -108,6 +109,18 @@ export const PreviewAutomationOpenInput = Schema.Struct({
     Schema.Boolean.annotate({
       description:
         "Reuse tabId when supplied, otherwise this agent session's current tab. Defaults to true; set false to create a new tab.",
+    }),
+  ),
+  profile: Schema.optional(
+    PreviewBrowserProfileName.annotate({
+      description:
+        "Named persistent browser profile for a NEW tab's cookies and logins (letters, digits, - or _). Sites the user signs into under a profile stay signed in for later sessions. Omit for the environment's shared profile. Only applies when a new tab is created.",
+    }),
+  ),
+  ephemeral: Schema.optional(
+    Schema.Boolean.annotate({
+      description:
+        "Open a NEW tab with a completely fresh in-memory browser session — no cookies or storage from any profile, discarded when the app quits. Only applies when a new tab is created.",
     }),
   ),
 })

@@ -67,6 +67,47 @@ it.layer(PreviewManager.layer)("PreviewManager", (it) => {
     }),
   );
 
+  it.effect("stamps profile and ephemeral opens with a browser scope and keeps it", () =>
+    Effect.gen(function* () {
+      const threadId = freshThreadId();
+      const manager = yield* PreviewManager.PreviewManager;
+
+      const shared = yield* manager.open({ threadId });
+      expect(shared.browserScope).toBeUndefined();
+
+      const profiled = yield* manager.open({ threadId, profile: "work" });
+      expect(profiled.browserScope).toBe("profile:work");
+
+      const ephemeral = yield* manager.open({ threadId, ephemeral: true });
+      expect(ephemeral.browserScope).toBe(`ephemeral:${ephemeral.tabId}`);
+
+      // Ephemeral wins when both are stated: a fresh session was asked for.
+      const both = yield* manager.open({ threadId, profile: "work", ephemeral: true });
+      expect(both.browserScope).toBe(`ephemeral:${both.tabId}`);
+
+      // Snapshot rebuilds along the tab's life must not drop the scope, or
+      // the renderer would silently remount the webview onto the shared
+      // partition mid-session.
+      const navigated = yield* manager.navigate({
+        threadId,
+        tabId: profiled.tabId,
+        url: "http://localhost:5173/",
+      });
+      expect(navigated.browserScope).toBe("profile:work");
+
+      yield* manager.reportStatus({
+        threadId,
+        tabId: profiled.tabId,
+        navStatus: { _tag: "Success", url: "http://localhost:5173/", title: "Dev" },
+        canGoBack: true,
+        canGoForward: false,
+      });
+      const listed = yield* manager.list({ threadId });
+      const reported = listed.sessions.find((entry) => entry.tabId === profiled.tabId);
+      expect(reported?.browserScope).toBe("profile:work");
+    }),
+  );
+
   it.effect("orders list snapshots and events with one monotonic revision", () =>
     Effect.gen(function* () {
       const threadId = freshThreadId();

@@ -218,11 +218,15 @@ export const getPreviewConfig = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_GET_CONFIG_CHANNEL,
   payload: DesktopPreviewConfigInputSchema,
   result: DesktopPreviewWebviewConfigSchema,
-  handler: Effect.fn("desktop.ipc.preview.getConfig")(function* ({ environmentId }) {
+  handler: Effect.fn("desktop.ipc.preview.getConfig")(function* ({ environmentId, browserScope }) {
     const manager = yield* PreviewManager.PreviewManager;
-    yield* manager.getBrowserSession(environmentId);
+    // Profiles are namespaced per environment so two environments sharing a
+    // profile name never share cookies. The bare environment id remains the
+    // historical shared partition.
+    const scope = browserScope ? `${environmentId}/${browserScope}` : environmentId;
+    yield* manager.getBrowserSession(scope);
     return {
-      partition: yield* manager.getBrowserPartition(environmentId),
+      partition: yield* manager.getBrowserPartition(scope),
       webPreferences: PREVIEW_WEBVIEW_PREFERENCES,
       preloadUrl: NodeURL.pathToFileURL(`${__dirname}/preview-pick-preload.cjs`).href,
     };

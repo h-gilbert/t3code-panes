@@ -63,6 +63,26 @@ describe("BrowserSession", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect("gives ephemeral scopes an in-memory partition and accepts both kinds", () =>
+    Effect.gen(function* () {
+      const browserSessions = yield* BrowserSession.BrowserSession;
+
+      const persistent = yield* browserSessions.getPartition("env-1/profile:work");
+      const ephemeral = yield* browserSessions.getPartition("env-1/ephemeral:tab_1");
+
+      // A `persist:` prefix is what makes Electron write the partition to
+      // disk; ephemeral scopes must never get one.
+      assert.isTrue(persistent.startsWith("persist:t3code-preview-"));
+      assert.isTrue(ephemeral.startsWith("t3code-preview-ephemeral-"));
+      assert.isFalse(ephemeral.startsWith("persist:"));
+
+      // Both partition kinds must pass the will-attach-webview guard.
+      assert.isTrue(browserSessions.isPartition(persistent));
+      assert.isTrue(browserSessions.isPartition(ephemeral));
+      assert.isFalse(browserSessions.isPartition("persist:some-other-partition"));
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect("grants clipboard-sanitized-write through both the request and check handlers", () =>
     Effect.gen(function* () {
       const browserSessions = yield* BrowserSession.BrowserSession;

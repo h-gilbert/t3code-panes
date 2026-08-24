@@ -45,6 +45,7 @@ type PreviewConfigBridge = Pick<DesktopPreviewBridge, "getPreviewConfig">;
 
 export const loadPreviewWebviewConfig = (
   environmentId: EnvironmentId,
+  browserScope?: string,
   bridge: PreviewConfigBridge | null = previewBridge,
 ): Effect.Effect<DesktopPreviewWebviewConfig, PreviewWebviewConfigError> => {
   if (bridge === null) {
@@ -52,25 +53,33 @@ export const loadPreviewWebviewConfig = (
   }
 
   return Effect.tryPromise({
-    try: () => bridge.getPreviewConfig(environmentId),
+    try: () => bridge.getPreviewConfig(environmentId, browserScope),
     catch: (cause) => new PreviewWebviewConfigLoadError({ environmentId, cause }),
   });
 };
 
-const previewWebviewConfigAtom = Atom.family((environmentId: EnvironmentId) =>
-  Atom.make(loadPreviewWebviewConfig(environmentId)).pipe(
+// Atom.family keys on value identity, so the composite key is one string.
+// "\u0000" cannot appear in an environment id or a browser scope.
+const previewWebviewConfigAtom = Atom.family((key: string) => {
+  const [environmentId, browserScope] = key.split("\u0000") as [EnvironmentId, string];
+  return Atom.make(
+    loadPreviewWebviewConfig(environmentId, browserScope === "" ? undefined : browserScope),
+  ).pipe(
     Atom.swr({
       staleTime: PREVIEW_CONFIG_STALE_TIME_MS,
       revalidateOnMount: true,
     }),
     Atom.setIdleTTL(PREVIEW_CONFIG_IDLE_TTL_MS),
-    Atom.withLabel(`preview:webview-config:${environmentId}`),
-  ),
-);
+    Atom.withLabel(`preview:webview-config:${key}`),
+  );
+});
 
 export function usePreviewWebviewConfig(
   environmentId: EnvironmentId,
+  browserScope?: string,
 ): DesktopPreviewWebviewConfig | null {
-  const result = useAtomValue(previewWebviewConfigAtom(environmentId));
+  const result = useAtomValue(
+    previewWebviewConfigAtom(`${environmentId}\u0000${browserScope ?? ""}`),
+  );
   return Option.getOrNull(AsyncResult.value(result));
 }

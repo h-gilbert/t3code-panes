@@ -123,6 +123,7 @@ const buildLoadingSnapshot = (input: {
   readonly url: string;
   readonly title: string;
   readonly viewport: PreviewViewportSetting;
+  readonly browserScope: string | undefined;
   readonly updatedAt: string;
 }): PreviewSessionSnapshot => ({
   threadId: input.threadId,
@@ -131,6 +132,7 @@ const buildLoadingSnapshot = (input: {
   canGoBack: false,
   canGoForward: false,
   viewport: input.viewport,
+  ...(input.browserScope ? { browserScope: input.browserScope } : {}),
   updatedAt: input.updatedAt,
 });
 
@@ -138,6 +140,7 @@ const buildIdleSnapshot = (input: {
   readonly threadId: string;
   readonly tabId: string;
   readonly viewport: PreviewViewportSetting;
+  readonly browserScope: string | undefined;
   readonly updatedAt: string;
 }): PreviewSessionSnapshot => ({
   threadId: input.threadId,
@@ -146,8 +149,20 @@ const buildIdleSnapshot = (input: {
   canGoBack: false,
   canGoForward: false,
   viewport: input.viewport,
+  ...(input.browserScope ? { browserScope: input.browserScope } : {}),
   updatedAt: input.updatedAt,
 });
+
+/**
+ * Storage scope a new tab is born with. Ephemeral wins over a named profile
+ * and embeds the tab id so every ephemeral tab gets its own throwaway
+ * partition; missing means the environment's shared persistent partition.
+ */
+const deriveBrowserScope = (
+  input: Pick<PreviewOpenInput, "profile" | "ephemeral">,
+  tabId: string,
+): string | undefined =>
+  input.ephemeral ? `ephemeral:${tabId}` : input.profile ? `profile:${input.profile}` : undefined;
 
 export const make = Effect.gen(function* PreviewManagerMake() {
   const serverEpoch = NodeCrypto.randomUUID();
@@ -222,6 +237,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
       // session is born at the right size; older clients omit it and keep the
       // historical fill-panel behaviour.
       const viewport = input.viewport ?? FILL_PREVIEW_VIEWPORT;
+      const browserScope = deriveBrowserScope(input, tabId);
       const snapshot = input.url
         ? buildLoadingSnapshot({
             threadId: input.threadId,
@@ -229,9 +245,10 @@ export const make = Effect.gen(function* PreviewManagerMake() {
             url: yield* normalizeUrl(input.url),
             title: "",
             viewport,
+            browserScope,
             updatedAt,
           })
-        : buildIdleSnapshot({ threadId: input.threadId, tabId, viewport, updatedAt });
+        : buildIdleSnapshot({ threadId: input.threadId, tabId, viewport, browserScope, updatedAt });
       yield* SynchronizedRef.modifyEffect(stateRef, (state) =>
         Effect.gen(function* () {
           const revision = state.revision + 1;
@@ -275,6 +292,9 @@ export const make = Effect.gen(function* PreviewManagerMake() {
             canGoBack: session.snapshot.canGoBack,
             canGoForward: session.snapshot.canGoForward,
             viewport: session.snapshot.viewport ?? FILL_PREVIEW_VIEWPORT,
+            ...(session.snapshot.browserScope
+              ? { browserScope: session.snapshot.browserScope }
+              : {}),
             updatedAt,
           };
           return {
@@ -308,6 +328,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
           canGoBack: input.canGoBack,
           canGoForward: input.canGoForward,
           viewport: session.snapshot.viewport ?? FILL_PREVIEW_VIEWPORT,
+          ...(session.snapshot.browserScope ? { browserScope: session.snapshot.browserScope } : {}),
           updatedAt,
         };
         const emit: PreviewEventDraft =

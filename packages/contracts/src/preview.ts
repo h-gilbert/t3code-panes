@@ -24,6 +24,16 @@ const Title = Schema.String.check(Schema.isMaxLength(512));
 export const PreviewTabId = TrimmedNonEmptyString.check(Schema.isMaxLength(128));
 export type PreviewTabId = typeof PreviewTabId.Type;
 
+/**
+ * Named persistent browser profile. Each name maps to its own cookie/storage
+ * partition on the hosting desktop, so logins persist per profile and never
+ * bleed between profiles.
+ */
+export const PreviewBrowserProfileName = Schema.String.check(
+  Schema.isPattern(/^[a-z0-9][a-z0-9_-]{0,31}$/i),
+);
+export type PreviewBrowserProfileName = typeof PreviewBrowserProfileName.Type;
+
 export const PREVIEW_VIEWPORT_MIN_DIMENSION = 240;
 export const PREVIEW_VIEWPORT_MAX_DIMENSION = 3840;
 export const PREVIEW_VIEWPORT_MAX_AREA = 3840 * 2160;
@@ -169,6 +179,13 @@ export const PreviewSessionSnapshot = Schema.Struct({
   canGoForward: Schema.Boolean,
   /** Missing snapshots from older servers are treated as fill-panel mode. */
   viewport: Schema.optional(PreviewViewportSetting),
+  /**
+   * Browser storage scope this tab was opened with. `profile:<name>` selects
+   * a named persistent partition, `ephemeral:<tabId>` an in-memory partition
+   * that dies with the app. Missing means the environment's shared persistent
+   * partition (the historical behaviour).
+   */
+  browserScope: Schema.optional(TrimmedNonEmptyString),
   updatedAt: Schema.String,
 });
 export type PreviewSessionSnapshot = typeof PreviewSessionSnapshot.Type;
@@ -184,6 +201,13 @@ export const PreviewOpenInput = Schema.Struct({
    * later (which the user would see as a visible reflow).
    */
   viewport: Schema.optional(PreviewViewportSetting),
+  /**
+   * Named persistent profile for this tab's cookies and storage. Omit for the
+   * environment's shared profile. Ignored when `ephemeral` is set.
+   */
+  profile: Schema.optional(PreviewBrowserProfileName),
+  /** Open with a completely fresh in-memory session that is discarded on quit. */
+  ephemeral: Schema.optional(Schema.Boolean),
 });
 export type PreviewOpenInput = typeof PreviewOpenInput.Type;
 

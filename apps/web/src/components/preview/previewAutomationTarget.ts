@@ -28,10 +28,20 @@ export function resolvePreviewAutomationOpenTab(
   state: PreviewAutomationSessionIndex,
   requestedTabId: string | undefined,
   reuseExistingTab: boolean,
+  requestedBrowserScope?: "ephemeral" | `profile:${string}`,
 ): string | null {
   if (!reuseExistingTab) return null;
   if (requestedTabId !== undefined) {
     return state.sessions[requestedTabId]?.tabId ?? null;
   }
-  return state.snapshot?.tabId ?? null;
+  const current = state.snapshot;
+  if (!current) return null;
+  // A requested profile or ephemeral session must not silently land in a
+  // reused tab from another storage scope; ephemeral requests always mean a
+  // fresh partition, so they never reuse.
+  if (requestedBrowserScope === "ephemeral") return null;
+  if (requestedBrowserScope !== undefined && current.browserScope !== requestedBrowserScope) {
+    return null;
+  }
+  return current.tabId;
 }

@@ -10,6 +10,14 @@ import * as Schema from "effect/Schema";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 
 const PREVIEW_PARTITION_PREFIX = "persist:t3code-preview-";
+// Ephemeral scopes get a partition WITHOUT the `persist:` prefix: Electron
+// keeps such sessions purely in memory, so cookies and storage vanish when
+// the app quits. The scope embeds the tab id, so each ephemeral tab is its
+// own throwaway partition.
+const EPHEMERAL_PARTITION_PREFIX = "t3code-preview-ephemeral-";
+const EPHEMERAL_SCOPE_MARKER = "ephemeral:";
+
+const isEphemeralScope = (scope: string): boolean => scope.includes(EPHEMERAL_SCOPE_MARKER);
 
 // Permissions granted to preview web content. `clipboard-sanitized-write` is the
 // Electron permission behind `navigator.clipboard.writeText()` — note it is NOT
@@ -121,7 +129,8 @@ export const make = Effect.gen(function* BrowserSessionMake() {
           }),
       ),
     );
-    return `${PREVIEW_PARTITION_PREFIX}${Encoding.encodeHex(digest).slice(0, 20)}`;
+    const prefix = isEphemeralScope(scope) ? EPHEMERAL_PARTITION_PREFIX : PREVIEW_PARTITION_PREFIX;
+    return `${prefix}${Encoding.encodeHex(digest).slice(0, 20)}`;
   });
 
   const getSession = Effect.fn("BrowserSession.getSession")(function* (scope = "shared") {
@@ -159,7 +168,9 @@ export const make = Effect.gen(function* BrowserSessionMake() {
 
   return BrowserSession.of({
     getPartition,
-    isPartition: (partition) => partition.startsWith(PREVIEW_PARTITION_PREFIX),
+    isPartition: (partition) =>
+      partition.startsWith(PREVIEW_PARTITION_PREFIX) ||
+      partition.startsWith(EPHEMERAL_PARTITION_PREFIX),
     getSession,
     clearCookies: Effect.fn("BrowserSession.clearCookies")(function* () {
       const sessions = yield* SynchronizedRef.get(sessionsRef);
