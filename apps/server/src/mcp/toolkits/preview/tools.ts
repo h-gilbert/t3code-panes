@@ -1,5 +1,7 @@
 import {
   PreviewAutomationClickInput,
+  PreviewAutomationCloseInput,
+  PreviewAutomationCloseResult,
   PreviewAutomationError,
   PreviewAutomationEvaluateInput,
   PreviewAutomationNavigateInput,
@@ -204,6 +206,17 @@ export const PreviewRecordingStopTool = safeBrowserTool(
   }).annotate(Tool.Title, "Stop browser recording"),
 );
 
+export const PreviewCloseTool = safeBrowserTool(
+  Tool.make("preview_close", {
+    description:
+      "Close the collaborative browser tab selected by tabId, or this agent session's current tab when omitted. Ends the shared session and removes the tab from every connected client, including its inline preview.",
+    parameters: PreviewAutomationCloseInput,
+    success: PreviewAutomationCloseResult,
+    failure: PreviewAutomationError,
+    dependencies,
+  }).annotate(Tool.Title, "Close browser preview"),
+);
+
 export const PreviewToolkit = Toolkit.make(
   PreviewStatusTool,
   PreviewOpenTool,
@@ -219,6 +232,7 @@ export const PreviewToolkit = Toolkit.make(
   PreviewWaitForTool,
   PreviewRecordingStartTool,
   PreviewRecordingStopTool,
+  PreviewCloseTool,
 );
 
 export const PreviewStandardToolkit = Toolkit.make(
@@ -235,6 +249,7 @@ export const PreviewStandardToolkit = Toolkit.make(
   PreviewWaitForTool,
   PreviewRecordingStartTool,
   PreviewRecordingStopTool,
+  PreviewCloseTool,
 );
 
 export const PreviewSnapshotToolkit = Toolkit.make(PreviewSnapshotTool);

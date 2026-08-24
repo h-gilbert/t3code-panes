@@ -1,7 +1,8 @@
 import { expect, it } from "@effect/vitest";
+import * as Context from "effect/Context";
 import { Tool } from "effect/unstable/ai";
 
-import { PreviewToolkit } from "./tools.ts";
+import { PreviewStandardToolkit, PreviewToolkit } from "./tools.ts";
 
 const schemaHasDescription = (schema: unknown): boolean => {
   if (!schema || typeof schema !== "object") return false;
@@ -71,4 +72,17 @@ it("exports exact object result schemas for preview actions", () => {
       description: "The preview action completed successfully.",
     });
   }
+});
+
+it("registers preview_close in both agent-facing toolkits", () => {
+  const tool = PreviewToolkit.tools.preview_close;
+  expect(tool).toBeDefined();
+  expect(PreviewStandardToolkit.tools.preview_close).toBeDefined();
+  // Closing a preview tab discards no user data; it must not be flagged
+  // destructive, or cautious agent harnesses will refuse to call it.
+  expect(Context.get(tool.annotations, Tool.Destructive)).toBe(false);
+  const resultSchema = Tool.getJsonSchemaFromSchema(tool.successSchema) as {
+    readonly properties?: Record<string, unknown>;
+  };
+  expect(Object.keys(resultSchema.properties ?? {})).toEqual(["tabId", "closed"]);
 });

@@ -29,7 +29,8 @@ import {
   reconcilePreviewServerSessions,
   updatePreviewServerSnapshot,
 } from "~/previewStateStore";
-import { usePreviewMiniPlayerStore } from "~/previewMiniPlayerStore";
+import { selectThreadPreviewMiniPlayer, usePreviewMiniPlayerStore } from "~/previewMiniPlayerStore";
+import { useRightPanelStore } from "~/rightPanelStore";
 import { resolveBrowserNavigationTarget } from "~/browser/browserTargetResolver";
 import {
   readActiveBrowserRecordingTargets,
@@ -47,6 +48,7 @@ import { previewEnvironment } from "~/state/preview";
 import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
 import { useAtomCommand } from "~/state/use-atom-command";
 
+import { closePreviewSession } from "./closePreviewSession";
 import { previewBridge } from "./previewBridge";
 import {
   PreviewAutomationOperationError,
@@ -287,6 +289,9 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
     reportFailure: false,
   });
   const resize = useAtomCommand(previewEnvironment.resize, {
+    reportFailure: false,
+  });
+  const closePreview = useAtomCommand(previewEnvironment.close, {
     reportFailure: false,
   });
   const respondToAutomation = useAtomCommand(
@@ -668,6 +673,32 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
             }
             return { ...artifact, tabId: stopTabId };
           }
+          case "close": {
+            const closeTabId = tabId;
+            if (!closeTabId || !state.sessions[closeTabId]) {
+              throw new PreviewAutomationTargetUnavailableError(unavailableTarget);
+            }
+            const result = await closePreviewSession({
+              closePreview,
+              snapshot: state.sessions[closeTabId] ?? null,
+              tabId: closeTabId,
+              threadRef,
+            });
+            if (result._tag === "Failure") {
+              return raiseAtomCommandFailure(result);
+            }
+            // The session is gone; remove every client presentation of the
+            // tab so a close by the agent never strands an orphaned surface.
+            const miniPlayer = selectThreadPreviewMiniPlayer(
+              usePreviewMiniPlayerStore.getState().byThreadKey,
+              threadRef,
+            );
+            if (miniPlayer?.tabId === closeTabId) {
+              usePreviewMiniPlayerStore.getState().close(threadRef);
+            }
+            useRightPanelStore.getState().closeSurface(threadRef, `browser:${closeTabId}`);
+            return { tabId: closeTabId, closed: true };
+          }
         }
       } catch (cause) {
         throw PreviewAutomationOperationError.fromCause({
@@ -680,7 +711,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
         });
       }
     },
-    [environmentId, listPreviews, open, registry, resize],
+    [closePreview, environmentId, listPreviews, open, registry, resize],
   );
   const [requestHandlerAtom] = useState(() => Atom.make({ handle: handleRequest }));
   const setRequestHandler = useAtomSet(requestHandlerAtom);

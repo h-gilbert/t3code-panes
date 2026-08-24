@@ -43,6 +43,7 @@ export const PREVIEW_AUTOMATION_OPERATIONS = [
   ...PREVIEW_AUTOMATION_V1_OPERATIONS,
   "resize",
   "setColorScheme",
+  "close",
 ] as const;
 
 export const PreviewAutomationOperation = Schema.Literals(PREVIEW_AUTOMATION_OPERATIONS);
@@ -62,6 +63,15 @@ const PreviewAutomationTabTargetFields = {
 
 export const PreviewAutomationTabTargetInput = Schema.Struct(PreviewAutomationTabTargetFields);
 export type PreviewAutomationTabTargetInput = typeof PreviewAutomationTabTargetInput.Type;
+
+export const PreviewAutomationCloseInput = Schema.Struct(PreviewAutomationTabTargetFields);
+export type PreviewAutomationCloseInput = typeof PreviewAutomationCloseInput.Type;
+
+export const PreviewAutomationCloseResult = Schema.Struct({
+  tabId: PreviewTabId,
+  closed: Schema.Boolean,
+});
+export type PreviewAutomationCloseResult = typeof PreviewAutomationCloseResult.Type;
 
 export const PreviewAutomationStatus = Schema.Struct({
   available: Schema.Boolean,

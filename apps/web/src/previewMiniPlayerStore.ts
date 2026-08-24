@@ -16,6 +16,8 @@ export interface PreviewMiniPlayerState {
   readonly tabId: string;
   readonly position: PreviewMiniPlayerPosition | null;
   readonly size: PreviewMiniPlayerSize | null;
+  /** Fills the window instead of floating; position/size are kept for restore. */
+  readonly maximized: boolean;
 }
 
 interface PreviewMiniPlayerStoreState {
@@ -23,6 +25,7 @@ interface PreviewMiniPlayerStoreState {
   readonly open: (ref: ScopedThreadRef, tabId: string) => void;
   readonly close: (ref: ScopedThreadRef) => void;
   readonly move: (ref: ScopedThreadRef, tabId: string, position: PreviewMiniPlayerPosition) => void;
+  readonly setMaximized: (ref: ScopedThreadRef, tabId: string, maximized: boolean) => void;
   readonly resize: (ref: ScopedThreadRef, tabId: string, size: PreviewMiniPlayerSize) => void;
   readonly removeThread: (ref: ScopedThreadRef) => void;
 }
@@ -41,6 +44,7 @@ export const usePreviewMiniPlayerStore = create<PreviewMiniPlayerStoreState>()((
             tabId,
             position: current?.position ?? null,
             size: current?.size ?? null,
+            maximized: current?.maximized ?? false,
           },
         },
       };
@@ -51,6 +55,18 @@ export const usePreviewMiniPlayerStore = create<PreviewMiniPlayerStoreState>()((
       if (!(threadKey in state.byThreadKey)) return state;
       const { [threadKey]: _closed, ...byThreadKey } = state.byThreadKey;
       return { byThreadKey };
+    }),
+  setMaximized: (ref, tabId, maximized) =>
+    set((state) => {
+      const threadKey = scopedThreadKey(ref);
+      const current = state.byThreadKey[threadKey];
+      if (!current || current.tabId !== tabId || current.maximized === maximized) return state;
+      return {
+        byThreadKey: {
+          ...state.byThreadKey,
+          [threadKey]: { ...current, maximized },
+        },
+      };
     }),
   move: (ref, tabId, position) =>
     set((state) => {

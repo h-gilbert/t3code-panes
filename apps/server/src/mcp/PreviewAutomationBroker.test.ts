@@ -669,6 +669,13 @@ it.effect("does not route new operations to legacy hosts that did not advertise 
 
       expect(error).toBeInstanceOf(PreviewAutomationNoAvailableHostError);
       expect(error).toMatchObject({ operation: "resize", environmentId: scope.environmentId });
+
+      const closeError = yield* broker
+        .invoke<void>({ scope, operation: "close", input: {} })
+        .pipe(Effect.flip);
+
+      expect(closeError).toBeInstanceOf(PreviewAutomationNoAvailableHostError);
+      expect(closeError).toMatchObject({ operation: "close", environmentId: scope.environmentId });
     }),
   ),
 );

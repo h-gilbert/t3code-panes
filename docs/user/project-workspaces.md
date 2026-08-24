@@ -45,5 +45,10 @@ On macOS desktop, the titlebar strip remains available for the traffic lights, w
 and workspace controls. It disappears in fullscreen so the panes use the entire window; the same
 actions remain available through their shortcuts.
 
+When an agent opens the shared browser, it appears as a floating preview inside the pane. Its
+header bar stays visible: drag it to move the preview, and use the header buttons to dock it into
+the right panel, pop it into a separate window, expand it to fill the T3 Code window, or close the
+browser. Agents can also close the browser themselves when they finish with it.
+
 Workspace assignments and layouts are stored locally in the browser or desktop app. Clearing local
 storage resets them.

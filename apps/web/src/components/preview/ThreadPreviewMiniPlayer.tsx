@@ -1,7 +1,13 @@
 "use client";
 
 import type { ScopedThreadRef } from "@t3tools/contracts";
-import { PanelRightIcon, PictureInPicture2, XIcon } from "lucide-react";
+import {
+  Maximize2Icon,
+  Minimize2Icon,
+  PanelRightIcon,
+  PictureInPicture2,
+  XIcon,
+} from "lucide-react";
 import { type PointerEvent as ReactPointerEvent, useLayoutEffect, useRef, useState } from "react";
 
 import { BrowserSurfaceSlot } from "~/browser/BrowserSurfaceSlot";
@@ -13,6 +19,10 @@ import { useThreadPreviewState } from "~/previewStateStore";
 import { selectThreadPreviewMiniPlayer, usePreviewMiniPlayerStore } from "~/previewMiniPlayerStore";
 import { useRightPanelStore } from "~/rightPanelStore";
 
+import { previewEnvironment } from "~/state/preview";
+import { useAtomCommand } from "~/state/use-atom-command";
+
+import { closePreviewSession } from "./closePreviewSession";
 import { previewBridge } from "./previewBridge";
 import {
   clampPreviewMiniPlayerPosition,
@@ -62,8 +72,30 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
     miniPlayer?.tabId === tabId && miniPlayer.size
       ? miniPlayer.size
       : PREVIEW_MINI_PLAYER_DEFAULT_SIZE;
-  const close = () => {
+  const maximized = miniPlayer?.tabId === tabId && miniPlayer.maximized;
+  const closePreview = useAtomCommand(previewEnvironment.close, {
+    reportFailure: false,
+  });
+  const closeBrowser = () => {
     usePreviewMiniPlayerStore.getState().close(threadRef);
+    void closePreviewSession({
+      closePreview,
+      snapshot,
+      tabId,
+      threadRef,
+    }).then((result) => {
+      if (result._tag === "Failure") {
+        toastManager.add({
+          type: "error",
+          title: "Unable to close the browser",
+          description: "The preview session could not be closed. It may already be gone.",
+        });
+      }
+    });
+  };
+
+  const toggleMaximized = () => {
+    usePreviewMiniPlayerStore.getState().setMaximized(threadRef, tabId, !maximized);
   };
 
   const openInPanel = () => {
@@ -86,6 +118,7 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
   };
 
   useLayoutEffect(() => {
+    if (maximized) return;
     const clampAndMove = () => {
       const root = rootRef.current;
       const parent = root?.offsetParent;
@@ -118,10 +151,10 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
     observer.observe(root);
     observer.observe(parent);
     return () => observer.disconnect();
-  }, [bottomInset, position, tabId, threadRef]);
+  }, [bottomInset, maximized, position, tabId, threadRef]);
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || maximized) return;
     const root = rootRef.current;
     const parent = root?.offsetParent;
     if (!root || !(parent instanceof HTMLElement)) return;
@@ -166,7 +199,7 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
   };
 
   const handleResizePointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || maximized) return;
     const root = rootRef.current;
     const parent = root?.offsetParent;
     if (!root || !(parent instanceof HTMLElement)) return;
@@ -231,119 +264,158 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
       ref={rootRef}
       aria-label="Floating browser preview"
       data-preview-mini-player={tabId}
-      className="pointer-events-none absolute select-none"
+      className={
+        maximized
+          ? "pointer-events-none fixed z-40 flex select-none flex-col"
+          : "pointer-events-none absolute flex select-none flex-col"
+      }
       style={
-        position
-          ? { left: position.x, top: position.y, width: size.width, height: size.height }
-          : {
+        maximized
+          ? {
+              left: PREVIEW_MINI_PLAYER_EDGE_GAP,
               right: PREVIEW_MINI_PLAYER_EDGE_GAP,
               top: PREVIEW_MINI_PLAYER_EDGE_GAP,
-              width: size.width,
-              height: size.height,
+              bottom: PREVIEW_MINI_PLAYER_EDGE_GAP,
             }
+          : position
+            ? { left: position.x, top: position.y, width: size.width, height: size.height }
+            : {
+                right: PREVIEW_MINI_PLAYER_EDGE_GAP,
+                top: PREVIEW_MINI_PLAYER_EDGE_GAP,
+                width: size.width,
+                height: size.height,
+              }
       }
     >
-      <div className="group pointer-events-auto absolute right-2 top-2 z-[34] size-3">
-        <div
-          aria-hidden="true"
-          className="absolute right-0 top-0 size-2 rounded-full bg-foreground/25 shadow-sm ring-1 ring-background/70 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0"
-        />
-        <div
-          className="pointer-events-none absolute right-0 top-0 flex h-8 cursor-grab items-center gap-0.5 rounded-lg border border-border/80 bg-popover/92 p-0.5 opacity-0 shadow-lg/20 backdrop-blur-xl transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 active:cursor-grabbing"
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={endDrag}
-          onPointerCancel={endDrag}
-        >
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label="Open preview in right panel"
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onClick={openInPanel}
-                />
-              }
-            >
-              <PanelRightIcon />
-            </TooltipTrigger>
-            <TooltipPopup side="top">Open in right panel</TooltipPopup>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant={desktopOverlay?.pictureInPicture ? "secondary" : "ghost"}
-                  size="icon-xs"
-                  aria-label={
-                    desktopOverlay?.pictureInPicture
-                      ? "Close popped-out preview"
-                      : "Pop preview into separate window"
-                  }
-                  disabled={!desktopOverlay?.hasWebContents}
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onClick={toggleNativePictureInPicture}
-                />
-              }
-            >
-              <PictureInPicture2 />
-            </TooltipTrigger>
-            <TooltipPopup side="top">
-              {desktopOverlay?.pictureInPicture
-                ? "Close separate window"
-                : "Pop into separate window"}
-            </TooltipPopup>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label="Close floating preview"
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onClick={close}
-                />
-              }
-            >
-              <XIcon />
-            </TooltipTrigger>
-            <TooltipPopup side="top">Close floating preview</TooltipPopup>
-          </Tooltip>
-        </div>
+      {/* Always-visible chrome. Sits ABOVE the surface slot rather than over
+          it: on desktop the guest page is a native view composited above the
+          DOM, so any control overlapping that rect can never be hovered or
+          clicked. */}
+      <div
+        className={
+          "pointer-events-auto flex h-8 shrink-0 items-center gap-0.5 rounded-t-xl border border-b-0 border-border/80 bg-popover/92 px-1.5 shadow-lg/20 backdrop-blur-xl " +
+          (maximized ? "" : "cursor-grab active:cursor-grabbing")
+        }
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+      >
+        <span className="min-w-0 flex-1 truncate pl-1 text-[11px] text-muted-foreground">
+          {snapshot.navStatus._tag === "Idle"
+            ? "Browser"
+            : snapshot.navStatus.title.trim() || snapshot.navStatus.url.trim() || "Browser"}
+        </span>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label="Open preview in right panel"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={openInPanel}
+              />
+            }
+          >
+            <PanelRightIcon />
+          </TooltipTrigger>
+          <TooltipPopup side="bottom">Open in right panel</TooltipPopup>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant={desktopOverlay?.pictureInPicture ? "secondary" : "ghost"}
+                size="icon-xs"
+                aria-label={
+                  desktopOverlay?.pictureInPicture
+                    ? "Close popped-out preview"
+                    : "Pop preview into separate window"
+                }
+                disabled={!desktopOverlay?.hasWebContents}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={toggleNativePictureInPicture}
+              />
+            }
+          >
+            <PictureInPicture2 />
+          </TooltipTrigger>
+          <TooltipPopup side="bottom">
+            {desktopOverlay?.pictureInPicture
+              ? "Close separate window"
+              : "Pop into separate window"}
+          </TooltipPopup>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label={maximized ? "Exit full screen" : "Expand preview to full screen"}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={toggleMaximized}
+              />
+            }
+          >
+            {maximized ? <Minimize2Icon /> : <Maximize2Icon />}
+          </TooltipTrigger>
+          <TooltipPopup side="bottom">
+            {maximized ? "Exit full screen" : "Full screen"}
+          </TooltipPopup>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label="Close browser"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={closeBrowser}
+              />
+            }
+          >
+            <XIcon />
+          </TooltipTrigger>
+          <TooltipPopup side="bottom">Close browser</TooltipPopup>
+        </Tooltip>
       </div>
 
-      <div className="relative h-full min-h-0">
-        <div className="absolute inset-0 z-[29] rounded-xl bg-muted shadow-2xl/35" />
+      <div className="relative min-h-0 flex-1">
+        <div className="absolute inset-0 z-[29] rounded-b-xl bg-muted shadow-2xl/35" />
         <BrowserSurfaceSlot
           tabId={runtimeTabId}
           visible={Boolean(desktopOverlay?.hasWebContents)}
           cornerRadius={12}
           fitSourceContent
           layoutVersion={
-            position
-              ? `${position.x}:${position.y}`
-              : `initial:${bottomInset}:${defaultLayoutVersion}`
+            maximized
+              ? "maximized"
+              : position
+                ? `${position.x}:${position.y}`
+                : `initial:${bottomInset}:${defaultLayoutVersion}`
           }
           className="absolute inset-0"
         />
-        <div className="pointer-events-none absolute inset-0 z-[31] rounded-xl ring-1 ring-inset ring-border/80" />
+        <div className="pointer-events-none absolute inset-0 z-[31] rounded-b-xl ring-1 ring-inset ring-border/80" />
         {!desktopOverlay?.hasWebContents ? (
-          <div className="pointer-events-none absolute inset-0 z-[32] flex items-center justify-center rounded-xl bg-muted text-xs text-muted-foreground">
+          <div className="pointer-events-none absolute inset-0 z-[32] flex items-center justify-center rounded-b-xl bg-muted text-xs text-muted-foreground">
             Reconnecting preview…
           </div>
         ) : null}
-        <button
-          type="button"
-          aria-label="Resize floating preview"
-          className="pointer-events-auto absolute bottom-0 right-0 z-[33] size-5 cursor-nwse-resize rounded-br-xl after:absolute after:bottom-1 after:right-1 after:size-2 after:border-b after:border-r after:border-foreground/45"
-          onPointerDown={handleResizePointerDown}
-          onPointerMove={handleResizePointerMove}
-          onPointerUp={endResize}
-          onPointerCancel={endResize}
-        />
+        {!maximized ? (
+          <button
+            type="button"
+            aria-label="Resize floating preview"
+            className="pointer-events-auto absolute bottom-0 right-0 z-[33] size-5 cursor-nwse-resize rounded-br-xl after:absolute after:bottom-1 after:right-1 after:size-2 after:border-b after:border-r after:border-foreground/45"
+            onPointerDown={handleResizePointerDown}
+            onPointerMove={handleResizePointerMove}
+            onPointerUp={endResize}
+            onPointerCancel={endResize}
+          />
+        ) : null}
       </div>
     </section>
   );
