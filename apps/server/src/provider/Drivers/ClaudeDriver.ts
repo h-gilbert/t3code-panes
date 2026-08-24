@@ -81,6 +81,24 @@ const UPDATE = makePackageManagedProviderMaintenanceResolver({
   },
 });
 
+/**
+ * Read the per-instance capabilities cache, dropping a failed probe instead of
+ * retaining it for the rest of the TTL.
+ *
+ * A probe fails for transient reasons — most often a machine that slept while
+ * the `claude` subprocess was still initializing, which lands as a timeout on
+ * wake. Caching that `undefined` alongside successes pinned the provider to
+ * "Limited" for five minutes after a lid close, so the next health check gets
+ * to probe again.
+ */
+export const readCapabilitiesCache = <Key, A>(
+  cache: Cache.Cache<Key, A | undefined>,
+  key: Key,
+): Effect.Effect<A | undefined> =>
+  Cache.get(cache, key).pipe(
+    Effect.tap(() => Cache.invalidateWhen(cache, key, (value) => value === undefined)),
+  );
+
 export type ClaudeDriverEnv =
   | BackgroundPolicy.BackgroundPolicy
   | ChildProcessSpawner.ChildProcessSpawner
@@ -165,7 +183,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
 
       const checkProvider = checkClaudeProviderStatus(
         effectiveConfig,
-        () => Cache.get(capabilitiesProbeCache, capabilitiesCacheKey),
+        () => readCapabilitiesCache(capabilitiesProbeCache, capabilitiesCacheKey),
         processEnv,
         cwd,
       ).pipe(

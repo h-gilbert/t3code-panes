@@ -36,7 +36,7 @@ import { cn } from "~/lib/utils";
 import { getVirtualizedScrollFadeClassName } from "../ui/scroll-area";
 import { TooltipProvider } from "../ui/tooltip";
 import {
-  isProviderInstancePickerReady,
+  isProviderInstanceModelsUsable,
   isProviderInstancePickerVisible,
   type ProviderInstanceEntry,
 } from "../../providerInstances";
@@ -192,7 +192,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const readyInstanceSet = useMemo(() => {
     const ready = new Set<ProviderInstanceId>();
     for (const entry of instanceEntries) {
-      if (isProviderInstancePickerReady(entry)) {
+      if (isProviderInstanceModelsUsable(entry)) {
         ready.add(entry.instanceId);
       }
     }

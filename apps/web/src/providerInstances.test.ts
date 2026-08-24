@@ -5,6 +5,7 @@ import {
   deriveProviderEntriesByEnvironment,
   deriveProviderInstanceEntries,
   getDefaultProviderInstanceModel,
+  isProviderInstanceModelsUsable,
   isProviderInstancePickerReady,
   isProviderInstancePickerVisible,
   resolveDefaultProviderModelSelection,
@@ -16,6 +17,7 @@ function provider(input: {
   provider: ProviderDriverKind;
   instanceId: string;
   enabled?: boolean;
+  installed?: boolean;
   availability?: ServerProvider["availability"];
   displayName?: string;
   accentColor?: string;
@@ -28,7 +30,7 @@ function provider(input: {
     ...(input.displayName ? { displayName: input.displayName } : {}),
     ...(input.accentColor ? { accentColor: input.accentColor } : {}),
     enabled: input.enabled ?? true,
-    installed: true,
+    installed: input.installed ?? true,
     version: null,
     status: input.status ?? "ready",
     ...(input.availability ? { availability: input.availability } : {}),
@@ -68,6 +70,52 @@ describe("isProviderInstancePickerReady", () => {
     ]);
 
     expect(entry && isProviderInstancePickerReady(entry)).toBe(true);
+  });
+});
+
+describe("isProviderInstanceModelsUsable", () => {
+  const entryFor = (input: Parameters<typeof provider>[0]) =>
+    deriveProviderInstanceEntries([provider(input)])[0];
+
+  it("keeps models for an installed instance whose probe only warns", () => {
+    // A warning here means metadata could not be read (an unverifiable
+    // subscription, a CLI too old to report one) — the CLI still runs, so
+    // emptying the picker would strand the user with no model to pick.
+    const entry = entryFor({
+      provider: ProviderDriverKind.make("claudeAgent"),
+      instanceId: "claudeAgent",
+      status: "warning",
+    });
+
+    expect(entry && isProviderInstancePickerReady(entry)).toBe(false);
+    expect(entry && isProviderInstanceModelsUsable(entry)).toBe(true);
+  });
+
+  it("drops models for an instance whose CLI is not installed yet", () => {
+    const entry = entryFor({
+      provider: ProviderDriverKind.make("claudeAgent"),
+      instanceId: "claudeAgent",
+      installed: false,
+      status: "warning",
+    });
+
+    expect(entry && isProviderInstanceModelsUsable(entry)).toBe(false);
+  });
+
+  it("drops models for an errored or disabled instance", () => {
+    const errored = entryFor({
+      provider: ProviderDriverKind.make("claudeAgent"),
+      instanceId: "claudeAgent",
+      status: "error",
+    });
+    const disabled = entryFor({
+      provider: ProviderDriverKind.make("claudeAgent"),
+      instanceId: "claudeAgent",
+      enabled: false,
+    });
+
+    expect(errored && isProviderInstanceModelsUsable(errored)).toBe(false);
+    expect(disabled && isProviderInstanceModelsUsable(disabled)).toBe(false);
   });
 });
 

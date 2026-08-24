@@ -25,6 +25,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  type BackgroundPolicySnapshot,
   type ClaudeSettings,
   type CodexSettings,
   type CursorSettings,
@@ -61,30 +62,34 @@ const TestHttpClientLive = Layer.succeed(
 
 const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
 
+/** Host that is awake and reports nothing else of interest. */
+const awakePolicySnapshot = {
+  hostPower: {
+    source: "unknown",
+    idle: "unknown",
+    idleSeconds: null,
+    locked: "unknown",
+    suspended: false,
+    onBattery: "unknown",
+    lowPowerMode: "unknown",
+    thermalState: "unknown",
+    stale: true,
+    updatedAt: TEST_EPOCH,
+  },
+  leases: [],
+  activeForegroundLeaseCount: 0,
+  activeScopeKeys: [],
+  shouldRunOpportunisticWork: true,
+  updatedAt: TEST_EPOCH,
+} as const satisfies BackgroundPolicySnapshot;
+
 const BackgroundPolicyAlwaysRunLayer = Layer.mock(BackgroundPolicy.BackgroundPolicy)({
   reportClientActivity: () => Effect.void,
   removeRpcClient: () => Effect.void,
   reportHostPowerState: () => Effect.void,
-  snapshot: Effect.succeed({
-    hostPower: {
-      source: "unknown",
-      idle: "unknown",
-      idleSeconds: null,
-      locked: "unknown",
-      suspended: false,
-      onBattery: "unknown",
-      lowPowerMode: "unknown",
-      thermalState: "unknown",
-      stale: true,
-      updatedAt: TEST_EPOCH,
-    },
-    leases: [],
-    activeForegroundLeaseCount: 0,
-    activeScopeKeys: [],
-    shouldRunOpportunisticWork: true,
-    updatedAt: TEST_EPOCH,
-  }),
+  snapshot: Effect.succeed(awakePolicySnapshot),
   streamChanges: Stream.empty,
+  subscribe: Effect.succeed({ latest: awakePolicySnapshot, changes: Stream.empty }),
   hasDemand: () => Effect.succeed(true),
   shouldRunScopeWork: () => Effect.succeed(true),
   shouldRunOpportunisticWork: Effect.succeed(true),

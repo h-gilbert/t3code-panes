@@ -5,6 +5,7 @@ import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import {
+  isProviderInstanceModelsUsable,
   isProviderInstancePickerReady,
   shouldShowInstanceBadge,
   type ProviderInstanceEntry,
@@ -133,7 +134,11 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
 
           {/* Instance buttons (one per configured instance — built-in + custom) */}
           {props.instanceEntries.map((entry) => {
-            const isUnavailable = !isProviderInstancePickerReady(entry);
+            // A limited-but-installed instance stays selectable; only a
+            // provider whose models cannot start is disabled. Both still
+            // explain themselves in the tooltip.
+            const isUnavailable = !isProviderInstanceModelsUsable(entry);
+            const isDegraded = !isProviderInstancePickerReady(entry);
             const isContextDisabled = props.disabledInstanceIds?.has(entry.instanceId) ?? false;
             const isDisabled = isUnavailable || isContextDisabled;
             const isSelected = props.selectedInstanceId === entry.instanceId;
@@ -141,7 +146,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
             const showNewBadge = props.newBadgeInstanceIds?.has(entry.instanceId) ?? false;
             const showInstanceBadge = shouldShowInstanceBadge(entry, props.instanceEntries);
 
-            const tooltip = isUnavailable
+            const tooltip = isDegraded
               ? describeUnavailableInstance(entry)
               : isContextDisabled
                 ? (props.getDisabledInstanceTooltip?.(entry) ?? entry.displayName)

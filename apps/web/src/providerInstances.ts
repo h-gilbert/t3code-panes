@@ -75,6 +75,21 @@ export function isProviderInstancePickerReady(entry: ProviderInstanceEntry): boo
   return entry.enabled && entry.isAvailable && entry.status === "ready";
 }
 
+/**
+ * Whether an instance's models can still be picked and started.
+ *
+ * Looser than `isProviderInstancePickerReady`: a `warning` probe on an
+ * installed CLI means some metadata could not be read (an unverifiable
+ * subscription, a CLI too old to report one), not that the provider cannot
+ * run. Gating the model list on `ready` emptied the picker for those, which
+ * left the user unable to pick any model from a provider that works fine.
+ * A `warning` on an uninstalled CLI is still the pending/absent case and
+ * stays excluded.
+ */
+export function isProviderInstanceModelsUsable(entry: ProviderInstanceEntry): boolean {
+  return entry.enabled && entry.isAvailable && entry.installed && entry.status !== "error";
+}
+
 /** Picker rails contain configured, enabled instances only. */
 export function isProviderInstancePickerVisible(entry: ProviderInstanceEntry): boolean {
   return entry.enabled;

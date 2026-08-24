@@ -14,6 +14,7 @@ import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import * as CodexErrors from "effect-codex-app-server/errors";
 import {
+  type BackgroundPolicySnapshot,
   ClaudeSettings,
   CodexSettings,
   DEFAULT_SERVER_SETTINGS,
@@ -74,30 +75,34 @@ const TestHttpClientLive = Layer.succeed(
   ),
 );
 
+/** Host that is awake and reports nothing else of interest. */
+const awakePolicySnapshot = {
+  hostPower: {
+    source: "unknown",
+    idle: "unknown",
+    idleSeconds: null,
+    locked: "unknown",
+    suspended: false,
+    onBattery: "unknown",
+    lowPowerMode: "unknown",
+    thermalState: "unknown",
+    stale: true,
+    updatedAt: TEST_EPOCH,
+  },
+  leases: [],
+  activeForegroundLeaseCount: 0,
+  activeScopeKeys: [],
+  shouldRunOpportunisticWork: true,
+  updatedAt: TEST_EPOCH,
+} as const satisfies BackgroundPolicySnapshot;
+
 const BackgroundPolicyAlwaysRunLayer = Layer.mock(BackgroundPolicy.BackgroundPolicy)({
   reportClientActivity: () => Effect.void,
   removeRpcClient: () => Effect.void,
   reportHostPowerState: () => Effect.void,
-  snapshot: Effect.succeed({
-    hostPower: {
-      source: "unknown",
-      idle: "unknown",
-      idleSeconds: null,
-      locked: "unknown",
-      suspended: false,
-      onBattery: "unknown",
-      lowPowerMode: "unknown",
-      thermalState: "unknown",
-      stale: true,
-      updatedAt: TEST_EPOCH,
-    },
-    leases: [],
-    activeForegroundLeaseCount: 0,
-    activeScopeKeys: [],
-    shouldRunOpportunisticWork: true,
-    updatedAt: TEST_EPOCH,
-  }),
+  snapshot: Effect.succeed(awakePolicySnapshot),
   streamChanges: Stream.empty,
+  subscribe: Effect.succeed({ latest: awakePolicySnapshot, changes: Stream.empty }),
   hasDemand: () => Effect.succeed(true),
   shouldRunScopeWork: () => Effect.succeed(true),
   shouldRunOpportunisticWork: Effect.succeed(true),
@@ -2291,7 +2296,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           assert.strictEqual(status.auth.status, "unknown");
           assert.strictEqual(
             status.message,
-            "Could not verify Claude authentication status from initialization result.",
+            "Could not read Claude account details. Claude is installed and can still run.",
           );
         }).pipe(
           Effect.provide(

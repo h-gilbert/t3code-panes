@@ -1,5 +1,6 @@
 import { describe, it, assert } from "@effect/vitest";
 import {
+  type BackgroundPolicySnapshot,
   DEFAULT_SERVER_SETTINGS,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -99,31 +100,40 @@ const refreshedSnapshotSecond: ServerProvider = {
   message: "Refreshed provider availability again.",
 };
 
-function makeBackgroundPolicyLayer(shouldRunScopeWork: boolean) {
+/** Policy snapshot whose only interesting field is the host suspend state. */
+function policySnapshot(suspended: boolean): BackgroundPolicySnapshot {
+  return {
+    hostPower: {
+      source: "unknown",
+      idle: "unknown",
+      idleSeconds: null,
+      locked: "unknown",
+      suspended,
+      onBattery: "unknown",
+      lowPowerMode: "unknown",
+      thermalState: "unknown",
+      stale: true,
+      updatedAt: TEST_EPOCH,
+    },
+    leases: [],
+    activeForegroundLeaseCount: 0,
+    activeScopeKeys: [],
+    shouldRunOpportunisticWork: true,
+    updatedAt: TEST_EPOCH,
+  };
+}
+
+function makeBackgroundPolicyLayer(
+  shouldRunScopeWork: boolean,
+  changes: Stream.Stream<BackgroundPolicySnapshot> = Stream.empty,
+) {
   return Layer.mock(BackgroundPolicy.BackgroundPolicy)({
     reportClientActivity: () => Effect.void,
     removeRpcClient: () => Effect.void,
     reportHostPowerState: () => Effect.void,
-    snapshot: Effect.succeed({
-      hostPower: {
-        source: "unknown",
-        idle: "unknown",
-        idleSeconds: null,
-        locked: "unknown",
-        suspended: false,
-        onBattery: "unknown",
-        lowPowerMode: "unknown",
-        thermalState: "unknown",
-        stale: true,
-        updatedAt: TEST_EPOCH,
-      },
-      leases: [],
-      activeForegroundLeaseCount: 0,
-      activeScopeKeys: [],
-      shouldRunOpportunisticWork: true,
-      updatedAt: TEST_EPOCH,
-    }),
-    streamChanges: Stream.empty,
+    snapshot: Effect.succeed(policySnapshot(false)),
+    streamChanges: changes,
+    subscribe: Effect.succeed({ latest: policySnapshot(false), changes }),
     hasDemand: () => Effect.succeed(shouldRunScopeWork),
     shouldRunScopeWork: () => Effect.succeed(shouldRunScopeWork),
     shouldRunOpportunisticWork: Effect.succeed(shouldRunScopeWork),
@@ -190,6 +200,71 @@ describe("makeManagedServerProvider", () => {
           assert.strictEqual(yield* Ref.get(checkCalls), 1);
         }),
       ).pipe(Effect.provide(AlwaysRunTestLayer)),
+  );
+
+  it.effect("re-checks the provider when the host resumes from suspend", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        // A probe in flight when the host suspends wakes up already timed out,
+        // so the snapshot on resume reports a failure that is no longer true.
+        const power = yield* PubSub.unbounded<BackgroundPolicySnapshot>();
+        const checkCalls = yield* Ref.make(0);
+        yield* makeManagedServerProvider<TestSettings>({
+          maintenanceCapabilities,
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          checkProvider: Ref.update(checkCalls, (count) => count + 1).pipe(
+            Effect.as(refreshedSnapshot),
+          ),
+          refreshInterval: "1 hour",
+        }).pipe(Effect.provide(makeBackgroundPolicyLayer(true, Stream.fromPubSub(power))));
+
+        yield* Effect.yieldNow;
+        assert.strictEqual(yield* Ref.get(checkCalls), 1);
+
+        yield* PubSub.publish(power, policySnapshot(true));
+        yield* Effect.yieldNow;
+        assert.strictEqual(yield* Ref.get(checkCalls), 1);
+
+        yield* PubSub.publish(power, policySnapshot(false));
+        yield* Effect.yieldNow;
+        yield* Effect.yieldNow;
+        assert.strictEqual(yield* Ref.get(checkCalls), 2);
+      }),
+    ).pipe(Effect.provide(ServerSettingsTestLayer)),
+  );
+
+  it.effect("does not re-check on power changes that are not a resume", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const power = yield* PubSub.unbounded<BackgroundPolicySnapshot>();
+        const checkCalls = yield* Ref.make(0);
+        yield* makeManagedServerProvider<TestSettings>({
+          maintenanceCapabilities,
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => Effect.succeed(initialSnapshot),
+          checkProvider: Ref.update(checkCalls, (count) => count + 1).pipe(
+            Effect.as(refreshedSnapshot),
+          ),
+          refreshInterval: "1 hour",
+        }).pipe(Effect.provide(makeBackgroundPolicyLayer(true, Stream.fromPubSub(power))));
+
+        yield* Effect.yieldNow;
+        assert.strictEqual(yield* Ref.get(checkCalls), 1);
+
+        // Unrelated policy churn while the host stays awake must not spawn a
+        // provider probe per event.
+        yield* PubSub.publish(power, policySnapshot(false));
+        yield* PubSub.publish(power, policySnapshot(false));
+        yield* Effect.yieldNow;
+        yield* Effect.yieldNow;
+        assert.strictEqual(yield* Ref.get(checkCalls), 1);
+      }),
+    ).pipe(Effect.provide(ServerSettingsTestLayer)),
   );
 
   it.effect("skips periodic provider refreshes without foreground provider-status demand", () =>

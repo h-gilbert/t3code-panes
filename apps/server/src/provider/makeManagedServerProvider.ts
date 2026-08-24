@@ -187,6 +187,24 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
     Effect.asVoid(applySnapshot(nextSettings)),
   ).pipe(Effect.forkScoped);
 
+  // A host suspended mid-probe wakes with that probe already timed out, so the
+  // snapshot on resume reports a failure that is no longer true. Re-check on
+  // the suspended -> resumed edge instead of showing it until the next
+  // scheduled refresh, which can be a full interval away.
+  const powerSubscription = yield* backgroundPolicy.subscribe;
+  const wasSuspendedRef = yield* Ref.make(powerSubscription.latest.hostPower.suspended);
+  yield* Stream.runForEach(powerSubscription.changes, (policySnapshot) =>
+    Ref.getAndSet(wasSuspendedRef, policySnapshot.hostPower.suspended).pipe(
+      Effect.flatMap((wasSuspended) =>
+        wasSuspended && !policySnapshot.hostPower.suspended
+          ? Effect.flatMap(hasProviderStatusDemand, (shouldRefresh) =>
+              shouldRefresh ? Effect.asVoid(refreshSnapshot()) : Effect.void,
+            )
+          : Effect.void,
+      ),
+    ),
+  ).pipe(Effect.ignoreCause({ log: true }), Effect.forkScoped);
+
   yield* Effect.forever(
     getRefreshInterval.pipe(
       Effect.flatMap((refreshInterval) =>

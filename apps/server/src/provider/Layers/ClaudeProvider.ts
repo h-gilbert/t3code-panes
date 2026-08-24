@@ -943,7 +943,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
         version: parsedVersion,
         status: "warning",
         auth: { status: "unknown" },
-        message: "Could not verify Claude authentication status from initialization result.",
+        message: "Could not read Claude account details. Claude is installed and can still run.",
       },
     });
   }
