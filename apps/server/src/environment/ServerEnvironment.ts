@@ -14,6 +14,7 @@ import { readAgentActivityPublishingActive } from "../cloud/config.ts";
 import { resolveServerSelfUpdateCapability } from "../cloud/selfUpdate.ts";
 import { resolveServiceLauncherMode } from "../cloud/serviceLauncherClient.ts";
 import * as ServerConfig from "../config.ts";
+import { readSelfHostedNotificationsConfigured } from "../notifications/config.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { resolveServerEnvironmentLabel } from "./ServerEnvironmentLabel.ts";
 
@@ -162,10 +163,16 @@ export const make = Effect.gen(function* () {
     // The publish opt-in and relay link change at runtime (`t3 connect
     // publish`, the client settings toggle), so the capability is read per
     // descriptor request rather than baked in at startup.
-    getDescriptor: readAgentActivityPublishingActive(secrets).pipe(
-      Effect.map((agentActivityPublishing) => ({
+    getDescriptor: Effect.all([
+      readAgentActivityPublishingActive(secrets),
+      readSelfHostedNotificationsConfigured(secrets),
+    ]).pipe(
+      Effect.map(([managedPublishing, selfHostedPublishing]) => ({
         ...descriptor,
-        capabilities: { ...descriptor.capabilities, agentActivityPublishing },
+        capabilities: {
+          ...descriptor.capabilities,
+          agentActivityPublishing: managedPublishing || selfHostedPublishing,
+        },
       })),
     ),
   });

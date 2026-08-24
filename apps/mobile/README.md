@@ -50,6 +50,22 @@ Build and install a self-contained Release app that does not need Metro:
 vp run ios:release
 ```
 
+For a paid Apple Developer account, a fully self-hosted build can use your own Team ID and bundle
+identifier. This keeps push-notification entitlements and Live Activities, but removes the hosted
+T3 Connect/Clerk configuration, T3's Expo update channel, the default hosted telemetry endpoint,
+and the optional iOS system Share extension:
+
+```bash
+T3CODE_MOBILE_SELF_HOSTED=1 \
+T3CODE_IOS_TEAM_ID=YOUR_TEAM_ID \
+T3CODE_IOS_BUNDLE_ID=com.example.t3code \
+vp run ios:release
+```
+
+The bundle identifier must match the App ID used by your APNs key. A development build uses the
+APNs sandbox; a Release build installed from Xcode also uses the entitlement selected by its
+provisioning profile.
+
 The Personal Team equivalent also needs a unique bundle identifier:
 
 ```bash

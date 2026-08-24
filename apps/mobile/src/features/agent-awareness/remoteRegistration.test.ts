@@ -107,6 +107,7 @@ vi.mock("expo-notifications", () => ({
   addPushTokenListener: vi.fn(() => ({ remove: vi.fn() })),
   getDevicePushTokenAsync: vi.fn(() => Promise.resolve({ type: "ios", data: "apns-token" })),
   getPermissionsAsync: vi.fn(() => Promise.resolve({ granted: true })),
+  requestPermissionsAsync: vi.fn(() => Promise.resolve({ granted: true, canAskAgain: true })),
 }));
 
 vi.mock("expo-crypto", () => ({

@@ -34,7 +34,13 @@ import {
 import AgentActivity, { type AgentActivityProps } from "../../widgets/AgentActivity";
 import { resolveCloudPublicConfig } from "../cloud/publicConfig";
 import { supportsAgentAwarenessPush } from "./capabilities";
+import { requestAgentNotificationPermission } from "./notificationPermissions";
 import { makeRelayDeviceRegistrationRequest, resolveApsEnvironment } from "./registrationPayload";
+import {
+  readDirectAgentActivity,
+  registerDirectLiveActivity,
+  registerDirectNotificationDevice,
+} from "./directRegistration";
 
 const REMOTE_ACTIVITY_REGISTRATION_RETRY_MS = 15_000;
 
@@ -81,6 +87,7 @@ const ACTIVITY_TOKEN_REREGISTER_INTERVAL_MS = 60_000;
 const registeredActivityPushTokens = new Map<string, number>();
 let pushTokenSubscription: { remove: () => void } | null = null;
 let appStateSubscription: { remove: () => void } | null = null;
+let directNotificationPermissionRequested = false;
 
 // Whether the relay has actually accepted this device's registration. The
 // notification/Live Activity settings toggles must reflect this rather than
@@ -163,6 +170,21 @@ function canRegisterRemoteLiveActivities(): boolean {
   return Platform.OS === "ios";
 }
 
+function isSelfHostedBuild(): boolean {
+  return Constants.expoConfig?.extra?.selfHostedBuild === true;
+}
+
+function directNotificationConnections(): ReadonlyArray<SavedRemoteConnection> {
+  if (!isSelfHostedBuild()) return [];
+  return [...environmentConnections.values()].filter(
+    (connection) => connection.relayManaged !== true && connection.bearerToken !== null,
+  );
+}
+
+function primaryDirectNotificationConnection(): SavedRemoteConnection | null {
+  return directNotificationConnections()[0] ?? null;
+}
+
 export function shouldRegisterAgentAwarenessDeviceForProvider(
   previousIdentity: string | null,
   identity: string | undefined,
@@ -186,6 +208,12 @@ export function setAgentAwarenessRelayTokenProvider(
   relayTokenProvider = provider;
   relayTokenProviderIdentity = provider ? (identity ?? null) : null;
   if (!provider) {
+    if (isSelfHostedBuild()) {
+      ensurePushTokenListener();
+      ensureAppStateListener();
+      enqueueDeviceRegistration({}, "direct device registration after startup failed");
+      return;
+    }
     pushTokenSubscription?.remove();
     pushTokenSubscription = null;
     appStateSubscription?.remove();
@@ -473,7 +501,10 @@ export function armAgentAwarenessLiveActivityForLocalWork(input: {
   readonly threadTitle: string;
   readonly projectTitle: string;
 }): void {
-  if (!canRegisterRemoteLiveActivities() || !relayTokenProvider) {
+  if (
+    !canRegisterRemoteLiveActivities() ||
+    (!relayTokenProvider && primaryDirectNotificationConnection() === null)
+  ) {
     return;
   }
   if (!environmentPublishesAgentActivity(input.environmentId)) {
@@ -538,6 +569,12 @@ function readAgentActivitySnapshot(): Effect.Effect<
   ManagedRelay.ManagedRelayClient
 > {
   return Effect.gen(function* () {
+    const directConnection = primaryDirectNotificationConnection();
+    if (directConnection) {
+      return yield* readDirectAgentActivity(directConnection).pipe(
+        Effect.map((response) => ({ aggregate: response.aggregate })),
+      );
+    }
     if (!readRelayConfig()) return null;
     const token = yield* relayToken("read-live-activity-registration-relay-token");
     if (!token) {
@@ -559,6 +596,14 @@ function registerLiveActivityWithRelay(
   body: RelayLiveActivityRegistrationRequest,
 ): Effect.Effect<boolean, unknown, ManagedRelay.ManagedRelayClient> {
   return Effect.gen(function* () {
+    const directConnection = primaryDirectNotificationConnection();
+    if (directConnection) {
+      const response = yield* registerDirectLiveActivity({
+        connection: directConnection,
+        payload: body,
+      });
+      return response.ok;
+    }
     if (!readRelayConfig()) return false;
     const token = yield* relayToken("read-live-activity-registration-relay-token");
     if (!token) {
@@ -728,20 +773,46 @@ function registerDevice(
       notificationsEnabled: pushTokenRegistration.notificationsEnabled,
     });
     const bundleId = Constants.expoConfig?.ios?.bundleIdentifier?.trim();
-    yield* registerDeviceWithRelay(
-      makeRelayDeviceRegistrationRequest({
-        deviceId,
-        label: Constants.deviceName?.trim() || "iOS device",
-        iosMajorVersion: iosMajorVersion(),
-        appVersion: Constants.expoConfig?.version,
-        ...(bundleId ? { bundleId } : {}),
-        apsEnvironment: resolveApsEnvironment(Constants.expoConfig?.extra?.appVariant),
-        ...(pushTokenRegistration.pushToken ? { pushToken: pushTokenRegistration.pushToken } : {}),
-        notificationsEnabled: pushTokenRegistration.notificationsEnabled,
-        preferences,
-      }),
-      expectedGeneration,
+    const body = makeRelayDeviceRegistrationRequest({
+      deviceId,
+      label: Constants.deviceName?.trim() || "iOS device",
+      iosMajorVersion: iosMajorVersion(),
+      appVersion: Constants.expoConfig?.version,
+      ...(bundleId ? { bundleId } : {}),
+      apsEnvironment: isSelfHostedBuild()
+        ? Constants.expoConfig?.extra?.selfHostedApnsEnvironment === "production"
+          ? "production"
+          : "sandbox"
+        : resolveApsEnvironment(Constants.expoConfig?.extra?.appVariant),
+      ...(pushTokenRegistration.pushToken ? { pushToken: pushTokenRegistration.pushToken } : {}),
+      notificationsEnabled: pushTokenRegistration.notificationsEnabled,
+      preferences,
+    });
+    const directResults = yield* Effect.forEach(
+      directNotificationConnections(),
+      (connection) =>
+        registerDirectNotificationDevice({ connection, payload: body }).pipe(
+          Effect.map((response) => response.ok),
+          Effect.catch((error) =>
+            Effect.sync(() => {
+              logRegistrationError(
+                `direct device registration failed for ${connection.environmentLabel}`,
+                error,
+              );
+              return false;
+            }),
+          ),
+        ),
+      { concurrency: 4 },
     );
+    if (directResults.some(Boolean)) {
+      setRegistrationStatus("registered");
+    }
+    if (readRelayConfig() && relayTokenProvider) {
+      yield* registerDeviceWithRelay(body, expectedGeneration);
+    } else if (!directResults.some(Boolean)) {
+      setRegistrationStatus("unknown");
+    }
   });
 }
 
@@ -813,7 +884,28 @@ export function registerAgentAwarenessConnection(connection: SavedRemoteConnecti
   environmentConnections.set(connection.environmentId, connection);
   ensurePushTokenListener();
   ensureAppStateListener();
-  enqueueDeviceRegistration({}, "device registration failed");
+  if (
+    isSelfHostedBuild() &&
+    connection.relayManaged !== true &&
+    connection.bearerToken !== null &&
+    !directNotificationPermissionRequested
+  ) {
+    directNotificationPermissionRequested = true;
+    void (async () => {
+      const permission = await settleAsyncResult(() =>
+        runtime.runPromiseExit(requestAgentNotificationPermission),
+      );
+      if (permission._tag === "Failure" && !isAtomCommandInterrupted(permission)) {
+        logRegistrationError(
+          "direct notification permission request failed",
+          squashAtomCommandFailure(permission),
+        );
+      }
+      enqueueDeviceRegistration({}, "device registration after notification permission failed");
+    })();
+  } else {
+    enqueueDeviceRegistration({}, "device registration failed");
+  }
   runRegistrationInBackground(
     refreshActiveLiveActivityRemoteRegistration(),
     "active live activity registration after environment connection failed",
@@ -892,6 +984,7 @@ export function __resetAgentAwarenessRemoteRegistrationForTest(): void {
   registrationStatus = "unknown";
   registrationStatusListeners.clear();
   registeredActivityPushTokens.clear();
+  directNotificationPermissionRequested = false;
 }
 
 export function unregisterAgentAwarenessDeviceForCurrentUser(
@@ -1028,7 +1121,10 @@ export function refreshActiveLiveActivityRemoteRegistration(): Effect.Effect<
   ManagedRelay.ManagedRelayClient
 > {
   return Effect.gen(function* () {
-    if (!canRegisterRemoteLiveActivities() || !relayTokenProvider) {
+    if (
+      !canRegisterRemoteLiveActivities() ||
+      (!relayTokenProvider && primaryDirectNotificationConnection() === null)
+    ) {
       return;
     }
 
