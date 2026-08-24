@@ -7,7 +7,7 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 
 import * as Electron from "electron";
-import { randomUUID } from "node:crypto";
+import * as NodeCrypto from "node:crypto";
 
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts";
 
@@ -331,7 +331,7 @@ export const make = Effect.gen(function* () {
 
   const createWindow = Effect.fn("desktop.window.createWindow")(function* (
     initialPath = "/",
-    restorePersistedBounds = true,
+    isMainWindow = true,
   ): Effect.fn.Return<Electron.BrowserWindow, DesktopWindowError> {
     yield* previewManager.getBrowserSession();
     const applicationUrl = getDesktopUrl(environment.isDevelopment);
@@ -340,7 +340,7 @@ export const make = Effect.gen(function* () {
     const iconOption = getIconOption(iconPaths, environment.platform);
     const shouldUseDarkColors = yield* electronTheme.shouldUseDarkColors;
     const persistedSettings = yield* desktopSettings.get;
-    const persistedBounds = restorePersistedBounds ? persistedSettings.mainWindowBounds : null;
+    const persistedBounds = isMainWindow ? persistedSettings.mainWindowBounds : null;
     const displayBoundsResult = yield* Effect.sync(() => {
       try {
         return {
@@ -476,9 +476,13 @@ export const make = Effect.gen(function* () {
         fiber === undefined ? Effect.void : Fiber.join(fiber).pipe(Effect.asVoid),
       ),
     );
-    flushMainWindowBounds = flushBoundsPersist;
-
-    yield* previewManager.setMainWindow(window);
+    if (isMainWindow) {
+      flushMainWindowBounds = flushBoundsPersist;
+      // Only the main window hosts previews. Registering secondary workspace
+      // windows here would reassign PiP/recording ownership to whichever
+      // window opened last.
+      yield* previewManager.setMainWindow(window);
+    }
     window.webContents.on("will-attach-webview", (event, webPreferences, params) => {
       if (
         typeof params.partition !== "string" ||
@@ -615,13 +619,17 @@ export const make = Effect.gen(function* () {
       event.preventDefault();
       window.setTitle(environment.displayName);
     });
-    window.on("resize", scheduleBoundsPersist);
-    window.on("move", scheduleBoundsPersist);
-    window.on("maximize", scheduleBoundsPersist);
-    window.on("unmaximize", scheduleBoundsPersist);
-    window.on("close", () => {
-      runFork(flushBoundsPersist);
-    });
+    // The persisted bounds belong to the main window; secondary workspace
+    // windows must not overwrite them with their own geometry.
+    if (isMainWindow) {
+      window.on("resize", scheduleBoundsPersist);
+      window.on("move", scheduleBoundsPersist);
+      window.on("maximize", scheduleBoundsPersist);
+      window.on("unmaximize", scheduleBoundsPersist);
+      window.on("close", () => {
+        runFork(flushBoundsPersist);
+      });
+    }
 
     if (environment.platform === "darwin") {
       window.on("enter-full-screen", () => {
@@ -785,8 +793,12 @@ export const make = Effect.gen(function* () {
     return window;
   });
 
+  // The renderer uses hash history in Electron (apps/web/src/main.tsx), so the
+  // route must live in the URL fragment. A path-style /workspace?workspace=…
+  // never reaches the router: it resolves to "/" and falls back to the shared
+  // "main" workspace, which made every Cmd+N window mirror the current one.
   const createMain = Effect.gen(function* () {
-    const window = yield* createWindow(`/workspace?workspace=${DEFAULT_MAIN_WORKSPACE_ID}`);
+    const window = yield* createWindow(`/#/workspace?workspace=${DEFAULT_MAIN_WORKSPACE_ID}`);
     yield* electronWindow.setMain(window);
     yield* logWindowInfo("main window created");
     return window;
@@ -796,7 +808,7 @@ export const make = Effect.gen(function* () {
     // Let the OS place secondary windows. Reusing the saved main-window x/y
     // puts the new window exactly over the current one, making Cmd+N look like
     // it did nothing when both workspaces have the same initial layout.
-    const window = yield* createWindow(`/workspace?workspace=${randomUUID()}`, false);
+    const window = yield* createWindow(`/#/workspace?workspace=${NodeCrypto.randomUUID()}`, false);
     yield* logWindowInfo("workspace window created");
     return window;
   }).pipe(Effect.withSpan("desktop.window.createWorkspaceWindow"));

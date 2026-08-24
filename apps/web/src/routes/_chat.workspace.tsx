@@ -45,6 +45,7 @@ import {
 import { SidebarInset } from "../components/ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
+import { isElectron } from "../env";
 import { resolveShortcutCommand } from "../keybindings";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isModelPickerOpen } from "../modelPickerVisibility";
@@ -598,7 +599,10 @@ export function ProjectPaneWorkspace({
   ).current;
   const openWorkspaceWindow = useCallback(() => {
     const nextWorkspace = window.crypto.randomUUID();
-    window.open(`/workspace?workspace=${encodeURIComponent(nextWorkspace)}`, "_blank");
+    // Electron routes with hash history, so the workspace id must live in the
+    // fragment or the new window falls back to the shared "main" workspace.
+    const path = `/workspace?workspace=${encodeURIComponent(nextWorkspace)}`;
+    window.open(isElectron ? `/#${path}` : path, "_blank");
   }, []);
 
   useEffect(() => {

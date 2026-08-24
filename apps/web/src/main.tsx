@@ -19,6 +19,11 @@ import { AppRoot } from "./AppRoot";
 import { clerkAppearance } from "./components/clerk/clerkAppearance";
 
 // Electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
+// Hash history only reads the fragment, so a path-style deep link (e.g. the desktop shell loading
+// /workspace?workspace=<id>) would otherwise be dropped and land on "/". Seed the hash from it.
+if (isElectron && !window.location.hash && window.location.pathname !== "/") {
+  window.history.replaceState(null, "", `/#${window.location.pathname}${window.location.search}`);
+}
 const history = isElectron ? createHashHistory() : createBrowserHistory();
 
 const router = getRouter(history);

@@ -138,9 +138,11 @@ export const make = Effect.gen(function* () {
       yield* electronApp.on("second-instance", () => {
         void runPromise(
           Effect.gen(function* () {
-            const mainWindow = yield* electronWindow.currentMainOrFirst;
-            if (Option.isSome(mainWindow)) {
-              yield* electronWindow.reveal(mainWindow.value);
+            // Prefer the focused window so a relaunch or deep link surfaces
+            // the window the user is working in, not always the original main.
+            const targetWindow = yield* electronWindow.focusedMainOrFirst;
+            if (Option.isSome(targetWindow)) {
+              yield* electronWindow.reveal(targetWindow.value);
             }
           }),
         );
