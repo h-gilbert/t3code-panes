@@ -87,7 +87,7 @@ function renderRunningActions(showSendWhileRunning: boolean, hasSendableContent:
   );
 }
 
-function renderSendButton() {
+function renderSendButton(backgroundAgentsWorking = false) {
   return renderToStaticMarkup(
     createElement(ComposerPrimaryActions, {
       compact: true,
@@ -101,6 +101,7 @@ function renderSendButton() {
       isEnvironmentUnavailable: false,
       isPreparingWorktree: false,
       hasSendableContent: true,
+      backgroundAgentsWorking,
       onPreviousPendingQuestion: () => {},
       onInterrupt: () => {},
       onImplementPlanInNewThread: () => {},
@@ -236,6 +237,14 @@ describe("ComposerPrimaryActions", () => {
 
     expect(markup).not.toContain("stage-nightly");
     expect(markup).toContain("bg-message-action text-message-action-foreground");
+  });
+
+  it("distinguishes an idle main turn while background agents are still working", () => {
+    const markup = renderSendButton(true);
+
+    expect(markup).toContain("ring-warning/55");
+    expect(markup).toContain("bg-warning");
+    expect(markup).toContain('aria-label="Send message — agents still working"');
   });
 
   it("only renders stop while running when Enter-to-send is available", () => {

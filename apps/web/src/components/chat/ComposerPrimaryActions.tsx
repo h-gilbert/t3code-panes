@@ -27,6 +27,7 @@ interface ComposerPrimaryActionsProps {
   isEnvironmentUnavailable: boolean;
   isPreparingWorktree: boolean;
   hasSendableContent: boolean;
+  backgroundAgentsWorking?: boolean;
   preserveComposerFocusOnPointerDown?: boolean;
   /** Enter-to-send is disabled on mobile viewports, where stop would otherwise
    * be the only primary action and a running turn could not be steered. */
@@ -70,6 +71,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   isEnvironmentUnavailable,
   isPreparingWorktree,
   hasSendableContent,
+  backgroundAgentsWorking = false,
   preserveComposerFocusOnPointerDown = false,
   showSendWhileRunning = false,
   onPreviousPendingQuestion,
@@ -226,6 +228,8 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         stageBackdropVariant
           ? "bg-transparent text-white enabled:shadow-black/24 enabled:hover:brightness-110"
           : "bg-message-action text-message-action-foreground enabled:shadow-message-action/24 hover:bg-message-action-hover",
+        backgroundAgentsWorking &&
+          "ring-2 ring-warning/55 ring-offset-2 ring-offset-background disabled:opacity-60",
       )}
       {...pointerFocusProps}
       disabled={
@@ -246,7 +250,9 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
                 ? "Preparing worktree"
                 : isSendBusy
                   ? "Sending"
-                  : "Send message"
+                  : backgroundAgentsWorking
+                    ? "Send message — agents still working"
+                    : "Send message"
       }
     >
       {stageBackdropVariant ? (
@@ -257,15 +263,23 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       {isConnecting || isSendBusy ? (
         <Spinner className="size-3.5" aria-hidden="true" />
       ) : (
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-          <path
-            d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
+        <>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <path
+              d="M7 11.5V2.5M7 2.5L3 6.5M7 2.5L11 6.5"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          {backgroundAgentsWorking ? (
+            <span
+              className="absolute top-0.5 right-0.5 size-1.5 rounded-sm bg-warning ring-1 ring-background"
+              aria-hidden="true"
+            />
+          ) : null}
+        </>
       )}
     </button>
   );
