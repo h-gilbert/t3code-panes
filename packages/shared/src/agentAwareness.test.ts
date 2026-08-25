@@ -131,6 +131,50 @@ describe("projectThreadAwareness", () => {
     expect(trulyInterrupted).toBeNull();
   });
 
+  it("keeps settled parent turns working while subagents or workflows are active", () => {
+    const state = projectThreadAwareness({
+      environmentId: "env-1" as EnvironmentId,
+      project,
+      thread: thread({
+        backgroundLiveness: "working",
+        latestTurn: {
+          turnId: "turn-1" as TurnId,
+          state: "completed",
+          requestedAt: NOW,
+          startedAt: NOW,
+          completedAt: NOW,
+          assistantMessageId: null,
+        },
+      }),
+    });
+
+    expect(state).toMatchObject({
+      phase: "running",
+      headline: "Agent is working",
+      detail: "Background agents are active.",
+    });
+  });
+
+  it("allows monitor-only work to finish with the parent turn", () => {
+    const state = projectThreadAwareness({
+      environmentId: "env-1" as EnvironmentId,
+      project,
+      thread: thread({
+        backgroundLiveness: "monitoring",
+        latestTurn: {
+          turnId: "turn-1" as TurnId,
+          state: "completed",
+          requestedAt: NOW,
+          startedAt: NOW,
+          completedAt: NOW,
+          assistantMessageId: null,
+        },
+      }),
+    });
+
+    expect(state?.phase).toBe("completed");
+  });
+
   it("projects ready sessions with no materialized turn as completed", () => {
     // Quick threads without code changes never get a checkpoint, so the SQL
     // shell has no latestTurn row and latest_turn_id is cleared when the

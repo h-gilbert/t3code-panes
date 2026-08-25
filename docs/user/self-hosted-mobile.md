@@ -65,7 +65,8 @@ t3 notifications status
 
 Every saved direct environment can send alerts to the phone. The primary direct environment owns
 the current Live Activity; this avoids routing activity tokens through a central service. Opening a
-notification deep-links to the relevant environment and thread.
+notification deep-links to the relevant environment and thread. Completion alerts wait for active
+subagents and workflows to finish. Long-running monitor tasks do not hold completion open.
 
 To remove the credentials and phone registration from an environment:
 

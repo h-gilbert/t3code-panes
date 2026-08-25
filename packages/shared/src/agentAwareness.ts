@@ -40,6 +40,7 @@ export interface ProjectThreadAwarenessInput {
     | "updatedAt"
     | "hasPendingApprovals"
     | "hasPendingUserInput"
+    | "backgroundLiveness"
   >;
 }
 
@@ -90,6 +91,13 @@ function resolveThreadAwarenessPhase(
     return "starting";
   }
   if (thread.session?.status === "running" || thread.latestTurn?.state === "running") {
+    return "running";
+  }
+  // The parent turn can settle while native subagents or workflows keep
+  // working. Keep the thread live until that work finishes so clients do not
+  // announce completion early. Monitor-only work is deliberately excluded:
+  // watch loops can run indefinitely and must not suppress Done forever.
+  if (thread.backgroundLiveness === "working") {
     return "running";
   }
   if (thread.latestTurn?.state === "completed") {
@@ -144,6 +152,14 @@ function detailForPhase(
   }
   if (phase === "completed") {
     return "Review the completed task.";
+  }
+  if (
+    phase === "running" &&
+    thread.backgroundLiveness === "working" &&
+    thread.session?.status !== "running" &&
+    thread.latestTurn?.state !== "running"
+  ) {
+    return "Background agents are active.";
   }
   if (phase === "running" && thread.session?.providerName) {
     return `${thread.session.providerName} is active.`;

@@ -87,7 +87,13 @@ export function shouldPublishAgentAwarenessEvent(event: OrchestrationEvent): boo
         event.payload.activity.kind === "provider.approval.respond.failed" ||
         event.payload.activity.kind === "user-input.requested" ||
         event.payload.activity.kind === "user-input.resolved" ||
-        event.payload.activity.kind === "runtime.error"
+        event.payload.activity.kind === "runtime.error" ||
+        event.payload.activity.kind === "task.started" ||
+        event.payload.activity.kind === "task.updated" ||
+        event.payload.activity.kind === "task.completed" ||
+        (event.payload.activity.kind === "task.progress" &&
+          typeof (event.payload.activity.payload as { readonly status?: unknown } | undefined)
+            ?.status === "string")
       );
     default:
       return true;
@@ -228,6 +234,7 @@ export function describeThreadShellForAwareness(
     latestTurnCompletedAt: shell.latestTurn?.completedAt ?? null,
     hasPendingApprovals: shell.hasPendingApprovals,
     hasPendingUserInput: shell.hasPendingUserInput,
+    backgroundLiveness: shell.backgroundLiveness ?? null,
   };
 }
 

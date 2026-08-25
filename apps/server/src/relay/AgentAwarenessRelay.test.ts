@@ -137,7 +137,7 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
     expect(AgentAwarenessRelay.eventThreadId(event)).toBe(threadId);
   });
 
-  it("does not publish start intents, streaming content, or non-awareness activity events", () => {
+  it("publishes task liveness changes but ignores task progress without status", () => {
     const now = "2026-05-25T00:00:00.000Z";
     const base = {
       sequence: 1,
@@ -158,6 +158,31 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
         },
       } as unknown as OrchestrationEvent),
     ).toBe(false);
+    expect(
+      AgentAwarenessRelay.shouldPublishAgentAwarenessEvent({
+        ...base,
+        type: "thread.activity-appended",
+        payload: {
+          threadId: "thread-1" as ThreadId,
+          activity: {
+            kind: "task.progress",
+            payload: { status: "running" },
+          },
+        },
+      } as unknown as OrchestrationEvent),
+    ).toBe(true);
+    for (const kind of ["task.started", "task.updated", "task.completed"] as const) {
+      expect(
+        AgentAwarenessRelay.shouldPublishAgentAwarenessEvent({
+          ...base,
+          type: "thread.activity-appended",
+          payload: {
+            threadId: "thread-1" as ThreadId,
+            activity: { kind, payload: {} },
+          },
+        } as unknown as OrchestrationEvent),
+      ).toBe(true);
+    }
     expect(
       AgentAwarenessRelay.shouldPublishAgentAwarenessEvent({
         ...base,
