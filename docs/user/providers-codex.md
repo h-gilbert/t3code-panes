@@ -28,6 +28,18 @@ Log in with Codex normally:
 codex login
 ```
 
+## Send feedback to OpenAI
+
+In an existing Codex thread, send `/feedback` or `/feedback` followed by a description of the
+issue. T3 Code uploads the thread and Codex logs to OpenAI and shows a thread ID that you can copy
+and share with OpenAI employees.
+
+## Sub-agent models
+
+The web and desktop Agents panel shows each sub-agent's model and reasoning effort when Codex
+reports them. If Codex does not report either value, T3 Code leaves it out instead of using the
+parent agent's settings.
+
 ## Approve access to other apps
 
 When a Codex tool needs access to an app such as Safari, T3 Code shows the app name and asks for
