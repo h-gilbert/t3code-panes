@@ -102,6 +102,7 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
     main: Effect.succeed(Option.none()),
     currentMainOrFirst: Effect.succeed(Option.none()),
     focusedMainOrFirst: Effect.succeed(Option.none()),
+    fromWebContents: () => Effect.succeed(Option.none()),
     setMain: () => Effect.void,
     clearMain: () => Effect.void,
     reveal: () => Effect.void,

@@ -67,6 +67,7 @@ function makeElectronWindowLayer(destroyAll: Effect.Effect<void> = Effect.void) 
     main: Effect.die("unexpected main window read"),
     currentMainOrFirst: Effect.die("unexpected current window read"),
     focusedMainOrFirst: Effect.die("unexpected focused window read"),
+    fromWebContents: () => Effect.die("unexpected web contents lookup"),
     setMain: () => Effect.void,
     clearMain: () => Effect.void,
     reveal: () => Effect.void,

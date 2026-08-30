@@ -3,6 +3,8 @@ import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import { vi } from "vite-plus/test";
 
+import type * as Electron from "electron";
+
 import * as DesktopIpc from "./DesktopIpc.ts";
 
 const invokeMethod: DesktopIpc.DesktopIpcMethod<never, never> = {
@@ -28,6 +30,38 @@ function makeIpcMain(
 }
 
 describe("DesktopIpc", () => {
+  it.effect("passes the sending renderer to sync handlers", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let listener: DesktopIpc.DesktopIpcSyncListener | undefined;
+        const ipc = DesktopIpc.make(
+          makeIpcMain({
+            on: (_channel, registeredListener) => {
+              listener = registeredListener;
+            },
+          }),
+        );
+        const sender = {} as Electron.WebContents;
+        let receivedSender: Electron.WebContents | undefined;
+
+        yield* ipc.handleSync({
+          channel: "desktop.test.sender",
+          handler: (event) =>
+            Effect.sync(() => {
+              receivedSender = event.sender;
+              return true;
+            }),
+        });
+        assert.isDefined(listener);
+        const event = { returnValue: undefined, sender };
+        listener(event);
+
+        assert.strictEqual(receivedSender, sender);
+        assert.isTrue(event.returnValue);
+      }),
+    ),
+  );
+
   it.effect("preserves invoke registration context and cause", () =>
     Effect.gen(function* () {
       const cause = new Error("invoke registration failed");

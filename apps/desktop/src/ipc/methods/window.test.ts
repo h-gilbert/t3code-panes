@@ -8,6 +8,7 @@ import type * as Electron from "electron";
 import * as DesktopBackendManager from "../../backend/DesktopBackendManager.ts";
 import * as DesktopBackendPool from "../../backend/DesktopBackendPool.ts";
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
+import * as DesktopIpc from "../DesktopIpc.ts";
 import { getLocalEnvironmentBootstraps, getWindowFullscreenState } from "./window.ts";
 
 const readyWslConfig: DesktopBackendManager.DesktopBackendStartConfig = {
@@ -52,7 +53,9 @@ const defaultWslInstance: DesktopBackendManager.DesktopBackendInstance = {
 describe("getLocalEnvironmentBootstraps", () => {
   it.effect("publishes the concrete running distro without replacing the stable instance id", () =>
     Effect.gen(function* () {
-      const result = yield* getLocalEnvironmentBootstraps.handler();
+      const result = yield* getLocalEnvironmentBootstraps.handler(
+        {} as DesktopIpc.DesktopIpcSyncEvent,
+      );
 
       assert.deepEqual(result, [
         {
@@ -89,7 +92,9 @@ describe("getLocalEnvironmentBootstraps", () => {
     };
 
     return Effect.gen(function* () {
-      const result = yield* getLocalEnvironmentBootstraps.handler();
+      const result = yield* getLocalEnvironmentBootstraps.handler(
+        {} as DesktopIpc.DesktopIpcSyncEvent,
+      );
       assert.deepEqual(result, [
         {
           id: "wsl:default",
@@ -125,22 +130,30 @@ describe("getLocalEnvironmentBootstraps", () => {
     };
 
     return Effect.gen(function* () {
-      const result = yield* getLocalEnvironmentBootstraps.handler();
+      const result = yield* getLocalEnvironmentBootstraps.handler(
+        {} as DesktopIpc.DesktopIpcSyncEvent,
+      );
       assert.deepEqual(result, []);
     }).pipe(Effect.provide(DesktopBackendPool.layerTest([stoppedInstance])));
   });
 });
 
 describe("getWindowFullscreenState", () => {
-  it.effect("reads the current native window state", () => {
-    const window = { isFullScreen: () => true } as Electron.BrowserWindow;
+  it.effect("reads the native state of the window that sent the request", () => {
+    const sender = {} as Electron.WebContents;
+    const mainWindow = { isFullScreen: () => true } as Electron.BrowserWindow;
+    const requestingWindow = { isFullScreen: () => false } as Electron.BrowserWindow;
 
     return Effect.gen(function* () {
-      assert.isTrue(yield* getWindowFullscreenState.handler());
+      assert.isFalse(yield* getWindowFullscreenState.handler({ returnValue: undefined, sender }));
     }).pipe(
       Effect.provide(
         Layer.mock(ElectronWindow.ElectronWindow)({
-          currentMainOrFirst: Effect.succeed(Option.some(window)),
+          currentMainOrFirst: Effect.succeed(Option.some(mainWindow)),
+          fromWebContents: (webContents) => {
+            assert.strictEqual(webContents, sender);
+            return Effect.succeed(Option.some(requestingWindow));
+          },
         }),
       ),
     );

@@ -34,6 +34,7 @@ const ElectronWindowCreateOptions = Schema.Struct({
 
 const ElectronWindowOperation = Schema.Literals([
   "list-windows",
+  "find-window-for-web-contents",
   "get-focused-window",
   "inspect-window",
   "reveal-window",
@@ -86,6 +87,9 @@ export class ElectronWindow extends Context.Service<
     readonly main: Effect.Effect<Option.Option<Electron.BrowserWindow>>;
     readonly currentMainOrFirst: Effect.Effect<Option.Option<Electron.BrowserWindow>>;
     readonly focusedMainOrFirst: Effect.Effect<Option.Option<Electron.BrowserWindow>>;
+    readonly fromWebContents: (
+      webContents: Electron.WebContents,
+    ) => Effect.Effect<Option.Option<Electron.BrowserWindow>>;
     readonly setMain: (window: Electron.BrowserWindow) => Effect.Effect<void>;
     readonly clearMain: (window: Option.Option<Electron.BrowserWindow>) => Effect.Effect<void>;
     readonly reveal: (window: Electron.BrowserWindow) => Effect.Effect<void>;
@@ -198,6 +202,18 @@ export const make = Effect.gen(function* () {
     main: liveMain,
     currentMainOrFirst,
     focusedMainOrFirst,
+    fromWebContents: (webContents) =>
+      Effect.try({
+        try: () => Option.fromNullishOr(Electron.BrowserWindow.fromWebContents(webContents)),
+        catch: (cause) =>
+          new ElectronWindowOperationError({
+            operation: "find-window-for-web-contents",
+            platform,
+            windowId: null,
+            channel: null,
+            cause,
+          }),
+      }).pipe(Effect.orDie),
     setMain: (window) => Ref.set(mainWindowRef, Option.some(window)),
     clearMain: (window) =>
       Ref.update(mainWindowRef, (current) => {

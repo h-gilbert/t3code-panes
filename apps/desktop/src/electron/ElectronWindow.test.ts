@@ -6,20 +6,26 @@ import * as Layer from "effect/Layer";
 import type * as Electron from "electron";
 import { beforeEach, vi } from "vite-plus/test";
 
-const { appFocusMock, browserWindowMock, getAllWindowsMock, getFocusedWindowMock } = vi.hoisted(
-  () => ({
-    appFocusMock: vi.fn(),
-    browserWindowMock: vi.fn(function BrowserWindowMock() {}),
-    getAllWindowsMock: vi.fn(),
-    getFocusedWindowMock: vi.fn(),
-  }),
-);
+const {
+  appFocusMock,
+  browserWindowMock,
+  fromWebContentsMock,
+  getAllWindowsMock,
+  getFocusedWindowMock,
+} = vi.hoisted(() => ({
+  appFocusMock: vi.fn(),
+  browserWindowMock: vi.fn(function BrowserWindowMock() {}),
+  fromWebContentsMock: vi.fn(),
+  getAllWindowsMock: vi.fn(),
+  getFocusedWindowMock: vi.fn(),
+}));
 
 vi.mock("electron", () => ({
   app: {
     focus: appFocusMock,
   },
   BrowserWindow: Object.assign(browserWindowMock, {
+    fromWebContents: fromWebContentsMock,
     getAllWindows: getAllWindowsMock,
     getFocusedWindow: getFocusedWindowMock,
   }),
@@ -42,9 +48,27 @@ describe("ElectronWindow", () => {
   beforeEach(() => {
     appFocusMock.mockReset();
     browserWindowMock.mockReset();
+    fromWebContentsMock.mockReset();
     getAllWindowsMock.mockReset();
     getFocusedWindowMock.mockReset();
   });
+
+  it.effect("finds the native window that owns a renderer", () =>
+    Effect.gen(function* () {
+      const webContents = {} as Electron.WebContents;
+      const window = makeBrowserWindow({ id: 3, destroyed: false });
+      fromWebContentsMock.mockReturnValue(window);
+
+      const electronWindow = yield* ElectronWindow.ElectronWindow;
+      const result = yield* electronWindow.fromWebContents(webContents);
+
+      assert.deepEqual(fromWebContentsMock.mock.calls, [[webContents]]);
+      assert.isTrue(result._tag === "Some");
+      if (result._tag === "Some") {
+        assert.strictEqual(result.value, window);
+      }
+    }).pipe(Effect.provide(TestLayer)),
+  );
 
   it.effect("preserves schema-safe creation context and the Electron cause", () =>
     Effect.gen(function* () {

@@ -41,6 +41,9 @@ independent workspace window. The existing **Command-B** shortcut shows or hides
 non-macOS platforms, use Alt and Control in place of Option and Command. All shortcuts can be
 changed in Settings.
 
+On macOS, each workspace window has a numbered session title in the Window menu and the Dock menu.
+Choose one of those titles to bring that workspace to the front.
+
 On macOS desktop, the titlebar strip remains available for the traffic lights, window dragging,
 and workspace controls. It disappears in fullscreen so the panes use the entire window; the same
 actions remain available through their shortcuts.

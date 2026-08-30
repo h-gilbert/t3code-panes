@@ -128,6 +128,7 @@ function makeFakeBrowserWindow() {
     setZoomLevel: webContents.setZoomLevel,
     setBackgroundThrottling: webContents.setBackgroundThrottling,
     setAutoHideCursor: window.setAutoHideCursor,
+    setTitle: window.setTitle,
     webContentsListeners,
     windowListeners,
   };
@@ -253,6 +254,7 @@ function makeTestLayer(input: {
     main: Ref.get(input.mainWindow),
     currentMainOrFirst: Ref.get(input.mainWindow),
     focusedMainOrFirst: Ref.get(input.mainWindow),
+    fromWebContents: () => Effect.succeed(Option.none()),
     setMain: (window) => Ref.set(input.mainWindow, Option.some(window)),
     clearMain: () => Ref.set(input.mainWindow, Option.none()),
     reveal: () => Effect.void,
@@ -361,6 +363,7 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
       main: Ref.get(mainWindow),
       currentMainOrFirst,
       focusedMainOrFirst: currentMainOrFirst,
+      fromWebContents: () => Effect.succeed(Option.none()),
       setMain: (window) => Ref.set(mainWindow, Option.some(window)),
       clearMain: () => Ref.set(mainWindow, Option.none()),
       reveal: (window) => Ref.update(revealedWindows, (windows) => [...windows, window]),
@@ -413,6 +416,17 @@ describe("DesktopWindow", () => {
     assert.deepEqual(
       DesktopWindow.resolveInitialMainWindowBounds(persistedBounds, [displays[0]!]),
       DesktopAppSettings.DEFAULT_MAIN_WINDOW_SIZE,
+    );
+  });
+
+  it("gives workspace windows distinct native titles", () => {
+    assert.equal(
+      DesktopWindow.resolveWorkspaceWindowTitle("T3 Code (Alpha)", 1),
+      "Session 1 · T3 Code (Alpha)",
+    );
+    assert.equal(
+      DesktopWindow.resolveWorkspaceWindowTitle("T3 Code (Alpha)", 2),
+      "Session 2 · T3 Code (Alpha)",
     );
   });
 
@@ -633,6 +647,17 @@ describe("DesktopWindow", () => {
         assert.equal(createdWindowOptions[1]?.height, 780);
         assert.isUndefined(createdWindowOptions[1]?.x);
         assert.isUndefined(createdWindowOptions[1]?.y);
+        assert.equal(createdWindowOptions[0]?.title, "Session 1 · T3 Code (Dev)");
+        assert.equal(createdWindowOptions[1]?.title, "Session 2 · T3 Code (Dev)");
+
+        const pageTitleUpdated = fakeWindow.windowListeners.get("page-title-updated");
+        if (!pageTitleUpdated) {
+          return yield* Effect.die("page-title-updated listener was not registered");
+        }
+        const preventDefault = vi.fn();
+        pageTitleUpdated({ preventDefault });
+        assert.equal(preventDefault.mock.calls.length, 1);
+        assert.deepEqual(fakeWindow.setTitle.mock.lastCall, ["Session 2 · T3 Code (Dev)"]);
         // Hash route: the renderer uses hash history in Electron, so a
         // path-style URL would drop the workspace id and mirror the main
         // window instead of opening a fresh workspace.

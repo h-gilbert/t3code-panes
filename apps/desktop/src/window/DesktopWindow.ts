@@ -171,6 +171,10 @@ export function resolveInitialMainWindowBounds(
   return DesktopAppSettings.DEFAULT_MAIN_WINDOW_SIZE;
 }
 
+export function resolveWorkspaceWindowTitle(displayName: string, windowNumber: number): string {
+  return `Session ${windowNumber} · ${displayName}`;
+}
+
 // A self-contained "Connecting to WSL" splash, shown immediately in wsl-only
 // mode while the WSL backend (which serves the renderer) cold-boots. Inlined as
 // a data URL so it needs no bundled asset and no backend — pure CSS, no JS.
@@ -302,6 +306,7 @@ export const make = Effect.gen(function* () {
   const runFork = Effect.runForkWith(context);
   const runPromise = Effect.runPromiseWith(context);
   let flushMainWindowBounds: Effect.Effect<void> = Effect.void;
+  let nextWorkspaceWindowNumber = 1;
 
   const dismissConnectingSplash = Effect.gen(function* () {
     const splash = yield* Ref.getAndSet(splashWindowRef, Option.none());
@@ -333,6 +338,8 @@ export const make = Effect.gen(function* () {
     initialPath = "/",
     isMainWindow = true,
   ): Effect.fn.Return<Electron.BrowserWindow, DesktopWindowError> {
+    const workspaceWindowNumber = nextWorkspaceWindowNumber;
+    const windowTitle = resolveWorkspaceWindowTitle(environment.displayName, workspaceWindowNumber);
     yield* previewManager.getBrowserSession();
     const applicationUrl = getDesktopUrl(environment.isDevelopment);
     const initialUrl = new URL(initialPath, applicationUrl).href;
@@ -371,7 +378,7 @@ export const make = Effect.gen(function* () {
       ...(environment.platform === "darwin" ? { disableAutoHideCursor: true } : {}),
       backgroundColor: getInitialWindowBackgroundColor(shouldUseDarkColors),
       ...iconOption,
-      title: environment.displayName,
+      title: windowTitle,
       ...getWindowTitleBarOptions(shouldUseDarkColors, environment.platform),
       webPreferences: {
         preload: environment.preloadPath,
@@ -387,6 +394,7 @@ export const make = Effect.gen(function* () {
         webviewTag: true,
       },
     });
+    nextWorkspaceWindowNumber = workspaceWindowNumber + 1;
 
     if (environment.platform === "darwin") {
       window.setAutoHideCursor(false);
@@ -617,7 +625,7 @@ export const make = Effect.gen(function* () {
 
     window.on("page-title-updated", (event) => {
       event.preventDefault();
-      window.setTitle(environment.displayName);
+      window.setTitle(windowTitle);
     });
     // The persisted bounds belong to the main window; secondary workspace
     // windows must not overwrite them with their own geometry.
@@ -695,7 +703,7 @@ export const make = Effect.gen(function* () {
       }
       clearDevelopmentLoadRetry();
       developmentLoadRetryIndex = 0;
-      window.setTitle(environment.displayName);
+      window.setTitle(windowTitle);
     });
     window.webContents.on(
       "did-fail-load",

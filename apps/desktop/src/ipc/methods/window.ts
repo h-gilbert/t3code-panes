@@ -77,9 +77,9 @@ export const getSystemLocale = DesktopIpc.makeSyncIpcMethod({
 export const getWindowFullscreenState = DesktopIpc.makeSyncIpcMethod({
   channel: IpcChannels.GET_WINDOW_FULLSCREEN_STATE_CHANNEL,
   result: Schema.Boolean,
-  handler: Effect.fn("desktop.ipc.window.getWindowFullscreenState")(function* () {
+  handler: Effect.fn("desktop.ipc.window.getWindowFullscreenState")(function* (event) {
     const electronWindow = yield* ElectronWindow.ElectronWindow;
-    const window = yield* electronWindow.currentMainOrFirst;
+    const window = yield* electronWindow.fromWebContents(event.sender);
     return Option.isSome(window) && window.value.isFullScreen();
   }),
 });
