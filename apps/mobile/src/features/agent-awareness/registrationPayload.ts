@@ -3,6 +3,19 @@ import type { RelayDeviceRegistrationRequest } from "@t3tools/contracts/relay";
 import type { Preferences } from "../../persistence/mobile-preferences";
 import { supportsAgentAwarenessPush } from "./capabilities";
 
+// One alert policy feeds both T3 Connect and direct self-hosted APNs
+// registrations. Routine completions remain visible in Live Activities and
+// the thread list; only states that need attention interrupt the user.
+export const AGENT_NOTIFICATION_POLICY = {
+  notifyOnApproval: true,
+  notifyOnInput: true,
+  notifyOnCompletion: false,
+  notifyOnFailure: true,
+} as const satisfies Pick<
+  RelayDeviceRegistrationRequest["preferences"],
+  "notifyOnApproval" | "notifyOnInput" | "notifyOnCompletion" | "notifyOnFailure"
+>;
+
 // Development builds are Xcode-signed and receive sandbox APNs tokens;
 // preview and production builds are distribution-signed and use production
 // APNs. The relay routes each device's pushes accordingly.
@@ -37,10 +50,7 @@ export function makeRelayDeviceRegistrationRequest(input: {
     preferences: {
       liveActivitiesEnabled,
       notificationsEnabled: pushAvailable && input.notificationsEnabled,
-      notifyOnApproval: true,
-      notifyOnInput: true,
-      notifyOnCompletion: true,
-      notifyOnFailure: true,
+      ...AGENT_NOTIFICATION_POLICY,
     },
   };
 }
