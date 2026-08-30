@@ -53,7 +53,8 @@ and workspace controls. It disappears in fullscreen so the panes use the entire 
 actions remain available through their shortcuts.
 
 When an agent opens the shared browser, it appears as a floating preview inside the pane. Its
-header bar stays visible: drag it to move the preview, and use the header buttons to dock it into
+overlay is opaque, so pane content and the thread sidebar do not show through it. Its header bar
+stays visible: drag it to move the preview, and use the header buttons to dock it into
 the right panel, pop it into a separate window, expand it to fill the T3 Code window, or close the
 browser. Agents can also close the browser themselves when they finish with it.
 

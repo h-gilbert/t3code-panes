@@ -21,6 +21,7 @@ export function RightPanelSheet(props: {
         side="right"
         showCloseButton={false}
         keepMounted
+        backdropClassName="bg-background"
         className={RIGHT_PANEL_SHEET_CLASS_NAME}
       >
         {props.children}
