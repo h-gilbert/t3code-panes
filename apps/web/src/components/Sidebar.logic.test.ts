@@ -16,6 +16,7 @@ import {
   isContextMenuPointerDown,
   isSidebarNestedLinkClick,
   isTrailingDoubleClick,
+  limitRecentSidebarThreads,
   orderItemsByPreferredIds,
   resolveProjectStatusIndicator,
   resolveSidebarStageBadgeLabel,
@@ -618,6 +619,26 @@ describe("resolveAdjacentThreadId", () => {
         direction: "previous",
       }),
     ).toBeNull();
+  });
+});
+
+describe("limitRecentSidebarThreads", () => {
+  const threads = ["newest", "newer", "older", "oldest"];
+
+  it("drops the oldest threads after the sidebar limit", () => {
+    expect(limitRecentSidebarThreads({ threads, maximum: 3, activeThread: null })).toEqual([
+      "newest",
+      "newer",
+      "older",
+    ]);
+  });
+
+  it("keeps the open thread visible without growing past the limit", () => {
+    expect(limitRecentSidebarThreads({ threads, maximum: 3, activeThread: "oldest" })).toEqual([
+      "newest",
+      "newer",
+      "oldest",
+    ]);
   });
 });
 

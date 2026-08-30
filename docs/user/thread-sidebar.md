@@ -10,6 +10,10 @@ request merges if **Auto-settle merged threads** is enabled.
 When you un-settle a thread, it returns to the top of the active list so you can find it right
 away. Its timestamps do not change. Other threads keep their positions.
 
+The active list shows the newest threads up to your thread preview limit. Older threads remain
+available through sidebar search. If you open an older thread from search or a link, its row stays
+visible while it is open without making the list taller.
+
 On web and desktop, drag a pinned thread to change its position. On mobile, open the thread's menu
 and choose **Move up** or **Move down**. The order is stored by the server and appears on your
 other connected devices.

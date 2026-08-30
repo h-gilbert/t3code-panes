@@ -368,6 +368,20 @@ export function getSidebarThreadIdsToPrewarm<TThreadId>(
   return visibleThreadIds.slice(0, Math.max(0, limit));
 }
 
+export function limitRecentSidebarThreads<T>(input: {
+  threads: readonly T[];
+  maximum: number;
+  activeThread: T | null;
+}): T[] {
+  const maximum = Math.max(1, Math.floor(input.maximum));
+  if (input.threads.length <= maximum) return [...input.threads];
+
+  const recent = input.threads.slice(0, maximum);
+  if (input.activeThread === null || recent.includes(input.activeThread)) return recent;
+
+  return [...recent.slice(0, -1), input.activeThread];
+}
+
 export function resolveAdjacentThreadId<T>(input: {
   threadIds: readonly T[];
   currentThreadId: T | null;
