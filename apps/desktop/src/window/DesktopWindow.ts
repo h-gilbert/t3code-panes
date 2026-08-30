@@ -14,6 +14,7 @@ import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts";
 import * as DesktopAssets from "../app/DesktopAssets.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import { makeComponentLogger } from "../app/DesktopObservability.ts";
+import * as DesktopState from "../app/DesktopState.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import { getDesktopUrl } from "../electron/ElectronProtocol.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
@@ -29,6 +30,7 @@ import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopClientSettings from "../settings/DesktopClientSettings.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import { makeQuitHoldHandler } from "./QuitHold.ts";
+import * as DesktopWindowSession from "./DesktopWindowSession.ts";
 
 const TITLEBAR_HEIGHT = 40;
 const DEFAULT_MAIN_WORKSPACE_ID = "main";
@@ -61,6 +63,7 @@ type WindowTitleBarOptions = Pick<
 type DesktopWindowRuntimeServices =
   | DesktopEnvironment.DesktopEnvironment
   | DesktopAssets.DesktopAssets
+  | DesktopState.DesktopState
   | DesktopAppSettings.DesktopAppSettings
   | DesktopClientSettings.DesktopClientSettings
   | ElectronApp.ElectronApp
@@ -68,7 +71,8 @@ type DesktopWindowRuntimeServices =
   | ElectronShell.ElectronShell
   | ElectronTheme.ElectronTheme
   | ElectronWindow.ElectronWindow
-  | PreviewManager.PreviewManager;
+  | PreviewManager.PreviewManager
+  | DesktopWindowSession.DesktopWindowSession;
 
 export type DesktopWindowError =
   | ElectronWindow.ElectronWindowCreateError
@@ -291,6 +295,8 @@ export const make = Effect.gen(function* () {
   const electronWindow = yield* ElectronWindow.ElectronWindow;
   const previewManager = yield* PreviewManager.PreviewManager;
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
+  const desktopState = yield* DesktopState.DesktopState;
+  const windowSession = yield* DesktopWindowSession.DesktopWindowSession;
   const clientSettings = yield* DesktopClientSettings.DesktopClientSettings;
   const electronApp = yield* ElectronApp.ElectronApp;
   // Window-side latch for the primary backend's readiness. Set by
@@ -305,7 +311,8 @@ export const make = Effect.gen(function* () {
   const context = yield* Effect.context<DesktopWindowRuntimeServices>();
   const runFork = Effect.runForkWith(context);
   const runPromise = Effect.runPromiseWith(context);
-  let flushMainWindowBounds: Effect.Effect<void> = Effect.void;
+  const windowBoundsFlushes = new Map<string, Effect.Effect<void>>();
+  let workspaceSessionRestored = false;
   let nextWorkspaceWindowNumber = 1;
 
   const dismissConnectingSplash = Effect.gen(function* () {
@@ -334,20 +341,30 @@ export const make = Effect.gen(function* () {
   const currentMainWindow = electronWindow.currentMainOrFirst.pipe(Effect.flatMap(withoutSplash));
   const focusedMainWindow = electronWindow.focusedMainOrFirst.pipe(Effect.flatMap(withoutSplash));
 
-  const createWindow = Effect.fn("desktop.window.createWindow")(function* (
-    initialPath = "/",
-    isMainWindow = true,
-  ): Effect.fn.Return<Electron.BrowserWindow, DesktopWindowError> {
-    const workspaceWindowNumber = nextWorkspaceWindowNumber;
+  const createWindow = Effect.fn("desktop.window.createWindow")(function* (input: {
+    readonly workspaceId: string;
+    readonly isMainWindow: boolean;
+    readonly restoredState?: DesktopWindowSession.DesktopWorkspaceWindowState;
+    readonly windowNumber?: number;
+  }): Effect.fn.Return<Electron.BrowserWindow, DesktopWindowError> {
+    const workspaceWindowNumber = input.windowNumber ?? nextWorkspaceWindowNumber;
     const windowTitle = resolveWorkspaceWindowTitle(environment.displayName, workspaceWindowNumber);
     yield* previewManager.getBrowserSession();
     const applicationUrl = getDesktopUrl(environment.isDevelopment);
-    const initialUrl = new URL(initialPath, applicationUrl).href;
+    const initialUrl = new URL(
+      `/#/workspace?workspace=${encodeURIComponent(input.workspaceId)}`,
+      applicationUrl,
+    ).href;
     const iconPaths = yield* assets.iconPaths;
     const iconOption = getIconOption(iconPaths, environment.platform);
     const shouldUseDarkColors = yield* electronTheme.shouldUseDarkColors;
     const persistedSettings = yield* desktopSettings.get;
-    const persistedBounds = isMainWindow ? persistedSettings.mainWindowBounds : null;
+    const persistedBounds =
+      input.restoredState?.bounds ??
+      (input.isMainWindow ? persistedSettings.mainWindowBounds : null);
+    const persistedMaximized =
+      input.restoredState?.isMaximized ??
+      (input.isMainWindow ? persistedSettings.mainWindowMaximized : false);
     const displayBoundsResult = yield* Effect.sync(() => {
       try {
         return {
@@ -394,7 +411,7 @@ export const make = Effect.gen(function* () {
         webviewTag: true,
       },
     });
-    nextWorkspaceWindowNumber = workspaceWindowNumber + 1;
+    nextWorkspaceWindowNumber = Math.max(nextWorkspaceWindowNumber, workspaceWindowNumber + 1);
 
     if (environment.platform === "darwin") {
       window.setAutoHideCursor(false);
@@ -418,7 +435,7 @@ export const make = Effect.gen(function* () {
       });
     };
     const fallbackWindowBounds = boundsPersistenceEnabled ? null : readPersistableBounds();
-    const fallbackWindowMaximized = persistedSettings.mainWindowMaximized;
+    const fallbackWindowMaximized = persistedMaximized;
     const persistCurrentBounds = (): Fiber.Fiber<void, never> | undefined => {
       if (!boundsPersistenceEnabled) {
         return pendingBoundsPersistFiber;
@@ -428,10 +445,23 @@ export const make = Effect.gen(function* () {
         return pendingBoundsPersistFiber;
       }
       pendingBoundsPersistFiber = runFork(
-        desktopSettings.setMainWindowBounds(bounds, window.isMaximized()).pipe(
+        Effect.all(
+          [
+            windowSession.upsert({
+              workspaceId: input.workspaceId,
+              bounds,
+              isMaximized: window.isMaximized(),
+            }),
+            ...(input.isMainWindow
+              ? [desktopSettings.setMainWindowBounds(bounds, window.isMaximized())]
+              : []),
+          ],
+          { discard: true },
+        ).pipe(
           Effect.asVoid,
           Effect.catch((error) =>
-            logWindowWarning("failed to persist main window bounds", {
+            logWindowWarning("failed to persist workspace window bounds", {
+              workspaceId: input.workspaceId,
               message: error.message,
             }),
           ),
@@ -484,8 +514,8 @@ export const make = Effect.gen(function* () {
         fiber === undefined ? Effect.void : Fiber.join(fiber).pipe(Effect.asVoid),
       ),
     );
-    if (isMainWindow) {
-      flushMainWindowBounds = flushBoundsPersist;
+    windowBoundsFlushes.set(input.workspaceId, flushBoundsPersist);
+    if (input.isMainWindow) {
       // Only the main window hosts previews. Registering secondary workspace
       // windows here would reassign PiP/recording ownership to whichever
       // window opened last.
@@ -627,17 +657,14 @@ export const make = Effect.gen(function* () {
       event.preventDefault();
       window.setTitle(windowTitle);
     });
-    // The persisted bounds belong to the main window; secondary workspace
-    // windows must not overwrite them with their own geometry.
-    if (isMainWindow) {
-      window.on("resize", scheduleBoundsPersist);
-      window.on("move", scheduleBoundsPersist);
-      window.on("maximize", scheduleBoundsPersist);
-      window.on("unmaximize", scheduleBoundsPersist);
-      window.on("close", () => {
-        runFork(flushBoundsPersist);
-      });
-    }
+    window.on("resize", scheduleBoundsPersist);
+    window.on("move", scheduleBoundsPersist);
+    window.on("maximize", scheduleBoundsPersist);
+    window.on("unmaximize", scheduleBoundsPersist);
+    let closingBoundsFiber: Fiber.Fiber<void, never> | undefined;
+    window.on("close", () => {
+      closingBoundsFiber = runFork(flushBoundsPersist);
+    });
 
     if (environment.platform === "darwin") {
       window.on("enter-full-screen", () => {
@@ -781,7 +808,7 @@ export const make = Effect.gen(function* () {
       }
       // Reveal the real window, then close the connecting splash (if any) so the
       // two don't overlap and there's no blank gap between them.
-      if (persistedSettings.mainWindowMaximized) {
+      if (persistedMaximized) {
         window.maximize();
       }
       void runPromise(Effect.andThen(electronWindow.reveal(window), dismissConnectingSplash));
@@ -792,11 +819,52 @@ export const make = Effect.gen(function* () {
       window.webContents.openDevTools({ mode: "detach" });
     }
 
+    let registrationFiber: Fiber.Fiber<void, never> | undefined;
     window.on("closed", () => {
       clearDevelopmentLoadRetry();
       clearBoundsPersist();
-      void runPromise(electronWindow.clearMain(Option.some(window)));
+      windowBoundsFlushes.delete(input.workspaceId);
+      void runPromise(
+        Effect.gen(function* () {
+          if (registrationFiber !== undefined) {
+            yield* Fiber.join(registrationFiber);
+          }
+          if (closingBoundsFiber !== undefined) {
+            yield* Fiber.join(closingBoundsFiber);
+          }
+          if (!(yield* Ref.get(desktopState.quitting))) {
+            yield* windowSession.remove(input.workspaceId).pipe(
+              Effect.catch((error) =>
+                logWindowWarning("failed to remove closed workspace window from session", {
+                  workspaceId: input.workspaceId,
+                  message: error.message,
+                }),
+              ),
+            );
+          }
+          yield* electronWindow.clearMain(Option.some(window));
+        }),
+      );
     });
+
+    // Save the workspace identity immediately. Bounds are flushed after moves
+    // and before quit, once Electron has finalized OS window placement.
+    registrationFiber = runFork(
+      windowSession
+        .upsert({
+          workspaceId: input.workspaceId,
+          bounds: persistedBounds,
+          isMaximized: persistedMaximized,
+        })
+        .pipe(
+          Effect.catch((error) =>
+            logWindowWarning("failed to register workspace window in session", {
+              workspaceId: input.workspaceId,
+              message: error.message,
+            }),
+          ),
+        ),
+    );
 
     return window;
   });
@@ -806,7 +874,10 @@ export const make = Effect.gen(function* () {
   // never reaches the router: it resolves to "/" and falls back to the shared
   // "main" workspace, which made every Cmd+N window mirror the current one.
   const createMain = Effect.gen(function* () {
-    const window = yield* createWindow(`/#/workspace?workspace=${DEFAULT_MAIN_WORKSPACE_ID}`);
+    const window = yield* createWindow({
+      workspaceId: DEFAULT_MAIN_WORKSPACE_ID,
+      isMainWindow: true,
+    });
     yield* electronWindow.setMain(window);
     yield* logWindowInfo("main window created");
     return window;
@@ -816,7 +887,10 @@ export const make = Effect.gen(function* () {
     // Let the OS place secondary windows. Reusing the saved main-window x/y
     // puts the new window exactly over the current one, making Cmd+N look like
     // it did nothing when both workspaces have the same initial layout.
-    const window = yield* createWindow(`/#/workspace?workspace=${NodeCrypto.randomUUID()}`, false);
+    const window = yield* createWindow({
+      workspaceId: NodeCrypto.randomUUID(),
+      isMainWindow: false,
+    });
     yield* logWindowInfo("workspace window created");
     return window;
   }).pipe(Effect.withSpan("desktop.window.createWorkspaceWindow"));
@@ -840,6 +914,49 @@ export const make = Effect.gen(function* () {
     if (!backendReady) return;
     const existingWindow = yield* currentMainWindow;
     if (Option.isSome(existingWindow)) return;
+    if (!workspaceSessionRestored) {
+      workspaceSessionRestored = true;
+      const persistedWindows = yield* windowSession.get;
+      if (persistedWindows.length > 0) {
+        const primaryIndex = Math.max(
+          0,
+          persistedWindows.findIndex((window) => window.workspaceId === DEFAULT_MAIN_WORKSPACE_ID),
+        );
+        const primaryState = persistedWindows[primaryIndex]!;
+        const primaryWindow = yield* createWindow({
+          workspaceId: primaryState.workspaceId,
+          isMainWindow: true,
+          restoredState: primaryState,
+          windowNumber: primaryIndex + 1,
+        });
+        yield* electronWindow.setMain(primaryWindow);
+        yield* Effect.forEach(
+          persistedWindows,
+          (windowState, index) =>
+            index === primaryIndex
+              ? Effect.void
+              : createWindow({
+                  workspaceId: windowState.workspaceId,
+                  isMainWindow: false,
+                  restoredState: windowState,
+                  windowNumber: index + 1,
+                }).pipe(
+                  Effect.catch((error) =>
+                    logWindowWarning("failed to restore workspace window", {
+                      workspaceId: windowState.workspaceId,
+                      message: error.message,
+                    }),
+                  ),
+                  Effect.asVoid,
+                ),
+          { discard: true },
+        );
+        yield* logWindowInfo("workspace window session restored", {
+          windowCount: persistedWindows.length,
+        });
+        return;
+      }
+    }
     yield* createMain;
   }).pipe(Effect.withSpan("desktop.window.createMainIfBackendReady"));
 
@@ -925,9 +1042,9 @@ export const make = Effect.gen(function* () {
     handleBackendNotReady: Ref.set(backendReadyRef, false).pipe(
       Effect.withSpan("desktop.window.handleBackendNotReady"),
     ),
-    flushMainWindowBounds: Effect.suspend(() => flushMainWindowBounds).pipe(
-      Effect.withSpan("desktop.window.flushMainWindowBounds"),
-    ),
+    flushMainWindowBounds: Effect.suspend(() =>
+      Effect.all([...windowBoundsFlushes.values()], { discard: true }),
+    ).pipe(Effect.withSpan("desktop.window.flushMainWindowBounds")),
     dispatchMenuAction: Effect.fn("desktop.window.dispatchMenuAction")(function* (action) {
       yield* Effect.annotateCurrentSpan({ action });
       const existingWindow = yield* focusedMainWindow;

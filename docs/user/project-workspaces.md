@@ -44,6 +44,10 @@ changed in Settings.
 On macOS, each workspace window has a numbered session title in the Window menu and the Dock menu.
 Choose one of those titles to bring that workspace to the front.
 
+When you quit and reopen the desktop app, T3 Code restores every workspace window with the same
+pane assignments, size, position, and maximized state. Closing one window removes it from the next
+session without stopping the threads shown in its panes.
+
 On macOS desktop, the titlebar strip remains available for the traffic lights, window dragging,
 and workspace controls. It disappears in fullscreen so the panes use the entire window; the same
 actions remain available through their shortcuts.

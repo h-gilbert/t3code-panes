@@ -46,6 +46,7 @@ import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import { MENU_ACTION_CHANNEL, WINDOW_FULLSCREEN_STATE_CHANNEL } from "../ipc/channels.ts";
 import * as DesktopServerExposure from "../backend/DesktopServerExposure.ts";
 import * as DesktopWindow from "./DesktopWindow.ts";
+import * as DesktopWindowSession from "./DesktopWindowSession.ts";
 import * as PreviewManager from "../preview/Manager.ts";
 
 const environmentInput = {
@@ -208,6 +209,10 @@ function makeTestLayer(input: {
   readonly openedExternalUrls?: unknown[];
   readonly previewZoomReapplies?: number[];
   readonly previewMainWindowAssignments?: Electron.BrowserWindow[];
+  readonly workspaceWindows?: ReadonlyArray<DesktopWindowSession.DesktopWorkspaceWindowState>;
+  readonly workspaceWindowUpdates?: DesktopWindowSession.DesktopWorkspaceWindowState[];
+  readonly workspaceWindowRemovals?: string[];
+  readonly desktopStateLayer?: Layer.Layer<DesktopState.DesktopState>;
 }) {
   let desktopSettings = input.desktopSettings ?? DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS;
   const desktopAppSettingsLayer = Layer.succeed(DesktopAppSettings.DesktopAppSettings, {
@@ -243,6 +248,30 @@ function makeTestLayer(input: {
     applyWslWindowsFallbackInMemory: Effect.die("unexpected WSL Windows fallback"),
   } satisfies DesktopAppSettings.DesktopAppSettings["Service"]);
 
+  let workspaceWindows = input.workspaceWindows ?? [];
+  const desktopWindowSessionLayer = Layer.succeed(DesktopWindowSession.DesktopWindowSession, {
+    get: Effect.sync(() => workspaceWindows),
+    load: Effect.sync(() => workspaceWindows),
+    upsert: (window) =>
+      Effect.sync(() => {
+        input.workspaceWindowUpdates?.push(window);
+        const index = workspaceWindows.findIndex(
+          (candidate) => candidate.workspaceId === window.workspaceId,
+        );
+        workspaceWindows =
+          index < 0
+            ? [...workspaceWindows, window]
+            : workspaceWindows.map((candidate, candidateIndex) =>
+                candidateIndex === index ? window : candidate,
+              );
+      }),
+    remove: (workspaceId) =>
+      Effect.sync(() => {
+        input.workspaceWindowRemovals?.push(workspaceId);
+        workspaceWindows = workspaceWindows.filter((window) => window.workspaceId !== workspaceId);
+      }),
+  });
+
   const electronWindowLayer = Layer.succeed(ElectronWindow.ElectronWindow, {
     create: (options) =>
       Effect.sync(() => {
@@ -271,7 +300,8 @@ function makeTestLayer(input: {
         desktopAppSettingsLayer,
         desktopClientSettingsLayer,
         desktopServerExposureLayer,
-        DesktopState.layer,
+        input.desktopStateLayer ?? DesktopState.layer,
+        desktopWindowSessionLayer,
         electronAppLayer,
         electronMenuLayer,
         Layer.succeed(ElectronShell.ElectronShell, {
@@ -380,6 +410,8 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
           DesktopAppSettings.layerTest(),
           desktopClientSettingsLayer,
           desktopServerExposureLayer,
+          DesktopState.layer,
+          DesktopWindowSession.layerTest(),
           electronAppLayer,
           electronMenuLayer,
           Layer.succeed(ElectronShell.ElectronShell, {
@@ -503,6 +535,152 @@ describe("DesktopWindow", () => {
           "t3code-dev://app/#/workspace?workspace=main",
         ]);
         assert.equal(fakeWindow.openDevTools.mock.calls.length, 1);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("restores every persisted workspace window with its identity and bounds", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const createdWindowOptions: Electron.BrowserWindowConstructorOptions[] = [];
+      const workspaceWindows = [
+        {
+          workspaceId: "main",
+          bounds: { x: 40, y: 60, width: 1200, height: 820 },
+          isMaximized: false,
+        },
+        {
+          workspaceId: "research-window",
+          bounds: { x: 1280, y: 80, width: 600, height: 900 },
+          isMaximized: true,
+        },
+      ] satisfies ReadonlyArray<DesktopWindowSession.DesktopWorkspaceWindowState>;
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+        createdWindowOptions,
+        workspaceWindows,
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+
+        assert.equal(yield* Ref.get(createCount), 2);
+        assert.deepEqual(
+          createdWindowOptions.map(({ x, y, width, height, title }) => ({
+            x,
+            y,
+            width,
+            height,
+            title,
+          })),
+          [
+            {
+              x: 40,
+              y: 60,
+              width: 1200,
+              height: 820,
+              title: "Session 1 · T3 Code (Dev)",
+            },
+            {
+              x: 1280,
+              y: 80,
+              width: 600,
+              height: 900,
+              title: "Session 2 · T3 Code (Dev)",
+            },
+          ],
+        );
+        assert.deepEqual(fakeWindow.loadURL.mock.calls, [
+          ["t3code-dev://app/#/workspace?workspace=main"],
+          ["t3code-dev://app/#/workspace?workspace=research-window"],
+        ]);
+
+        const readyToShow = fakeWindow.windowListeners.get("ready-to-show");
+        if (!readyToShow) return yield* Effect.die("ready-to-show listener was not registered");
+        readyToShow();
+        assert.equal(fakeWindow.maximize.mock.calls.length, 1);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("removes a workspace from the next session when its window closes", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const workspaceWindowRemovals: string[] = [];
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+        workspaceWindowRemovals,
+        workspaceWindows: [
+          {
+            workspaceId: "main",
+            bounds: { x: 0, y: 0, width: 1100, height: 780 },
+            isMaximized: false,
+          },
+        ],
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+        const close = fakeWindow.windowListeners.get("close");
+        const closed = fakeWindow.windowListeners.get("closed");
+        if (!close || !closed) {
+          return yield* Effect.die("window close listeners were not registered");
+        }
+
+        close();
+        closed();
+        yield* Effect.yieldNow;
+        assert.deepEqual(workspaceWindowRemovals, ["main"]);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("keeps workspace windows in the session while the app quits", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const backendReady = yield* Ref.make(false);
+      const quitting = yield* Ref.make(true);
+      const workspaceWindowRemovals: string[] = [];
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+        workspaceWindowRemovals,
+        desktopStateLayer: Layer.succeed(DesktopState.DesktopState, { backendReady, quitting }),
+        workspaceWindows: [
+          {
+            workspaceId: "main",
+            bounds: { x: 0, y: 0, width: 1100, height: 780 },
+            isMaximized: false,
+          },
+        ],
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+        const close = fakeWindow.windowListeners.get("close");
+        const closed = fakeWindow.windowListeners.get("closed");
+        if (!close || !closed) {
+          return yield* Effect.die("window close listeners were not registered");
+        }
+
+        close();
+        closed();
+        yield* Effect.yieldNow;
+        assert.deepEqual(workspaceWindowRemovals, []);
       }).pipe(Effect.provide(layer));
     }),
   );
@@ -666,13 +844,12 @@ describe("DesktopWindow", () => {
           /^t3code-dev:\/\/app\/#\/workspace\?workspace=[0-9a-f-]+$/,
         );
         // Secondary windows never take over preview hosting from the main
-        // window, and never register bounds persistence (the saved bounds
-        // belong to the main window alone).
+        // window. Both windows track bounds for session restoration.
         assert.equal(previewMainWindowAssignments.length, 1);
         const resizeRegistrations = fakeWindow.on.mock.calls.filter(
           ([eventName]) => eventName === "resize",
         );
-        assert.equal(resizeRegistrations.length, 1);
+        assert.equal(resizeRegistrations.length, 2);
       }).pipe(Effect.provide(layer));
     }),
   );
