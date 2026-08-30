@@ -1,5 +1,6 @@
 import {
   PREVIEW_AUTOMATION_V1_OPERATIONS,
+  PreviewAutomationBusyError,
   PreviewAutomationClientDisconnectedError,
   PreviewAutomationControlInterruptedError,
   PreviewAutomationExecutionError,
@@ -21,6 +22,7 @@ import {
   type PreviewAutomationResponse,
   type PreviewAutomationStreamEvent,
 } from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
@@ -90,6 +92,19 @@ interface HostAssignment {
   readonly tabSequence?: number;
 }
 
+/**
+ * The provider session that currently holds a shared browser environment for
+ * exclusive interaction, plus when it last drove it. Keyed per environment (one
+ * shared surface per environment) rather than per connection, so it survives a
+ * host reconnect within the idle window and expresses "another session owns the
+ * browser" — something the per-session `assignments` map cannot.
+ */
+interface HostHolder {
+  readonly providerSessionId: string;
+  readonly threadId: McpInvocationContext.McpInvocationScope["threadId"];
+  readonly lastActivityMs: number;
+}
+
 interface PreviewAutomationRequestErrorContext {
   readonly operation: PreviewAutomationOperation;
   readonly environmentId: McpInvocationContext.McpInvocationScope["environmentId"];
@@ -108,10 +123,22 @@ interface PreviewAutomationRequestErrorContext {
 interface BrokerState {
   readonly clients: ReadonlyMap<string, ClientConnection>;
   readonly assignments: ReadonlyMap<string, HostAssignment>;
+  readonly holders: ReadonlyMap<ClientConnection["environmentId"], HostHolder>;
   readonly pending: ReadonlyMap<string, PendingRequest>;
   readonly requestSequence: number;
   readonly focusSequence: number;
 }
+
+type InvokeRoute =
+  | { readonly type: "no-host" }
+  | { readonly type: "busy"; readonly holder: HostHolder }
+  | {
+      readonly type: "route";
+      readonly connection: ClientConnection;
+      readonly requestId: string;
+      readonly requestContext: PreviewAutomationRequestErrorContext;
+      readonly requestSequence: number;
+    };
 
 const removeConnectionFromState = (
   current: BrokerState,
@@ -120,11 +147,23 @@ const removeConnectionFromState = (
 ): { readonly state: BrokerState; readonly disconnected: ReadonlyArray<PendingRequest> } => {
   const clients = new Map(current.clients);
   const assignments = new Map(current.assignments);
+  const holders = new Map(current.holders);
   const pending = new Map(current.pending);
   const disconnected: PendingRequest[] = [];
-  if (current.clients.get(clientId)?.queue === queue) clients.delete(clientId);
+  const removedConnection = current.clients.get(clientId);
+  if (removedConnection?.queue === queue) clients.delete(clientId);
   for (const [assignmentKey, assignment] of assignments) {
     if (assignment.queue === queue) assignments.delete(assignmentKey);
+  }
+  // Drop the exclusive-use lease once an environment has no connected host
+  // left: nothing remains to hold the surface, and a stale holder would
+  // otherwise wrongly block the next session until the idle window elapsed.
+  if (removedConnection) {
+    const environmentId = removedConnection.environmentId;
+    const environmentStillConnected = Array.from(clients.values()).some(
+      (connection) => connection.environmentId === environmentId,
+    );
+    if (!environmentStillConnected) holders.delete(environmentId);
   }
   for (const [requestId, entry] of pending) {
     if (entry.queue !== queue) continue;
@@ -132,7 +171,7 @@ const removeConnectionFromState = (
     disconnected.push(entry);
   }
   return {
-    state: { ...current, clients, assignments, pending },
+    state: { ...current, clients, assignments, holders, pending },
     disconnected,
   };
 };
@@ -152,6 +191,39 @@ const selectorDiagnosticsFromInput = (
 
 const hostAssignmentKey = (scope: McpInvocationContext.McpInvocationScope): string =>
   `${scope.environmentId}\u0000${scope.providerSessionId}`;
+
+/**
+ * Operations that actively drive the shared browser surface (input, navigation,
+ * lifecycle) and must not interleave between provider sessions. Passive reads
+ * (`status`, `snapshot`, `waitFor`) are omitted: they neither mutate the page
+ * nor steal focus, so they run concurrently and never claim the lease.
+ */
+const PREVIEW_AUTOMATION_EXCLUSIVE_OPERATIONS: ReadonlySet<PreviewAutomationOperation> = new Set([
+  "open",
+  "navigate",
+  "click",
+  "type",
+  "press",
+  "scroll",
+  "evaluate",
+  "resize",
+  "setColorScheme",
+  "close",
+  "autofill",
+  "recordingStart",
+  "recordingStop",
+]);
+
+/**
+ * How long the shared browser stays leased to its last active driver after that
+ * driver goes quiet. A live multi-step interaction refreshes the lease on every
+ * step, so this only elapses once a session truly stops touching the browser —
+ * at which point another session (or a crashed holder's successor) may take over.
+ */
+const PREVIEW_AUTOMATION_LEASE_IDLE_MS = 10_000;
+
+const isExclusiveOperation = (operation: PreviewAutomationOperation): boolean =>
+  PREVIEW_AUTOMATION_EXCLUSIVE_OPERATIONS.has(operation);
 
 const isPreviewTabId = Schema.is(PreviewTabId);
 
@@ -290,6 +362,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
   const state = yield* SynchronizedRef.make<BrokerState>({
     clients: new Map(),
     assignments: new Map(),
+    holders: new Map(),
     pending: new Map(),
     requestSequence: 0,
     focusSequence: 0,
@@ -428,92 +501,146 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
   ): Effect.fn.Return<A, PreviewAutomationError> {
     const timeoutMs = input.timeoutMs ?? 15_000;
     const deferred = yield* Deferred.make<unknown, PreviewAutomationError>();
-    const route = yield* SynchronizedRef.modify(state, (current) => {
-      const assignments = new Map(
-        Array.from(current.assignments).filter(([, assignment]) => {
-          const connection = current.clients.get(assignment.clientId);
-          return (
-            connection?.connectionId === assignment.connectionId &&
-            connection.queue === assignment.queue
-          );
-        }),
-      );
-      const assignmentKey = hostAssignmentKey(input.scope);
-      const assigned = assignments.get(assignmentKey);
-      const assignedConnection = assigned ? current.clients.get(assigned.clientId) : undefined;
-      const hasLiveAssignment = assignedConnection?.environmentId === input.scope.environmentId;
-      // Keep one provider session on one physical desktop runtime so a
-      // multi-step browser interaction cannot jump between independent
-      // Electron cookie/DOM state. A live assignment that predates an
-      // operation is not silently moved to a newer client: the caller gets a
-      // capability failure and can deliberately start a fresh provider
-      // session. A dead lease is pruned above and may fail over.
-      const connection =
-        hasLiveAssignment && supportsOperation(assignedConnection, input.operation)
-          ? assignedConnection
-          : hasLiveAssignment
-            ? undefined
-            : Array.from(current.clients.values())
-                .filter(
-                  (host) =>
-                    host.environmentId === input.scope.environmentId &&
-                    supportsOperation(host, input.operation),
-                )
-                .sort(
-                  (left, right) =>
-                    right.supportedOperations.size - left.supportedOperations.size ||
-                    Number(right.focused) - Number(left.focused) ||
-                    right.focusOrder - left.focusOrder,
-                )[0];
-      if (!connection) {
-        if (!hasLiveAssignment) assignments.delete(assignmentKey);
-        return [undefined, { ...current, assignments }] as const;
-      }
-      const canReuseAssignedTab =
-        assigned !== undefined &&
-        assigned.connectionId === connection.connectionId &&
-        assigned.queue === connection.queue;
-      assignments.set(assignmentKey, {
-        clientId: connection.clientId,
-        connectionId: connection.connectionId,
-        queue: connection.queue,
-        ...(canReuseAssignedTab && assigned.tabId !== undefined ? { tabId: assigned.tabId } : {}),
-        ...(canReuseAssignedTab && assigned.tabSequence !== undefined
-          ? { tabSequence: assigned.tabSequence }
-          : {}),
-      });
+    // Read the clock outside `modify` (its reducer must stay pure): the lease
+    // guard below compares the current holder's last activity against `now`.
+    const now = yield* Clock.currentTimeMillis;
+    const exclusive = isExclusiveOperation(input.operation);
+    const route = yield* SynchronizedRef.modify(
+      state,
+      (current): readonly [InvokeRoute, BrokerState] => {
+        const assignments = new Map(
+          Array.from(current.assignments).filter(([, assignment]) => {
+            const connection = current.clients.get(assignment.clientId);
+            return (
+              connection?.connectionId === assignment.connectionId &&
+              connection.queue === assignment.queue
+            );
+          }),
+        );
+        const assignmentKey = hostAssignmentKey(input.scope);
+        const assigned = assignments.get(assignmentKey);
+        const assignedConnection = assigned ? current.clients.get(assigned.clientId) : undefined;
+        const hasLiveAssignment = assignedConnection?.environmentId === input.scope.environmentId;
+        // Keep one provider session on one physical desktop runtime so a
+        // multi-step browser interaction cannot jump between independent
+        // Electron cookie/DOM state. A live assignment that predates an
+        // operation is not silently moved to a newer client: the caller gets a
+        // capability failure and can deliberately start a fresh provider
+        // session. A dead lease is pruned above and may fail over.
+        const connection =
+          hasLiveAssignment && supportsOperation(assignedConnection, input.operation)
+            ? assignedConnection
+            : hasLiveAssignment
+              ? undefined
+              : Array.from(current.clients.values())
+                  .filter(
+                    (host) =>
+                      host.environmentId === input.scope.environmentId &&
+                      supportsOperation(host, input.operation),
+                  )
+                  .sort(
+                    (left, right) =>
+                      right.supportedOperations.size - left.supportedOperations.size ||
+                      Number(right.focused) - Number(left.focused) ||
+                      right.focusOrder - left.focusOrder,
+                  )[0];
+        if (!connection) {
+          if (!hasLiveAssignment) assignments.delete(assignmentKey);
+          return [{ type: "no-host" as const }, { ...current, assignments }] as const;
+        }
+        // Exclusive-use guard: while one provider session is actively driving the
+        // shared browser for this environment, refuse a competing session's
+        // interaction instead of stomping the surface the holder — and the human
+        // watching it — is mid-flow with. Passive reads skip this entirely.
+        if (exclusive) {
+          const holder = current.holders.get(input.scope.environmentId);
+          const holderActive =
+            holder !== undefined && now - holder.lastActivityMs < PREVIEW_AUTOMATION_LEASE_IDLE_MS;
+          if (holderActive && holder.providerSessionId !== input.scope.providerSessionId) {
+            return [
+              { type: "busy" as const, holder },
+              { ...current, assignments },
+            ] as const;
+          }
+        }
+        const canReuseAssignedTab =
+          assigned !== undefined &&
+          assigned.connectionId === connection.connectionId &&
+          assigned.queue === connection.queue;
+        assignments.set(assignmentKey, {
+          clientId: connection.clientId,
+          connectionId: connection.connectionId,
+          queue: connection.queue,
+          ...(canReuseAssignedTab && assigned.tabId !== undefined ? { tabId: assigned.tabId } : {}),
+          ...(canReuseAssignedTab && assigned.tabSequence !== undefined
+            ? { tabSequence: assigned.tabSequence }
+            : {}),
+        });
 
-      const requestSequence = current.requestSequence;
-      const requestId = `preview-${requestSequence}`;
-      const tabId = input.tabId ?? (canReuseAssignedTab ? assigned.tabId : undefined);
-      const selectorDiagnostics = selectorDiagnosticsFromInput(input.input);
-      const context: PreviewAutomationRequestErrorContext = {
-        operation: input.operation,
-        environmentId: input.scope.environmentId,
-        threadId: input.scope.threadId,
-        providerSessionId: input.scope.providerSessionId,
-        providerInstanceId: input.scope.providerInstanceId,
-        clientId: connection.clientId,
-        connectionId: connection.connectionId,
-        requestId,
-        ...(tabId === undefined ? {} : { tabId }),
-        timeoutMs,
-        ...selectorDiagnostics,
-      };
-      const pending = new Map(current.pending);
-      pending.set(requestId, { queue: connection.queue, deferred, context });
-      return [
-        { connection, requestId, requestContext: context, requestSequence },
-        { ...current, assignments, pending, requestSequence: current.requestSequence + 1 },
-      ] as const;
-    });
-    if (!route) {
+        const requestSequence = current.requestSequence;
+        const requestId = `preview-${requestSequence}`;
+        const tabId = input.tabId ?? (canReuseAssignedTab ? assigned.tabId : undefined);
+        const selectorDiagnostics = selectorDiagnosticsFromInput(input.input);
+        const context: PreviewAutomationRequestErrorContext = {
+          operation: input.operation,
+          environmentId: input.scope.environmentId,
+          threadId: input.scope.threadId,
+          providerSessionId: input.scope.providerSessionId,
+          providerInstanceId: input.scope.providerInstanceId,
+          clientId: connection.clientId,
+          connectionId: connection.connectionId,
+          requestId,
+          ...(tabId === undefined ? {} : { tabId }),
+          timeoutMs,
+          ...selectorDiagnostics,
+        };
+        const pending = new Map(current.pending);
+        pending.set(requestId, { queue: connection.queue, deferred, context });
+        // Claim or refresh the exclusive lease so this session's next step (and
+        // the idle timer) start from now. Passive reads leave the lease untouched.
+        const holders = exclusive
+          ? new Map(current.holders).set(input.scope.environmentId, {
+              providerSessionId: input.scope.providerSessionId,
+              threadId: input.scope.threadId,
+              lastActivityMs: now,
+            })
+          : current.holders;
+        return [
+          {
+            type: "route" as const,
+            connection,
+            requestId,
+            requestContext: context,
+            requestSequence,
+          },
+          {
+            ...current,
+            assignments,
+            holders,
+            pending,
+            requestSequence: current.requestSequence + 1,
+          },
+        ] as const;
+      },
+    );
+    if (route.type === "no-host") {
       return yield* new PreviewAutomationNoAvailableHostError({
         operation: input.operation,
         environmentId: input.scope.environmentId,
         threadId: input.scope.threadId,
         providerSessionId: input.scope.providerSessionId,
         providerInstanceId: input.scope.providerInstanceId,
+      });
+    }
+    if (route.type === "busy") {
+      return yield* new PreviewAutomationBusyError({
+        operation: input.operation,
+        environmentId: input.scope.environmentId,
+        threadId: input.scope.threadId,
+        providerSessionId: input.scope.providerSessionId,
+        providerInstanceId: input.scope.providerInstanceId,
+        holderProviderSessionId: route.holder.providerSessionId,
+        ...(route.holder.threadId === undefined ? {} : { holderThreadId: route.holder.threadId }),
       });
     }
     const { connection, requestId, requestContext, requestSequence } = route;

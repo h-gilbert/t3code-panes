@@ -2,6 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import {
   EnvironmentId,
+  PreviewAutomationBusyError,
   PreviewAutomationClientDisconnectedError,
   PreviewAutomationInvalidSelectorError,
   PreviewAutomationMalformedResponseError,
@@ -14,11 +15,13 @@ import {
   type PreviewAutomationRequest,
   type PreviewAutomationStreamEvent,
 } from "@t3tools/contracts";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
 import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 
 import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
 
@@ -1048,4 +1051,104 @@ it.effect("accepts responses only from the host that received the request", () =
       expect(result).toBe("owner");
     }),
   ),
+);
+
+const competingScope = {
+  ...scope,
+  providerSessionId: "provider-session-2",
+  threadId: ThreadId.make("thread-2"),
+};
+
+it.effect("refuses a competing provider session while another holds the shared browser", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* makeBroker;
+      const requests = requestsFrom(yield* broker.connect(makeHost()));
+      // Never respond: session one's click stays in flight, holding the lease.
+      yield* Stream.runDrain(requests).pipe(Effect.forkScoped);
+      yield* broker.invoke<void>({ scope, operation: "click", input: {} }).pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+
+      const error = yield* broker
+        .invoke<void>({ scope: competingScope, operation: "click", input: {} })
+        .pipe(Effect.flip);
+
+      expect(error).toBeInstanceOf(PreviewAutomationBusyError);
+      expect(error).toMatchObject({
+        operation: "click",
+        environmentId: scope.environmentId,
+        providerSessionId: "provider-session-2",
+        holderProviderSessionId: "provider-session-1",
+        holderThreadId: scope.threadId,
+      });
+    }),
+  ),
+);
+
+it.effect("lets a passive read through while another session holds the browser", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* makeBroker;
+      const requests = requestsFrom(yield* broker.connect(makeHost()));
+      yield* Stream.runForEach(requests, (request) =>
+        broker.respond({
+          clientId: "client-1",
+          connectionId: request.connectionId,
+          requestId: request.requestId,
+          ok: true,
+          result: request.operation,
+        }),
+      ).pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+
+      // Session one claims the exclusive lease with a mutating op.
+      expect(yield* broker.invoke<string>({ scope, operation: "click", input: {} })).toBe("click");
+
+      // A different session can still read the shared browser concurrently...
+      expect(
+        yield* broker.invoke<string>({ scope: competingScope, operation: "status", input: {} }),
+      ).toBe("status");
+
+      // ...but cannot drive it.
+      const error = yield* broker
+        .invoke<string>({ scope: competingScope, operation: "type", input: {} })
+        .pipe(Effect.flip);
+      expect(error).toBeInstanceOf(PreviewAutomationBusyError);
+    }),
+  ),
+);
+
+it.effect("releases the lease after the idle window so another session can take over", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* makeBroker;
+      const requests = requestsFrom(yield* broker.connect(makeHost()));
+      yield* Stream.runForEach(requests, (request) =>
+        broker.respond({
+          clientId: "client-1",
+          connectionId: request.connectionId,
+          requestId: request.requestId,
+          ok: true,
+          result: request.operation,
+        }),
+      ).pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+
+      expect(yield* broker.invoke<string>({ scope, operation: "click", input: {} })).toBe("click");
+
+      // Held immediately after the holder's last activity.
+      expect(
+        yield* broker
+          .invoke<string>({ scope: competingScope, operation: "click", input: {} })
+          .pipe(Effect.flip),
+      ).toBeInstanceOf(PreviewAutomationBusyError);
+
+      // Once the holder has been quiet for the idle window, the lease frees up.
+      yield* TestClock.adjust(Duration.millis(10_000));
+      yield* Effect.yieldNow;
+      expect(
+        yield* broker.invoke<string>({ scope: competingScope, operation: "click", input: {} }),
+      ).toBe("click");
+    }),
+  ).pipe(Effect.provide(TestClock.layer())),
 );

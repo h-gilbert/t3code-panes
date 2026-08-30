@@ -750,6 +750,19 @@ export class PreviewAutomationNoAvailableHostError extends Schema.TaggedErrorCla
   }
 }
 
+export class PreviewAutomationBusyError extends Schema.TaggedErrorClass<PreviewAutomationBusyError>()(
+  "PreviewAutomationBusyError",
+  {
+    ...PreviewAutomationScopeErrorFields,
+    holderProviderSessionId: TrimmedNonEmptyString,
+    holderThreadId: Schema.optional(ThreadId),
+  },
+) {
+  override get message(): string {
+    return `The shared browser for environment ${this.environmentId} is currently held by another session; try again shortly.`;
+  }
+}
+
 export class PreviewAutomationUnsupportedClientError extends Schema.TaggedErrorClass<PreviewAutomationUnsupportedClientError>()(
   "PreviewAutomationUnsupportedClientError",
   {
@@ -910,6 +923,7 @@ export class PreviewAutomationMalformedResponseError extends Schema.TaggedErrorC
 export const PreviewAutomationError = Schema.Union([
   PreviewAutomationUnavailableError,
   PreviewAutomationNoAvailableHostError,
+  PreviewAutomationBusyError,
   PreviewAutomationUnsupportedClientError,
   PreviewAutomationTabNotFoundError,
   PreviewAutomationTimeoutError,
