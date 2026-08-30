@@ -112,6 +112,23 @@ describe("window workspace layouts", () => {
     );
   });
 
+  it("adds a ninth slot when expanding an older eight-pane workspace", () => {
+    const olderLayout = {
+      ...DEFAULT_PROJECT_WORKSPACE_LAYOUT,
+      panes: DEFAULT_PROJECT_WORKSPACE_LAYOUT.panes.slice(0, 8),
+      projectKeys: DEFAULT_PROJECT_WORKSPACE_LAYOUT.projectKeys.slice(0, 8),
+      paneCount: 8 as const,
+    };
+
+    const expanded = resizeWorkspaceLayoutPaneCount(olderLayout, 9);
+
+    expect(expanded.paneCount).toBe(9);
+    expect(expanded.panes).toHaveLength(9);
+    expect(expanded.projectKeys).toHaveLength(9);
+    expect(expanded.panes[8]).toBeNull();
+    expect(expanded.projectKeys[8]).toBeNull();
+  });
+
   it("assigns one project to a pane and clears its previous thread", () => {
     useWorkspacePaneStore.setState({ layoutsByProjectKey: {} });
     const thread = scopeThreadRef("environment-1" as EnvironmentId, ThreadId.make("thread-1"));

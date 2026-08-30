@@ -74,10 +74,13 @@ import {
 import {
   selectProjectWorkspaceLayout,
   useWorkspacePaneStore,
+  WORKSPACE_PANE_COUNT,
+  WORKSPACE_PANE_COUNTS,
   type WorkspacePaneCount,
   type WorkspacePaneIndex,
   type WorkspacePaneTarget,
 } from "../workspacePaneStore";
+import { resolveWorkspaceGridColumnCount } from "../workspacePaneLayout";
 import {
   resolveWorkspaceDraftThreadRef,
   resolveWorkspacePaneThreadTitle,
@@ -595,7 +598,10 @@ export function ProjectPaneWorkspace({
     layout;
   const visiblePanes = panes.slice(0, paneCount);
   const paneComposerHandleRefs = useRef(
-    Array.from({ length: 8 }, () => ({ current: null }) as RefObject<ChatComposerHandle | null>),
+    Array.from(
+      { length: WORKSPACE_PANE_COUNT },
+      () => ({ current: null }) as RefObject<ChatComposerHandle | null>,
+    ),
   ).current;
   const openWorkspaceWindow = useCallback(() => {
     const nextWorkspace = window.crypto.randomUUID();
@@ -632,7 +638,7 @@ export function ProjectPaneWorkspace({
           modelPickerOpen: isModelPickerOpen(),
         },
       });
-      const paneCountMatch = /^workspace\.paneCount\.([1-8])$/.exec(command ?? "");
+      const paneCountMatch = /^workspace\.paneCount\.([1-9])$/.exec(command ?? "");
       const nextPaneCount = paneCountMatch?.[1]
         ? (Number(paneCountMatch[1]) as WorkspacePaneCount)
         : null;
@@ -705,7 +711,7 @@ export function ProjectPaneWorkspace({
                   )
                 }
               >
-                {([1, 2, 3, 4, 5, 6, 7, 8] as const).map((count) => (
+                {WORKSPACE_PANE_COUNTS.map((count) => (
                   <option key={count} value={count}>
                     {count}
                   </option>
@@ -769,7 +775,7 @@ export function ProjectPaneWorkspace({
                 : layoutMode === "rows"
                   ? { gridTemplateRows: `repeat(${paneCount}, minmax(0, 1fr))` }
                   : {
-                      gridTemplateColumns: `repeat(${Math.ceil(Math.sqrt(paneCount))}, minmax(0, 1fr))`,
+                      gridTemplateColumns: `repeat(${resolveWorkspaceGridColumnCount(paneCount)}, minmax(0, 1fr))`,
                       gridAutoRows: "minmax(0, 1fr)",
                     }
           }

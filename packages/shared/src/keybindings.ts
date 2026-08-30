@@ -39,7 +39,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+f", command: "projectSearch.toggle", when: "!terminalFocus" },
   { key: "mod+alt+shift+t", command: "themeEditor.toggle" },
   { key: "mod+s", command: "composer.stash", when: "!terminalFocus" },
-  ...([1, 2, 3, 4, 5, 6, 7, 8] as const).map((paneCount) => ({
+  ...([1, 2, 3, 4, 5, 6, 7, 8, 9] as const).map((paneCount) => ({
     key: `mod+alt+${paneCount}`,
     command: `workspace.paneCount.${paneCount}` as const,
     when: "!terminalFocus",

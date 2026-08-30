@@ -85,10 +85,10 @@ it.effect("parses keybinding rules", () =>
     assert.strictEqual(parsedThemeEditor.command, "themeEditor.toggle");
 
     const parsedWorkspacePaneCount = yield* decode(KeybindingRule, {
-      key: "mod+alt+6",
-      command: "workspace.paneCount.6",
+      key: "mod+alt+9",
+      command: "workspace.paneCount.9",
     });
-    assert.strictEqual(parsedWorkspacePaneCount.command, "workspace.paneCount.6");
+    assert.strictEqual(parsedWorkspacePaneCount.command, "workspace.paneCount.9");
 
     const parsedWorkspaceLayout = yield* decode(KeybindingRule, {
       key: "mod+alt+g",

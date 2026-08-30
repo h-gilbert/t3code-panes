@@ -76,6 +76,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "workspace.paneCount.6",
   "workspace.paneCount.7",
   "workspace.paneCount.8",
+  "workspace.paneCount.9",
   "workspace.layout.grid",
   "workspace.layout.columns",
   "workspace.layout.rows",

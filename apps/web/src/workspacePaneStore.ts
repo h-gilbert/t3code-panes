@@ -6,12 +6,13 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import type { DraftId } from "./composerDraftStore";
 import { resolveStorage } from "./lib/storage";
 
-export const WORKSPACE_PANE_COUNT = 8;
+export const WORKSPACE_PANE_COUNTS = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
+export const WORKSPACE_PANE_COUNT = 9;
 export const DEFAULT_WORKSPACE_KEY = "main";
 const WORKSPACE_PANE_STORAGE_KEY = "t3code:window-workspaces:v3";
 
-export type WorkspacePaneCount = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
-export type WorkspacePaneIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
+export type WorkspacePaneCount = (typeof WORKSPACE_PANE_COUNTS)[number];
+export type WorkspacePaneIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 export type WorkspaceLayoutMode = "grid" | "columns" | "rows";
 export interface WorkspaceDraftPaneTarget {
   readonly draftId: DraftId;
@@ -134,7 +135,26 @@ export function resizeWorkspaceLayoutPaneCount(
   paneCount: WorkspacePaneCount,
 ): ProjectWorkspaceLayout {
   if (paneCount >= layout.paneCount) {
-    return paneCount === layout.paneCount ? layout : { ...layout, paneCount };
+    if (
+      paneCount === layout.paneCount &&
+      layout.panes.length === WORKSPACE_PANE_COUNT &&
+      layout.projectKeys.length === WORKSPACE_PANE_COUNT
+    ) {
+      return layout;
+    }
+
+    return {
+      ...layout,
+      panes: Array.from(
+        { length: WORKSPACE_PANE_COUNT },
+        (_, index) => layout.panes[index] ?? null,
+      ),
+      projectKeys: Array.from(
+        { length: WORKSPACE_PANE_COUNT },
+        (_, index) => layout.projectKeys[index] ?? null,
+      ),
+      paneCount,
+    };
   }
 
   const visibleSlots: IndexedWorkspacePane[] = Array.from(

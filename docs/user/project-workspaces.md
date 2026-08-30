@@ -34,7 +34,7 @@ it. A non-empty directory with a different origin is left untouched.
 
 Workspace layout controls are available in the macOS desktop titlebar when the app is windowed.
 They are also available from the keyboard: use **Option-Command-1** through
-**Option-Command-8** to set the pane count, **Option-Command-G** for grid,
+**Option-Command-9** to set the pane count, **Option-Command-G** for grid,
 **Option-Command-C** for columns, and **Option-Command-R** for rows. Use
 **Shift-Option-Command-R** to reset the workspace and **Option-Command-N** to open another
 independent workspace window. The existing **Command-B** shortcut shows or hides the sidebar. On
