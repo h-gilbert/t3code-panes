@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { ChevronLeftIcon, ChevronRightIcon, XIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import type { ExpandedImagePreview } from "./ExpandedImagePreview";
@@ -46,9 +47,9 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
   const item = preview.images[index];
   if (!item) return null;
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 px-4 py-6 [-webkit-app-region:no-drag]"
+      className="fixed inset-0 z-[150] flex items-center justify-center bg-black/75 px-4 py-6 [-webkit-app-region:no-drag]"
       role="dialog"
       aria-modal="true"
       aria-label="Expanded image preview"
@@ -105,6 +106,7 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
           <ChevronRightIcon className="size-5" />
         </Button>
       )}
-    </div>
+    </div>,
+    document.body,
   );
 });
