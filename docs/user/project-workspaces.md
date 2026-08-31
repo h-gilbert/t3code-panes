@@ -64,11 +64,16 @@ persistent cookie space — or as an ephemeral session that starts with no store
 discarded when the app quits.
 
 You can save a site login from the browser's menu ("Save login for this site…"). Logins are
-encrypted with the operating system's keychain, bound to the exact site they were saved for, and
-never leave this computer. You or an agent can then fill the site's sign-in form automatically;
-the password is typed straight into the page and is never shown to the agent. Note that an agent
-allowed to run scripts in the page could read a filled form field, so save logins you are
-comfortable delegating.
+encrypted with the operating system's keychain and never leave this computer. Each login is bound
+to its T3 Code environment, browser profile, and exact HTTPS site. HTTP is allowed only for local
+development sites. You or an agent can then fill the site's sign-in form automatically. Reopen
+**Save login for this site…** to update or remove a saved login.
+
+Saved-login autofill and agent-provided page scripts cannot run in the same page document. If the
+agent has evaluated JavaScript, navigate or reload before filling a saved login. After a password
+is filled, the agent can continue with normal browser controls, but it cannot evaluate JavaScript
+until the page fully navigates. This keeps the password out of the agent's tool results. The site
+itself still receives the password, so only save accounts you are comfortable delegating.
 
 Workspace assignments and layouts are stored locally in the browser or desktop app. Clearing local
 storage resets them.

@@ -143,25 +143,30 @@ const browserCredentialsLayer = Layer.mock(BrowserCredentials.BrowserCredentials
   resolveForFill: () => Effect.succeed({ reason: "no-credential" as const }),
 });
 
-const layer = PreviewManager.layer.pipe(
-  Layer.provideMerge(browserSessionLayer),
-  Layer.provideMerge(browserCredentialsLayer),
-  Layer.provideMerge(environmentLayer),
-  Layer.provideMerge(fileSystemLayer),
-  Layer.provideMerge(Path.layer),
-  Layer.provideMerge(Layer.succeed(HostProcessPlatform, "darwin")),
-);
+const makeLayer = (
+  credentialsLayer: Layer.Layer<BrowserCredentials.BrowserCredentials> = browserCredentialsLayer,
+) =>
+  PreviewManager.layer.pipe(
+    Layer.provideMerge(browserSessionLayer),
+    Layer.provideMerge(credentialsLayer),
+    Layer.provideMerge(environmentLayer),
+    Layer.provideMerge(fileSystemLayer),
+    Layer.provideMerge(Path.layer),
+    Layer.provideMerge(Layer.succeed(HostProcessPlatform, "darwin")),
+  );
+const layer = makeLayer();
 const encodePreviewManagerError = Schema.encodeSync(PreviewManager.PreviewManagerError);
 
 const withManager = <A>(
   use: (
     manager: PreviewManager.PreviewManager["Service"],
   ) => Effect.Effect<A, PreviewManager.PreviewManagerError, Scope.Scope>,
+  managerLayer = layer,
 ) =>
   Effect.gen(function* () {
     const manager = yield* PreviewManager.PreviewManager;
     return yield* use(manager);
-  }).pipe(Effect.provide(layer), Effect.scoped);
+  }).pipe(Effect.provide(managerLayer), Effect.scoped);
 
 interface TestCapturedPreviewImage {
   readonly toJPEG: () => Buffer;
@@ -3512,6 +3517,115 @@ describe("PreviewManager", () => {
         });
       }),
     ),
+  );
+
+  effectIt.effect(
+    "blocks arbitrary evaluation after password autofill until a full navigation",
+    () => {
+      const credentialLayer = Layer.mock(BrowserCredentials.BrowserCredentials)({
+        list: Effect.succeed([]),
+        save: () => Effect.die("unused in Manager tests"),
+        delete: () => Effect.void,
+        resolveForFill: () => Effect.succeed({ username: "hamish", password: "credential-secret" }),
+      });
+      return withManager(
+        (manager) =>
+          Effect.gen(function* () {
+            const webContentsListeners = new Map<
+              string,
+              (...args: ReadonlyArray<unknown>) => void
+            >();
+            let autofillPending = true;
+            const sendCommand = vi.fn(async (method: string) => {
+              if (method !== "Runtime.evaluate") return undefined;
+              if (autofillPending) {
+                autofillPending = false;
+                return {
+                  result: {
+                    value: {
+                      filled: true,
+                      filledPassword: true,
+                      filledUsername: true,
+                    },
+                  },
+                };
+              }
+              return { result: { value: "safe-after-navigation" } };
+            });
+            fromId.mockReturnValue({
+              id: 42,
+              isDestroyed: () => false,
+              getType: () => "webview",
+              getURL: () => "https://example.com/login",
+              getTitle: () => "Example",
+              isLoading: () => false,
+              isDevToolsOpened: () => false,
+              getZoomFactor: () => 1,
+              setZoomFactor: vi.fn(),
+              setAudioMuted: vi.fn(),
+              isCurrentlyAudible: () => false,
+              on: vi.fn((event: string, listener: (...args: ReadonlyArray<unknown>) => void) => {
+                webContentsListeners.set(event, listener);
+              }),
+              off: vi.fn(),
+              ipc: { on: vi.fn(), off: vi.fn() },
+              send: webviewSend,
+              navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+              setWindowOpenHandler: vi.fn(),
+              debugger: {
+                isAttached: () => false,
+                attach: vi.fn(),
+                sendCommand,
+                on: vi.fn(),
+                off: vi.fn(),
+              },
+            } as never);
+
+            yield* manager.createTab("tab_credential");
+            yield* manager.registerWebview("tab_credential", 42);
+            expect(
+              yield* manager.automationAutofill("tab_credential", {
+                environmentId: "env_a",
+                profile: null,
+              }),
+            ).toMatchObject({ filled: true, origin: "https://example.com" });
+
+            const protectedExit = yield* Effect.exit(
+              manager.automationEvaluate("tab_credential", {
+                expression: 'document.querySelector("input[type=password]")?.value',
+              }),
+            );
+            expect(Exit.isFailure(protectedExit)).toBe(true);
+            if (Exit.isFailure(protectedExit)) {
+              expect(Option.getOrThrow(Cause.findErrorOption(protectedExit.cause))).toMatchObject({
+                _tag: "PreviewAutomationCredentialProtectedError",
+                tabId: "tab_credential",
+              });
+            }
+
+            webContentsListeners.get("did-navigate")?.();
+            yield* Effect.yieldNow;
+            expect(
+              yield* manager.automationEvaluate("tab_credential", { expression: "document.title" }),
+            ).toBe("safe-after-navigation");
+
+            const evaluatedExit = yield* Effect.exit(
+              manager.automationAutofill("tab_credential", {
+                environmentId: "env_a",
+                profile: null,
+              }),
+            );
+            expect(Exit.isFailure(evaluatedExit)).toBe(true);
+            if (Exit.isFailure(evaluatedExit)) {
+              expect(Option.getOrThrow(Cause.findErrorOption(evaluatedExit.cause))).toMatchObject({
+                _tag: "PreviewAutomationCredentialAutofillBlockedError",
+                tabId: "tab_credential",
+              });
+            }
+          }),
+        makeLayer(credentialLayer),
+      );
+    },
   );
 });
 

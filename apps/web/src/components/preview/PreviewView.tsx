@@ -4,12 +4,14 @@ import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import {
   FILL_PREVIEW_VIEWPORT,
+  type DesktopBrowserCredentialSummary,
   type PreviewAnnotationPayload,
   type PreviewViewportSetting,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { normalizePreviewUrl } from "@t3tools/shared/preview";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Trash2Icon } from "lucide-react";
 
 import {
   BROWSER_HISTORY_MAX_ENTRIES_PER_PROJECT,
@@ -85,6 +87,14 @@ interface Props {
 
 const localApi = typeof window === "undefined" ? null : ensureLocalApi();
 
+const browserCredentialOrigin = (url: string): string | null => {
+  try {
+    return new URL(url).origin.toLowerCase();
+  } catch {
+    return null;
+  }
+};
+
 /**
  * Single-tab preview surface: chrome row on top, one webview below, empty
  * state when no session exists for the thread.
@@ -157,15 +167,51 @@ export function PreviewView({
   const [saveLoginOpen, setSaveLoginOpen] = useState(false);
   const [saveLoginUsername, setSaveLoginUsername] = useState("");
   const [saveLoginPassword, setSaveLoginPassword] = useState("");
+  const [savedLogins, setSavedLogins] = useState<ReadonlyArray<DesktopBrowserCredentialSummary>>(
+    [],
+  );
   // Named-profile tabs read and write that profile's logins; shared and
   // ephemeral tabs use the shared set.
   const loginProfile = snapshot?.browserScope?.startsWith("profile:")
     ? snapshot.browserScope.slice("profile:".length)
     : null;
+  useEffect(() => {
+    if (!saveLoginOpen || !previewBridge || !url) {
+      setSavedLogins([]);
+      return;
+    }
+    const origin = browserCredentialOrigin(url);
+    if (!origin) return;
+    let cancelled = false;
+    void previewBridge.browserCredentials
+      .list()
+      .then((credentials) => {
+        if (cancelled) return;
+        setSavedLogins(
+          credentials.filter(
+            (credential) =>
+              (credential.environmentId === threadRef.environmentId ||
+                credential.environmentId === null) &&
+              credential.origin === origin &&
+              credential.profile === loginProfile,
+          ),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setSavedLogins([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loginProfile, saveLoginOpen, threadRef.environmentId, url]);
   const handleFillLogin = useCallback(() => {
     if (!previewBridge || !runtimeTabId) return;
     void previewBridge.browserCredentials
-      .autofill({ tabId: runtimeTabId, profile: loginProfile })
+      .autofill({
+        tabId: runtimeTabId,
+        environmentId: threadRef.environmentId,
+        profile: loginProfile,
+      })
       .then((result) => {
         if (result.filled) return;
         toastManager.add({
@@ -191,17 +237,26 @@ export function PreviewView({
       .catch(() => {
         toastManager.add({ type: "error", title: "Unable to fill the login" });
       });
-  }, [loginProfile, runtimeTabId]);
+  }, [loginProfile, runtimeTabId, threadRef.environmentId]);
   const handleSaveLogin = useCallback(() => {
     if (!previewBridge || !url) return;
     const username = saveLoginUsername.trim();
     if (username.length === 0 || saveLoginPassword.length === 0) return;
     void previewBridge.browserCredentials
-      .save({ url, profile: loginProfile, username, password: saveLoginPassword })
+      .save({
+        environmentId: threadRef.environmentId,
+        url,
+        profile: loginProfile,
+        username,
+        password: saveLoginPassword,
+      })
       .then((saved) => {
-        setSaveLoginOpen(false);
         setSaveLoginUsername("");
         setSaveLoginPassword("");
+        setSavedLogins((current) => [
+          ...current.filter((credential) => credential.id !== saved.id),
+          saved,
+        ]);
         toastManager.add({
           type: "success",
           title: `Login saved for ${saved.origin}`,
@@ -215,7 +270,18 @@ export function PreviewView({
           description: "OS keychain encryption may be unavailable on this machine.",
         });
       });
-  }, [loginProfile, saveLoginPassword, saveLoginUsername, url]);
+  }, [loginProfile, saveLoginPassword, saveLoginUsername, threadRef.environmentId, url]);
+  const handleDeleteSavedLogin = useCallback((id: string) => {
+    if (!previewBridge) return;
+    void previewBridge.browserCredentials
+      .delete(id)
+      .then(() => {
+        setSavedLogins((current) => current.filter((credential) => credential.id !== id));
+      })
+      .catch(() => {
+        toastManager.add({ type: "error", title: "Unable to remove the saved login" });
+      });
+  }, []);
   const panelRect = useBrowserSurfaceStore((state) =>
     runtimeTabId ? (state.byTabId[runtimeTabId]?.rect ?? null) : null,
   );
@@ -837,6 +903,30 @@ export function PreviewView({
               {loginProfile ? ` in the “${loginProfile}” profile` : ""}. Agents can autofill it here
               without seeing the password.
             </p>
+            {savedLogins.length > 0 ? (
+              <div className="flex flex-col gap-1.5 rounded-md border p-2">
+                <p className="px-1 text-xs font-medium text-muted-foreground">
+                  Saved for this environment
+                </p>
+                {savedLogins.map((credential) => (
+                  <div
+                    key={credential.id}
+                    className="flex min-w-0 items-center justify-between gap-2 rounded-sm px-1 py-0.5"
+                  >
+                    <span className="truncate text-sm">{credential.username}</span>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      type="button"
+                      aria-label={`Remove saved login for ${credential.username}`}
+                      onClick={() => handleDeleteSavedLogin(credential.id)}
+                    >
+                      <Trash2Icon />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="preview-save-login-username">Username or email</Label>
               <Input

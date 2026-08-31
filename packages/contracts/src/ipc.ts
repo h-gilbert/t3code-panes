@@ -677,6 +677,8 @@ export const DesktopPreviewWebviewConfigSchema: Schema.Codec<DesktopPreviewWebvi
  */
 export interface DesktopBrowserCredentialSummary {
   id: string;
+  /** Environment allowed to use the login; null identifies an unclaimed legacy entry. */
+  environmentId: string | null;
   /** Exact origin (scheme://host[:port]) the login is bound to. */
   origin: string;
   /** Named browser profile the login belongs to; null is the shared profile. */
@@ -688,6 +690,7 @@ export interface DesktopBrowserCredentialSummary {
 export const DesktopBrowserCredentialSummarySchema: Schema.Codec<DesktopBrowserCredentialSummary> =
   Schema.Struct({
     id: Schema.String,
+    environmentId: Schema.NullOr(EnvironmentId),
     origin: Schema.String,
     profile: Schema.NullOr(Schema.String),
     username: Schema.String,
@@ -695,6 +698,7 @@ export const DesktopBrowserCredentialSummarySchema: Schema.Codec<DesktopBrowserC
   });
 
 export interface DesktopBrowserCredentialSaveInput {
+  environmentId: string;
   /** Any URL on the site; the desktop stores its exact origin. */
   url: string;
   profile: string | null;
@@ -704,6 +708,7 @@ export interface DesktopBrowserCredentialSaveInput {
 
 export const DesktopBrowserCredentialSaveInputSchema: Schema.Codec<DesktopBrowserCredentialSaveInput> =
   Schema.Struct({
+    environmentId: EnvironmentId,
     url: Schema.String,
     profile: Schema.NullOr(Schema.String),
     username: Schema.String,
@@ -712,6 +717,7 @@ export const DesktopBrowserCredentialSaveInputSchema: Schema.Codec<DesktopBrowse
 
 export interface DesktopBrowserAutofillInput {
   tabId: string;
+  environmentId: string;
   /** Browser profile of the tab; null is the shared profile. */
   profile: string | null;
   /** Selects between multiple logins for one origin. Omit for the only one. */
@@ -721,6 +727,7 @@ export interface DesktopBrowserAutofillInput {
 export const DesktopBrowserAutofillInputSchema: Schema.Codec<DesktopBrowserAutofillInput> =
   Schema.Struct({
     tabId: Schema.String,
+    environmentId: EnvironmentId,
     profile: Schema.NullOr(Schema.String),
     username: Schema.optional(Schema.String),
   });

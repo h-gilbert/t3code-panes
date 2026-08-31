@@ -529,6 +529,14 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   const pictureInPictureAspectRatiosRef = yield* Ref.make<ReadonlyMap<string, number>>(new Map());
   const pictureInPictureMutationSemaphore = yield* Semaphore.make(1);
   const closingTabIdsRef = yield* Ref.make<ReadonlySet<string>>(new Set());
+  // Arbitrary page evaluation can read a populated password input. Once
+  // autofill places a password into a document, keep semantic browser actions
+  // available but refuse evaluate until a full navigation replaces it.
+  const credentialProtectedTabIdsRef = yield* Ref.make<ReadonlySet<string>>(new Set());
+  // An agent could install an input listener before autofill and capture the
+  // password later. Track arbitrary evaluation in the other direction too:
+  // a document that has run agent JavaScript cannot receive a saved login.
+  const arbitraryEvaluationTabIdsRef = yield* Ref.make<ReadonlySet<string>>(new Set());
   let frameCaptureWindowOpen = true;
   let currentMainWindow: BrowserWindow | undefined;
   let mainWindowCleanupFiber: Fiber.Fiber<void, never> | undefined;
@@ -1246,15 +1254,23 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       } else {
         const error = Option.getOrNull(Cause.findErrorOption(exit.cause));
         const interrupted = isPreviewAutomationControlInterruptedError(error);
-        const errorMessage = isPreviewOperationError(error)
-          ? PreviewOperationError.toTimelineMessage(error)
-          : isPreviewAutomationEvaluationError(error)
-            ? PreviewAutomationEvaluationError.toTimelineMessage(error)
-            : isPreviewAutomationInvalidSelectorError(error)
-              ? PreviewAutomationInvalidSelectorError.toTimelineMessage(error)
-              : error instanceof Error
-                ? error.message
-                : String(error);
+        // A hostile page can include an autofilled value in an exception.
+        // Keep autofill timeline errors structural rather than copying remote
+        // exception text into snapshots an agent can read.
+        const errorMessage =
+          action === "autofill"
+            ? error instanceof Error
+              ? error.message
+              : "Saved-login autofill failed"
+            : isPreviewOperationError(error)
+              ? PreviewOperationError.toTimelineMessage(error)
+              : isPreviewAutomationEvaluationError(error)
+                ? PreviewAutomationEvaluationError.toTimelineMessage(error)
+                : isPreviewAutomationInvalidSelectorError(error)
+                  ? PreviewAutomationInvalidSelectorError.toTimelineMessage(error)
+                  : error instanceof Error
+                    ? error.message
+                    : String(error);
         yield* replaceAction(tabId, {
           ...actionEvent,
           status: interrupted ? "interrupted" : "failed",
@@ -1489,7 +1505,27 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       if (Option.isSome(next)) yield* emitIfCurrent(tabId, next.value);
     });
     const sync = () => runFork(syncState(true));
-    const syncNavigation = () => runFork(syncState(false, true));
+    const syncNavigation = () =>
+      runFork(
+        Effect.all(
+          [
+            syncState(false, true),
+            Ref.update(credentialProtectedTabIdsRef, (protectedTabIds) => {
+              if (!protectedTabIds.has(tabId)) return protectedTabIds;
+              const next = new Set(protectedTabIds);
+              next.delete(tabId);
+              return next;
+            }),
+            Ref.update(arbitraryEvaluationTabIdsRef, (evaluatedTabIds) => {
+              if (!evaluatedTabIds.has(tabId)) return evaluatedTabIds;
+              const next = new Set(evaluatedTabIds);
+              next.delete(tabId);
+              return next;
+            }),
+          ],
+          { discard: true },
+        ),
+      );
     const syncInPageNavigation = () => runFork(syncState(false));
     const navigationStarted = (
       event: Electron.Event<Electron.WebContentsDidStartNavigationEventParams>,
@@ -1820,9 +1856,21 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         cancelPickElement(tabId),
         closePictureInPicture(tabId),
         stopFrameCapture(tabId, "recording"),
+        Ref.update(credentialProtectedTabIdsRef, (protectedTabIds) => {
+          if (!protectedTabIds.has(tabId)) return protectedTabIds;
+          const next = new Set(protectedTabIds);
+          next.delete(tabId);
+          return next;
+        }),
+        Ref.update(arbitraryEvaluationTabIdsRef, (evaluatedTabIds) => {
+          if (!evaluatedTabIds.has(tabId)) return evaluatedTabIds;
+          const next = new Set(evaluatedTabIds);
+          next.delete(tabId);
+          return next;
+        }),
       ],
       {
-        concurrency: 3,
+        concurrency: 5,
         discard: true,
       },
     );
@@ -3630,7 +3678,40 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   ) {
     const wc = yield* requireWebContents(tabId);
     return yield* withControlSession(tabId, wc, "evaluate", (send) =>
-      performAutomationEvaluate(tabId, input, send),
+      Effect.gen(function* () {
+        if ((yield* Ref.get(credentialProtectedTabIdsRef)).has(tabId)) {
+          return yield* new PreviewAutomationCredentialProtectedError({ tabId });
+        }
+        yield* Ref.update(
+          arbitraryEvaluationTabIdsRef,
+          (evaluatedTabIds) => new Set([...evaluatedTabIds, tabId]),
+        );
+        return yield* performAutomationEvaluate(tabId, input, send);
+      }),
+    );
+  });
+
+  const automationAutofill = Effect.fn("PreviewManager.automationAutofillDocument")(function* (
+    tabId: string,
+    expression: string,
+  ) {
+    const wc = yield* requireWebContents(tabId);
+    return yield* withControlSession(tabId, wc, "autofill", (send) =>
+      Effect.gen(function* () {
+        if ((yield* Ref.get(arbitraryEvaluationTabIdsRef)).has(tabId)) {
+          return yield* new PreviewAutomationCredentialAutofillBlockedError({ tabId });
+        }
+        const outcome = decodeAutofillOutcome(
+          yield* performAutomationEvaluate(tabId, { expression }, send),
+        );
+        if (outcome?.filledPassword) {
+          yield* Ref.update(
+            credentialProtectedTabIdsRef,
+            (protectedTabIds) => new Set([...protectedTabIds, tabId]),
+          );
+        }
+        return outcome;
+      }),
     );
   });
 
@@ -3761,6 +3842,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   yield* Effect.addFinalizer(() => destroy().pipe(Effect.ignore));
 
   return {
+    automationAutofill,
     automationClick,
     automationEvaluate,
     automationPress,
@@ -3923,6 +4005,24 @@ export class PreviewAutomationEvaluationError extends Schema.TaggedErrorClass<Pr
   }
 }
 
+export class PreviewAutomationCredentialProtectedError extends Schema.TaggedErrorClass<PreviewAutomationCredentialProtectedError>()(
+  "PreviewAutomationCredentialProtectedError",
+  { tabId: Schema.String },
+) {
+  override get message(): string {
+    return `Preview JavaScript evaluation is disabled after password autofill until tab ${this.tabId} fully navigates`;
+  }
+}
+
+export class PreviewAutomationCredentialAutofillBlockedError extends Schema.TaggedErrorClass<PreviewAutomationCredentialAutofillBlockedError>()(
+  "PreviewAutomationCredentialAutofillBlockedError",
+  { tabId: Schema.String },
+) {
+  override get message(): string {
+    return `Saved-login autofill is disabled after JavaScript evaluation until tab ${this.tabId} fully navigates`;
+  }
+}
+
 export class PreviewAutomationTargetNotFoundError extends Schema.TaggedErrorClass<PreviewAutomationTargetNotFoundError>()(
   "PreviewAutomationTargetNotFoundError",
   {
@@ -4053,6 +4153,8 @@ export const PreviewManagerError = Schema.Union([
   PreviewAutomationDevToolsOpenError,
   PreviewAutomationDebuggerAttachedError,
   PreviewAutomationEvaluationError,
+  PreviewAutomationCredentialProtectedError,
+  PreviewAutomationCredentialAutofillBlockedError,
   PreviewAutomationTargetNotFoundError,
   PreviewAutomationTargetNotEditableError,
   PreviewAutomationCoordinatesOutsideViewportError,
@@ -4160,6 +4262,7 @@ export class PreviewManager extends Context.Service<
     readonly automationAutofill: (
       tabId: string,
       input: {
+        readonly environmentId: string;
         readonly profile: string | null;
         readonly username?: string | undefined;
       },
@@ -4301,7 +4404,12 @@ export const make = Effect.gen(function* PreviewManagerMake() {
       // The store re-checks (origin, profile) exactly; the password for one
       // site can never be typed into another.
       const resolved = yield* browserCredentials
-        .resolveForFill({ origin, profile: input.profile, username: input.username })
+        .resolveForFill({
+          origin,
+          environmentId: input.environmentId,
+          profile: input.profile,
+          username: input.username,
+        })
         .pipe(
           Effect.mapError(
             (cause) => new PreviewOperationError({ operation: "automationAutofill", cause }),
@@ -4310,10 +4418,9 @@ export const make = Effect.gen(function* PreviewManagerMake() {
       if ("reason" in resolved) {
         return { filled: false, reason: resolved.reason, origin } as const;
       }
-      const outcome = decodeAutofillOutcome(
-        yield* operations.automationEvaluate(tabId, {
-          expression: buildAutofillExpression(resolved.username, resolved.password),
-        }),
+      const outcome = yield* operations.automationAutofill(
+        tabId,
+        buildAutofillExpression(resolved.username, resolved.password),
       );
       return outcome?.filled
         ? ({ filled: true, origin, username: resolved.username } as const)

@@ -697,6 +697,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
             const profile = scope?.startsWith("profile:") ? scope.slice("profile:".length) : null;
             return await ready.bridge.browserCredentials.autofill({
               tabId: ready.runtimeTabId,
+              environmentId,
               profile,
               ...(input.username ? { username: input.username } : {}),
             });

@@ -255,6 +255,7 @@ export const autofillBrowserCredential = DesktopIpc.makeIpcMethod({
   handler: Effect.fn("desktop.ipc.preview.credentials.autofill")(function* (input) {
     const manager = yield* PreviewManager.PreviewManager;
     return yield* manager.automationAutofill(input.tabId, {
+      environmentId: input.environmentId,
       profile: input.profile,
       ...(input.username === undefined ? {} : { username: input.username }),
     });

@@ -491,7 +491,7 @@ export const PreviewAutomationEvaluateInput = Schema.Struct({
   ),
 }).annotate({
   description:
-    "Evaluates JavaScript in the page. Prefer snapshot and semantic actions; use evaluate for inspection or unsupported interactions.",
+    "Evaluates JavaScript in the page. Prefer snapshot and semantic actions; use evaluate for inspection or unsupported interactions. A document that runs agent JavaScript cannot receive saved-login autofill, and evaluation is unavailable after password autofill. A full navigation resets either restriction.",
 });
 export type PreviewAutomationEvaluateInput = typeof PreviewAutomationEvaluateInput.Type;
 

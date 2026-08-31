@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Path from "effect/Path";
 
@@ -10,6 +11,8 @@ import * as ElectronSafeStorage from "../electron/ElectronSafeStorage.ts";
 import * as BrowserCredentials from "./BrowserCredentials.ts";
 
 const files = new Map<string, string>();
+const ENV_A = "env_a";
+const ENV_B = "env_b";
 
 const fileSystemLayer = Layer.succeed(
   FileSystem.FileSystem,
@@ -28,19 +31,19 @@ const environmentLayer = Layer.mock(DesktopEnvironment.DesktopEnvironment)({
 } as never);
 
 /** Reversible fake "encryption" so tests can assert plaintext never rests on disk. */
-const safeStorageLayer = (encryptionAvailable: boolean) =>
+const safeStorageLayer = (encryptionAvailable: boolean, backend: string | null = null) =>
   Layer.mock(ElectronSafeStorage.ElectronSafeStorage)({
     isEncryptionAvailable: Effect.succeed(encryptionAvailable),
     encryptString: (value) => Effect.succeed(new TextEncoder().encode(`enc:${value}`)),
     decryptString: (value) => Effect.succeed(new TextDecoder().decode(value).replace(/^enc:/, "")),
-    selectedStorageBackend: Effect.succeedNone,
+    selectedStorageBackend: Effect.succeed(backend === null ? Option.none() : Option.some(backend)),
   });
 
-const layerWith = (encryptionAvailable: boolean) =>
+const layerWith = (encryptionAvailable: boolean, backend: string | null = null) =>
   BrowserCredentials.layer.pipe(
     Layer.provideMerge(fileSystemLayer),
     Layer.provideMerge(environmentLayer),
-    Layer.provideMerge(safeStorageLayer(encryptionAvailable)),
+    Layer.provideMerge(safeStorageLayer(encryptionAvailable, backend)),
     Layer.provideMerge(Path.layer),
     Layer.provideMerge(NodeServices.layer),
   );
@@ -55,6 +58,7 @@ describe("normalizeCredentialOrigin", () => {
       BrowserCredentials.normalizeCredentialOrigin("http://localhost:5173/admin"),
       "http://localhost:5173",
     );
+    assert.strictEqual(BrowserCredentials.normalizeCredentialOrigin("http://example.com"), null);
     assert.strictEqual(
       BrowserCredentials.normalizeCredentialOrigin("github.com"),
       "https://github.com",
@@ -71,6 +75,7 @@ describe("BrowserCredentials", () => {
       const store = yield* BrowserCredentials.BrowserCredentials;
 
       yield* store.save({
+        environmentId: ENV_A,
         url: "https://github.com/login",
         profile: null,
         username: "hamish",
@@ -84,16 +89,22 @@ describe("BrowserCredentials", () => {
       // The password must never rest on disk in plaintext.
       assert.isFalse([...files.values()].some((raw) => raw.includes("hunter2")));
 
-      const hit = yield* store.resolveForFill({ origin: "https://github.com", profile: null });
+      const hit = yield* store.resolveForFill({
+        environmentId: ENV_A,
+        origin: "https://github.com",
+        profile: null,
+      });
       assert.deepStrictEqual(hit, { username: "hamish", password: "hunter2" });
 
       // A different origin or profile is a refusal, never a fallback.
       const wrongOrigin = yield* store.resolveForFill({
+        environmentId: ENV_A,
         origin: "https://evil.example",
         profile: null,
       });
       assert.deepStrictEqual(wrongOrigin, { reason: "no-credential" });
       const wrongProfile = yield* store.resolveForFill({
+        environmentId: ENV_A,
         origin: "https://github.com",
         profile: "work",
       });
@@ -106,12 +117,14 @@ describe("BrowserCredentials", () => {
       files.clear();
       const store = yield* BrowserCredentials.BrowserCredentials;
       yield* store.save({
+        environmentId: ENV_A,
         url: "https://github.com",
         profile: null,
         username: "personal",
         password: "a",
       });
       yield* store.save({
+        environmentId: ENV_A,
         url: "https://github.com",
         profile: null,
         username: "work",
@@ -119,12 +132,14 @@ describe("BrowserCredentials", () => {
       });
 
       const ambiguous = yield* store.resolveForFill({
+        environmentId: ENV_A,
         origin: "https://github.com",
         profile: null,
       });
       assert.deepStrictEqual(ambiguous, { reason: "ambiguous-credential" });
 
       const picked = yield* store.resolveForFill({
+        environmentId: ENV_A,
         origin: "https://github.com",
         profile: null,
         username: "work",
@@ -133,17 +148,86 @@ describe("BrowserCredentials", () => {
     }).pipe(Effect.provide(layerWith(true))),
   );
 
+  it.effect("isolates logins by environment", () =>
+    Effect.gen(function* () {
+      files.clear();
+      const store = yield* BrowserCredentials.BrowserCredentials;
+      yield* store.save({
+        environmentId: ENV_A,
+        url: "https://github.com",
+        profile: null,
+        username: "hamish",
+        password: "a",
+      });
+
+      const miss = yield* store.resolveForFill({
+        environmentId: ENV_B,
+        origin: "https://github.com",
+        profile: null,
+      });
+      assert.deepStrictEqual(miss, { reason: "no-credential" });
+
+      yield* store.save({
+        environmentId: ENV_B,
+        url: "https://github.com",
+        profile: null,
+        username: "hamish",
+        password: "b",
+      });
+      assert.strictEqual((yield* store.list).length, 2);
+      assert.deepStrictEqual(
+        yield* store.resolveForFill({
+          environmentId: ENV_B,
+          origin: "https://github.com",
+          profile: null,
+        }),
+        { username: "hamish", password: "b" },
+      );
+    }).pipe(Effect.provide(layerWith(true))),
+  );
+
+  it.effect("claims a version 1 login for the first environment that uses it", () =>
+    Effect.gen(function* () {
+      files.clear();
+      files.set(
+        "/state/browser-credentials.json",
+        '{"version":1,"credentials":[{"id":"legacy","origin":"https://github.com","profile":null,"username":"hamish","encryptedPassword":"ZW5jOmxlZ2FjeS1wYXNzd29yZA==","updatedAt":"2026-08-31T00:00:00.000Z"}]}',
+      );
+      const store = yield* BrowserCredentials.BrowserCredentials;
+
+      assert.deepStrictEqual(
+        yield* store.resolveForFill({
+          environmentId: ENV_A,
+          origin: "https://github.com",
+          profile: null,
+        }),
+        { username: "hamish", password: "legacy-password" },
+      );
+      assert.include(files.get("/state/browser-credentials.json") ?? "", '"version":2');
+      assert.deepStrictEqual(
+        yield* store.resolveForFill({
+          environmentId: ENV_B,
+          origin: "https://github.com",
+          profile: null,
+        }),
+        { reason: "no-credential" },
+      );
+    }).pipe(Effect.provide(layerWith(true))),
+  );
+
   it.effect("rotates the password in place for the same origin, profile, and username", () =>
     Effect.gen(function* () {
       files.clear();
       const store = yield* BrowserCredentials.BrowserCredentials;
       yield* store.save({
+        environmentId: ENV_A,
         url: "https://github.com",
         profile: null,
         username: "hamish",
         password: "old",
       });
       yield* store.save({
+        environmentId: ENV_A,
         url: "https://github.com/login",
         profile: null,
         username: "hamish",
@@ -152,6 +236,7 @@ describe("BrowserCredentials", () => {
 
       assert.strictEqual((yield* store.list).length, 1);
       const resolved = yield* store.resolveForFill({
+        environmentId: ENV_A,
         origin: "https://github.com",
         profile: null,
       });
@@ -164,15 +249,39 @@ describe("BrowserCredentials", () => {
       files.clear();
       const store = yield* BrowserCredentials.BrowserCredentials;
       const error = yield* store
-        .save({ url: "https://github.com", profile: null, username: "u", password: "p" })
+        .save({
+          environmentId: ENV_A,
+          url: "https://github.com",
+          profile: null,
+          username: "u",
+          password: "p",
+        })
         .pipe(Effect.flip);
       assert.strictEqual(error._tag, "BrowserCredentialEncryptionUnavailableError");
 
       const resolved = yield* store.resolveForFill({
+        environmentId: ENV_A,
         origin: "https://github.com",
         profile: null,
       });
       assert.deepStrictEqual(resolved, { reason: "unavailable" });
     }).pipe(Effect.provide(layerWith(false))),
+  );
+
+  it.effect("refuses Electron's plaintext Linux storage backend", () =>
+    Effect.gen(function* () {
+      files.clear();
+      const store = yield* BrowserCredentials.BrowserCredentials;
+      const error = yield* store
+        .save({
+          environmentId: ENV_A,
+          url: "https://github.com",
+          profile: null,
+          username: "u",
+          password: "p",
+        })
+        .pipe(Effect.flip);
+      assert.strictEqual(error._tag, "BrowserCredentialEncryptionUnavailableError");
+    }).pipe(Effect.provide(layerWith(true, "basic_text"))),
   );
 });

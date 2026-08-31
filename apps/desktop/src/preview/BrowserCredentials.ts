@@ -8,10 +8,10 @@
  * into the guest page — list results never include them, and neither the
  * renderer nor an agent can read one back through this service.
  *
- * Every login is bound to an exact origin (scheme://host[:port]) and a
- * browser profile (null = the shared profile). Fill callers must present the
- * live page origin; a mismatch is a refusal, not a fallback, so a credential
- * saved for one site can never be typed into another.
+ * Every login is bound to an environment, an exact origin
+ * (scheme://host[:port]), and a browser profile (null = the shared profile).
+ * Fill callers must present all three; a mismatch is a refusal, not a
+ * fallback, so an unrelated environment or site cannot borrow a login.
  */
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -20,10 +20,12 @@ import * as Effect from "effect/Effect";
 import * as Encoding from "effect/Encoding";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 import type { DesktopBrowserCredentialSummary } from "@t3tools/contracts";
+import { isLoopbackHost } from "@t3tools/shared/preview";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as ElectronSafeStorage from "../electron/ElectronSafeStorage.ts";
@@ -32,6 +34,8 @@ const CREDENTIALS_FILE_NAME = "browser-credentials.json";
 
 const StoredCredential = Schema.Struct({
   id: Schema.String,
+  /** Null only while an entry from version 1 waits to be claimed by an environment. */
+  environmentId: Schema.NullOr(Schema.String),
   origin: Schema.String,
   profile: Schema.NullOr(Schema.String),
   username: Schema.String,
@@ -41,13 +45,29 @@ const StoredCredential = Schema.Struct({
 });
 type StoredCredential = typeof StoredCredential.Type;
 
-const CredentialsDocument = Schema.Struct({
+const CredentialsDocumentV1 = Schema.Struct({
   version: Schema.Literal(1),
+  credentials: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      origin: Schema.String,
+      profile: Schema.NullOr(Schema.String),
+      username: Schema.String,
+      encryptedPassword: Schema.String,
+      updatedAt: Schema.String,
+    }),
+  ),
+});
+
+const CredentialsDocument = Schema.Struct({
+  version: Schema.Literal(2),
   credentials: Schema.Array(StoredCredential),
 });
 type CredentialsDocument = typeof CredentialsDocument.Type;
 
-const decodeDocument = Schema.decodeUnknownEffect(Schema.fromJsonString(CredentialsDocument));
+const decodeDocument = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Union([CredentialsDocumentV1, CredentialsDocument])),
+);
 const encodeDocument = Schema.encodeEffect(Schema.fromJsonString(CredentialsDocument));
 
 export class BrowserCredentialStoreError extends Schema.TaggedErrorClass<BrowserCredentialStoreError>()(
@@ -76,7 +96,7 @@ export class BrowserCredentialInvalidOriginError extends Schema.TaggedErrorClass
   { url: Schema.String },
 ) {
   override get message(): string {
-    return `Not a valid http(s) URL to bind a login to: ${this.url}`;
+    return `Logins require an HTTPS URL or an HTTP loopback URL: ${this.url}`;
   }
 }
 
@@ -92,6 +112,7 @@ export const normalizeCredentialOrigin = (url: string): string | null => {
   try {
     const parsed = new URL(url.includes("://") ? url : `https://${url}`);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    if (parsed.protocol === "http:" && !isLoopbackHost(parsed.hostname)) return null;
     return parsed.origin.toLowerCase();
   } catch {
     return null;
@@ -99,25 +120,37 @@ export const normalizeCredentialOrigin = (url: string): string | null => {
 };
 
 /**
- * Select the login to fill for a live page. Exact origin + profile match
- * only; `username` disambiguates when one origin has several logins.
+ * Select the login to fill for a live page. Exact environment + origin +
+ * profile match only; `username` disambiguates several matching logins.
  */
 export const selectCredentialForFill = (
   credentials: ReadonlyArray<StoredCredential>,
   input: {
     readonly origin: string;
+    readonly environmentId: string;
     readonly profile: string | null;
     readonly username?: string | undefined;
   },
 ):
   | { readonly credential: StoredCredential }
   | { readonly reason: "no-credential" | "ambiguous-credential" } => {
-  const matches = credentials.filter(
+  const exactMatches = credentials.filter(
     (credential) =>
+      credential.environmentId === input.environmentId &&
       credential.origin === input.origin &&
       credential.profile === input.profile &&
       (input.username === undefined || credential.username === input.username),
   );
+  const matches =
+    exactMatches.length > 0
+      ? exactMatches
+      : credentials.filter(
+          (credential) =>
+            credential.environmentId === null &&
+            credential.origin === input.origin &&
+            credential.profile === input.profile &&
+            (input.username === undefined || credential.username === input.username),
+        );
   if (matches.length === 0) return { reason: "no-credential" };
   if (matches.length > 1) return { reason: "ambiguous-credential" };
   return { credential: matches[0]! };
@@ -125,6 +158,7 @@ export const selectCredentialForFill = (
 
 const toSummary = (credential: StoredCredential): DesktopBrowserCredentialSummary => ({
   id: credential.id,
+  environmentId: credential.environmentId,
   origin: credential.origin,
   profile: credential.profile,
   username: credential.username,
@@ -139,6 +173,7 @@ export class BrowserCredentials extends Context.Service<
       BrowserCredentialStoreError
     >;
     readonly save: (input: {
+      readonly environmentId: string;
       readonly url: string;
       readonly profile: string | null;
       readonly username: string;
@@ -151,6 +186,7 @@ export class BrowserCredentials extends Context.Service<
      */
     readonly resolveForFill: (input: {
       readonly origin: string;
+      readonly environmentId: string;
       readonly profile: string | null;
       readonly username?: string | undefined;
     }) => Effect.Effect<
@@ -178,15 +214,24 @@ export const make = Effect.gen(function* BrowserCredentialsMake() {
       .pipe(
         Effect.mapError((cause) => new BrowserCredentialStoreError({ operation: "stat", cause })),
       );
-    if (!exists) return { version: 1, credentials: [] } as CredentialsDocument;
+    if (!exists) return { version: 2, credentials: [] } as CredentialsDocument;
     const raw = yield* fileSystem
       .readFileString(storePath)
       .pipe(
         Effect.mapError((cause) => new BrowserCredentialStoreError({ operation: "read", cause })),
       );
-    return yield* decodeDocument(raw).pipe(
+    const decoded = yield* decodeDocument(raw).pipe(
       Effect.mapError((cause) => new BrowserCredentialStoreError({ operation: "decode", cause })),
     );
+    return decoded.version === 2
+      ? decoded
+      : {
+          version: 2,
+          credentials: decoded.credentials.map((credential) => ({
+            ...credential,
+            environmentId: null,
+          })),
+        };
   });
 
   const writeDocument = (document: CredentialsDocument) =>
@@ -203,8 +248,18 @@ export const make = Effect.gen(function* BrowserCredentialsMake() {
       ),
     );
 
-  const requireEncryption = safeStorage.isEncryptionAvailable.pipe(
+  const encryptionAvailable = Effect.all([
+    safeStorage.isEncryptionAvailable,
+    safeStorage.selectedStorageBackend,
+  ]).pipe(
+    Effect.map(
+      ([available, backend]) =>
+        available && !(Option.isSome(backend) && backend.value === "basic_text"),
+    ),
     Effect.mapError((cause) => new BrowserCredentialStoreError({ operation: "keychain", cause })),
+  );
+
+  const requireEncryption = encryptionAvailable.pipe(
     Effect.filterOrFail(
       (available): available is true => available,
       () => new BrowserCredentialEncryptionUnavailableError(),
@@ -234,16 +289,20 @@ export const make = Effect.gen(function* BrowserCredentialsMake() {
       return yield* SynchronizedRef.modifyEffect(writeLock, () =>
         Effect.gen(function* () {
           const document = yield* readDocument;
-          // One login per (origin, profile, username): saving again rotates
-          // the password in place.
+          // One login per (environment, origin, profile, username): saving
+          // again rotates the password in place. A matching version 1 entry
+          // is claimed by this environment during the same write.
           const existing = document.credentials.find(
             (credential) =>
+              (credential.environmentId === input.environmentId ||
+                credential.environmentId === null) &&
               credential.origin === origin &&
               credential.profile === input.profile &&
               credential.username === input.username,
           );
           const entry: StoredCredential = {
             id: existing?.id ?? id,
+            environmentId: input.environmentId,
             origin,
             profile: input.profile,
             username: input.username,
@@ -255,7 +314,7 @@ export const make = Effect.gen(function* BrowserCredentialsMake() {
                 credential.id === existing.id ? entry : credential,
               )
             : [...document.credentials, entry];
-          yield* writeDocument({ version: 1, credentials });
+          yield* writeDocument({ version: 2, credentials });
           return [toSummary(entry), undefined] as const;
         }),
       );
@@ -267,7 +326,7 @@ export const make = Effect.gen(function* BrowserCredentialsMake() {
           const document = yield* readDocument;
           const credentials = document.credentials.filter((credential) => credential.id !== id);
           if (credentials.length !== document.credentials.length) {
-            yield* writeDocument({ version: 1, credentials });
+            yield* writeDocument({ version: 2, credentials });
           }
           return [undefined, undefined] as const;
         }),
@@ -275,14 +334,28 @@ export const make = Effect.gen(function* BrowserCredentialsMake() {
     }),
 
     resolveForFill: Effect.fn("BrowserCredentials.resolveForFill")(function* (input) {
-      const available = yield* safeStorage.isEncryptionAvailable.pipe(
-        Effect.mapError(
-          (cause) => new BrowserCredentialStoreError({ operation: "keychain", cause }),
-        ),
-      );
+      const available = yield* encryptionAvailable;
       if (!available) return { reason: "unavailable" } as const;
-      const document = yield* readDocument;
-      const selected = selectCredentialForFill(document.credentials, input);
+      const selected = yield* SynchronizedRef.modifyEffect(writeLock, () =>
+        Effect.gen(function* () {
+          const document = yield* readDocument;
+          const selected = selectCredentialForFill(document.credentials, input);
+          if ("reason" in selected || selected.credential.environmentId !== null) {
+            return [selected, undefined] as const;
+          }
+          const claimed = {
+            ...selected.credential,
+            environmentId: input.environmentId,
+          };
+          yield* writeDocument({
+            version: 2,
+            credentials: document.credentials.map((credential) =>
+              credential.id === claimed.id ? claimed : credential,
+            ),
+          });
+          return [{ credential: claimed }, undefined] as const;
+        }),
+      );
       if ("reason" in selected) return selected;
       const encrypted = yield* Effect.fromResult(
         Encoding.decodeBase64(selected.credential.encryptedPassword),

@@ -23,5 +23,7 @@ The browser keeps cookies and logins between sessions, so sites the user has sig
 
 When a page shows a login form, call \`preview_autofill\` — it types the user's saved login for that exact site directly into the page; the password is never shown to you. If it reports no saved login, ask the user to sign in themselves or save the login via the browser menu. Never ask the user to paste a password into the conversation.
 
+Call autofill before using JavaScript evaluation on a login page. A document that has run agent JavaScript cannot receive a saved login, and JavaScript evaluation is disabled after a password is filled. A full navigation resets either restriction. Continue with snapshots, clicks, typing, key presses, and waits to submit or complete the login. These restrictions do not affect normal browser control.
+
 Do not switch to global browser skills, Chrome, Node REPL browser automation, standalone Playwright, or agent-browser merely because the preview is initially closed or a first call fails. Use an alternative browser system only when the T3 preview tools are absent, the user explicitly requests another browser, or \`preview_open\` returns an explicit unsupported/unavailable error. A failed T3 preview tool call should be inspected and retried with corrected arguments when the error is actionable.
 `;
