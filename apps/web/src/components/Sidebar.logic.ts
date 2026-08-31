@@ -56,6 +56,26 @@ type LogicalSidebarProject = SidebarProject & {
   }[];
 };
 
+export function resolveWorkspaceSidebarProjectKeys(
+  projectGroups: readonly LogicalSidebarProject[],
+  paneProjectKeys: readonly (string | null)[],
+  paneCount: number,
+): ReadonlySet<string> {
+  const visibleProjectKeys = new Set(
+    paneProjectKeys.slice(0, paneCount).filter((key) => key !== null),
+  );
+  const projectKeys = new Set<string>();
+
+  for (const group of projectGroups) {
+    if (!visibleProjectKeys.has(group.projectKey)) continue;
+    for (const project of group.memberProjectRefs) {
+      projectKeys.add(`${project.environmentId}:${project.projectId}`);
+    }
+  }
+
+  return projectKeys;
+}
+
 export type ThreadTraversalDirection = "previous" | "next";
 
 export async function archiveSelectedThreadEntries<

@@ -22,6 +22,7 @@ import {
   resolveSidebarStageBadgeLabel,
   resolveThreadRowClassName,
   resolveSidebarThreadStatus,
+  resolveWorkspaceSidebarProjectKeys,
   resolveThreadStatusPill,
   resolveWorkingStartedAt,
   searchSidebarThreadsByTitle,
@@ -53,6 +54,44 @@ import {
   type Project,
   type Thread,
 } from "../types";
+
+describe("resolveWorkspaceSidebarProjectKeys", () => {
+  const projectGroups = [
+    {
+      id: "alpha",
+      title: "Alpha",
+      projectKey: "alpha",
+      memberProjectRefs: [
+        { environmentId: "local", projectId: "alpha-local" },
+        { environmentId: "remote", projectId: "alpha-remote" },
+      ],
+    },
+    {
+      id: "beta",
+      title: "Beta",
+      projectKey: "beta",
+      memberProjectRefs: [{ environmentId: "local", projectId: "beta-local" }],
+    },
+    {
+      id: "hidden",
+      title: "Hidden",
+      projectKey: "hidden",
+      memberProjectRefs: [{ environmentId: "local", projectId: "hidden-local" }],
+    },
+  ];
+
+  it("includes every physical project represented by visible panes", () => {
+    expect(
+      resolveWorkspaceSidebarProjectKeys(projectGroups, ["alpha", "beta", "hidden"], 2),
+    ).toEqual(new Set(["local:alpha-local", "remote:alpha-remote", "local:beta-local"]));
+  });
+
+  it("returns an empty scope when no visible pane has a project", () => {
+    expect(resolveWorkspaceSidebarProjectKeys(projectGroups, [null, "hidden"], 1)).toEqual(
+      new Set(),
+    );
+  });
+});
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
 

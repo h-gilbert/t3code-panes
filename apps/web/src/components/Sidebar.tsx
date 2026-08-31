@@ -142,6 +142,7 @@ import {
   resolveAdjacentThreadId,
   resolveSettledTimestamp,
   resolveSidebarThreadStatus,
+  resolveWorkspaceSidebarProjectKeys,
   searchSidebarThreadsByTitle,
   shouldCreateNewThreadInCurrentProject,
   resolveWorkingStartedAt,
@@ -1950,8 +1951,9 @@ export default function Sidebar() {
 
   const changeRequestSnapshotByKey = useAtomValue(threadChangeRequestSnapshotsAtom);
 
-  // Project scope: one menu above the list. Scoping filters the list without
-  // making the header width depend on the number or length of project names.
+  // Outside a pane workspace, this menu filters the thread list. Inside one,
+  // it configures the focused pane while the list covers every visible pane's
+  // project.
   const [projectScopeKey, setProjectScopeKey] = useState<string | null>(null);
   const scopedProjectGroup = useMemo(
     () =>
@@ -1960,17 +1962,28 @@ export default function Sidebar() {
         : (projectGroups.find((project) => project.projectKey === projectScopeKey) ?? null),
     [projectGroups, projectScopeKey],
   );
-  const scopedProjectKeys = useMemo(
-    () =>
-      scopedProjectGroup === null
-        ? null
-        : new Set(
-            scopedProjectGroup.memberProjectRefs.map(
-              (projectRef) => `${projectRef.environmentId}:${projectRef.projectId}`,
-            ),
+  const scopedProjectKeys = useMemo(() => {
+    if (workspaceActive) {
+      return resolveWorkspaceSidebarProjectKeys(
+        projectGroups,
+        activeWorkspaceLayout.projectKeys,
+        activeWorkspaceLayout.paneCount,
+      );
+    }
+    return scopedProjectGroup === null
+      ? null
+      : new Set(
+          scopedProjectGroup.memberProjectRefs.map(
+            (projectRef) => `${projectRef.environmentId}:${projectRef.projectId}`,
           ),
-    [scopedProjectGroup],
-  );
+        );
+  }, [
+    activeWorkspaceLayout.paneCount,
+    activeWorkspaceLayout.projectKeys,
+    projectGroups,
+    scopedProjectGroup,
+    workspaceActive,
+  ]);
   useEffect(() => {
     if (projectScopeKey !== null && scopedProjectGroup === null) {
       setProjectScopeKey(null);
@@ -2010,7 +2023,7 @@ export default function Sidebar() {
   // hidden now, and bulk actions must never count or touch invisible rows.
   useEffect(() => {
     clearSelection();
-  }, [clearSelection, projectScopeKey]);
+  }, [clearSelection, scopedProjectKeys]);
 
   const handleProjectSettings = useCallback(
     (event: ReactMouseEvent<HTMLButtonElement>, projectGroup: SidebarProjectSnapshot) => {
@@ -2193,7 +2206,8 @@ export default function Sidebar() {
   // filter context changes so a scope/search flip never inherits a deep
   // page state.
   const [settledVisibleCount, setSettledVisibleCount] = useState(SETTLED_TAIL_INITIAL_COUNT);
-  const settledResetKey = projectScopeKey ?? "all";
+  const settledResetKey =
+    scopedProjectKeys === null ? "all" : [...scopedProjectKeys].sort().join("\0");
   const lastSettledResetKeyRef = useRef(settledResetKey);
   if (lastSettledResetKeyRef.current !== settledResetKey) {
     lastSettledResetKeyRef.current = settledResetKey;
