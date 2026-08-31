@@ -14,5 +14,7 @@ describe("floating browser fullscreen presentation", () => {
     expect(source).toContain("fitSourceContent={!maximized}");
     expect(source).toContain("zIndex={maximized ? 110 : 30}");
     expect(source).toContain('? "pointer-events-none fixed z-100');
+    expect(source).toContain('aria-label={mobileViewport ? "Leave mobile viewport"');
+    expect(source).toContain('? "Set viewport dimensions" : "Fill available space"');
   });
 });

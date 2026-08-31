@@ -1,17 +1,22 @@
 "use client";
 
-import type { ScopedThreadRef } from "@t3tools/contracts";
+import { FILL_PREVIEW_VIEWPORT, type ScopedThreadRef } from "@t3tools/contracts";
+import { PREVIEW_VIEWPORT_PRESETS, resolvePreviewViewport } from "@t3tools/shared/previewViewport";
 import {
   Maximize2Icon,
   Minimize2Icon,
+  MonitorSmartphoneIcon,
   PanelRightIcon,
   PictureInPicture2,
+  SmartphoneIcon,
   XIcon,
 } from "lucide-react";
 import { type PointerEvent as ReactPointerEvent, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { BrowserSurfaceSlot } from "~/browser/BrowserSurfaceSlot";
+import { browserResponsiveViewportForToggle, useBrowserDefaults } from "~/browser/browserDefaults";
+import { commitBrowserViewportChange } from "~/browser/browserViewportActions";
 import { previewRuntimeTabId } from "~/browser/previewRuntimeTabId";
 import { Button } from "~/components/ui/button";
 import { toastManager } from "~/components/ui/toast";
@@ -68,6 +73,13 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
   const snapshot = previewState.sessions[tabId] ?? null;
   const runtimeTabId = previewRuntimeTabId(threadRef, previewState.serverEpoch, tabId);
   const desktopOverlay = previewState.desktopByTabId[tabId] ?? null;
+  const browserDefaults = useBrowserDefaults();
+  const viewport = snapshot?.viewport ?? FILL_PREVIEW_VIEWPORT;
+  const mobileViewport =
+    viewport._tag === "preset" &&
+    PREVIEW_VIEWPORT_PRESETS.some(
+      (preset) => preset.id === viewport.presetId && preset.category === "Phone",
+    );
   const position = miniPlayer?.tabId === tabId ? miniPlayer.position : null;
   const size =
     miniPlayer?.tabId === tabId && miniPlayer.size
@@ -116,6 +128,33 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
         description: error instanceof Error ? error.message : "An error occurred.",
       });
     });
+  };
+
+  const toggleViewportSizing = () => {
+    if (viewport._tag !== "fill") {
+      void commitBrowserViewportChange(runtimeTabId, FILL_PREVIEW_VIEWPORT).catch(() => undefined);
+      return;
+    }
+    const root = rootRef.current;
+    void commitBrowserViewportChange(
+      runtimeTabId,
+      browserResponsiveViewportForToggle({
+        defaults: browserDefaults,
+        panelRect: root
+          ? { width: root.clientWidth, height: Math.max(1, root.clientHeight - 32) }
+          : null,
+        zoomFactor: desktopOverlay?.zoomFactor,
+      }),
+    ).catch(() => undefined);
+  };
+
+  const toggleMobileViewport = () => {
+    void commitBrowserViewportChange(
+      runtimeTabId,
+      mobileViewport
+        ? FILL_PREVIEW_VIEWPORT
+        : resolvePreviewViewport({ mode: "preset", preset: "iphone-12-pro" }),
+    ).catch(() => undefined);
   };
 
   useLayoutEffect(() => {
@@ -308,6 +347,46 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
             ? "Browser"
             : snapshot.navStatus.title.trim() || snapshot.navStatus.url.trim() || "Browser"}
         </span>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant={viewport._tag === "fill" ? "ghost" : "secondary"}
+                size="icon-xs"
+                aria-label={
+                  viewport._tag === "fill" ? "Set viewport dimensions" : "Fill available space"
+                }
+                aria-pressed={viewport._tag !== "fill"}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={toggleViewportSizing}
+              />
+            }
+          >
+            <MonitorSmartphoneIcon />
+          </TooltipTrigger>
+          <TooltipPopup side="bottom">
+            {viewport._tag === "fill" ? "Set viewport dimensions" : "Fill available space"}
+          </TooltipPopup>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant={mobileViewport ? "secondary" : "ghost"}
+                size="icon-xs"
+                aria-label={mobileViewport ? "Leave mobile viewport" : "Use mobile viewport"}
+                aria-pressed={mobileViewport}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={toggleMobileViewport}
+              />
+            }
+          >
+            <SmartphoneIcon />
+          </TooltipTrigger>
+          <TooltipPopup side="bottom">
+            {mobileViewport ? "Leave mobile viewport" : "Use mobile viewport"}
+          </TooltipPopup>
+        </Tooltip>
         <Tooltip>
           <TooltipTrigger
             render={

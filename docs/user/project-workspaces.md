@@ -9,9 +9,10 @@ in the top-left corner or the configured sidebar shortcut to open it when choosi
 The project name in each pane header is the project menu. A project represents a directory (or a
 logical group of the same repository across environments). The generated thread title appears next
 to the project name and updates everywhere when the thread is renamed or its title is regenerated.
-Focusing a pane filters the sidebar to that project; choosing a thread in the sidebar assigns it to
-the focused pane. Use the pane header to maximize it temporarily. The X removes the thread from
-that pane without stopping its work, including work running on another environment. The checkmark
+The sidebar shows threads from every project assigned to a visible pane. Focusing a pane chooses
+where the next thread opens, and the project picker in the sidebar changes that pane's project. Use
+the pane header to maximize it temporarily. The X removes the thread from that pane without stopping
+its work, including work running on another environment. The checkmark
 settles an idle thread and clears the pane. It stays disabled while the thread is working or waiting
 for you. Settlement stops the thread's provider session, background work, and managed terminal
 processes without deleting its history. Settled threads remain available from the sidebar and
@@ -52,11 +53,16 @@ On macOS desktop, the titlebar strip remains available for the traffic lights, w
 and workspace controls. It disappears in fullscreen so the panes use the entire window; the same
 actions remain available through their shortcuts.
 
-When an agent opens the shared browser, it appears as a floating preview inside the pane. Its
-overlay is opaque, so pane content and the thread sidebar do not show through it. Its header bar
-stays visible: drag it to move the preview, and use the header buttons to dock it into
-the right panel, pop it into a separate window, expand it to fill the T3 Code window, or close the
-browser. Agents can also close the browser themselves when they finish with it.
+When an agent opens the shared browser, it expands over the T3 Code window so the page starts at a
+useful size. Use its header buttons to restore it to a movable preview, dock it into the right
+panel, pop it into a separate window, or close the browser. The restored preview is opaque, so pane
+content and the thread sidebar do not show through it. Agents can also close the browser themselves
+when they finish with it.
+
+When a tab uses an exact viewport size, a Viewport row appears above the page. Enter width and
+height directly, lock the current ratio, choose a phone or tablet preset, or use Mobile for a quick
+phone-sized check. Fill returns the page to the available browser space. Only the X in the browser
+header closes the browser.
 
 The shared browser keeps cookies and logins between sessions, so signing in to a site once keeps
 it available for later agent work. An agent can also open a tab under a named profile — a separate

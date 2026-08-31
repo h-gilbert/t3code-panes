@@ -7,7 +7,7 @@ import {
   type PreviewViewportSetting,
 } from "@t3tools/contracts";
 import { PREVIEW_VIEWPORT_PRESETS, resolvePreviewViewport } from "@t3tools/shared/previewViewport";
-import { Link2, Unlink2, X } from "lucide-react";
+import { Link2, Smartphone, Unlink2 } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "~/components/ui/button";
@@ -29,6 +29,7 @@ import { commitViewportAndAspectRatio } from "./browserDeviceToolbarState";
 import { ScreenRotationIcon } from "./ScreenRotationIcon";
 
 const RESPONSIVE_VALUE = "responsive";
+const MOBILE_PRESET_ID = "iphone-12-pro";
 const SELECT_ITEMS = [
   { value: RESPONSIVE_VALUE, label: "Responsive" },
   ...PREVIEW_VIEWPORT_PRESETS.map((preset) => ({ value: preset.id, label: preset.label })),
@@ -54,6 +55,8 @@ export function BrowserDeviceToolbar({
     readonly width: string;
     readonly height: string;
   } | null>(null);
+  const [previousNonMobileSetting, setPreviousNonMobileSetting] =
+    useState<PreviewViewportSetting | null>(null);
   const presentedSize = customSize ?? {
     width: String(setting.width),
     height: String(setting.height),
@@ -63,6 +66,11 @@ export function BrowserDeviceToolbar({
     PREVIEW_VIEWPORT_PRESETS.some((preset) => preset.id === setting.presetId)
       ? setting.presetId
       : RESPONSIVE_VALUE;
+  const selectedPreset =
+    setting._tag === "preset"
+      ? PREVIEW_VIEWPORT_PRESETS.find((preset) => preset.id === setting.presetId)
+      : undefined;
+  const mobileViewport = selectedPreset?.category === "Phone";
   const customWidth = Number(presentedSize.width);
   const customHeight = Number(presentedSize.height);
   const customValid =
@@ -152,6 +160,16 @@ export function BrowserDeviceToolbar({
     onAspectRatioChange(aspectRatio === null ? customWidth / customHeight : null);
   };
 
+  const toggleMobileViewport = () => {
+    if (mobileViewport) {
+      apply(previousNonMobileSetting ?? { _tag: "freeform", width: 1280, height: 800 }, null);
+      setPreviousNonMobileSetting(null);
+      return;
+    }
+    setPreviousNonMobileSetting(setting);
+    apply(resolvePreviewViewport({ mode: "preset", preset: MOBILE_PRESET_ID }), null);
+  };
+
   return (
     <div
       className="sticky left-0 top-0 z-50 flex items-center gap-0.5 overflow-x-auto border-b border-border/70 bg-background/95 px-1.5 shadow-xs backdrop-blur-md [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
@@ -176,7 +194,7 @@ export function BrowserDeviceToolbar({
     >
       {width >= 560 ? (
         <span className="mr-0.5 shrink-0 text-[11px] font-medium text-muted-foreground">
-          Dimensions
+          Viewport
         </span>
       ) : null}
       <Select
@@ -200,17 +218,34 @@ export function BrowserDeviceToolbar({
         <SelectPopup align="start" alignItemWithTrigger={false} className="min-w-64">
           <SelectItem value={RESPONSIVE_VALUE}>Responsive</SelectItem>
           <SelectGroup>
-            <SelectGroupLabel>Standard</SelectGroupLabel>
-            {PREVIEW_VIEWPORT_PRESETS.map((preset) => (
-              <SelectItem key={preset.id} value={preset.id}>
-                <span className="flex w-full items-center justify-between gap-5">
-                  <span>{preset.label}</span>
-                  <span className="text-xs tabular-nums text-muted-foreground">
-                    {preset.detail}
+            <SelectGroupLabel>Phones</SelectGroupLabel>
+            {PREVIEW_VIEWPORT_PRESETS.filter((preset) => preset.category === "Phone").map(
+              (preset) => (
+                <SelectItem key={preset.id} value={preset.id}>
+                  <span className="flex w-full items-center justify-between gap-5">
+                    <span>{preset.label}</span>
+                    <span className="text-xs tabular-nums text-muted-foreground">
+                      {preset.detail}
+                    </span>
                   </span>
-                </span>
-              </SelectItem>
-            ))}
+                </SelectItem>
+              ),
+            )}
+          </SelectGroup>
+          <SelectGroup>
+            <SelectGroupLabel>Tablets and displays</SelectGroupLabel>
+            {PREVIEW_VIEWPORT_PRESETS.filter((preset) => preset.category === "Tablet").map(
+              (preset) => (
+                <SelectItem key={preset.id} value={preset.id}>
+                  <span className="flex w-full items-center justify-between gap-5">
+                    <span>{preset.label}</span>
+                    <span className="text-xs tabular-nums text-muted-foreground">
+                      {preset.detail}
+                    </span>
+                  </span>
+                </SelectItem>
+              ),
+            )}
           </SelectGroup>
         </SelectPopup>
       </Select>
@@ -283,7 +318,7 @@ export function BrowserDeviceToolbar({
           render={
             <Button
               variant="ghost"
-              size="icon-xs"
+              size={width >= 660 ? "xs" : "icon-xs"}
               type="button"
               aria-label={
                 aspectRatio === null ? "Lock viewport aspect ratio" : "Unlock viewport aspect ratio"
@@ -301,9 +336,31 @@ export function BrowserDeviceToolbar({
           ) : (
             <Link2 className={cn(aspectRatio !== null && "text-foreground")} />
           )}
+          {width >= 660 ? <span>Ratio</span> : null}
         </TooltipTrigger>
         <TooltipPopup side="top">
           {aspectRatio === null ? "Lock aspect ratio" : "Unlock aspect ratio"}
+        </TooltipPopup>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant={mobileViewport ? "secondary" : "ghost"}
+              size={width >= 740 ? "xs" : "icon-xs"}
+              type="button"
+              aria-label={mobileViewport ? "Leave mobile viewport" : "Use mobile viewport"}
+              aria-pressed={mobileViewport}
+              disabled={pending}
+              onClick={toggleMobileViewport}
+            />
+          }
+        >
+          <Smartphone />
+          {width >= 740 ? <span>Mobile</span> : null}
+        </TooltipTrigger>
+        <TooltipPopup side="top">
+          {mobileViewport ? "Leave mobile viewport" : "Use mobile viewport"}
         </TooltipPopup>
       </Tooltip>
       <Button
@@ -318,16 +375,16 @@ export function BrowserDeviceToolbar({
       </Button>
       <Button
         variant="ghost"
-        size="icon-xs"
+        size="xs"
         type="button"
-        aria-label="Close device toolbar"
+        aria-label="Fill available space"
         className="sticky right-0 ml-auto bg-background/95"
         disabled={pending}
         onClick={() => {
           apply({ _tag: "fill" }, null);
         }}
       >
-        <X />
+        Fill
       </Button>
     </div>
   );
