@@ -7,8 +7,23 @@ one environment.
 Pinned threads still move to **Settled** when they become inactive. They also move when their pull
 request merges if **Auto-settle merged threads** is enabled.
 
+Settling releases the thread's active compute resources: T3 Code stops its provider session and
+background agent work, and closes its managed terminal processes while preserving terminal history.
+This has the same meaning on web, desktop, iOS, and Android because the connected server owns the
+transition. You can resume or un-settle the thread later; its history remains available, and provider
+or terminal resources start again only when new work needs them.
+
 When you un-settle a thread, it returns to the top of the active list so you can find it right
 away. Its timestamps do not change. Other threads keep their positions.
+
+T3 Code archives an explicitly settled thread after it has remained settled for seven days. New
+activity un-settles it and cancels that pending archive. Archived threads remain available in
+Settings under **Archive**, where you can restore them.
+Restoring a thread returns it to the open list and starts a fresh settlement period.
+
+`/resume` lists open threads first and settled threads second. Both groups put the most recently
+active thread first, including the time when its latest agent turn finished. Archived threads do
+not appear in `/resume` until you restore them.
 
 The active list shows the newest threads up to your thread preview limit. Older threads remain
 available through sidebar search. If you open an older thread from search or a link, its row stays

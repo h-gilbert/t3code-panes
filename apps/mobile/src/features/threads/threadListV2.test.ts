@@ -342,6 +342,7 @@ describe("buildThreadListV2Items", () => {
     expect(layout.items.map((item) => item.thread.id)).toEqual(["active", "pinned-settled"]);
     expect(layout.items.map((item) => item.pinned)).toEqual([false, false]);
     expect(layout.settledCount).toBe(1);
+    expect(layout.threadsNeedingSettlementMaterialization).toEqual([]);
   });
 
   it("moves pinned threads to the settled shelf when their pull request merges", () => {
@@ -362,6 +363,9 @@ describe("buildThreadListV2Items", () => {
     expect(layout.items.map((item) => item.variant)).toEqual(["card", "slim"]);
     expect(layout.items[1]?.thread.pinnedAt).toBe("2026-06-01T12:00:00.000Z");
     expect(layout.settledCount).toBe(1);
+    expect(layout.threadsNeedingSettlementMaterialization.map((thread) => thread.id)).toEqual([
+      "pinned-merged",
+    ]);
   });
 
   it("moves inactive pinned threads to the settled shelf", () => {

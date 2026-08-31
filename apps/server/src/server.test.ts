@@ -7296,7 +7296,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("stops the provider session after settle without closing terminals", () =>
+  it.effect("stops the provider session and closes terminals after settle", () =>
     Effect.gen(function* () {
       const threadId = ThreadId.make("thread-settle");
       const effects: string[] = [];
@@ -7354,7 +7354,11 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       );
 
       assert.equal(dispatchResult.sequence, 1);
-      assert.deepEqual(effects, ["dispatch:thread.settle", "dispatch:thread.session.stop"]);
+      assert.deepEqual(effects, [
+        "dispatch:thread.settle",
+        "dispatch:thread.session.stop",
+        `terminal.close:${threadId}`,
+      ]);
       const sessionStopCommand = dispatchedCommands[1];
       assert.equal(sessionStopCommand?.type, "thread.session.stop");
       if (sessionStopCommand?.type === "thread.session.stop") {
@@ -7408,7 +7412,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       );
 
       assert.equal(dispatchResult.sequence, 1);
-      assert.deepEqual(effects, ["dispatch:thread.settle"]);
+      assert.deepEqual(effects, ["dispatch:thread.settle", `terminal.close:${threadId}`]);
       assert.deepEqual(
         dispatchedCommands.map((command) => command.type),
         ["thread.settle"],

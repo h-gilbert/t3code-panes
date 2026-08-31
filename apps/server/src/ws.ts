@@ -1232,20 +1232,17 @@ const makeWsRpcLayer = (
                   );
                 }
 
-                // Terminals are user-opened panes, not thread background
-                // work: archive removes the thread from view so they close
-                // with it, but a settled thread stays reachable and may be
-                // un-settled, so its terminals stay up.
-                if (parkingCommand.type === "thread.archive") {
-                  yield* terminalManager.close({ threadId: parkingCommand.threadId }).pipe(
-                    Effect.catch((error) =>
-                      Effect.logWarning("failed to close thread terminals after archive", {
-                        threadId: parkingCommand.threadId,
-                        error: error.message,
-                      }),
-                    ),
-                  );
-                }
+                // Managed terminal processes are thread-owned resources. Keep
+                // their history, but close them before acknowledging archive
+                // or settlement so an immediate resume cannot race cleanup.
+                yield* terminalManager.close({ threadId: parkingCommand.threadId }).pipe(
+                  Effect.catch((error) =>
+                    Effect.logWarning(`failed to close thread terminals after ${parkingKind}`, {
+                      threadId: parkingCommand.threadId,
+                      error: error.message,
+                    }),
+                  ),
+                );
               }
               return result;
             }).pipe(

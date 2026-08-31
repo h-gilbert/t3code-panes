@@ -1,6 +1,10 @@
 "use client";
 
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  scopeProjectRef,
+  scopeThreadRef,
+  scopedThreadKey,
+} from "@t3tools/client-runtime/environment";
 import {
   canCreateProjectInEnvironment,
   getCloneDestinationBrowsePath,
@@ -22,6 +26,7 @@ import {
   settlePromise,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
+import { effectiveSettled, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
 import {
   type DesktopWslState,
   type EnvironmentId,
@@ -67,6 +72,7 @@ import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useClientSettings } from "../hooks/useSettings";
+import { useThreadActions } from "../hooks/useThreadActions";
 import { useTheme } from "../hooks/useTheme";
 import { readLocalApi } from "../localApi";
 import { desktopLocalBackendId } from "../connection/desktopLocal";
@@ -140,7 +146,11 @@ import {
   CommandPaletteMetaDot,
   ThreadCommandSubtitle,
 } from "./ThreadCommandSubtitle";
-import { ThreadRowLeadingStatus, ThreadRowTrailingStatus } from "./ThreadStatusIndicators";
+import {
+  ThreadRowLeadingStatus,
+  ThreadRowTrailingStatus,
+  threadChangeRequestSnapshotsAtom,
+} from "./ThreadStatusIndicators";
 import { primaryServerKeybindingsAtom, primaryServerProvidersAtom } from "../state/server";
 import {
   deriveProviderInstanceEntries,
@@ -648,6 +658,7 @@ function OpenCommandPaletteDialog(props: {
   const projects = useProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const threads = useThreadShells();
+  const { unsettleThread } = useThreadActions();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { theme, themeHalves, resolvedTheme } = useTheme();
   const providers = useAtomValue(primaryServerProvidersAtom);
@@ -1147,6 +1158,7 @@ function OpenCommandPaletteDialog(props: {
         ...(activeThreadId ? { activeThreadId } : {}),
         projectTitleById,
         sortOrder: clientSettings.sidebarThreadSortOrder,
+        orderByLastActivity: true,
         icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
         renderLeadingContent: (thread) => <ThreadRowLeadingStatus thread={thread} />,
         renderTrailingContent: (thread) => <ThreadRowTrailingStatus thread={thread} />,
@@ -1240,6 +1252,71 @@ function OpenCommandPaletteDialog(props: {
     ],
   );
   const recentThreadItems = allThreadItems.slice(0, RECENT_THREAD_LIMIT);
+  const changeRequestSnapshotByKey = useAtomValue(threadChangeRequestSnapshotsAtom);
+  const resumeThreadGroups = useMemo<CommandPaletteView["groups"]>(() => {
+    const now = new Date().toISOString();
+    const settledThreadKeys = new Set(
+      threads
+        .filter((thread) => {
+          if (thread.archivedAt !== null) return false;
+          const environment = environments.find(
+            (candidate) => candidate.environmentId === thread.environmentId,
+          );
+          if (environment?.serverConfig?.environment.capabilities.threadSettlement !== true) {
+            return false;
+          }
+          if (
+            environment.serverConfig.environment.capabilities.threadSnooze === true &&
+            effectiveSnoozed(thread, { now })
+          ) {
+            return false;
+          }
+          const snapshot = changeRequestSnapshotByKey.get(
+            scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+          );
+          const changeRequest =
+            snapshot != null && (thread.worktreePath === null || snapshot.branch === thread.branch)
+              ? snapshot.pr
+              : null;
+          return effectiveSettled(thread, {
+            now,
+            autoSettleAfterDays: clientSettings.sidebarAutoSettleAfterDays,
+            autoSettleOnMerge: clientSettings.sidebarAutoSettleOnMerge,
+            changeRequest,
+          });
+        })
+        .map((thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))),
+    );
+    const isSettledItem = (item: CommandPaletteActionItem) =>
+      item.threadRef !== undefined &&
+      settledThreadKeys.has(
+        scopedThreadKey(scopeThreadRef(item.threadRef.environmentId, item.threadRef.id)),
+      );
+    const openItems = allThreadItems.filter((item) => !isSettledItem(item));
+    const settledItems = allThreadItems.filter(isSettledItem).map((item) => ({
+      ...item,
+      run: async () => {
+        if (item.threadRef === undefined) return;
+        const result = await unsettleThread(
+          scopeThreadRef(item.threadRef.environmentId, item.threadRef.id),
+        );
+        if (result._tag === "Success") await item.run();
+      },
+    }));
+    return [
+      ...(openItems.length > 0 ? [{ value: "open-threads", label: "Open", items: openItems }] : []),
+      ...(settledItems.length > 0
+        ? [{ value: "settled-threads", label: "Settled", items: settledItems }]
+        : []),
+    ];
+  }, [
+    allThreadItems,
+    changeRequestSnapshotByKey,
+    clientSettings,
+    environments,
+    threads,
+    unsettleThread,
+  ]);
 
   const pushPaletteView = useCallback(
     (view: CommandPaletteView): void => {
@@ -1534,15 +1611,9 @@ function OpenCommandPaletteDialog(props: {
     clearOpenIntent();
     pushPaletteView({
       addonIcon: <MessageSquareIcon className={ADDON_ICON_CLASS} />,
-      groups: [
-        {
-          value: "threads",
-          label: "Threads",
-          items: allThreadItems,
-        },
-      ],
+      groups: resumeThreadGroups,
     });
-  }, [allThreadItems, clearOpenIntent, openIntent, pushPaletteView]);
+  }, [clearOpenIntent, openIntent, pushPaletteView, resumeThreadGroups]);
 
   useLayoutEffect(() => {
     if (openIntent?.kind !== "add-local-project") {

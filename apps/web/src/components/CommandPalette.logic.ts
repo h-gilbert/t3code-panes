@@ -108,6 +108,7 @@ export interface CommandPaletteItem {
 export interface CommandPaletteActionItem extends CommandPaletteItem {
   readonly kind: "action";
   readonly keepOpen?: boolean;
+  readonly threadRef?: Pick<SidebarThreadSummary, "environmentId" | "id">;
   readonly run: () => Promise<void>;
 }
 
@@ -181,6 +182,7 @@ export type BuildThreadActionItemsThread = Pick<
   | "modelSelection"
   | "projectId"
   | "session"
+  | "latestTurn"
   | "title"
   | "worktreePath"
 > & {
@@ -188,11 +190,33 @@ export type BuildThreadActionItemsThread = Pick<
   latestUserMessageAt?: string | null;
 };
 
+function commandPaletteThreadLastActivityAt(thread: BuildThreadActionItemsThread): string {
+  const candidates = [
+    thread.latestUserMessageAt,
+    thread.latestTurn?.requestedAt,
+    thread.latestTurn?.startedAt,
+    thread.latestTurn?.completedAt,
+  ];
+  let latest = thread.createdAt;
+  let latestMs = Date.parse(thread.createdAt);
+  for (const candidate of candidates) {
+    if (candidate == null) continue;
+    const candidateMs = Date.parse(candidate);
+    if (candidateMs > latestMs) {
+      latest = candidate;
+      latestMs = candidateMs;
+    }
+  }
+  return latest;
+}
+
 export function buildThreadActionItems<TThread extends BuildThreadActionItemsThread>(input: {
   threads: ReadonlyArray<TThread>;
   activeThreadId?: Thread["id"];
   projectTitleById: ReadonlyMap<Project["id"], string>;
   sortOrder: SidebarThreadSortOrder;
+  /** Resume uses actual turn activity instead of the sidebar's static order. */
+  orderByLastActivity?: boolean;
   icon: ReactNode;
   /** Optional content rendered inline before the title text per-thread. */
   renderLeadingContent?: (thread: TThread) => ReactNode;
@@ -204,10 +228,14 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
   runThread: (thread: Pick<SidebarThreadSummary, "environmentId" | "id">) => Promise<void>;
   limit?: number;
 }): CommandPaletteActionItem[] {
-  const sortedThreads = sortThreads(
-    input.threads.filter((thread) => thread.archivedAt === null),
-    input.sortOrder,
-  );
+  const unarchivedThreads = input.threads.filter((thread) => thread.archivedAt === null);
+  const sortedThreads = input.orderByLastActivity
+    ? [...unarchivedThreads].toSorted((left, right) => {
+        const timestamp = (thread: TThread) =>
+          Date.parse(commandPaletteThreadLastActivityAt(thread));
+        return timestamp(right) - timestamp(left) || left.id.localeCompare(right.id);
+      })
+    : sortThreads(unarchivedThreads, input.sortOrder);
   const visibleThreads =
     input.limit === undefined ? sortedThreads : sortedThreads.slice(0, input.limit);
 
@@ -245,9 +273,12 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
         title: thread.title,
         description,
         timestamp: formatRelativeTimeLabel(
-          thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt,
+          input.orderByLastActivity
+            ? commandPaletteThreadLastActivityAt(thread)
+            : (thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt),
         ),
         icon: input.icon,
+        threadRef: { environmentId: thread.environmentId, id: thread.id },
       },
       leadingContent ? { titleLeadingContent: leadingContent } : {},
       trailingContent ? { titleTrailingContent: trailingContent } : {},

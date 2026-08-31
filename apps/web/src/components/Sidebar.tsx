@@ -2606,6 +2606,20 @@ export default function Sidebar() {
     },
     [planForwardNavigation, settleThread],
   );
+  // Inactivity and change-request rules are client preferences, but Settled
+  // is a server-owned resource boundary. Materialize derived rows through the
+  // same command as a manual settle so web, desktop, and mobile converge on
+  // one durable meaning.
+  useEffect(() => {
+    for (const thread of settledThreads) {
+      if (thread.settledOverride === "settled") continue;
+      const threadRef = scopeThreadRef(thread.environmentId, thread.id);
+      const threadKey = scopedThreadKey(threadRef);
+      if (settlingThreadKeysRef.current.has(threadKey)) continue;
+      settlingThreadKeysRef.current.add(threadKey);
+      void settleThread(threadRef).finally(() => settlingThreadKeysRef.current.delete(threadKey));
+    }
+  }, [settleThread, settledThreads]);
   const attemptUnsettle = useCallback(
     (threadRef: ScopedThreadRef) => {
       void (async () => {

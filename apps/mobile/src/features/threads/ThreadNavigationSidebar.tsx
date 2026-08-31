@@ -34,6 +34,7 @@ import { mobilePreferencesAtom } from "../../state/preferences";
 import { useThreadSearch } from "../../state/queries";
 import { useThreadListV2Enabled } from "./use-thread-list-v2-enabled";
 import { useThreadListV2ShelfPreferences } from "./use-thread-list-v2-shelf-preferences";
+import { useMaterializeSettledThreads } from "./use-materialize-settled-threads";
 import { environmentServerConfigsAtom } from "../../state/server";
 import { usePendingNewTasks } from "../../state/use-pending-new-tasks";
 import { useWorkspaceState } from "../../state/workspace";
@@ -504,6 +505,7 @@ function ThreadNavigationSidebarPane(
     if (!threadListV2Enabled)
       return {
         items: [],
+        threadsNeedingSettlementMaterialization: [],
         hiddenSettledCount: 0,
         snoozedCount: 0,
         snoozedShelfHeaderIndex: null,
@@ -546,6 +548,7 @@ function ThreadNavigationSidebarPane(
     threads,
     selectedProjectScope,
   ]);
+  useMaterializeSettledThreads(threadListV2Layout.threadsNeedingSettlementMaterialization);
   // Re-partition the moment the earliest snooze expires (clamped to the
   // signed-32-bit setTimeout range; far-future wakes re-arm at the clamp).
   const nextSnoozeWakeAt = threadListV2Layout.nextSnoozeWakeAt;

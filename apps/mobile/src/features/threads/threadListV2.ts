@@ -200,6 +200,8 @@ export interface ThreadListV2Item {
 
 export interface ThreadListV2Layout {
   readonly items: ThreadListV2Item[];
+  /** Client-derived settled rows that still need a durable server settle. */
+  readonly threadsNeedingSettlementMaterialization: EnvironmentThreadShell[];
   /** Settled threads beyond the render limit (behind "Show more"). */
   readonly hiddenSettledCount: number;
   /** Snoozed threads matching the current filters. */
@@ -500,6 +502,9 @@ export function buildThreadListV2Items(input: {
   }
   return {
     items,
+    threadsNeedingSettlementMaterialization: orderedSettled.filter(
+      (thread) => thread.settledOverride !== "settled",
+    ),
     hiddenSettledCount: orderedSettled.length - pagedSettled.length,
     snoozedCount: orderedSnoozed.length,
     snoozedShelfHeaderIndex,

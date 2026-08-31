@@ -118,6 +118,47 @@ it.layer(NodeServices.layer)("settled thread decider", (it) => {
     }),
   );
 
+  it.effect("guards retention archives against activity after the sweep snapshot", () =>
+    Effect.gen(function* () {
+      const archived = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.archive",
+          commandId: CommandId.make("cmd-auto-archive"),
+          threadId: ThreadId.make("thread-1"),
+          ifSettledAt: SETTLED_AT,
+        },
+        readModel: makeReadModel("settled"),
+      });
+      expect("type" in archived ? archived.type : archived[0]?.type).toBe("thread.archived");
+
+      const stale = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.archive",
+          commandId: CommandId.make("cmd-auto-archive-stale"),
+          threadId: ThreadId.make("thread-1"),
+          ifSettledAt: SETTLED_AT,
+        },
+        readModel: makeReadModel(null),
+      }).pipe(Effect.flip);
+      expect(stale._tag).toBe("OrchestrationCommandInvariantError");
+    }),
+  );
+
+  it.effect("restores an archived settled thread as active", () =>
+    Effect.gen(function* () {
+      const restored = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.unarchive",
+          commandId: CommandId.make("cmd-restore-auto-archived"),
+          threadId: ThreadId.make("thread-1"),
+        },
+        readModel: makeReadModel("settled", NOW),
+      });
+      const events = "type" in restored ? [restored] : restored;
+      expect(events.map((event) => event.type)).toEqual(["thread.unarchived", "thread.unsettled"]);
+    }),
+  );
+
   it.effect("settling a snoozed thread also wakes it", () =>
     Effect.gen(function* () {
       const result = yield* decideOrchestrationCommand({

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId, TurnId } from "@t3tools/contracts";
 import type { Thread } from "../types";
 import {
   browseInputEndPaddingClass,
@@ -214,6 +214,38 @@ describe("buildThreadActionItems", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("orders resume threads by the latest turn completion", () => {
+    const items = buildThreadActionItems({
+      threads: [
+        makeThread({
+          id: ThreadId.make("thread-newer-created"),
+          createdAt: "2026-03-20T12:00:00.000Z",
+        }),
+        makeThread({
+          id: ThreadId.make("thread-later-completion"),
+          latestTurn: {
+            turnId: TurnId.make("turn-1"),
+            state: "completed",
+            requestedAt: "2026-03-20T10:00:00.000Z",
+            startedAt: "2026-03-20T10:00:01.000Z",
+            completedAt: "2026-03-20T13:00:00.000Z",
+            assistantMessageId: null,
+          },
+        }),
+      ],
+      projectTitleById: new Map([[PROJECT_ID, "Project"]]),
+      sortOrder: "created_at",
+      orderByLastActivity: true,
+      icon: null,
+      runThread: async () => undefined,
+    });
+
+    expect(items.map((item) => item.value)).toEqual([
+      "thread:thread-later-completion",
+      "thread:thread-newer-created",
+    ]);
   });
 
   it("ranks thread title matches ahead of contextual project-name matches", () => {

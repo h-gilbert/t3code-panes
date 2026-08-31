@@ -35,6 +35,7 @@ import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
 import { useThreadSearch } from "../../state/queries";
 import { useThreadListV2Enabled } from "../threads/use-thread-list-v2-enabled";
+import { useMaterializeSettledThreads } from "../threads/use-materialize-settled-threads";
 import { environmentServerConfigsAtom } from "../../state/server";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 import {
@@ -663,6 +664,7 @@ export function HomeScreen(props: HomeScreenProps) {
     if (!threadListV2Enabled)
       return {
         items: [],
+        threadsNeedingSettlementMaterialization: [],
         hiddenSettledCount: 0,
         snoozedCount: 0,
         snoozedShelfHeaderIndex: null,
@@ -706,6 +708,7 @@ export function HomeScreen(props: HomeScreenProps) {
     threadListV2Enabled,
     v2ScopedProjectGroup,
   ]);
+  useMaterializeSettledThreads(threadListV2Layout.threadsNeedingSettlementMaterialization);
   // Re-partition the moment the earliest snooze expires (clamped to the
   // signed-32-bit setTimeout range; far-future wakes re-arm at the clamp).
   const nextSnoozeWakeAt = threadListV2Layout.nextSnoozeWakeAt;

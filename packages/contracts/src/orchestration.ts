@@ -751,6 +751,9 @@ const ThreadArchiveCommand = Schema.Struct({
   type: Schema.Literal("thread.archive"),
   commandId: CommandId,
   threadId: ThreadId,
+  // Background retention uses this as an optimistic guard. Manual archive
+  // commands omit it and keep their existing behavior.
+  ifSettledAt: Schema.optional(IsoDateTime),
 });
 
 const ThreadUnarchiveCommand = Schema.Struct({

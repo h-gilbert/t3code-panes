@@ -406,11 +406,20 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.archive": {
-      yield* requireThreadNotArchived({
+      const thread = yield* requireThreadNotArchived({
         readModel,
         command,
         threadId: command.threadId,
       });
+      if (
+        command.ifSettledAt !== undefined &&
+        (thread.settledOverride !== "settled" || thread.settledAt !== command.ifSettledAt)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `thread ${command.threadId} is no longer settled at ${command.ifSettledAt}`,
+        });
+      }
       const occurredAt = yield* nowIso;
       return {
         ...(yield* withEventBase({
@@ -429,25 +438,43 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.unarchive": {
-      yield* requireThreadArchived({
+      const thread = yield* requireThreadArchived({
         readModel,
         command,
         threadId: command.threadId,
       });
       const occurredAt = yield* nowIso;
-      return {
+      const unarchivedEvent = {
         ...(yield* withEventBase({
           aggregateKind: "thread",
           aggregateId: command.threadId,
           occurredAt,
           commandId: command.commandId,
         })),
-        type: "thread.unarchived",
+        type: "thread.unarchived" as const,
         payload: {
           threadId: command.threadId,
           updatedAt: occurredAt,
         },
       };
+      if (thread.settledOverride !== "settled") return unarchivedEvent;
+      return [
+        unarchivedEvent,
+        {
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.unsettled" as const,
+          payload: {
+            threadId: command.threadId,
+            reason: "user" as const,
+            updatedAt: occurredAt,
+          },
+        },
+      ];
     }
 
     case "thread.settle": {

@@ -1,6 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { canSettle } from "@t3tools/client-runtime/state/thread-settled";
 import { createFileRoute } from "@tanstack/react-router";
 import type { ScopedProjectRef, ScopedThreadRef } from "@t3tools/contracts";
 import {
@@ -25,15 +26,6 @@ import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider";
 import { Button } from "../components/ui/button";
 import {
-  AlertDialog,
-  AlertDialogClose,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogPopup,
-  AlertDialogTitle,
-} from "../components/ui/alert-dialog";
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
@@ -54,7 +46,7 @@ import { resolveThreadSyncPhase } from "../threadSync";
 import { useThreadDetail, useThreadRefs, useThreadShell, useThreadStatus } from "../state/entities";
 import { useEnvironmentQuery } from "../state/query";
 import { useProjects } from "../state/entities";
-import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
+import { usePrimaryEnvironmentId } from "../state/environments";
 import { environmentShell } from "../state/shell";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { useClientSettings } from "../hooks/useSettings";
@@ -85,7 +77,6 @@ import {
   resolveWorkspaceDraftThreadRef,
   resolveWorkspacePaneThreadTitle,
 } from "../workspacePaneTitle";
-import { workspaceThreadNeedsFinishConfirmation } from "../workspacePaneLifecycle";
 import { cn } from "~/lib/utils";
 import { newDraftId, newThreadId } from "../lib/utils";
 
@@ -275,8 +266,7 @@ function WorkspacePane({
   focused,
   maximized,
   composerHandleRef,
-  environmentLabel,
-  archiveThread,
+  settleThread,
 }: {
   readonly workspaceKey: string;
   readonly index: WorkspacePaneIndex;
@@ -286,8 +276,7 @@ function WorkspacePane({
   readonly focused: boolean;
   readonly maximized: boolean;
   readonly composerHandleRef: RefObject<ChatComposerHandle | null>;
-  readonly environmentLabel: string;
-  readonly archiveThread: ReturnType<typeof useThreadActions>["archiveThread"];
+  readonly settleThread: ReturnType<typeof useThreadActions>["settleThread"];
 }) {
   const focusPane = useWorkspacePaneStore((state) => state.focusPane);
   const clearPane = useWorkspacePaneStore((state) => state.clearPane);
@@ -296,8 +285,7 @@ function WorkspacePane({
   const toggleMaximize = useWorkspacePaneStore((state) => state.toggleMaximize);
   const handleNewThread = useNewThreadHandler();
   const [pendingProjectRef, setPendingProjectRef] = useState<ScopedProjectRef | null>(null);
-  const [finishConfirmOpen, setFinishConfirmOpen] = useState(false);
-  const [finishing, setFinishing] = useState(false);
+  const [settling, setSettling] = useState(false);
   const draftRequestVersionRef = useRef(0);
   const serverThreadRef = paneTarget && "threadId" in paneTarget ? paneTarget : null;
   const serverThreadShell = useThreadShell(serverThreadRef);
@@ -358,35 +346,26 @@ function WorkspacePane({
     draftRequestVersionRef.current += 1;
     clearPane(workspaceKey, index);
   }, [clearPane, index, workspaceKey]);
-  const hasActiveWork = workspaceThreadNeedsFinishConfirmation(serverThreadShell);
+  const settleAvailable =
+    serverThreadShell !== null && canSettle(serverThreadShell, { now: new Date().toISOString() });
   const finishThread = useCallback(async () => {
-    if (!serverThreadRef || finishing) return;
-    setFinishing(true);
-    const result = await archiveThread(serverThreadRef, {
-      allowRunning: true,
-    });
-    setFinishing(false);
+    if (!serverThreadRef || settling) return;
+    setSettling(true);
+    const result = await settleThread(serverThreadRef);
+    setSettling(false);
     if (result._tag === "Failure") {
       const error = squashAtomCommandFailure(result);
       toastManager.add(
         stackedThreadToast({
           type: "error",
           title: "Could not finish thread",
-          description: error instanceof Error ? error.message : "The thread was not archived.",
+          description: error instanceof Error ? error.message : "The thread was not settled.",
         }),
       );
       return;
     }
-    setFinishConfirmOpen(false);
     clearPane(workspaceKey, index);
-  }, [archiveThread, clearPane, finishing, index, serverThreadRef, workspaceKey]);
-  const handleFinishThread = useCallback(() => {
-    if (hasActiveWork) {
-      setFinishConfirmOpen(true);
-      return;
-    }
-    void finishThread();
-  }, [finishThread, hasActiveWork]);
+  }, [clearPane, index, serverThreadRef, settleThread, settling, workspaceKey]);
 
   return (
     <section
@@ -476,10 +455,12 @@ function WorkspacePane({
             <Button
               size="icon-micro"
               variant="ghost"
-              aria-label="Finish thread and stop resources"
-              title="Finish thread and stop resources"
-              disabled={finishing}
-              onClick={handleFinishThread}
+              aria-label="Settle thread and clear pane"
+              title={
+                settleAvailable ? "Settle thread and clear pane" : "Thread still needs attention"
+              }
+              disabled={settling || !settleAvailable}
+              onClick={() => void finishThread()}
             >
               <CircleCheckIcon className="size-3" />
             </Button>
@@ -510,30 +491,6 @@ function WorkspacePane({
           ) : null}
         </div>
       </div>
-      <AlertDialog
-        open={finishConfirmOpen}
-        onOpenChange={(open) => {
-          if (!finishing) setFinishConfirmOpen(open);
-        }}
-      >
-        <AlertDialogPopup>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Finish this thread?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This stops ongoing agent work and managed terminals on {environmentLabel}, then
-              archives the thread. Processes detached outside T3 may continue running.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogClose render={<Button variant="outline" disabled={finishing} />}>
-              Cancel
-            </AlertDialogClose>
-            <Button variant="destructive" disabled={finishing} onClick={() => void finishThread()}>
-              {finishing ? "Finishing…" : "Finish and archive"}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogPopup>
-      </AlertDialog>
       {paneTarget && "draftId" in paneTarget ? (
         <WorkspaceDraftPane
           workspaceKey={workspaceKey}
@@ -567,7 +524,6 @@ export function ProjectPaneWorkspace({
   readonly active?: boolean;
 }) {
   const projects = useProjects();
-  const { environments } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { isMacosDesktop, isWindowFullscreen } = useDesktopFullscreen();
@@ -588,12 +544,7 @@ export function ProjectPaneWorkspace({
   const setPaneCount = useWorkspacePaneStore((state) => state.setPaneCount);
   const setLayoutMode = useWorkspacePaneStore((state) => state.setLayoutMode);
   const resetWorkspace = useWorkspacePaneStore((state) => state.resetWorkspace);
-  const { archiveThread } = useThreadActions();
-  const environmentLabelById = useMemo(
-    () =>
-      new Map(environments.map((environment) => [environment.environmentId, environment.label])),
-    [environments],
-  );
+  const { settleThread } = useThreadActions();
   const { panes, projectKeys, paneCount, layoutMode, focusedPaneIndex, maximizedPaneIndex } =
     layout;
   const visiblePanes = panes.slice(0, paneCount);
@@ -794,12 +745,7 @@ export function ProjectPaneWorkspace({
                 focused={active && focusedPaneIndex === index}
                 maximized={maximizedPaneIndex === index}
                 composerHandleRef={paneComposerHandleRefs[index]!}
-                environmentLabel={
-                  paneTarget && "environmentId" in paneTarget
-                    ? (environmentLabelById.get(paneTarget.environmentId) ?? "its environment")
-                    : "its environment"
-                }
-                archiveThread={archiveThread}
+                settleThread={settleThread}
               />
             );
           })}
