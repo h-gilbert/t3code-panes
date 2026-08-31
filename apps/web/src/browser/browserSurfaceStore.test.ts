@@ -111,6 +111,7 @@ describe("browserSurfaceStore", () => {
             fittedSourceContent: null,
             fitSourceContent: false,
             cornerRadius: 0,
+            zIndex: 30,
             updatedAt: 1,
             owner: null,
           },
@@ -121,6 +122,7 @@ describe("browserSurfaceStore", () => {
             fittedSourceContent: null,
             fitSourceContent: false,
             cornerRadius: 0,
+            zIndex: 30,
             updatedAt: 2,
             owner: null,
           },
@@ -159,6 +161,15 @@ describe("browserSurfaceStore", () => {
     expect(useBrowserSurfaceStore.getState().byTabId[tabId]).toMatchObject({
       visible: false,
       owner: null,
+    });
+  });
+
+  it("tracks the requested layer for a fullscreen surface", () => {
+    const lease = acquireBrowserSurface("fullscreen-browser-surface");
+    lease.present({ x: 0, y: 32, width: 1_440, height: 868 }, true, 0, 110);
+
+    expect(useBrowserSurfaceStore.getState().byTabId["fullscreen-browser-surface"]).toMatchObject({
+      zIndex: 110,
     });
   });
 

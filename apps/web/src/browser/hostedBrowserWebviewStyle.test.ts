@@ -42,6 +42,18 @@ describe("resolveHostedBrowserWebviewWrapperStyle", () => {
     });
   });
 
+  it("places a fullscreen webview above pane controls", () => {
+    expect(
+      resolveHostedBrowserWebviewWrapperStyle({
+        active: true,
+        renderingActive: true,
+        rect: { x: 0, y: 32, width: 1_440, height: 868 },
+        hiddenSize: { width: 1_280, height: 800 },
+        zIndex: 110,
+      }),
+    ).toMatchObject({ zIndex: 110 });
+  });
+
   it("suspends painting for an inactive webview", () => {
     const style = resolveHostedBrowserWebviewWrapperStyle({
       active: false,

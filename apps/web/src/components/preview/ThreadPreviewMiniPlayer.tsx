@@ -9,6 +9,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { type PointerEvent as ReactPointerEvent, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { BrowserSurfaceSlot } from "~/browser/BrowserSurfaceSlot";
 import { previewRuntimeTabId } from "~/browser/previewRuntimeTabId";
@@ -259,23 +260,23 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
 
   if (!snapshot || miniPlayer?.tabId !== tabId) return null;
 
-  return (
+  const player = (
     <section
       ref={rootRef}
       aria-label="Floating browser preview"
       data-preview-mini-player={tabId}
       className={
         maximized
-          ? "pointer-events-none fixed z-40 flex select-none flex-col"
+          ? "pointer-events-none fixed z-100 flex select-none flex-col bg-background"
           : "pointer-events-none absolute flex select-none flex-col"
       }
       style={
         maximized
           ? {
-              left: PREVIEW_MINI_PLAYER_EDGE_GAP,
-              right: PREVIEW_MINI_PLAYER_EDGE_GAP,
-              top: PREVIEW_MINI_PLAYER_EDGE_GAP,
-              bottom: PREVIEW_MINI_PLAYER_EDGE_GAP,
+              left: 0,
+              right: 0,
+              top: 0,
+              bottom: 0,
             }
           : position
             ? { left: position.x, top: position.y, width: size.width, height: size.height }
@@ -293,7 +294,8 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
           clicked. */}
       <div
         className={
-          "pointer-events-auto flex h-8 shrink-0 items-center gap-0.5 rounded-t-xl border border-b-0 border-border/80 bg-popover/92 px-1.5 shadow-lg/20 backdrop-blur-xl " +
+          "pointer-events-auto flex h-8 shrink-0 items-center gap-0.5 border border-b-0 border-border/80 bg-popover/92 px-1.5 shadow-lg/20 backdrop-blur-xl " +
+          (maximized ? "" : "rounded-t-xl ") +
           (maximized ? "" : "cursor-grab active:cursor-grabbing")
         }
         onPointerDown={handlePointerDown}
@@ -384,12 +386,17 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
       </div>
 
       <div className="relative min-h-0 flex-1">
-        <div className="absolute inset-0 z-[29] rounded-b-xl bg-muted shadow-2xl/35" />
+        <div
+          className={
+            "absolute inset-0 z-[29] bg-muted shadow-2xl/35 " + (maximized ? "" : "rounded-b-xl")
+          }
+        />
         <BrowserSurfaceSlot
           tabId={runtimeTabId}
           visible={Boolean(desktopOverlay?.hasWebContents)}
-          cornerRadius={12}
-          fitSourceContent
+          cornerRadius={maximized ? 0 : 12}
+          fitSourceContent={!maximized}
+          zIndex={maximized ? 110 : 30}
           layoutVersion={
             maximized
               ? "maximized"
@@ -399,9 +406,19 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
           }
           className="absolute inset-0"
         />
-        <div className="pointer-events-none absolute inset-0 z-[31] rounded-b-xl ring-1 ring-inset ring-border/80" />
+        <div
+          className={
+            "pointer-events-none absolute inset-0 z-[31] ring-1 ring-inset ring-border/80 " +
+            (maximized ? "" : "rounded-b-xl")
+          }
+        />
         {!desktopOverlay?.hasWebContents ? (
-          <div className="pointer-events-none absolute inset-0 z-[32] flex items-center justify-center rounded-b-xl bg-muted text-xs text-muted-foreground">
+          <div
+            className={
+              "pointer-events-none absolute inset-0 z-[32] flex items-center justify-center bg-muted text-xs text-muted-foreground " +
+              (maximized ? "" : "rounded-b-xl")
+            }
+          >
             Reconnecting preview…
           </div>
         ) : null}
@@ -419,4 +436,6 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
       </div>
     </section>
   );
+
+  return maximized ? createPortal(player, document.body) : player;
 }

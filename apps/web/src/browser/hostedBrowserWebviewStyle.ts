@@ -24,15 +24,16 @@ export function resolveHostedBrowserWebviewWrapperStyle(input: {
   readonly cornerRadius?: number;
   readonly rect: BrowserSurfaceRect | null;
   readonly hiddenSize: HostedBrowserWebviewSize;
+  readonly zIndex?: number;
 }): HostedBrowserWebviewWrapperStyle {
-  const { active, cornerRadius = 0, hiddenSize, rect, renderingActive } = input;
+  const { active, cornerRadius = 0, hiddenSize, rect, renderingActive, zIndex = 30 } = input;
   if (active && rect) {
     return {
       left: rect.x,
       top: rect.y,
       width: rect.width,
       height: rect.height,
-      zIndex: 30,
+      zIndex,
       pointerEvents: "auto",
       ...(cornerRadius > 0 ? { borderRadius: cornerRadius } : {}),
     };
