@@ -9,8 +9,8 @@ the hosted relay, Cloudflare, or T3's Expo update channel.
 - A paid Apple Developer membership.
 - Xcode and CocoaPods on the Mac used to build the app.
 - Tailscale on the Mac and iPhone, signed into the same tailnet.
-- An Apple Push Notification service key (`AuthKey_<KEY_ID>.p8`) if you want notifications and
-  Live Activities while the app is closed.
+- An Apple Push Notification service key (`AuthKey_<KEY_ID>.p8`) if you want notifications while
+  the app is closed.
 
 ## Build the app
 
@@ -28,10 +28,9 @@ An Xcode-installed development build uses APNs sandbox. Use `production` only wh
 provisioning profile carries the production APNs entitlement, such as a TestFlight build.
 
 The self-hosted variant has its own app name and bundle identity, so it can coexist with the
-official T3 Code app. It retains notifications, widgets, Live Activities, and normal in-app
-attachments. It also registers the established `t3code://` deep-link alias so widget taps work.
-The optional iOS system Share extension is omitted so a private build does not need a third Apple
-App ID and provisioning profile.
+official T3 Code app. It retains notifications and normal in-app attachments. It also registers
+the established `t3code://` deep-link alias. The optional iOS system Share extension is omitted so
+a private build does not need another Apple App ID and provisioning profile.
 
 ## Connect over Tailscale
 
@@ -63,10 +62,9 @@ Check the result with:
 t3 notifications status
 ```
 
-Every saved direct environment can send alerts to the phone. The primary direct environment owns
-the current Live Activity; this avoids routing activity tokens through a central service. Opening a
-notification deep-links to the relevant environment and thread. Completion alerts wait for active
-subagents and workflows to finish. Long-running monitor tasks do not hold completion open.
+Every saved direct environment can send alerts to the phone. Opening a notification deep-links to
+the relevant environment and thread. Completion alerts wait for active subagents and workflows to
+finish. Long-running monitor tasks do not hold completion open.
 
 To remove the credentials and phone registration from an environment:
 

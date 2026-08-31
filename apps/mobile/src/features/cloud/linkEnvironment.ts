@@ -30,7 +30,6 @@ import { makeEnvironmentHttpApiClient } from "@t3tools/client-runtime/rpc";
 
 import { authClientMetadata } from "../../lib/authClientMetadata";
 import type { SavedRemoteConnection } from "../../lib/connection";
-import * as MobilePreferences from "../../persistence/mobile-preferences";
 import * as MobileStorage from "../../persistence/mobile-storage";
 import { resolveCloudPublicConfig } from "./publicConfig";
 
@@ -276,8 +275,8 @@ type LinkEnvironmentToCloudRequirements =
   | ManagedRelay.ManagedRelayClient
   | MobileStorage.MobileStorage;
 
-export function linkEnvironmentToCloudWithPreference(
-  input: LinkEnvironmentToCloudInput & { readonly liveActivitiesEnabled: boolean },
+export function linkEnvironmentToCloud(
+  input: LinkEnvironmentToCloudInput,
 ): Effect.Effect<void, CloudEnvironmentLinkError, LinkEnvironmentToCloudRequirements> {
   return Effect.gen(function* () {
     if (!input.connection.bearerToken) {
@@ -292,13 +291,12 @@ export function linkEnvironmentToCloudWithPreference(
     const deviceId = yield* storage.loadOrCreateAgentAwarenessDeviceId.pipe(
       Effect.mapError(cloudEnvironmentLinkError("Could not load the mobile device id.")),
     );
-    const liveActivitiesEnabled = input.liveActivitiesEnabled;
     const challenge = yield* relayClient
       .createEnvironmentLinkChallenge({
         clerkToken: input.clerkToken,
         payload: {
           notificationsEnabled: true,
-          liveActivitiesEnabled,
+          liveActivitiesEnabled: false,
           managedTunnelsEnabled: true,
         },
       })
@@ -330,7 +328,7 @@ export function linkEnvironmentToCloudWithPreference(
           deviceId,
           proof,
           notificationsEnabled: true,
-          liveActivitiesEnabled,
+          liveActivitiesEnabled: false,
           managedTunnelsEnabled: true,
         },
       })
@@ -359,25 +357,6 @@ export function linkEnvironmentToCloudWithPreference(
         Effect.mapError(cloudEnvironmentLinkError("Could not configure environment relay access.")),
       );
   });
-}
-
-export function linkEnvironmentToCloud(
-  input: LinkEnvironmentToCloudInput,
-): Effect.Effect<
-  void,
-  CloudEnvironmentLinkError,
-  LinkEnvironmentToCloudRequirements | MobilePreferences.MobilePreferencesStore
-> {
-  return MobilePreferences.MobilePreferencesStore.pipe(
-    Effect.flatMap((preferencesStore) => preferencesStore.load),
-    Effect.mapError(cloudEnvironmentLinkError("Could not load mobile notification preferences.")),
-    Effect.flatMap((preferences) =>
-      linkEnvironmentToCloudWithPreference({
-        ...input,
-        liveActivitiesEnabled: preferences.liveActivitiesEnabled !== false,
-      }),
-    ),
-  );
 }
 
 export function listCloudEnvironments(input: {

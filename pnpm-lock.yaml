@@ -376,9 +376,6 @@ importers:
       expo-web-browser:
         specifier: ~56.0.5
         version: 56.0.5(expo@56.0.12)(react-native@0.85.3(@babel/core@7.29.7)(@react-native/metro-config@0.85.3(@babel/core@7.29.7)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(@types/react@19.2.16)(bufferutil@4.1.0)(react@19.2.3)(utf-8-validate@6.0.6))
-      expo-widgets:
-        specifier: ~56.0.19
-        version: 56.0.19(3cdc0dde9f93166d952f1e1bd0cb25c0)
       punycode:
         specifier: ^2.3.1
         version: 2.3.1
@@ -17274,6 +17271,7 @@ snapshots:
       - react-dom
       - react-native-reanimated
       - react-native-worklets
+    optional: true
 
   expo@56.0.12(8895228379997a2a064f9644cda56ed0):
     dependencies:

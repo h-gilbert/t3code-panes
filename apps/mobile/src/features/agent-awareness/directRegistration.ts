@@ -4,10 +4,7 @@ import {
   executeEnvironmentHttpRequest,
   remoteHttpClientLayer,
 } from "@t3tools/client-runtime/rpc";
-import type {
-  RelayDeviceRegistrationRequest,
-  RelayLiveActivityRegistrationRequest,
-} from "@t3tools/contracts/relay";
+import type { RelayDeviceRegistrationRequest } from "@t3tools/contracts/relay";
 import * as Effect from "effect/Effect";
 
 import type { SavedRemoteConnection } from "../../lib/connection";
@@ -45,36 +42,6 @@ export function registerDirectNotificationDevice(input: {
         headers: authorizationHeaders(input.connection),
         payload: input.payload,
       }),
-    );
-  }).pipe(Effect.provide(directHttpClientLayer));
-}
-
-export function registerDirectLiveActivity(input: {
-  readonly connection: SavedRemoteConnection;
-  readonly payload: RelayLiveActivityRegistrationRequest;
-}) {
-  return Effect.gen(function* () {
-    const client = yield* makeEnvironmentHttpApiClient(input.connection.httpBaseUrl);
-    const urls = makeEnvironmentHttpApiUrlBuilder(input.connection.httpBaseUrl);
-    return yield* executeEnvironmentHttpRequest(
-      urls.notifications.registerLiveActivity(),
-      REQUEST_TIMEOUT_MS,
-      client.notifications.registerLiveActivity({
-        headers: authorizationHeaders(input.connection),
-        payload: input.payload,
-      }),
-    );
-  }).pipe(Effect.provide(directHttpClientLayer));
-}
-
-export function readDirectAgentActivity(connection: SavedRemoteConnection) {
-  return Effect.gen(function* () {
-    const client = yield* makeEnvironmentHttpApiClient(connection.httpBaseUrl);
-    const urls = makeEnvironmentHttpApiUrlBuilder(connection.httpBaseUrl);
-    return yield* executeEnvironmentHttpRequest(
-      urls.notifications.agentActivity(),
-      REQUEST_TIMEOUT_MS,
-      client.notifications.agentActivity({ headers: authorizationHeaders(connection) }),
     );
   }).pipe(Effect.provide(directHttpClientLayer));
 }

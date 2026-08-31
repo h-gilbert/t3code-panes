@@ -1,11 +1,9 @@
 import type { RelayDeviceRegistrationRequest } from "@t3tools/contracts/relay";
 
-import type { Preferences } from "../../persistence/mobile-preferences";
 import { supportsAgentAwarenessPush } from "./capabilities";
 
 // One alert policy feeds both T3 Connect and direct self-hosted APNs
-// registrations. Routine completions remain visible in Live Activities and
-// the thread list; only states that need attention interrupt the user.
+// registrations. Only states that need attention interrupt the user.
 export const AGENT_NOTIFICATION_POLICY = {
   notifyOnApproval: true,
   notifyOnInput: true,
@@ -31,12 +29,9 @@ export function makeRelayDeviceRegistrationRequest(input: {
   readonly bundleId?: string;
   readonly apsEnvironment?: "sandbox" | "production";
   readonly pushToken?: string;
-  readonly pushToStartToken?: string;
   readonly notificationsEnabled: boolean;
-  readonly preferences: Preferences;
 }): RelayDeviceRegistrationRequest {
   const pushAvailable = supportsAgentAwarenessPush();
-  const liveActivitiesEnabled = pushAvailable && input.preferences.liveActivitiesEnabled !== false;
   return {
     deviceId: input.deviceId,
     label: input.label,
@@ -46,9 +41,8 @@ export function makeRelayDeviceRegistrationRequest(input: {
     ...(input.bundleId ? { bundleId: input.bundleId } : {}),
     ...(input.apsEnvironment ? { apsEnvironment: input.apsEnvironment } : {}),
     ...(input.pushToken ? { pushToken: input.pushToken } : {}),
-    ...(input.pushToStartToken ? { pushToStartToken: input.pushToStartToken } : {}),
     preferences: {
-      liveActivitiesEnabled,
+      liveActivitiesEnabled: false,
       notificationsEnabled: pushAvailable && input.notificationsEnabled,
       ...AGENT_NOTIFICATION_POLICY,
     },
