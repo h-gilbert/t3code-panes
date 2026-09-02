@@ -18,7 +18,7 @@ describe("previewMiniPlayerStore", () => {
 
     expect(
       selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
-    ).toMatchObject({ tabId: "tab-a", maximized: true });
+    ).toMatchObject({ tabId: "tab-a", maximized: false });
     expect(
       selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refB),
     ).toMatchObject({ tabId: "tab-b" });
@@ -35,7 +35,7 @@ describe("previewMiniPlayerStore", () => {
       tabId: "tab-b",
       position: { x: 24, y: 48 },
       size: null,
-      maximized: true,
+      maximized: false,
     });
   });
 
@@ -50,7 +50,7 @@ describe("previewMiniPlayerStore", () => {
       tabId: "tab-b",
       position: null,
       size: null,
-      maximized: true,
+      maximized: false,
     });
   });
 
@@ -64,13 +64,13 @@ describe("previewMiniPlayerStore", () => {
     ).toMatchObject({ tabId: "tab-b", size: { width: 480, height: 320 } });
   });
 
-  it("preserves the restored floating state while switching tabs", () => {
+  it("preserves fullscreen state while switching tabs", () => {
     usePreviewMiniPlayerStore.getState().open(refA, "tab-a");
-    usePreviewMiniPlayerStore.getState().setMaximized(refA, "tab-a", false);
+    usePreviewMiniPlayerStore.getState().setMaximized(refA, "tab-a", true);
     usePreviewMiniPlayerStore.getState().open(refA, "tab-b");
 
     expect(
       selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
-    ).toMatchObject({ tabId: "tab-b", maximized: false });
+    ).toMatchObject({ tabId: "tab-b", maximized: true });
   });
 });

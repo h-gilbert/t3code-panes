@@ -53,11 +53,10 @@ On macOS desktop, the titlebar strip remains available for the traffic lights, w
 and workspace controls. It disappears in fullscreen so the panes use the entire window; the same
 actions remain available through their shortcuts.
 
-When an agent opens the shared browser, it expands over the T3 Code window so the page starts at a
-useful size. Use its header buttons to restore it to a movable preview, dock it into the right
-panel, pop it into a separate window, or close the browser. The restored preview is opaque, so pane
-content and the thread sidebar do not show through it. Agents can also close the browser themselves
-when they finish with it.
+When an agent opens the shared browser, it appears as a movable preview in the pane. Use its header
+buttons to expand it over the T3 Code window, dock it into the right panel, pop it into a separate
+window, or close the browser. The preview is opaque, so pane content and the thread sidebar do not
+show through it. Agents can also close the browser themselves when they finish with it.
 
 When a tab uses an exact viewport size, a Viewport row appears above the page. Enter width and
 height directly, lock the current ratio, choose a phone or tablet preset, or use Mobile for a quick

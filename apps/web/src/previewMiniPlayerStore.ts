@@ -44,7 +44,7 @@ export const usePreviewMiniPlayerStore = create<PreviewMiniPlayerStoreState>()((
             tabId,
             position: current?.position ?? null,
             size: current?.size ?? null,
-            maximized: current?.maximized ?? true,
+            maximized: current?.maximized ?? false,
           },
         },
       };
