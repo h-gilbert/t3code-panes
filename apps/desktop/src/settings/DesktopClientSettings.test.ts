@@ -20,6 +20,7 @@ const clientSettings: ClientSettings = {
   confirmQuit: true,
   confirmThreadArchive: true,
   confirmThreadDelete: false,
+  continueThreadsAfterServerUpdate: true,
   dismissedProviderUpdateNotificationKeys: [],
   diffIgnoreWhitespace: true,
   environmentIdentificationMode: "artwork",

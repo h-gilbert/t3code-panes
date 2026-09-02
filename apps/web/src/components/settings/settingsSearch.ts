@@ -142,6 +142,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
   },
   {
+    id: "continue-threads-after-server-update",
+    title: "Continue threads after server updates",
+    to: "/settings/general",
+  },
+  {
     id: "new-threads",
     title: "New threads",
     to: "/settings/general",

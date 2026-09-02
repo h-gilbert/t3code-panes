@@ -215,7 +215,12 @@ export const make = Effect.gen(function* () {
       threadPinReorder: true,
       threadTitleRegeneration: true,
       ...(serverSelfUpdate === null ? {} : { serverSelfUpdate }),
-      ...(serverSelfUpdate === "boot-service" ? { serverSelfUpdateProgress: true } : {}),
+      ...(serverSelfUpdate === "boot-service"
+        ? {
+            serverSelfUpdateProgress: true,
+            serverUpdateThreadContinuation: true,
+          }
+        : {}),
     },
   };
 
