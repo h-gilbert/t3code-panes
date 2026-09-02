@@ -61,6 +61,7 @@ describe("isPreviewRefreshShortcut", () => {
 
 const {
   browserWindowConstructor,
+  browserWindowFromWebContents,
   createFromPath,
   fromId,
   getFocusedWebContents,
@@ -71,6 +72,7 @@ const {
   writeImage,
 } = vi.hoisted(() => ({
   browserWindowConstructor: vi.fn(),
+  browserWindowFromWebContents: vi.fn(() => null),
   createFromPath: vi.fn((): { readonly isEmpty: () => boolean } => ({ isEmpty: () => false })),
   fromId: vi.fn((_id?: number) => null),
   getFocusedWebContents: vi.fn(() => null),
@@ -82,7 +84,9 @@ const {
 }));
 
 vi.mock("electron", () => ({
-  BrowserWindow: browserWindowConstructor,
+  BrowserWindow: Object.assign(browserWindowConstructor, {
+    fromWebContents: browserWindowFromWebContents,
+  }),
   clipboard: {
     writeImage,
   },
@@ -346,6 +350,8 @@ const makeTestPictureInPictureWindow = (loadURL: () => Promise<void> = async () 
 describe("PreviewManager", () => {
   beforeEach(() => {
     browserWindowConstructor.mockReset();
+    browserWindowFromWebContents.mockReset();
+    browserWindowFromWebContents.mockReturnValue(null);
     fromId.mockClear();
     getFocusedWebContents.mockReset();
     getFocusedWebContents.mockReturnValue(null);
@@ -406,6 +412,49 @@ describe("PreviewManager", () => {
           });
         }
         expect(getType).not.toHaveBeenCalled();
+      }),
+    ),
+  );
+
+  effectIt.effect("promotes a surviving workspace window after the preview host closes", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        let closeMainWindow: (() => void) | undefined;
+        const originalHostWebContents = { setBackgroundThrottling: vi.fn() };
+        const replacementHostWebContents = { setBackgroundThrottling: vi.fn() };
+        const replacementWindow = {
+          isDestroyed: () => false,
+          once: vi.fn(),
+          webContents: replacementHostWebContents,
+        };
+        const previewWebContents = Object.assign(
+          makeTestPreviewWebContents(async () => ({
+            toJPEG: () => Buffer.from("frame"),
+            getSize: () => ({ width: 1280, height: 720 }),
+          })),
+          { hostWebContents: replacementHostWebContents },
+        );
+        fromId.mockReturnValue(previewWebContents as never);
+        browserWindowFromWebContents.mockReturnValue(replacementWindow as never);
+
+        yield* manager.setMainWindow({
+          isDestroyed: () => false,
+          once: vi.fn((event: string, listener: () => void) => {
+            if (event === "closed") closeMainWindow = listener;
+          }),
+          webContents: originalHostWebContents,
+        } as never);
+        closeMainWindow?.();
+        yield* Effect.yieldNow;
+
+        yield* manager.createTab("tab_surviving_workspace");
+        yield* manager.registerWebview("tab_surviving_workspace", 42);
+        yield* manager.startRecording("tab_surviving_workspace");
+
+        expect(browserWindowFromWebContents).toHaveBeenCalledWith(replacementHostWebContents);
+        expect(replacementWindow.once).toHaveBeenCalledWith("closed", expect.any(Function));
+        expect(replacementHostWebContents.setBackgroundThrottling).toHaveBeenCalledWith(false);
+        yield* manager.stopRecording("tab_surviving_workspace");
       }),
     ),
   );

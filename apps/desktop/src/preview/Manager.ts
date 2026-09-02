@@ -1787,10 +1787,19 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           currentMainWindow = undefined;
           frameCaptureWindowOpen = false;
           mainWindowCleanupFiber = runFork(
-            Effect.all([closeAllPictureInPicture(), stopAllRecordings()], {
-              concurrency: "unbounded",
-              discard: true,
-            }).pipe(Effect.ignore),
+            Effect.all(
+              [
+                Ref.update(mainWindowRef, (current) =>
+                  Option.isSome(current) && current.value === window ? Option.none() : current,
+                ),
+                closeAllPictureInPicture(),
+                stopAllRecordings(),
+              ],
+              {
+                concurrency: "unbounded",
+                discard: true,
+              },
+            ).pipe(Effect.ignore),
           );
         });
         return [undefined, sessions] as const;
@@ -1942,14 +1951,21 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       return yield* new PreviewTabNotFoundError({ tabId });
     }
     const wc = webContents.fromId(webContentsId);
-    const mainWindow = yield* Ref.get(mainWindowRef);
-    if (
-      !wc ||
-      wc.isDestroyed() ||
-      wc.getType() !== "webview" ||
-      (Option.isSome(mainWindow) && wc.hostWebContents !== mainWindow.value.webContents)
-    ) {
+    if (!wc || wc.isDestroyed() || wc.getType() !== "webview") {
       return yield* new PreviewWebContentsNotFoundError({ tabId, webContentsId });
+    }
+    const hostWebContents = wc.hostWebContents;
+    const mainWindow = yield* Ref.get(mainWindowRef);
+    const liveMainWindow =
+      Option.isSome(mainWindow) && !mainWindow.value.isDestroyed() ? mainWindow.value : null;
+    if (liveMainWindow && hostWebContents !== liveMainWindow.webContents) {
+      return yield* new PreviewWebContentsNotFoundError({ tabId, webContentsId });
+    }
+    if (!liveMainWindow && hostWebContents) {
+      const replacementWindow = BrowserWindow.fromWebContents(hostWebContents);
+      if (replacementWindow && !replacementWindow.isDestroyed()) {
+        yield* setMainWindow(replacementWindow);
+      }
     }
     const attached = yield* Ref.get(attachedRef);
     const annotationTheme = yield* Ref.get(annotationThemeRef);
