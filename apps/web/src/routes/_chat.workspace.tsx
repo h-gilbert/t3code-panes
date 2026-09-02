@@ -11,6 +11,7 @@ import {
   FolderOpenIcon,
   Grid2X2Icon,
   Maximize2Icon,
+  MessageSquareIcon,
   Minimize2Icon,
   MonitorUpIcon,
   RotateCcwIcon,
@@ -43,9 +44,15 @@ import { isTerminalFocused } from "../lib/terminalFocus";
 import { isModelPickerOpen } from "../modelPickerVisibility";
 import { resolveThreadRouteRenderState } from "../threadRoutes";
 import { resolveThreadSyncPhase } from "../threadSync";
-import { useThreadDetail, useThreadRefs, useThreadShell, useThreadStatus } from "../state/entities";
+import {
+  useThreadDetail,
+  useProjects,
+  useThreadRefs,
+  useThreadShell,
+  useThreadShells,
+  useThreadStatus,
+} from "../state/entities";
 import { useEnvironmentQuery } from "../state/query";
-import { useProjects } from "../state/entities";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { environmentShell } from "../state/shell";
 import { primaryServerKeybindingsAtom } from "../state/server";
@@ -77,32 +84,69 @@ import {
   resolveWorkspaceDraftThreadRef,
   resolveWorkspacePaneThreadTitle,
 } from "../workspacePaneTitle";
+import {
+  buildWorkspaceThreadPickerItems,
+  workspaceThreadPickerItemsForProject,
+  type WorkspaceThreadPickerItem,
+} from "../workspacePaneThreadPicker";
 import { cn } from "~/lib/utils";
 import { newDraftId, newThreadId } from "../lib/utils";
 
 function EmptyWorkspacePane({
   paneNumber,
   projectSelected,
+  threads,
   onNewThread,
+  onSelectThread,
 }: {
   readonly paneNumber: number;
   readonly projectSelected: boolean;
+  readonly threads: readonly WorkspaceThreadPickerItem[];
   readonly onNewThread: (() => void) | null;
+  readonly onSelectThread: (thread: WorkspaceThreadPickerItem) => void;
 }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 bg-background px-6 text-center">
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 overflow-hidden bg-background px-6 py-4 text-center">
       <MonitorUpIcon className="size-6 text-muted-foreground/60" aria-hidden />
       <p className="text-sm font-medium text-foreground">Pane {paneNumber}</p>
       <p className="max-w-64 text-xs leading-5 text-muted-foreground">
         {projectSelected
-          ? "Choose a thread from this project in the sidebar."
-          : "Choose a project for this pane, then select one of its threads."}
+          ? "Start a new thread or resume one from this project."
+          : "Choose a project, or resume any open thread."}
       </p>
       {onNewThread ? (
         <Button size="sm" variant="outline" onClick={onNewThread}>
           New thread
         </Button>
       ) : null}
+      {threads.length > 0 ? (
+        <div className="mt-1 flex max-h-56 w-full max-w-sm flex-col overflow-y-auto rounded-md border border-border bg-muted/20 p-1 text-left">
+          {threads.map((thread) => (
+            <button
+              key={`${thread.threadRef.environmentId}:${thread.threadRef.threadId}`}
+              type="button"
+              className="flex min-h-9 w-full items-center gap-2 rounded px-2 py-1.5 text-left outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => onSelectThread(thread)}
+            >
+              <MessageSquareIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-xs font-medium text-foreground">
+                  {thread.title}
+                </span>
+                {!projectSelected ? (
+                  <span className="block truncate text-[11px] text-muted-foreground">
+                    {thread.projectName}
+                  </span>
+                ) : null}
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          {projectSelected ? "No other open threads in this project." : "No open threads."}
+        </p>
+      )}
     </div>
   );
 }
@@ -263,6 +307,7 @@ function WorkspacePane({
   paneTarget,
   projectKey,
   projects,
+  availableThreads,
   focused,
   maximized,
   composerHandleRef,
@@ -273,6 +318,7 @@ function WorkspacePane({
   readonly paneTarget: WorkspacePaneTarget | null;
   readonly projectKey: string | null;
   readonly projects: readonly SidebarProjectSnapshot[];
+  readonly availableThreads: readonly WorkspaceThreadPickerItem[];
   readonly focused: boolean;
   readonly maximized: boolean;
   readonly composerHandleRef: RefObject<ChatComposerHandle | null>;
@@ -281,6 +327,7 @@ function WorkspacePane({
   const focusPane = useWorkspacePaneStore((state) => state.focusPane);
   const clearPane = useWorkspacePaneStore((state) => state.clearPane);
   const setPaneProject = useWorkspacePaneStore((state) => state.setPaneProject);
+  const assignThread = useWorkspacePaneStore((state) => state.assignThread);
   const assignDraft = useWorkspacePaneStore((state) => state.assignDraft);
   const toggleMaximize = useWorkspacePaneStore((state) => state.toggleMaximize);
   const handleNewThread = useNewThreadHandler();
@@ -328,6 +375,11 @@ function WorkspacePane({
     () => projects.find((project) => project.projectKey === projectKey) ?? null,
     [projectKey, projects],
   );
+  const pickerThreads = useMemo(
+    () =>
+      workspaceThreadPickerItemsForProject(availableThreads, selectedProject?.projectKey ?? null),
+    [availableThreads, selectedProject?.projectKey],
+  );
 
   useEffect(() => {
     if (pendingProjectRef) {
@@ -340,6 +392,14 @@ function WorkspacePane({
       openFreshDraft(scopeProjectRef(selectedProject.environmentId, selectedProject.id));
     }
   }, [openFreshDraft, selectedProject]);
+  const openExistingThread = useCallback(
+    (thread: WorkspaceThreadPickerItem) => {
+      draftRequestVersionRef.current += 1;
+      setPaneProject(workspaceKey, index, thread.projectKey);
+      assignThread(workspaceKey, thread.threadRef, index);
+    },
+    [assignThread, index, setPaneProject, workspaceKey],
+  );
   const handleClearPane = useCallback(() => {
     // Invalidate a project selection that is still preparing its draft so it
     // cannot repopulate the pane after the user clears it.
@@ -508,8 +568,10 @@ function WorkspacePane({
       ) : (
         <EmptyWorkspacePane
           paneNumber={index + 1}
-          projectSelected={projectKey !== null}
+          projectSelected={selectedProject !== null}
+          threads={pickerThreads}
           onNewThread={selectedProject ? startNewThread : null}
+          onSelectThread={openExistingThread}
         />
       )}
     </section>
@@ -524,6 +586,7 @@ export function ProjectPaneWorkspace({
   readonly active?: boolean;
 }) {
   const projects = useProjects();
+  const threads = useThreadShells();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { isMacosDesktop, isWindowFullscreen } = useDesktopFullscreen();
@@ -548,6 +611,15 @@ export function ProjectPaneWorkspace({
   const { panes, projectKeys, paneCount, layoutMode, focusedPaneIndex, maximizedPaneIndex } =
     layout;
   const visiblePanes = panes.slice(0, paneCount);
+  const availableThreads = useMemo(
+    () =>
+      buildWorkspaceThreadPickerItems({
+        threads,
+        projects: projectGroups,
+        paneTargets: panes,
+      }),
+    [panes, projectGroups, threads],
+  );
   const paneComposerHandleRefs = useRef(
     Array.from(
       { length: WORKSPACE_PANE_COUNT },
@@ -742,6 +814,7 @@ export function ProjectPaneWorkspace({
                 paneTarget={paneTarget}
                 projectKey={projectKeys[index] ?? null}
                 projects={projectGroups}
+                availableThreads={availableThreads}
                 focused={active && focusedPaneIndex === index}
                 maximized={maximizedPaneIndex === index}
                 composerHandleRef={paneComposerHandleRefs[index]!}

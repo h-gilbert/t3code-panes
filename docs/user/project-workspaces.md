@@ -45,6 +45,11 @@ changed in Settings.
 On macOS, each workspace window has a numbered session title in the Window menu and the Dock menu.
 Choose one of those titles to bring that workspace to the front.
 
+An empty pane lists open threads that are not already assigned elsewhere in the workspace. Select
+a project in the pane header to limit the list to that project, or clear the project to see threads
+from every project. Choose a thread to resume it in the pane, or use **New thread** when a project
+is selected.
+
 When you quit and reopen the desktop app, T3 Code restores every workspace window with the same
 pane assignments, size, position, and maximized state. Closing one window removes it from the next
 session without stopping the threads shown in its panes.
