@@ -9,9 +9,11 @@ import {
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import type { Thread, ThreadShell } from "../types";
+import type { RightPanelSurface } from "../rightPanelStore";
 import {
   MAX_HIDDEN_MOUNTED_PREVIEW_THREADS,
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
+  agentControlledBrowserCloseConfirmation,
   branchMismatchKey,
   buildExpiredTerminalContextToastCopy,
   buildLoadingThreadFromShell,
@@ -36,6 +38,43 @@ import {
   shouldShowPlanFollowUpPrompt,
   shouldWriteThreadErrorToCurrentServerThread,
 } from "./ChatView.logic";
+
+describe("agent browser close confirmation", () => {
+  const surfaces = [
+    { id: "browser:one", kind: "preview", resourceId: "tab-1" },
+    { id: "browser:two", kind: "preview", resourceId: "tab-2" },
+    { id: "diff", kind: "diff" },
+  ] satisfies RightPanelSurface[];
+
+  it("only warns for browsers under active agent control", () => {
+    expect(
+      agentControlledBrowserCloseConfirmation(surfaces, {
+        "tab-1": { controller: "none" },
+        "tab-2": { controller: "human" },
+      }),
+    ).toBeNull();
+
+    expect(
+      agentControlledBrowserCloseConfirmation([surfaces[0]!], {
+        "tab-1": { controller: "agent" },
+      }),
+    ).toBe(
+      [
+        "Close browser while the agent is using it?",
+        "The agent is actively controlling this browser. Closing it may interrupt the current browser action.",
+      ].join("\n"),
+    );
+  });
+
+  it("counts every agent-controlled browser in a bulk close", () => {
+    expect(
+      agentControlledBrowserCloseConfirmation(surfaces, {
+        "tab-1": { controller: "agent" },
+        "tab-2": { controller: "agent" },
+      }),
+    ).toContain("Close 2 browsers");
+  });
+});
 
 const environmentId = EnvironmentId.make("environment-local");
 const projectId = ProjectId.make("project-1");

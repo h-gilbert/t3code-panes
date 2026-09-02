@@ -18,12 +18,14 @@ import { BrowserSurfaceSlot } from "~/browser/BrowserSurfaceSlot";
 import { browserResponsiveViewportForToggle, useBrowserDefaults } from "~/browser/browserDefaults";
 import { commitBrowserViewportChange } from "~/browser/browserViewportActions";
 import { previewRuntimeTabId } from "~/browser/previewRuntimeTabId";
+import { agentControlledBrowserCloseConfirmationForCount } from "~/components/ChatView.logic";
 import { Button } from "~/components/ui/button";
 import { toastManager } from "~/components/ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { useThreadPreviewState } from "~/previewStateStore";
 import { selectThreadPreviewMiniPlayer, usePreviewMiniPlayerStore } from "~/previewMiniPlayerStore";
 import { useRightPanelStore } from "~/rightPanelStore";
+import { readLocalApi } from "~/localApi";
 
 import { previewEnvironment } from "~/state/preview";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -89,7 +91,7 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
   const closePreview = useAtomCommand(previewEnvironment.close, {
     reportFailure: false,
   });
-  const closeBrowser = () => {
+  const finishCloseBrowser = () => {
     usePreviewMiniPlayerStore.getState().close(threadRef);
     void closePreviewSession({
       closePreview,
@@ -105,6 +107,23 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
         });
       }
     });
+  };
+  const closeBrowser = () => {
+    const message = agentControlledBrowserCloseConfirmationForCount(
+      desktopOverlay?.controller === "agent" ? 1 : 0,
+    );
+    if (!message) {
+      finishCloseBrowser();
+      return;
+    }
+    const localApi = readLocalApi();
+    if (!localApi) return;
+    void localApi.dialogs.confirm(message, { variant: "destructive" }).then(
+      (confirmed) => {
+        if (confirmed) finishCloseBrowser();
+      },
+      () => undefined,
+    );
   };
 
   const toggleMaximized = () => {
