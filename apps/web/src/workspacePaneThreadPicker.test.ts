@@ -71,4 +71,18 @@ describe("workspace pane thread picker", () => {
       "Thread b",
     ]);
   });
+
+  it("marks settled threads without removing them from the picker", () => {
+    const items = buildWorkspaceThreadPickerItems({
+      threads: [thread("open", projectA), thread("settled", projectA)],
+      projects,
+      paneTargets: [],
+      settledThreadKeys: new Set([`${environmentId}:settled`]),
+    });
+
+    expect(items.map(({ title, status }) => ({ title, status }))).toEqual([
+      { title: "Thread open", status: "open" },
+      { title: "Thread settled", status: "settled" },
+    ]);
+  });
 });

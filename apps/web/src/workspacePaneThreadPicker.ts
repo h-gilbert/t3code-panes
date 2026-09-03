@@ -20,12 +20,14 @@ export interface WorkspaceThreadPickerItem {
   readonly title: string;
   readonly projectKey: string;
   readonly projectName: string;
+  readonly status: "open" | "settled";
 }
 
 export function buildWorkspaceThreadPickerItems(input: {
   readonly threads: readonly EnvironmentThreadShell[];
   readonly projects: readonly WorkspaceThreadPickerProject[];
   readonly paneTargets: readonly (WorkspacePaneTarget | null)[];
+  readonly settledThreadKeys?: ReadonlySet<string>;
 }): WorkspaceThreadPickerItem[] {
   const openThreadKeys = new Set(
     input.paneTargets.flatMap((target) =>
@@ -60,6 +62,11 @@ export function buildWorkspaceThreadPickerItems(input: {
         title: thread.title,
         projectKey: project.projectKey,
         projectName: project.displayName,
+        status: input.settledThreadKeys?.has(
+          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+        )
+          ? "settled"
+          : "open",
       },
     ];
   });

@@ -1,7 +1,15 @@
 import { useAtomValue } from "@effect/atom-react";
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import {
+  scopedThreadKey,
+  scopeProjectRef,
+  scopeThreadRef,
+} from "@t3tools/client-runtime/environment";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import { canSettle } from "@t3tools/client-runtime/state/thread-settled";
+import {
+  canSettle,
+  effectiveSettled,
+  effectiveSnoozed,
+} from "@t3tools/client-runtime/state/thread-settled";
 import { createFileRoute } from "@tanstack/react-router";
 import type { ScopedProjectRef, ScopedThreadRef } from "@t3tools/contracts";
 import {
@@ -23,6 +31,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 
 import { ChatViewContent, shouldTypeToFocusComposer } from "../components/ChatView";
 import type { ChatComposerHandle } from "../components/chat/ChatComposer";
+import { threadChangeRequestSnapshotsAtom } from "../components/ThreadStatusIndicators";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider";
 import { Button } from "../components/ui/button";
@@ -47,6 +56,7 @@ import { resolveThreadSyncPhase } from "../threadSync";
 import {
   useThreadDetail,
   useProjects,
+  useServerConfigs,
   useThreadRefs,
   useThreadShell,
   useThreadShells,
@@ -59,6 +69,7 @@ import { primaryServerKeybindingsAtom } from "../state/server";
 import { useClientSettings } from "../hooks/useSettings";
 import { useDesktopFullscreen } from "../hooks/useDesktopFullscreen";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
+import { useNowMinute } from "../hooks/useNowMinute";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { selectProjectGroupingSettings } from "../logicalProject";
 import {
@@ -105,6 +116,32 @@ function EmptyWorkspacePane({
   readonly onNewThread: (() => void) | null;
   readonly onSelectThread: (thread: WorkspaceThreadPickerItem) => void;
 }) {
+  const openThreads = threads.filter((thread) => thread.status === "open");
+  const settledThreads = threads.filter((thread) => thread.status === "settled");
+  const renderThreads = (items: readonly WorkspaceThreadPickerItem[]) =>
+    items.map((thread) => (
+      <button
+        key={`${thread.threadRef.environmentId}:${thread.threadRef.threadId}`}
+        type="button"
+        className="flex min-h-9 w-full items-center gap-2 rounded px-2 py-1.5 text-left outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={() => onSelectThread(thread)}
+      >
+        {thread.status === "settled" ? (
+          <CircleCheckIcon className="size-3.5 shrink-0 text-muted-foreground/70" aria-hidden />
+        ) : (
+          <MessageSquareIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        )}
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-xs font-medium text-foreground">{thread.title}</span>
+          {!projectSelected ? (
+            <span className="block truncate text-[11px] text-muted-foreground">
+              {thread.projectName}
+            </span>
+          ) : null}
+        </span>
+      </button>
+    ));
+
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 overflow-hidden bg-background px-6 py-4 text-center">
       <MonitorUpIcon className="size-6 text-muted-foreground/60" aria-hidden />
@@ -121,26 +158,22 @@ function EmptyWorkspacePane({
       ) : null}
       {threads.length > 0 ? (
         <div className="mt-1 flex max-h-56 w-full max-w-sm flex-col overflow-y-auto rounded-md border border-border bg-muted/20 p-1 text-left">
-          {threads.map((thread) => (
-            <button
-              key={`${thread.threadRef.environmentId}:${thread.threadRef.threadId}`}
-              type="button"
-              className="flex min-h-9 w-full items-center gap-2 rounded px-2 py-1.5 text-left outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
-              onClick={() => onSelectThread(thread)}
-            >
-              <MessageSquareIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-xs font-medium text-foreground">
-                  {thread.title}
-                </span>
-                {!projectSelected ? (
-                  <span className="block truncate text-[11px] text-muted-foreground">
-                    {thread.projectName}
-                  </span>
-                ) : null}
-              </span>
-            </button>
-          ))}
+          {openThreads.length > 0 ? (
+            <>
+              <p className="px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Open
+              </p>
+              {renderThreads(openThreads)}
+            </>
+          ) : null}
+          {settledThreads.length > 0 ? (
+            <>
+              <p className="mt-1 border-t border-border px-2 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Settled
+              </p>
+              {renderThreads(settledThreads)}
+            </>
+          ) : null}
         </div>
       ) : (
         <p className="mt-1 text-[11px] text-muted-foreground">
@@ -587,10 +620,15 @@ export function ProjectPaneWorkspace({
 }) {
   const projects = useProjects();
   const threads = useThreadShells();
+  const serverConfigs = useServerConfigs();
+  const changeRequestSnapshotByKey = useAtomValue(threadChangeRequestSnapshotsAtom);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { isMacosDesktop, isWindowFullscreen } = useDesktopFullscreen();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
+  const autoSettleAfterDays = useClientSettings((settings) => settings.sidebarAutoSettleAfterDays);
+  const autoSettleOnMerge = useClientSettings((settings) => settings.sidebarAutoSettleOnMerge);
+  const nowMinute = useNowMinute();
   const projectGroups = useMemo(
     () =>
       buildSidebarProjectSnapshots({
@@ -611,14 +649,47 @@ export function ProjectPaneWorkspace({
   const { panes, projectKeys, paneCount, layoutMode, focusedPaneIndex, maximizedPaneIndex } =
     layout;
   const visiblePanes = panes.slice(0, paneCount);
+  const settledThreadKeys = useMemo(() => {
+    const now = `${nowMinute}:00.000Z`;
+    return new Set(
+      threads.flatMap((thread) => {
+        const capabilities = serverConfigs.get(thread.environmentId)?.environment.capabilities;
+        if (capabilities?.threadSettlement !== true) return [];
+        if (capabilities.threadSnooze === true && effectiveSnoozed(thread, { now })) return [];
+        const threadRef = scopeThreadRef(thread.environmentId, thread.id);
+        const threadKey = scopedThreadKey(threadRef);
+        const snapshot = changeRequestSnapshotByKey.get(threadKey);
+        const changeRequest =
+          snapshot != null && (thread.worktreePath === null || snapshot.branch === thread.branch)
+            ? snapshot.pr
+            : null;
+        return effectiveSettled(thread, {
+          now,
+          autoSettleAfterDays,
+          autoSettleOnMerge,
+          changeRequest,
+        })
+          ? [threadKey]
+          : [];
+      }),
+    );
+  }, [
+    autoSettleAfterDays,
+    autoSettleOnMerge,
+    changeRequestSnapshotByKey,
+    nowMinute,
+    serverConfigs,
+    threads,
+  ]);
   const availableThreads = useMemo(
     () =>
       buildWorkspaceThreadPickerItems({
         threads,
         projects: projectGroups,
         paneTargets: panes,
+        settledThreadKeys,
       }),
-    [panes, projectGroups, threads],
+    [panes, projectGroups, settledThreadKeys, threads],
   );
   const paneComposerHandleRefs = useRef(
     Array.from(
