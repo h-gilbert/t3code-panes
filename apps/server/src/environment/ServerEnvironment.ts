@@ -7,10 +7,12 @@ import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/ho
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -180,6 +182,7 @@ const makeIdentity = Effect.gen(function* () {
 });
 
 export const make = Effect.gen(function* () {
+  const scope = yield* Effect.scope;
   const path = yield* Path.Path;
   const serverConfig = yield* ServerConfig.ServerConfig;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
@@ -224,23 +227,42 @@ export const make = Effect.gen(function* () {
     },
   };
 
+  let agentActivityPublishing = false;
+  let refreshFiber: Fiber.Fiber<void> | undefined;
+  const refreshMutex = yield* Semaphore.make(1);
+  const refresh = Effect.all([
+    readAgentActivityPublishingActive(secrets),
+    readSelfHostedNotificationsConfigured(secrets),
+  ]).pipe(
+    Effect.map(([managed, selfHosted]) => {
+      agentActivityPublishing = managed || selfHosted;
+    }),
+  );
+  const getRefresh = refreshMutex.withPermits(1)(
+    Effect.gen(function* () {
+      if (refreshFiber === undefined || refreshFiber.pollUnsafe() !== undefined) {
+        refreshFiber = yield* refresh.pipe(Effect.forkIn(scope));
+      }
+      return refreshFiber;
+    }),
+  );
+
   return ServerEnvironment.of({
     getEnvironmentId: Effect.succeed(environmentId),
-    // The publish opt-in and relay link change at runtime (`t3 connect
-    // publish`, the client settings toggle), so the capability is read per
-    // descriptor request rather than baked in at startup.
-    getDescriptor: Effect.all([
-      readAgentActivityPublishingActive(secrets),
-      readSelfHostedNotificationsConfigured(secrets),
-    ]).pipe(
-      Effect.map(([managedPublishing, selfHostedPublishing]) => ({
+    // Fast reads reflect runtime configuration changes immediately. A stalled
+    // secret store must not hold reconnection hostage: keep one refresh alive
+    // in the service scope and fall back to the last advertised value.
+    getDescriptor: Effect.gen(function* () {
+      const fiber = yield* getRefresh;
+      yield* Fiber.join(fiber).pipe(Effect.timeoutOption("100 millis"));
+      return {
         ...descriptor,
         capabilities: {
           ...descriptor.capabilities,
-          agentActivityPublishing: managedPublishing || selfHostedPublishing,
+          agentActivityPublishing,
         },
-      })),
-    ),
+      };
+    }),
   });
 });
 

@@ -3,11 +3,13 @@ import { expect, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
+import * as TestClock from "effect/testing/TestClock";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import {
@@ -73,6 +75,81 @@ const makeServerConfig = Effect.fn(function* (baseDir: string) {
 });
 
 it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
+  it.effect.each([false, true])("bounds stalled capability reads with cached value %s", (initial) =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-descriptor-stall-" });
+      const started = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      let blocked = !initial;
+      let configured = initial;
+      let blockedReads = 0;
+      let readInterrupted = false;
+      const secretStore = ServerSecretStore.ServerSecretStore.of({
+        get: () =>
+          Effect.gen(function* () {
+            if (blocked) {
+              blockedReads++;
+              yield* Deferred.succeed(started, undefined);
+              yield* Deferred.await(release);
+            }
+            return configured ? Option.some(new TextEncoder().encode("true")) : Option.none();
+          }).pipe(
+            Effect.onInterrupt(() =>
+              Effect.sync(() => {
+                readInterrupted = true;
+              }),
+            ),
+          ),
+        set: () => Effect.void,
+        create: () => Effect.void,
+        getOrCreateRandom: () => Effect.succeed(new Uint8Array()),
+        remove: () => Effect.void,
+      });
+      yield* Effect.gen(function* () {
+        const environment = yield* ServerEnvironment.ServerEnvironment;
+        if (initial) {
+          expect((yield* environment.getDescriptor).capabilities.agentActivityPublishing).toBe(
+            true,
+          );
+        }
+        blocked = true;
+        const requests = yield* Effect.all(
+          [environment.getDescriptor, environment.getDescriptor, environment.getDescriptor],
+          { concurrency: "unbounded" },
+        ).pipe(Effect.forkScoped);
+        yield* Deferred.await(started);
+        const cancelledRequest = yield* environment.getDescriptor.pipe(Effect.forkScoped);
+        yield* Fiber.interrupt(cancelledRequest);
+        yield* TestClock.adjust("100 millis");
+        const descriptors = yield* Fiber.join(requests);
+        expect(descriptors.map((value) => value.capabilities.agentActivityPublishing)).toEqual([
+          initial,
+          initial,
+          initial,
+        ]);
+        expect(blockedReads).toBe(1);
+        expect(readInterrupted).toBe(false);
+
+        // The shared refresh survives request deadlines, then reflects changes
+        // in both directions without restarting the environment service.
+        blocked = false;
+        configured = !initial;
+        yield* Deferred.succeed(release, undefined);
+        expect((yield* environment.getDescriptor).capabilities.agentActivityPublishing).toBe(
+          !initial,
+        );
+      }).pipe(
+        Effect.provide(
+          ServerEnvironment.layer.pipe(
+            Layer.provide(Layer.succeed(ServerSecretStore.ServerSecretStore, secretStore)),
+            Layer.provide(ServerConfig.layerTest(process.cwd(), baseDir)),
+          ),
+        ),
+      );
+    }),
+  );
+
   it.effect.each([
     { name: "missing", content: undefined },
     { name: "empty", content: "" },

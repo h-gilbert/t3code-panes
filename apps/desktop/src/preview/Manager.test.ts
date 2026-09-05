@@ -3198,7 +3198,8 @@ describe("PreviewManager", () => {
           }
           return undefined;
         });
-        fromId.mockReturnValue({
+        const restoreFocus = vi.fn();
+        const previewWebContents = {
           id: 42,
           isDestroyed: () => false,
           getType: () => "webview",
@@ -3228,7 +3229,15 @@ describe("PreviewManager", () => {
             on: vi.fn(),
             off: vi.fn(),
           },
-        } as never);
+        } as never;
+        fromId.mockReturnValue(previewWebContents);
+        getFocusedWebContents
+          .mockReturnValueOnce({
+            id: 7,
+            isDestroyed: () => false,
+            focus: restoreFocus,
+          } as never)
+          .mockReturnValueOnce(previewWebContents);
 
         yield* manager.subscribePointerEvents((event) =>
           Effect.sync(() => {
@@ -3258,11 +3267,12 @@ describe("PreviewManager", () => {
           button: "left",
           clickCount: 1,
         });
+        expect(restoreFocus).toHaveBeenCalledOnce();
       }),
     ),
   );
 
-  effectIt.effect("types in background webviews and enables native key input", () =>
+  effectIt.effect("types and presses keys in background webviews without taking app focus", () =>
     withManager((manager) =>
       Effect.gen(function* () {
         let failKeyDown = false;
@@ -3290,13 +3300,7 @@ describe("PreviewManager", () => {
           }
           return method === "Runtime.evaluate" ? { result: { value: { ok: true } } } : undefined;
         });
-        const restoreFocus = vi.fn();
         const focus = vi.fn();
-        getFocusedWebContents.mockReturnValue({
-          id: 7,
-          isDestroyed: () => false,
-          focus: restoreFocus,
-        } as never);
         fromId.mockReturnValue({
           id: 42,
           isDestroyed: () => false,
@@ -3377,9 +3381,8 @@ describe("PreviewManager", () => {
         expect(clearOnlyEvaluation).toBeDefined();
         expect(methods).not.toContain("Input.insertText");
         expect(enableIndex).toBeGreaterThanOrEqual(0);
-        expect(focus).toHaveBeenCalledOnce();
-        expect(restoreFocus).toHaveBeenCalledOnce();
-        expect(methods).toContain("Page.bringToFront");
+        expect(focus).not.toHaveBeenCalled();
+        expect(methods).not.toContain("Page.bringToFront");
         expect(enableIndex).toBeLessThan(focusOnIndex);
         expect(focusOnIndex).toBeLessThan(keyDownIndex);
         expect(keyDownIndex).toBeLessThan(keyUpIndex);
@@ -3409,7 +3412,7 @@ describe("PreviewManager", () => {
         expect(sendCommand).toHaveBeenCalledWith("Emulation.setFocusEmulationEnabled", {
           enabled: false,
         });
-        expect(restoreFocus).toHaveBeenCalledTimes(2);
+        expect(focus).not.toHaveBeenCalled();
         expect(
           sendCommand.mock.calls.filter(
             ([method, params]) =>
@@ -3431,7 +3434,7 @@ describe("PreviewManager", () => {
           text: "!",
           unmodifiedText: "!",
         });
-        expect(restoreFocus).toHaveBeenCalledTimes(3);
+        expect(focus).not.toHaveBeenCalled();
       }),
     ),
   );

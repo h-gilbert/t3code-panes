@@ -218,6 +218,13 @@ backend is reachable from an HTTPS browser context.
 
 ## Version coordination
 
+Descriptor requests share one service-scoped refresh of the optional notification capability.
+They wait at most 100 ms for secret reads, then use the last completed value (initially false).
+Request cancellation does not cancel that refresh; closing the environment service does. The next
+request starts a new refresh once the previous one finishes, so fast reads still reflect settings
+changes immediately. This cache only advertises `agentActivityPublishing`; publishers continue to
+check their actual configuration independently.
+
 Remote environments stay online while clients move to newer releases. The environment descriptor
 carries the running server version and may advertise a safe replacement path, so the UI can show the
 right action without making the transport responsible for process management. The connection

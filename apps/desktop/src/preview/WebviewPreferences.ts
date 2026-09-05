@@ -21,6 +21,8 @@
  *   the preload's `import { ipcRenderer }` line, but no Node globals leak.
  * - `nodeIntegration=false`: pinned for clarity (the page itself never gets
  *   Node access).
+ * - `focusOnNavigation=false`: navigation inside an agent-controlled guest
+ *   must not move macOS first-responder focus away from the user's composer.
  *
  * Format notes (locked down by `WebviewPreferences.test.ts`):
  * - Whitespace-free. Electron's webpreferences parser splits on `,` and
@@ -39,4 +41,4 @@
  * security-critical flags can't regress on preview tabs.
  */
 export const PREVIEW_WEBVIEW_PREFERENCES =
-  "contextIsolation=false,sandbox=true,nodeIntegration=false";
+  "contextIsolation=false,sandbox=true,nodeIntegration=false,focusOnNavigation=false";
