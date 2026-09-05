@@ -29,7 +29,7 @@ describe("ComposerWorkingStatus", () => {
     expect(formatComposerWorkingWord("invalid")).toBe("Working");
   });
 
-  it("renders the persistent animated working label above the composer", () => {
+  it("renders a static working label above the composer", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-23T09:01:32.000Z"));
     const expectedWord = formatComposerWorkingWord("2026-08-23T09:00:00.000Z");
@@ -40,9 +40,10 @@ describe("ComposerWorkingStatus", () => {
 
     expect(markup).toContain('data-composer-working-status="true"');
     expect(markup).toContain('aria-label="Thread is working"');
-    expect(markup.match(/composer-working-letter/g)).toHaveLength(Array.from(expectedWord).length);
+    expect(markup).toContain(`>${expectedWord}<`);
     expect(markup).toContain("1m 32s");
-    expect(markup).toContain("composer-working-letter");
+    expect(markup).not.toContain("composer-working-letter");
+    expect(markup).not.toContain("animation");
     expect(markup).not.toContain("live-activity-focus");
   });
 });

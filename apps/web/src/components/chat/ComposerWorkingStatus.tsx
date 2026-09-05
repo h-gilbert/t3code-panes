@@ -196,15 +196,6 @@ function hashStartedAt(startedAt: string): number {
   return hash;
 }
 
-function splitWordIntoLetters(word: string) {
-  const occurrences = new Map<string, number>();
-  return Array.from(word, (character) => {
-    const occurrence = occurrences.get(character) ?? 0;
-    occurrences.set(character, occurrence + 1);
-    return { character, key: `${character}-${occurrence}` };
-  });
-}
-
 export function formatComposerWorkingWord(startedAt: string): string {
   const startedAtMs = Date.parse(startedAt);
   if (!Number.isFinite(startedAtMs)) return "Working";
@@ -250,15 +241,7 @@ function WorkingDetails({ startedAt }: { startedAt: string }) {
   return (
     <>
       <span aria-hidden className="px-0.5 whitespace-pre">
-        {splitWordIntoLetters(word).map((letter, index) => (
-          <span
-            key={letter.key}
-            className="composer-working-letter inline-block"
-            style={{ animationDelay: `${index * 45}ms` }}
-          >
-            {letter.character}
-          </span>
-        ))}
+        {word}
       </span>
       <span aria-hidden className="text-muted-foreground/45">
         ·

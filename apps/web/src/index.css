@@ -505,30 +505,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   margin-left: var(--live-activity-focus-width);
 }
 
-@keyframes composer-working-wave {
-  0%,
-  18%,
-  100% {
-    transform: translateY(0);
-  }
-  6% {
-    transform: translateY(-2px);
-  }
-  12% {
-    transform: translateY(1px);
-  }
-}
-
-@utility composer-working-letter {
-  animation: composer-working-wave 2.8s ease-in-out infinite;
-  will-change: transform;
-
-  @media (prefers-reduced-motion: reduce) {
-    animation: none;
-    will-change: auto;
-  }
-}
-
 @layer base {
   :root {
     /* Keep the original T3 Code artwork palettes as the defaults. Built-in
