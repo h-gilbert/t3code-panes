@@ -5,7 +5,7 @@ import {
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
 import {
-  DEFAULT_CLAUDE_MODEL,
+  DEFAULT_MODEL,
   DEFAULT_PROVIDER_REASONING_EFFORT,
   DEFAULT_RUNTIME_MODE,
   defaultInstanceIdForDriver,
@@ -50,9 +50,9 @@ interface NewThreadWorkspaceOptions {
 }
 
 const DEFAULT_NEW_CHAT_MODEL_SELECTION = createModelSelection(
-  defaultInstanceIdForDriver(ProviderDriverKind.make("claudeAgent")),
-  DEFAULT_CLAUDE_MODEL,
-  [{ id: "effort", value: DEFAULT_PROVIDER_REASONING_EFFORT }],
+  defaultInstanceIdForDriver(ProviderDriverKind.make("codex")),
+  DEFAULT_MODEL,
+  [{ id: "reasoningEffort", value: DEFAULT_PROVIDER_REASONING_EFFORT }],
 );
 
 // The workspace options the caller passed explicitly, shaped for the draft

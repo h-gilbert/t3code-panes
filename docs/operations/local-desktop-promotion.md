@@ -74,8 +74,17 @@ the lockfile merely to complete a local install.
 - Replace only the resolved installed bundle. Never use a wildcard or broad recursive target.
 - Reopen the new bundle normally so it selects the same production T3 home it used before.
 
-An atomic helper command does not exist yet, so filesystem replacement and application launch may
-require macOS approval. Resolve and report the exact source, destination, and backup paths.
+For an already extracted app signed with the Apple Development certificate, run:
+
+```sh
+bash scripts/install-local-desktop-update.sh '/path/to/T3 Code (Alpha).app'
+```
+
+The script checks the signature, signing team, and bundle identifier, prints the exact paths,
+and asks for a safe restart boundary. It stages the replacement, quits the installed app normally,
+refuses to replace it while its processes remain, keeps a timestamped backup, and reopens it.
+It does not build, sign, or verify the restored workspace. Filesystem replacement and application
+launch may require macOS approval.
 
 ### 5. Verify the outcome
 

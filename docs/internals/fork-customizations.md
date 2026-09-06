@@ -5,6 +5,13 @@ upstream changes, including changes that apply without textual conflicts. This
 is not an exhaustive file list: inspect local history and uncommitted changes
 for other customizations before each update.
 
+## New-thread model
+
+Web and desktop new-thread actions select Codex GPT-6 Astra with medium reasoning
+effort, including when reusing an empty draft. Keep this default in
+`apps/web/src/hooks/useHandleNewThread.ts`. The shared Codex fallback model is
+also Astra, and the provider prefers Astra over Sol and Terra when available.
+
 ## Collaborative browser
 
 - Agent-opened previews start at a fixed 320 × 200 in the owning pane's top-right
