@@ -32,9 +32,10 @@ export function makeRelayDeviceRegistrationRequest(input: {
     preferences: {
       liveActivitiesEnabled: false,
       notificationsEnabled: pushAvailable && input.notificationsEnabled,
+      // Only approval, input, and failure states interrupt the user.
       notifyOnApproval: true,
       notifyOnInput: true,
-      notifyOnCompletion: true,
+      notifyOnCompletion: false,
       notifyOnFailure: true,
     },
   };
