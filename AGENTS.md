@@ -101,6 +101,22 @@ The most common defect in this repo is a change that works on the path you teste
 - There is currently no `promote:desktop` command. Do not claim or invoke one until it exists. The
   intended future command is described in the runbook.
 
+### Updating the private iOS app
+
+- Follow [local iPhone updates](docs/operations/local-ios-updates.md) and use
+  `python3 scripts/ios-local.py status --fetch`, `update`, `build`, and `install`.
+  The iOS source is the separate worktree at `.t3/ios/source`; updating it does
+  not require merging or restarting the panes desktop/server checkout.
+- Preserve the private iOS branch's commits when merging upstream. Do not build
+  from a fresh upstream tree that drops the private changes.
+- This private app must have **normal push notifications and no Live Activities
+  or Dynamic Island support**. Preserve approval, input, completion, and failure
+  alerts. Keep the widget SDK/extension, activity-token registration, and Live
+  Activity settings removed. Do not weaken the build/install policy checks to
+  accommodate an upstream update; adapt the private changes instead.
+- Use the build ledger and verify the phone's installed version before reporting
+  an update as installed. Keep the existing app bundle identity and saved data.
+
 ## Test data
 
 An empty database is a bad test. Seed your worktree's `.t3` with a copy of real data instead of pointing at live state:
