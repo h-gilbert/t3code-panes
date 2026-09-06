@@ -31,7 +31,15 @@ import type {
 } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { normalizePreviewUrl } from "@t3tools/shared/preview";
-import { BrowserWindow, type Session, clipboard, nativeImage, shell, webContents } from "electron";
+import {
+  BrowserWindow,
+  Menu,
+  type Session,
+  clipboard,
+  nativeImage,
+  shell,
+  webContents,
+} from "electron";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -1706,6 +1714,27 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       });
     });
     const beforeInput = (event: Electron.Event, input: Electron.Input): void => {
+      const pasteModifier =
+        hostPlatform === "darwin" ? input.meta && !input.control : input.control && !input.meta;
+      if (
+        input.type === "keyDown" &&
+        input.key.toLowerCase() === "v" &&
+        pasteModifier &&
+        !input.shift &&
+        !input.alt &&
+        !input.isComposing
+      ) {
+        // macOS menu roles use the native responder chain. Address the guest
+        // directly, and consume the shortcut synchronously to avoid a second paste.
+        event.preventDefault();
+        runFork(handleHumanInput({ kind: "key", key: input.key, code: input.code }));
+        runFork(
+          attempt({ operation: "shortcut.paste", tabId, webContentsId: wc.id }, () => {
+            if (!wc.isDestroyed()) wc.paste();
+          }).pipe(Effect.ignore),
+        );
+        return;
+      }
       if (isPreviewRefreshShortcut(input)) {
         event.preventDefault();
         runFork(
@@ -1716,6 +1745,45 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         return;
       }
       runFork(forwardShortcut(event, input));
+    };
+    const contextMenu = (event: Electron.Event, params: Electron.ContextMenuParams): void => {
+      event.preventDefault();
+      const editItem = (
+        label: string,
+        command: "undo" | "redo" | "cut" | "copy" | "paste" | "selectAll",
+        enabled: boolean,
+      ): Electron.MenuItemConstructorOptions => ({
+        label,
+        enabled,
+        // Bind the action to the clicked guest even if the app's focus changes
+        // while the native menu is open.
+        click: () => {
+          runFork(
+            attempt({ operation: `contextMenu.${command}`, tabId, webContentsId: wc.id }, () => {
+              if (!wc.isDestroyed()) wc[command]();
+            }).pipe(Effect.ignore),
+          );
+          runFork(handleHumanInput());
+        },
+      });
+      runFork(
+        attempt({ operation: "contextMenu.popup", tabId, webContentsId: wc.id }, () => {
+          if (wc.isDestroyed()) return;
+          const window = BrowserWindow.fromWebContents(wc.hostWebContents ?? wc);
+          if (!window || window.isDestroyed()) return;
+          const flags = params.editFlags;
+          Menu.buildFromTemplate([
+            editItem("Undo", "undo", flags.canUndo),
+            editItem("Redo", "redo", flags.canRedo),
+            { type: "separator" },
+            editItem("Cut", "cut", flags.canCut),
+            editItem("Copy", "copy", flags.canCopy),
+            editItem("Paste", "paste", flags.canPaste),
+            { type: "separator" },
+            editItem("Select All", "selectAll", flags.canSelectAll),
+          ]).popup({ window });
+        }).pipe(Effect.ignore),
+      );
     };
     yield* Scope.addFinalizer(
       scope,
@@ -1731,6 +1799,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         wc.off("did-fail-load", failed as never);
         wc.off("audio-state-changed", audioStateChanged);
         wc.off("before-input-event", beforeInput);
+        wc.off("context-menu", contextMenu);
         wc.ipc.off(HUMAN_INPUT_CHANNEL, humanInput);
         wc.ipc.off(MOUSE_NAVIGATE_CHANNEL, mouseNavigate);
       }).pipe(Effect.ignore),
@@ -1757,6 +1826,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           return { action: "deny" };
         });
         wc.on("before-input-event", beforeInput);
+        wc.on("context-menu", contextMenu);
       });
       yield* Ref.update(attachedRef, (attached) =>
         replaceMap(attached, (copy) => {
@@ -3398,18 +3468,33 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       { operation: "automationClick.getFocusedWebContents", tabId, webContentsId: wc.id },
       () => webContents.getFocusedWebContents(),
     );
-    const restoreUserFocus = attempt(
+    const restoreUserFocus = () => {
+      if (
+        !previouslyFocused ||
+        previouslyFocused.id === wc.id ||
+        previouslyFocused.isDestroyed() ||
+        webContents.getFocusedWebContents()?.id !== wc.id
+      )
+        return;
+      previouslyFocused.focus();
+    };
+    // Restore in the native focus callback, before waiting for the CDP click
+    // response. Restoring only after mouseReleased leaves a typing gap.
+    const onAgentClickFocus = () => {
+      try {
+        restoreUserFocus();
+      } catch {
+        // The user's renderer may close while the click is in flight.
+      }
+    };
+    yield* attempt({ operation: "automationClick.guardFocus", tabId, webContentsId: wc.id }, () => {
+      wc.on("focus", onAgentClickFocus);
+    });
+    const releaseFocusGuard = attempt(
       { operation: "automationClick.restoreFocusedWebContents", tabId, webContentsId: wc.id },
       () => {
-        if (
-          !previouslyFocused ||
-          previouslyFocused.id === wc.id ||
-          previouslyFocused.isDestroyed() ||
-          webContents.getFocusedWebContents()?.id !== wc.id
-        ) {
-          return;
-        }
-        previouslyFocused.focus();
+        wc.off("focus", onAgentClickFocus);
+        restoreUserFocus();
       },
     ).pipe(Effect.ignore);
     yield* Effect.gen(function* () {
@@ -3426,7 +3511,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         button: "left",
         clickCount: 1,
       });
-    }).pipe(Effect.ensuring(restoreUserFocus));
+    }).pipe(Effect.ensuring(releaseFocusGuard));
   });
 
   const automationClick = Effect.fn("PreviewManager.automationClick")(function* (

@@ -12,6 +12,21 @@ describe("browserSurfaceStore", () => {
     useBrowserSurfaceStore.setState({ activityByTabId: {}, byTabId: {} });
   });
 
+  it("keeps fill mode owned by the expanded view when a compact lease is replaced", () => {
+    const compact = acquireBrowserSurface("mode-switch", true);
+    const expanded = acquireBrowserSurface("mode-switch", false, true);
+    compact.release();
+    expect(useBrowserSurfaceStore.getState().byTabId["mode-switch"]).toMatchObject({
+      fillContainer: true,
+      fitSourceContent: false,
+    });
+    expanded.release();
+    expect(useBrowserSurfaceStore.getState().byTabId["mode-switch"]).toMatchObject({
+      fillContainer: false,
+      owner: null,
+    });
+  });
+
   it("keeps concurrent background work active until every lease is released", () => {
     const first = acquireBrowserSurfaceActivity("background-browser");
     const second = acquireBrowserSurfaceActivity("background-browser");

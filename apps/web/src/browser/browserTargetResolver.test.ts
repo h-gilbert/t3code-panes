@@ -25,7 +25,7 @@ describe("browser target resolver", () => {
     });
   });
 
-  it("preserves explicit loopback URL navigation for a remote Tailscale environment", async () => {
+  it("maps localhost URL navigation onto a remote Tailscale IPv4 host", async () => {
     readPreparedConnection.mockReturnValue({ httpBaseUrl: "http://100.65.180.100:3773" });
     const { resolveBrowserNavigationTarget } = await import("./browserTargetResolver");
     expect(
@@ -35,13 +35,13 @@ describe("browser target resolver", () => {
       }),
     ).toEqual({
       requestedUrl: "http://localhost:5173/dashboard?mode=test#results",
-      resolvedUrl: "http://localhost:5173/dashboard?mode=test#results",
-      resolutionKind: "direct",
+      resolvedUrl: "http://100.65.180.100:5173/dashboard?mode=test#results",
+      resolutionKind: "direct-private-network",
       environmentId: "environment-1",
     });
   });
 
-  it("preserves explicit IPv4 loopback URL navigation for a private network environment", async () => {
+  it("maps explicit IPv4 loopback navigation onto a private network environment", async () => {
     readPreparedConnection.mockReturnValue({ httpBaseUrl: "http://192.168.1.50:3773" });
     const { resolveBrowserNavigationTarget } = await import("./browserTargetResolver");
     expect(
@@ -51,13 +51,13 @@ describe("browser target resolver", () => {
       }),
     ).toEqual({
       requestedUrl: "http://127.0.0.1:5999/",
-      resolvedUrl: "http://127.0.0.1:5999/",
-      resolutionKind: "direct",
+      resolvedUrl: "http://192.168.1.50:5999/",
+      resolutionKind: "direct-private-network",
       environmentId: "environment-1",
     });
   });
 
-  it("preserves URL credentials on explicit loopback navigation", async () => {
+  it("preserves URL credentials when mapping localhost onto a remote host", async () => {
     readPreparedConnection.mockReturnValue({ httpBaseUrl: "http://100.65.180.100:3773" });
     const { resolveBrowserNavigationTarget } = await import("./browserTargetResolver");
     expect(
@@ -65,10 +65,10 @@ describe("browser target resolver", () => {
         kind: "url",
         url: "http://user:p%40ss@localhost:5173/dashboard",
       }).resolvedUrl,
-    ).toBe("http://user:p%40ss@localhost:5173/dashboard");
+    ).toBe("http://user:p%40ss@100.65.180.100:5173/dashboard");
   });
 
-  it("preserves credentialed loopback URLs for private IPv6 environments", async () => {
+  it("maps credentialed localhost URLs onto private IPv6 hosts", async () => {
     readPreparedConnection.mockReturnValue({
       httpBaseUrl: "http://[fd7a:115c:a1e0::53]:3773",
     });
@@ -78,10 +78,10 @@ describe("browser target resolver", () => {
         kind: "url",
         url: "http://user:p%40ss@localhost:5173/dashboard?mode=test#results",
       }).resolvedUrl,
-    ).toBe("http://user:p%40ss@localhost:5173/dashboard?mode=test#results");
+    ).toBe("http://user:p%40ss@[fd7a:115c:a1e0::53]:5173/dashboard?mode=test#results");
   });
 
-  it("preserves schemeless localhost navigation for a remote environment", async () => {
+  it("maps schemeless localhost navigation onto a remote environment host", async () => {
     readPreparedConnection.mockReturnValue({ httpBaseUrl: "http://192.168.1.25:3773" });
     const { resolveBrowserNavigationTarget } = await import("./browserTargetResolver");
     expect(
@@ -89,7 +89,7 @@ describe("browser target resolver", () => {
         kind: "url",
         url: "localhost:3000/app",
       }).resolvedUrl,
-    ).toBe("localhost:3000/app");
+    ).toBe("http://192.168.1.25:3000/app");
   });
 
   it("keeps localhost navigation local for a local environment", async () => {
@@ -133,12 +133,12 @@ describe("browser target resolver", () => {
         port: 5173,
       }),
     ).toThrow(/authenticated preview gateway/);
-    expect(
+    expect(() =>
       resolveBrowserNavigationTarget(EnvironmentId.make("environment-1"), {
         kind: "url",
         url: "http://localhost:5173",
       }),
-    ).toMatchObject({ resolvedUrl: "http://localhost:5173", resolutionKind: "direct" });
+    ).toThrow(/authenticated preview gateway/);
   });
 
   it("normalizes schemeless localhost server-picker values", async () => {

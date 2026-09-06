@@ -12,13 +12,36 @@ beforeEach(() => {
 });
 
 describe("previewMiniPlayerStore", () => {
-  it("keeps floating previews scoped to their thread", () => {
+  it("returns to a fixed preview without losing the floating window's layout", () => {
+    const store = usePreviewMiniPlayerStore.getState();
+    store.open(refA, "tab-a");
+    store.setFloating(refA, "tab-a", true);
+    store.resize(refA, "tab-a", { width: 800, height: 560 });
+    store.move(refA, "tab-a", { x: 100, y: 80 });
+    store.setMaximized(refA, "tab-a", true);
+    store.setMaximized(refA, "tab-a", false);
+    expect(
+      selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
+    ).toMatchObject({ floating: true, maximized: false });
+    store.setFloating(refA, "tab-a", false);
+    store.open(refA, "tab-b");
+    store.setFloating(refA, "tab-a", true);
+    expect(
+      selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
+    ).toMatchObject({
+      floating: false,
+      size: { width: 800, height: 560 },
+      position: { x: 100, y: 80 },
+    });
+  });
+
+  it("opens floating browsers scoped to their thread", () => {
     usePreviewMiniPlayerStore.getState().open(refA, "tab-a");
     usePreviewMiniPlayerStore.getState().open(refB, "tab-b");
 
     expect(
       selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
-    ).toMatchObject({ tabId: "tab-a", maximized: false });
+    ).toMatchObject({ tabId: "tab-a", maximized: false, floating: false });
     expect(
       selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refB),
     ).toMatchObject({ tabId: "tab-b" });
@@ -36,6 +59,7 @@ describe("previewMiniPlayerStore", () => {
       position: { x: 24, y: 48 },
       size: null,
       maximized: false,
+      floating: false,
     });
   });
 
@@ -51,6 +75,7 @@ describe("previewMiniPlayerStore", () => {
       position: null,
       size: null,
       maximized: false,
+      floating: false,
     });
   });
 

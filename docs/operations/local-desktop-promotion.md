@@ -62,6 +62,12 @@ the lockfile merely to complete a local install.
 
 ### 4. Replace safely
 
+- Sign the extracted local app with the same Apple Development certificate on
+  every update, preserving its entitlements. Do not use ad hoc signing as a
+  fallback: its designated requirement changes with the executable, which can
+  make macOS ask again for Downloads and other protected-folder permissions.
+  Verify the signature before quitting the installed app. Switching an existing
+  ad hoc install to certificate signing may require one new permission grant.
 - Fully extract the artifact before installation; do not run the app from the archive or a mounted
   transient location.
 - Keep one clearly named backup of the current app bundle until the replacement is verified.

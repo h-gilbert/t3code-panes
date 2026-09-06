@@ -1,37 +1,22 @@
 "use client";
 
-import { FILL_PREVIEW_VIEWPORT, type ScopedThreadRef } from "@t3tools/contracts";
-import { PREVIEW_VIEWPORT_PRESETS, resolvePreviewViewport } from "@t3tools/shared/previewViewport";
-import {
-  Maximize2Icon,
-  Minimize2Icon,
-  MonitorSmartphoneIcon,
-  PanelRightIcon,
-  PictureInPicture2,
-  SmartphoneIcon,
-  XIcon,
-} from "lucide-react";
+import { type ScopedThreadRef } from "@t3tools/contracts";
+import { Maximize2Icon, Minimize2Icon, PictureInPicture2, XIcon } from "lucide-react";
 import { type PointerEvent as ReactPointerEvent, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { BrowserSurfaceSlot } from "~/browser/BrowserSurfaceSlot";
-import { browserResponsiveViewportForToggle, useBrowserDefaults } from "~/browser/browserDefaults";
-import { commitBrowserViewportChange } from "~/browser/browserViewportActions";
 import { previewRuntimeTabId } from "~/browser/previewRuntimeTabId";
-import { agentControlledBrowserCloseConfirmationForCount } from "~/components/ChatView.logic";
 import { Button } from "~/components/ui/button";
 import { toastManager } from "~/components/ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { useThreadPreviewState } from "~/previewStateStore";
 import { selectThreadPreviewMiniPlayer, usePreviewMiniPlayerStore } from "~/previewMiniPlayerStore";
-import { useRightPanelStore } from "~/rightPanelStore";
-import { readLocalApi } from "~/localApi";
 
 import { previewEnvironment } from "~/state/preview";
 import { useAtomCommand } from "~/state/use-atom-command";
 
 import { closePreviewSession } from "./closePreviewSession";
-import { previewBridge } from "./previewBridge";
 import {
   clampPreviewMiniPlayerPosition,
   clampPreviewMiniPlayerSize,
@@ -45,6 +30,10 @@ interface DragState {
   readonly pointerY: number;
   readonly playerX: number;
   readonly playerY: number;
+  readonly width: number;
+  readonly height: number;
+  readonly containerWidth: number;
+  readonly containerHeight: number;
 }
 
 interface ResizeState {
@@ -60,38 +49,36 @@ interface ResizeState {
 interface Props {
   readonly threadRef: ScopedThreadRef;
   readonly tabId: string;
-  readonly bottomInset: number;
 }
 
-export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props) {
+export function ThreadPreviewMiniPlayer({ threadRef, tabId }: Props) {
+  const [anchorLayout, setAnchorLayout] = useState(0);
   const rootRef = useRef<HTMLElement | null>(null);
+  const anchorRef = useRef<HTMLDivElement | null>(null);
+  const dragFrameRef = useRef<number | null>(null);
+  const pendingPositionRef = useRef<{ x: number; y: number } | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const resizeRef = useRef<ResizeState | null>(null);
-  const [defaultLayoutVersion, setDefaultLayoutVersion] = useState("");
   const miniPlayer = usePreviewMiniPlayerStore((state) =>
     selectThreadPreviewMiniPlayer(state.byThreadKey, threadRef),
   );
   const previewState = useThreadPreviewState(threadRef);
   const snapshot = previewState.sessions[tabId] ?? null;
+  const hasPreview = snapshot !== null;
   const runtimeTabId = previewRuntimeTabId(threadRef, previewState.serverEpoch, tabId);
   const desktopOverlay = previewState.desktopByTabId[tabId] ?? null;
-  const browserDefaults = useBrowserDefaults();
-  const viewport = snapshot?.viewport ?? FILL_PREVIEW_VIEWPORT;
-  const mobileViewport =
-    viewport._tag === "preset" &&
-    PREVIEW_VIEWPORT_PRESETS.some(
-      (preset) => preset.id === viewport.presetId && preset.category === "Phone",
-    );
   const position = miniPlayer?.tabId === tabId ? miniPlayer.position : null;
   const size =
     miniPlayer?.tabId === tabId && miniPlayer.size
       ? miniPlayer.size
       : PREVIEW_MINI_PLAYER_DEFAULT_SIZE;
   const maximized = miniPlayer?.tabId === tabId && miniPlayer.maximized;
+  const floating = Boolean(miniPlayer?.tabId === tabId && miniPlayer.floating);
+  const compact = !floating && !maximized;
   const closePreview = useAtomCommand(previewEnvironment.close, {
     reportFailure: false,
   });
-  const finishCloseBrowser = () => {
+  const closeBrowser = () => {
     usePreviewMiniPlayerStore.getState().close(threadRef);
     void closePreviewSession({
       closePreview,
@@ -108,123 +95,84 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
       }
     });
   };
-  const closeBrowser = () => {
-    const message = agentControlledBrowserCloseConfirmationForCount(
-      desktopOverlay?.controller === "agent" ? 1 : 0,
-    );
-    if (!message) {
-      finishCloseBrowser();
-      return;
-    }
-    const localApi = readLocalApi();
-    if (!localApi) return;
-    void localApi.dialogs.confirm(message, { variant: "destructive" }).then(
-      (confirmed) => {
-        if (confirmed) finishCloseBrowser();
-      },
-      () => undefined,
-    );
-  };
 
   const toggleMaximized = () => {
     usePreviewMiniPlayerStore.getState().setMaximized(threadRef, tabId, !maximized);
   };
 
-  const openInPanel = () => {
-    usePreviewMiniPlayerStore.getState().close(threadRef);
-    useRightPanelStore.getState().openBrowser(threadRef, tabId);
-  };
-
-  const toggleNativePictureInPicture = () => {
-    if (!previewBridge) return;
-    const operation = desktopOverlay?.pictureInPicture
-      ? previewBridge.pictureInPicture.close
-      : previewBridge.pictureInPicture.open;
-    void operation(runtimeTabId).catch((error) => {
-      toastManager.add({
-        type: "error",
-        title: "Unable to update popped-out preview",
-        description: error instanceof Error ? error.message : "An error occurred.",
-      });
-    });
-  };
-
-  const toggleViewportSizing = () => {
-    if (viewport._tag !== "fill") {
-      void commitBrowserViewportChange(runtimeTabId, FILL_PREVIEW_VIEWPORT).catch(() => undefined);
-      return;
+  const toggleFloating = () => {
+    const store = usePreviewMiniPlayerStore.getState();
+    if (!floating && !miniPlayer?.size) {
+      store.resize(threadRef, tabId, { width: 800, height: 560 });
     }
-    const root = rootRef.current;
-    void commitBrowserViewportChange(
-      runtimeTabId,
-      browserResponsiveViewportForToggle({
-        defaults: browserDefaults,
-        panelRect: root
-          ? { width: root.clientWidth, height: Math.max(1, root.clientHeight - 32) }
-          : null,
-        zoomFactor: desktopOverlay?.zoomFactor,
-      }),
-    ).catch(() => undefined);
-  };
-
-  const toggleMobileViewport = () => {
-    void commitBrowserViewportChange(
-      runtimeTabId,
-      mobileViewport
-        ? FILL_PREVIEW_VIEWPORT
-        : resolvePreviewViewport({ mode: "preset", preset: "iphone-12-pro" }),
-    ).catch(() => undefined);
+    store.setFloating(threadRef, tabId, !floating);
+    store.setMaximized(threadRef, tabId, false);
   };
 
   useLayoutEffect(() => {
-    if (maximized) return;
+    const anchor = anchorRef.current;
+    if (!compact || !hasPreview || !anchor) return;
+    const observer = new ResizeObserver(() => setAnchorLayout((version) => version + 1));
+    observer.observe(anchor);
+    return () => observer.disconnect();
+  }, [compact, hasPreview]);
+
+  useLayoutEffect(() => {
+    if (!floating || maximized || !hasPreview) return;
     const clampAndMove = () => {
       const root = rootRef.current;
-      const parent = root?.offsetParent;
-      if (!root || !(parent instanceof HTMLElement)) return;
+      if (!root) return;
+      const container = { width: window.innerWidth, height: window.innerHeight };
+      const current = selectThreadPreviewMiniPlayer(
+        usePreviewMiniPlayerStore.getState().byThreadKey,
+        threadRef,
+      );
       const nextSize = clampPreviewMiniPlayerSize(
-        { width: root.offsetWidth, height: root.offsetHeight },
-        { width: parent.clientWidth, height: parent.clientHeight },
-        bottomInset,
+        current?.size ?? PREVIEW_MINI_PLAYER_DEFAULT_SIZE,
+        container,
+      );
+      const anchor = anchorRef.current?.getBoundingClientRect();
+      const nextPosition = clampPreviewMiniPlayerPosition(
+        current?.position ?? {
+          x: (anchor?.right ?? container.width) - nextSize.width - PREVIEW_MINI_PLAYER_EDGE_GAP,
+          y: (anchor?.top ?? 0) + PREVIEW_MINI_PLAYER_EDGE_GAP,
+        },
+        container,
+        nextSize,
       );
       usePreviewMiniPlayerStore.getState().resize(threadRef, tabId, nextSize);
-      if (!position) {
-        setDefaultLayoutVersion(`${parent.clientWidth}:${parent.clientHeight}`);
-        return;
-      }
-      const next = clampPreviewMiniPlayerPosition(
-        position,
-        { width: parent.clientWidth, height: parent.clientHeight },
-        nextSize,
-        bottomInset,
-      );
-      usePreviewMiniPlayerStore.getState().move(threadRef, tabId, next);
+      usePreviewMiniPlayerStore.getState().move(threadRef, tabId, nextPosition);
     };
     clampAndMove();
-    const root = rootRef.current;
-    const parent = root?.offsetParent;
-    if (!root || !(parent instanceof HTMLElement) || typeof ResizeObserver === "undefined") {
-      return;
-    }
-    const observer = new ResizeObserver(clampAndMove);
-    observer.observe(root);
-    observer.observe(parent);
-    return () => observer.disconnect();
-  }, [bottomInset, maximized, position, tabId, threadRef]);
+    window.addEventListener("resize", clampAndMove);
+    return () => window.removeEventListener("resize", clampAndMove);
+  }, [floating, hasPreview, maximized, tabId, threadRef]);
+
+  useLayoutEffect(
+    () => () => {
+      if (dragFrameRef.current !== null) cancelAnimationFrame(dragFrameRef.current);
+      dragFrameRef.current = null;
+      pendingPositionRef.current = null;
+      dragRef.current = null;
+    },
+    [tabId, threadRef, floating, maximized],
+  );
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0 || maximized) return;
+    if (event.button !== 0 || !floating || maximized) return;
     const root = rootRef.current;
-    const parent = root?.offsetParent;
-    if (!root || !(parent instanceof HTMLElement)) return;
+    if (!root) return;
     const rootRect = root.getBoundingClientRect();
-    const parentRect = parent.getBoundingClientRect();
     dragRef.current = {
       pointerId: event.pointerId,
       pointerX: event.clientX,
       pointerY: event.clientY,
-      playerX: rootRect.left - parentRect.left,
-      playerY: rootRect.top - parentRect.top,
+      playerX: rootRect.left,
+      playerY: rootRect.top,
+      width: rootRect.width,
+      height: rootRect.height,
+      containerWidth: window.innerWidth,
+      containerHeight: window.innerHeight,
     };
     event.currentTarget.setPointerCapture(event.pointerId);
     event.preventDefault();
@@ -232,44 +180,49 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
 
   const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
-    const root = rootRef.current;
-    const parent = root?.offsetParent;
-    if (!drag || drag.pointerId !== event.pointerId || !root || !(parent instanceof HTMLElement)) {
-      return;
-    }
+    if (!drag || drag.pointerId !== event.pointerId) return;
     const next = clampPreviewMiniPlayerPosition(
       {
         x: drag.playerX + event.clientX - drag.pointerX,
         y: drag.playerY + event.clientY - drag.pointerY,
       },
-      { width: parent.clientWidth, height: parent.clientHeight },
-      { width: root.offsetWidth, height: root.offsetHeight },
-      bottomInset,
+      { width: drag.containerWidth, height: drag.containerHeight },
+      { width: drag.width, height: drag.height },
     );
-    usePreviewMiniPlayerStore.getState().move(threadRef, tabId, next);
+    pendingPositionRef.current = next;
+    if (dragFrameRef.current !== null) return;
+    dragFrameRef.current = requestAnimationFrame(() => {
+      dragFrameRef.current = null;
+      const pending = pendingPositionRef.current;
+      pendingPositionRef.current = null;
+      if (pending) usePreviewMiniPlayerStore.getState().move(threadRef, tabId, pending);
+    });
   };
 
   const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (dragRef.current?.pointerId !== event.pointerId) return;
     dragRef.current = null;
+    if (dragFrameRef.current !== null) cancelAnimationFrame(dragFrameRef.current);
+    dragFrameRef.current = null;
+    const pending = pendingPositionRef.current;
+    pendingPositionRef.current = null;
+    if (pending) usePreviewMiniPlayerStore.getState().move(threadRef, tabId, pending);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
   };
 
   const handleResizePointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (event.button !== 0 || maximized) return;
+    if (event.button !== 0 || !floating || maximized) return;
     const root = rootRef.current;
-    const parent = root?.offsetParent;
-    if (!root || !(parent instanceof HTMLElement)) return;
+    if (!root) return;
     const rootRect = root.getBoundingClientRect();
-    const parentRect = parent.getBoundingClientRect();
     resizeRef.current = {
       pointerId: event.pointerId,
       pointerX: event.clientX,
       pointerY: event.clientY,
-      playerX: rootRect.left - parentRect.left,
-      playerY: rootRect.top - parentRect.top,
+      playerX: rootRect.left,
+      playerY: rootRect.top,
       width: root.offsetWidth,
       height: root.offsetHeight,
     };
@@ -281,13 +234,7 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
   const handleResizePointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
     const resize = resizeRef.current;
     const root = rootRef.current;
-    const parent = root?.offsetParent;
-    if (
-      !resize ||
-      resize.pointerId !== event.pointerId ||
-      !root ||
-      !(parent instanceof HTMLElement)
-    ) {
+    if (!resize || resize.pointerId !== event.pointerId || !root) {
       return;
     }
     const nextSize = clampPreviewMiniPlayerSize(
@@ -295,15 +242,13 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
         width: resize.width + event.clientX - resize.pointerX,
         height: resize.height + event.clientY - resize.pointerY,
       },
-      { width: parent.clientWidth, height: parent.clientHeight },
-      bottomInset,
+      { width: window.innerWidth, height: window.innerHeight },
     );
     usePreviewMiniPlayerStore.getState().resize(threadRef, tabId, nextSize);
     const nextPosition = clampPreviewMiniPlayerPosition(
       { x: resize.playerX, y: resize.playerY },
-      { width: parent.clientWidth, height: parent.clientHeight },
+      { width: window.innerWidth, height: window.innerHeight },
       nextSize,
-      bottomInset,
     );
     usePreviewMiniPlayerStore.getState().move(threadRef, tabId, nextPosition);
   };
@@ -321,12 +266,14 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
   const player = (
     <section
       ref={rootRef}
-      aria-label="Floating browser preview"
+      aria-label={compact ? "Browser preview" : "Floating browser preview"}
       data-preview-mini-player={tabId}
       className={
         maximized
           ? "pointer-events-none fixed z-100 flex select-none flex-col bg-background"
-          : "pointer-events-none absolute flex select-none flex-col"
+          : compact
+            ? "pointer-events-none absolute z-100 flex select-none flex-col shadow-xl"
+            : "pointer-events-none fixed z-100 flex select-none flex-col shadow-xl"
       }
       style={
         maximized
@@ -336,14 +283,21 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
               top: 0,
               bottom: 0,
             }
-          : position
-            ? { left: position.x, top: position.y, width: size.width, height: size.height }
-            : {
+          : compact
+            ? {
                 right: PREVIEW_MINI_PLAYER_EDGE_GAP,
                 top: PREVIEW_MINI_PLAYER_EDGE_GAP,
-                width: size.width,
-                height: size.height,
+                width: PREVIEW_MINI_PLAYER_DEFAULT_SIZE.width,
+                height: PREVIEW_MINI_PLAYER_DEFAULT_SIZE.height,
               }
+            : position
+              ? { left: position.x, top: position.y, width: size.width, height: size.height }
+              : {
+                  right: PREVIEW_MINI_PLAYER_EDGE_GAP,
+                  top: PREVIEW_MINI_PLAYER_EDGE_GAP,
+                  width: size.width,
+                  height: size.height,
+                }
       }
     >
       {/* Always-visible chrome. Sits ABOVE the surface slot rather than over
@@ -352,9 +306,9 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
           clicked. */}
       <div
         className={
-          "pointer-events-auto flex h-8 shrink-0 items-center gap-0.5 border border-b-0 border-border/80 bg-popover/92 px-1.5 shadow-lg/20 backdrop-blur-xl " +
+          "pointer-events-auto flex h-8 shrink-0 items-center gap-0.5 border border-b-0 border-border/80 bg-popover px-1.5 " +
           (maximized ? "" : "rounded-t-xl ") +
-          (maximized ? "" : "cursor-grab active:cursor-grabbing")
+          (floating && !maximized ? "cursor-grab active:cursor-grabbing" : "")
         }
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -370,81 +324,18 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
           <TooltipTrigger
             render={
               <Button
-                variant={viewport._tag === "fill" ? "ghost" : "secondary"}
-                size="icon-xs"
-                aria-label={
-                  viewport._tag === "fill" ? "Set viewport dimensions" : "Fill available space"
-                }
-                aria-pressed={viewport._tag !== "fill"}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={toggleViewportSizing}
-              />
-            }
-          >
-            <MonitorSmartphoneIcon />
-          </TooltipTrigger>
-          <TooltipPopup side="bottom">
-            {viewport._tag === "fill" ? "Set viewport dimensions" : "Fill available space"}
-          </TooltipPopup>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                variant={mobileViewport ? "secondary" : "ghost"}
-                size="icon-xs"
-                aria-label={mobileViewport ? "Leave mobile viewport" : "Use mobile viewport"}
-                aria-pressed={mobileViewport}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={toggleMobileViewport}
-              />
-            }
-          >
-            <SmartphoneIcon />
-          </TooltipTrigger>
-          <TooltipPopup side="bottom">
-            {mobileViewport ? "Leave mobile viewport" : "Use mobile viewport"}
-          </TooltipPopup>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
                 variant="ghost"
                 size="icon-xs"
-                aria-label="Open preview in right panel"
+                aria-label={floating ? "Return to small preview" : "Open floating browser window"}
                 onPointerDown={(event) => event.stopPropagation()}
-                onClick={openInPanel}
-              />
-            }
-          >
-            <PanelRightIcon />
-          </TooltipTrigger>
-          <TooltipPopup side="bottom">Open in right panel</TooltipPopup>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                variant={desktopOverlay?.pictureInPicture ? "secondary" : "ghost"}
-                size="icon-xs"
-                aria-label={
-                  desktopOverlay?.pictureInPicture
-                    ? "Close popped-out preview"
-                    : "Pop preview into separate window"
-                }
-                disabled={!desktopOverlay?.hasWebContents}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={toggleNativePictureInPicture}
+                onClick={toggleFloating}
               />
             }
           >
             <PictureInPicture2 />
           </TooltipTrigger>
           <TooltipPopup side="bottom">
-            {desktopOverlay?.pictureInPicture
-              ? "Close separate window"
-              : "Pop into separate window"}
+            {floating ? "Return to small preview" : "Open floating browser window"}
           </TooltipPopup>
         </Tooltip>
         <Tooltip>
@@ -484,56 +375,50 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
       </div>
 
       <div className="relative min-h-0 flex-1">
-        <div
-          className={
-            "absolute inset-0 z-[29] bg-muted shadow-2xl/35 " + (maximized ? "" : "rounded-b-xl")
-          }
-        />
+        <div className="absolute inset-0 z-[29] bg-muted" />
         <BrowserSurfaceSlot
           tabId={runtimeTabId}
           visible={Boolean(desktopOverlay?.hasWebContents)}
-          cornerRadius={maximized ? 0 : 12}
-          fitSourceContent={!maximized}
-          zIndex={maximized ? 110 : 30}
+          cornerRadius={0}
+          fitSourceContent={compact}
+          fillContainer={!compact}
+          zIndex={110}
           layoutVersion={
-            maximized
-              ? "maximized"
-              : position
-                ? `${position.x}:${position.y}`
-                : `initial:${bottomInset}:${defaultLayoutVersion}`
+            compact
+              ? `compact:${anchorLayout}`
+              : maximized
+                ? "maximized"
+                : position
+                  ? `${position.x}:${position.y}`
+                  : "initial"
           }
           className="absolute inset-0"
         />
-        <div
-          className={
-            "pointer-events-none absolute inset-0 z-[31] ring-1 ring-inset ring-border/80 " +
-            (maximized ? "" : "rounded-b-xl")
-          }
-        />
+        <div className="pointer-events-none absolute inset-0 z-[31] ring-1 ring-inset ring-border/80" />
         {!desktopOverlay?.hasWebContents ? (
-          <div
-            className={
-              "pointer-events-none absolute inset-0 z-[32] flex items-center justify-center bg-muted text-xs text-muted-foreground " +
-              (maximized ? "" : "rounded-b-xl")
-            }
-          >
+          <div className="pointer-events-none absolute inset-0 z-[32] flex items-center justify-center bg-muted text-xs text-muted-foreground">
             Reconnecting preview…
           </div>
         ) : null}
-        {!maximized ? (
-          <button
-            type="button"
-            aria-label="Resize floating preview"
-            className="pointer-events-auto absolute bottom-0 right-0 z-[33] size-5 cursor-nwse-resize rounded-br-xl after:absolute after:bottom-1 after:right-1 after:size-2 after:border-b after:border-r after:border-foreground/45"
-            onPointerDown={handleResizePointerDown}
-            onPointerMove={handleResizePointerMove}
-            onPointerUp={endResize}
-            onPointerCancel={endResize}
-          />
-        ) : null}
       </div>
+      {floating && !maximized ? (
+        <button
+          type="button"
+          aria-label="Resize floating preview"
+          className="pointer-events-auto absolute -bottom-1.5 -right-1.5 size-3 cursor-nwse-resize"
+          onPointerDown={handleResizePointerDown}
+          onPointerMove={handleResizePointerMove}
+          onPointerUp={endResize}
+          onPointerCancel={endResize}
+        />
+      ) : null}
     </section>
   );
 
-  return maximized ? createPortal(player, document.body) : player;
+  return (
+    <>
+      <div ref={anchorRef} className="pointer-events-none absolute inset-0" aria-hidden="true" />
+      {compact ? player : createPortal(player, document.body)}
+    </>
+  );
 }

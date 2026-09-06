@@ -74,6 +74,22 @@ The most common defect in this repo is a change that works on the path you teste
 - **Connection modes.** Local, remote/relay, and tunnel behave differently. Multi-device and multi-environment cases are real.
 - **Docs.** `docs/` splits by audience. Behavior changes that a user would notice belong in `docs/user/` (shipped-product voice, no repo tooling or source paths); architecture and contributor changes in `docs/internals/`; runbooks in `docs/operations/`; new vocabulary in `docs/internals/glossary.md`.
 
+## Preserving this fork during upstream updates
+
+- Before pulling, merging, cherry-picking, or resolving upstream changes, read
+  [the sync runbook](docs/fork/upstream-sync.md) and
+  [the custom behavior requirements](docs/internals/fork-customizations.md).
+- Preserve the developer's custom behavior, including uncommitted work. Inspect
+  local history and both sides of overlapping changes. A clean Git merge does
+  not prove that behavior survived; check callers, shared contracts, and tests too.
+- Adapt incoming fixes to the custom behavior. Do not blindly take either side,
+  discard custom tests, or change their expectations to match upstream. Complete
+  compatible integration autonomously; ask only when preserving the intended
+  behavior requires a product decision the developer has not already made.
+- Run focused regression checks for affected custom behavior before declaring an
+  update complete. Report what was preserved, adapted, deferred, and verified.
+  Keep the custom behavior requirements current when intentional changes land.
+
 ## Dev servers
 
 - `vp i` installs. Worktrees get this from the t3.json setup script; if module resolution looks broken, it probably did not run.
@@ -111,7 +127,8 @@ The most common defect in this repo is a change that works on the path you teste
   from a fresh upstream tree that drops the private changes.
 - This private app must have **normal push notifications and no Live Activities
   or Dynamic Island support**. Preserve approval, input, and failure alerts;
-  keep routine completion alerts disabled. Keep the widget SDK/extension, activity-token registration, and Live
+  enable completion alerts only for turns submitted from iOS, including follow-ups.
+  Keep web/desktop completion alerts disabled. Keep the widget SDK/extension, activity-token registration, and Live
   Activity settings removed. Do not weaken the build/install policy checks to
   accommodate an upstream update; adapt the private changes instead.
 - Use the build ledger and verify the phone's installed version before reporting

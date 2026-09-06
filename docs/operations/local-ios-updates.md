@@ -87,8 +87,12 @@ artifact.
 
 The private policy is **normal push notifications, no Live Activities or Dynamic
 Island integration**. Keep approval, input, and failure alerts enabled, and routine
-completion alerts disabled. This is the original attention-only policy.
-The build ledger records these four alert preferences, and installation rejects
+completion alerts disabled for web/desktop submissions. As of September 7, completion
+alerts are enabled for turns submitted from iOS, including follow-ups and queued
+messages. The app registers `notifyOnCompletion: false` and
+`notifyOnIosCompletion: true`; older servers safely keep completions silent.
+The environment server must also include turn-origin support before these alerts work.
+The build ledger records these alert preferences, and installation rejects
 older builds that do not record this policy. Source checks and push-registration
 tests enforce the same values on future updates.
 The source check rejects `expo-widgets`, ActivityKit/Dynamic Island implementation,

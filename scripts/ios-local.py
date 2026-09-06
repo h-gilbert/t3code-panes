@@ -23,6 +23,7 @@ NOTIFICATION_POLICY = {
     'notifyOnApproval': True,
     'notifyOnInput': True,
     'notifyOnCompletion': False,
+    'notifyOnIosCompletion': True,
     'notifyOnFailure': True,
 }
 INPUTS = ['apps/mobile', 'packages', 'patches', 'assets', 'scripts/lib',
@@ -55,7 +56,7 @@ def check_source_policy(source=SOURCE):
     for preference, enabled in NOTIFICATION_POLICY.items():
         values = re.findall(r'\b' + preference + r'\s*:\s*([^,\n}]+)', registration)
         if [value.strip() for value in values] != [str(enabled).lower()]:
-            raise RuntimeError('Private attention-only notification policy changed: ' + preference)
+            raise RuntimeError('Private notification policy changed: ' + preference)
 
 
 def check_native_policy(native):
@@ -204,6 +205,7 @@ def worker(number):
                            stderr=subprocess.STDOUT, check=True)
             subprocess.run([str(SOURCE / 'node_modules/.bin/vp'), 'test', 'run',
                             'apps/mobile/src/features/agent-awareness/remoteRegistration.test.ts',
+                            'apps/mobile/src/lib/projectThreadStartTurn.test.ts',
                             'apps/mobile/src/features/cloud/linkEnvironment.test.ts'],
                            cwd=SOURCE, stdout=validation, stderr=subprocess.STDOUT, check=True)
         info_path = native / SCHEME / 'Info.plist'
@@ -254,7 +256,7 @@ def install(number):
     if record['status'] != 'built':
         raise RuntimeError('Only a completed build can be installed.')
     if record.get('privatePolicy', {}).get('notificationPreferences') != NOTIFICATION_POLICY:
-        raise RuntimeError('Build does not record the original attention-only notification policy.')
+        raise RuntimeError('Build does not record the iOS-origin completion notification policy.')
     check_artifact_policy(Path(record['artifact']))
     run('xcrun', 'devicectl', '--timeout', '120', 'device', 'install', 'app', '--device', DEVICE, record['artifact'])
     app = installed_app()
@@ -279,7 +281,7 @@ if __name__ == '__main__':
     elif args.command == 'check':
         check_source_policy()
         check_native_policy(SOURCE / 'apps/mobile/ios')
-        print('Private iOS policy passed: attention alerts enabled, completion alerts and Live Activities disabled.')
+        print('Private iOS policy passed: attention and iOS-origin completion alerts enabled; unfiltered completions and Live Activities disabled.')
     elif args.command == 'build':
         build()
     elif args.command == '_build':

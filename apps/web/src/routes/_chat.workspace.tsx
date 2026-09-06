@@ -469,7 +469,13 @@ function WorkspacePane({
       aria-label={`Workspace pane ${index + 1}`}
       data-workspace-pane={index}
       data-focused={focused ? "true" : "false"}
-      onPointerDownCapture={() => focusPane(workspaceKey, index)}
+      onPointerDownCapture={(event) => {
+        // Portaled browser chrome belongs to its thread, but dragging it must
+        // not select that thread's pane or redirect composer keyboard input.
+        if (event.target instanceof Element && event.target.closest("[data-preview-mini-player]"))
+          return;
+        focusPane(workspaceKey, index);
+      }}
     >
       <div
         className={cn(

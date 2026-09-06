@@ -21,6 +21,9 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+
+import { readTurnClientOrigin } from "./turnClientOrigin.ts";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
@@ -209,7 +212,8 @@ export function makeEnvironmentAggregate(
   };
 }
 
-function notificationForTransition(input: {
+export function notificationForTransition(input: {
+  readonly iosCompletionThreads?: ReadonlySet<ThreadId>;
   readonly previous: RelayAgentActivityAggregateStateType | null;
   readonly next: RelayAgentActivityAggregateStateType | null;
   readonly registration: StoredRegistration;
@@ -241,7 +245,9 @@ function notificationForTransition(input: {
         });
         const enabled =
           candidate.phase === "completed"
-            ? input.registration.device.preferences.notifyOnCompletion
+            ? input.registration.device.preferences.notifyOnCompletion ||
+              (input.registration.device.preferences.notifyOnIosCompletion === true &&
+                input.iosCompletionThreads?.has(candidate.threadId) === true)
             : input.registration.device.preferences.notifyOnFailure;
         return (
           enabled &&
@@ -356,6 +362,7 @@ export function sendApns(input: {
 }
 
 export const make = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
   const snapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
@@ -440,8 +447,10 @@ export const make = Effect.gen(function* () {
   });
 
   const deliver = Effect.fn("SelfHostedNotifications.deliver")(function* (
-    previous: RelayAgentActivityAggregateStateType | null,
     next: RelayAgentActivityAggregateStateType | null,
+    previousThread: RelayAgentActivityState | null,
+    nextThread: RelayAgentActivityState | null,
+    iosCompletionThreads: ReadonlySet<ThreadId>,
   ) {
     const [registration, credentials, now] = yield* Effect.all([
       getRegistration,
@@ -455,8 +464,12 @@ export const make = Effect.gen(function* () {
       environment: registration.device.apsEnvironment ?? credentials.environment,
     };
     const notification = notificationForTransition({
-      previous,
-      next,
+      iosCompletionThreads,
+      previous: makeEnvironmentAggregate(
+        previousThread ? [previousThread] : [],
+        now.epochMilliseconds,
+      ),
+      next: makeEnvironmentAggregate(nextThread ? [nextThread] : [], now.epochMilliseconds),
       registration,
       nowMs: now.epochMilliseconds,
     });
@@ -571,7 +584,14 @@ export const make = Effect.gen(function* () {
       thread,
       project,
     });
-    const previous = yield* getAggregateFromRef;
+    const previousThread = (yield* Ref.get(statesRef)).get(threadId) ?? null;
+    const iosCompletionThreads = new Set<ThreadId>();
+    if (snapshot.state?.phase === "completed" && Option.isSome(thread) && thread.value.latestTurn) {
+      const origin = yield* readTurnClientOrigin(threadId, thread.value.latestTurn.turnId).pipe(
+        Effect.provideService(SqlClient.SqlClient, sql),
+      );
+      if (origin === "ios") iosCompletionThreads.add(threadId);
+    }
     yield* Ref.update(statesRef, (states) => {
       const next = new Map(states);
       if (snapshot.state === null) next.delete(threadId);
@@ -579,8 +599,8 @@ export const make = Effect.gen(function* () {
       return next;
     });
     const next = yield* getAggregateFromRef;
-    if (encodeAggregateJson(previous) !== encodeAggregateJson(next)) {
-      yield* deliver(previous, next);
+    if (encodeUnknownJson(previousThread) !== encodeUnknownJson(snapshot.state)) {
+      yield* deliver(next, previousThread, snapshot.state, iosCompletionThreads);
     }
   });
   const publishThread = (threadId: ThreadId) =>

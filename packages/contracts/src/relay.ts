@@ -31,6 +31,7 @@ export const RelayAgentAwarenessPreferences = Schema.Struct({
   notifyOnApproval: Schema.Boolean,
   notifyOnInput: Schema.Boolean,
   notifyOnCompletion: Schema.Boolean,
+  notifyOnIosCompletion: Schema.optional(Schema.Boolean),
   notifyOnFailure: Schema.Boolean,
 });
 export type RelayAgentAwarenessPreferences = typeof RelayAgentAwarenessPreferences.Type;

@@ -302,6 +302,7 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
       const result = yield* decideOrchestrationCommand({
         command: {
           type: "thread.turn.start",
+          clientOrigin: "ios",
           commandId: CommandId.make("cmd-turn-start"),
           threadId: ThreadId.make("thread-1"),
           message: {
@@ -332,6 +333,7 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
         return;
       }
       expect(turnStartEvent.payload).toMatchObject({
+        clientOrigin: "ios",
         threadId: ThreadId.make("thread-1"),
         messageId: asMessageId("message-user-1"),
         modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.3-codex", [
