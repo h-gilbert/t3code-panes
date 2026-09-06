@@ -43,6 +43,7 @@ describe("project thread title", () => {
       suffix: "",
     });
     const input = buildProjectThreadStartTurnInput({
+      clientOrigin: "ios",
       projectId: ProjectId.make("project"),
       projectCwd: "/workspace",
       threadId: "new-thread",
@@ -61,6 +62,7 @@ describe("project thread title", () => {
       worktreeBranchName: "unused",
     });
 
+    expect(input.clientOrigin).toBe("ios");
     expect(input.titleSeed).toBe(title);
     expect(input.bootstrap.createThread.title).toBe(input.titleSeed);
     expect(input.message.text).toBe(text);

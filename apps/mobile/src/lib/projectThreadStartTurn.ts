@@ -22,6 +22,7 @@ export function deriveThreadTitleFromPrompt(value: string): string {
 }
 
 export interface ProjectThreadStartTurnSpec {
+  readonly clientOrigin?: "ios" | "android";
   readonly projectId: ProjectId;
   readonly projectCwd: string;
   readonly threadId: string;
@@ -51,6 +52,7 @@ export function buildProjectThreadStartTurnInput(spec: ProjectThreadStartTurnSpe
   const title = deriveThreadTitleFromPrompt(spec.text);
   const isWorktree = spec.workspaceMode === "worktree";
   return {
+    ...(spec.clientOrigin ? { clientOrigin: spec.clientOrigin } : {}),
     commandId: CommandId.make(spec.commandId),
     threadId: ThreadId.make(spec.threadId),
     message: {

@@ -15,7 +15,7 @@ import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert } from "react-native";
+import { Alert, Platform } from "react-native";
 
 import { scopedProjectKey, scopedThreadKey } from "../lib/scopedEntities";
 import { buildProjectThreadStartTurnInput } from "../lib/projectThreadStartTurn";
@@ -753,6 +753,7 @@ export function useThreadOutboxDrain(): void {
       const deliveryResult = await startTurn({
         environmentId: queuedMessage.environmentId,
         input: {
+          clientOrigin: Platform.OS === "ios" ? "ios" : "android",
           commandId: queuedMessage.commandId,
           threadId: queuedMessage.threadId,
           message: {
@@ -873,6 +874,7 @@ export function useThreadOutboxDrain(): void {
       const deliveryResult = await startTurn({
         environmentId: queuedMessage.environmentId,
         input: buildProjectThreadStartTurnInput({
+          clientOrigin: Platform.OS === "ios" ? "ios" : "android",
           projectId: creation.projectId,
           projectCwd,
           threadId: queuedMessage.threadId,

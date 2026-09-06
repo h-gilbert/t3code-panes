@@ -260,6 +260,7 @@ function registrationSignature(body: RelayDeviceRegistrationRequest): string {
     body.preferences.notifyOnApproval,
     body.preferences.notifyOnInput,
     body.preferences.notifyOnCompletion,
+    body.preferences.notifyOnIosCompletion,
     body.preferences.notifyOnFailure,
   ].join("|");
 }

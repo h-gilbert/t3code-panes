@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import { Platform } from "react-native";
 
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
@@ -131,6 +132,7 @@ export function useCreateProjectThread() {
       const result = await startTurn({
         environmentId: input.project.environmentId,
         input: buildProjectThreadStartTurnInput({
+          clientOrigin: Platform.OS === "ios" ? "ios" : "android",
           projectId: input.project.id,
           projectCwd: input.project.workspaceRoot,
           threadId: metadata.threadId,
