@@ -86,7 +86,11 @@ the build runs. The build verifies its source fingerprint before accepting the
 artifact.
 
 The private policy is **normal push notifications, no Live Activities or Dynamic
-Island integration**. Keep approval, input, completion, and failure alerts working.
+Island integration**. Keep approval, input, and failure alerts enabled, and routine
+completion alerts disabled. This is the original attention-only policy.
+The build ledger records these four alert preferences, and installation rejects
+older builds that do not record this policy. Source checks and push-registration
+tests enforce the same values on future updates.
 The source check rejects `expo-widgets`, ActivityKit/Dynamic Island implementation,
 activity-token registration, and any device registration that can enable Live
 Activities. Live Activity settings and preferences must remain removed. The wire

@@ -24,7 +24,8 @@ class InstallLedgerTests(unittest.TestCase):
         artifact.mkdir()
         (artifact / 'Info.plist').write_bytes(plistlib.dumps({}))
         self.record = {'status': 'built', 'buildNumber': '2', 'version': '1.0.4',
-                       'artifact': str(artifact)}
+                       'artifact': str(artifact),
+                       'privatePolicy': {'notificationPreferences': dict(ios.NOTIFICATION_POLICY)}}
         ios.save(self.state / 'builds/2/record.json', self.record)
 
     def test_failed_install_preserves_previous_record(self):
@@ -60,6 +61,14 @@ class InstallLedgerTests(unittest.TestCase):
                 ios.install('2')
             run.assert_not_called()
 
+    def test_old_completion_alert_policy_cannot_be_installed(self):
+        self.record['privatePolicy']['notificationPreferences']['notifyOnCompletion'] = True
+        ios.save(self.state / 'builds/2/record.json', self.record)
+        with patch.object(ios, 'run') as run:
+            with self.assertRaisesRegex(RuntimeError, 'attention-only'):
+                ios.install('2')
+            run.assert_not_called()
+
     def test_live_activity_build_cannot_be_installed(self):
         (Path(self.record['artifact']) / 'Info.plist').write_bytes(
             plistlib.dumps({'NSSupportsLiveActivities': True}))
@@ -88,7 +97,9 @@ class PrivateSourcePolicyTests(unittest.TestCase):
         self.mobile = self.source / 'apps/mobile'
         self.payload = self.mobile / 'src/features/agent-awareness/registrationPayload.ts'
         self.payload.parent.mkdir(parents=True)
-        self.payload.write_text('const preferences = {liveActivitiesEnabled: false};')
+        self.payload.write_text('const preferences = {liveActivitiesEnabled: false,\n'
+                                'notifyOnApproval: true, notifyOnInput: true,\n'
+                                'notifyOnCompletion: false, notifyOnFailure: true};')
         (self.mobile / 'app.config.ts').write_text('')
         (self.mobile / 'package.json').write_text(json.dumps({
             'dependencies': {'expo-notifications': '57'},
@@ -101,6 +112,21 @@ class PrivateSourcePolicyTests(unittest.TestCase):
         self.payload.write_text('const preferences = {liveActivitiesEnabled: enabled};')
         with self.assertRaises(RuntimeError):
             ios.check_source_policy(self.source)
+
+    def test_completion_alerts_cannot_be_reenabled(self):
+        self.payload.write_text(self.payload.read_text().replace(
+            'notifyOnCompletion: false', 'notifyOnCompletion: true'))
+        with self.assertRaisesRegex(RuntimeError, 'notifyOnCompletion'):
+            ios.check_source_policy(self.source)
+
+    def test_attention_alerts_cannot_be_disabled(self):
+        for preference in ['notifyOnApproval', 'notifyOnInput', 'notifyOnFailure']:
+            with self.subTest(preference=preference):
+                original = self.payload.read_text()
+                self.payload.write_text(original.replace(preference + ': true', preference + ': false'))
+                with self.assertRaisesRegex(RuntimeError, preference):
+                    ios.check_source_policy(self.source)
+                self.payload.write_text(original)
 
     def test_missing_push_dependency_is_rejected(self):
         (self.mobile / 'package.json').write_text('{"dependencies": {}}')

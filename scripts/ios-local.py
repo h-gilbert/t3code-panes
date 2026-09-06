@@ -19,6 +19,12 @@ SOURCE = STATE / 'source'
 DEVICE = 'CF4845A2-5ACF-5346-8123-49892EDAE92A'
 BUNDLE = 'nz.co.hamishgilbert.t3code'
 SCHEME = 'T3CodeSelfHosted'
+NOTIFICATION_POLICY = {
+    'notifyOnApproval': True,
+    'notifyOnInput': True,
+    'notifyOnCompletion': False,
+    'notifyOnFailure': True,
+}
 INPUTS = ['apps/mobile', 'packages', 'patches', 'assets', 'scripts/lib',
           'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml']
 
@@ -46,6 +52,10 @@ def check_source_policy(source=SOURCE):
     registration = (mobile / 'src/features/agent-awareness/registrationPayload.ts').read_text()
     if not re.search(r'liveActivitiesEnabled\s*:\s*false\b', registration):
         raise RuntimeError('APNs device registration must explicitly disable Live Activities.')
+    for preference, enabled in NOTIFICATION_POLICY.items():
+        values = re.findall(r'\b' + preference + r'\s*:\s*([^,\n}]+)', registration)
+        if [value.strip() for value in values] != [str(enabled).lower()]:
+            raise RuntimeError('Private attention-only notification policy changed: ' + preference)
 
 
 def check_native_policy(native):
@@ -229,7 +239,8 @@ def worker(number):
             raise RuntimeError('Signed app is missing the expected APNs entitlement.')
         record.update(status='built', version=built['CFBundleShortVersionString'],
                       artifact=str(directory / artifact.name), finishedAt=now(),
-                      privatePolicy={'liveActivities': False, 'pushNotifications': True})
+                      privatePolicy={'liveActivities': False, 'pushNotifications': True,
+                                     'notificationPreferences': NOTIFICATION_POLICY})
     except Exception as error:
         record.update(status='failed', error=str(error), finishedAt=now())
         raise
@@ -242,6 +253,8 @@ def install(number):
     record = json.loads(path.read_text())
     if record['status'] != 'built':
         raise RuntimeError('Only a completed build can be installed.')
+    if record.get('privatePolicy', {}).get('notificationPreferences') != NOTIFICATION_POLICY:
+        raise RuntimeError('Build does not record the original attention-only notification policy.')
     check_artifact_policy(Path(record['artifact']))
     run('xcrun', 'devicectl', '--timeout', '120', 'device', 'install', 'app', '--device', DEVICE, record['artifact'])
     app = installed_app()
@@ -266,7 +279,7 @@ if __name__ == '__main__':
     elif args.command == 'check':
         check_source_policy()
         check_native_policy(SOURCE / 'apps/mobile/ios')
-        print('Private iOS policy passed: normal push enabled, Live Activities removed.')
+        print('Private iOS policy passed: attention alerts enabled, completion alerts and Live Activities disabled.')
     elif args.command == 'build':
         build()
     elif args.command == '_build':
