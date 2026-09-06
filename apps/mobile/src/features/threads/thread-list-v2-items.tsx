@@ -46,9 +46,8 @@ const MONO_FONT = Platform.select({
   default: "monospace",
 });
 
-// Status hues follow the system-wide convention set by sidebar v1 and the
-// Live Activity/widgets (amber approval, indigo input, sky working) so a
-// thread reads the same color everywhere it surfaces.
+// Status hues follow the system-wide convention set by sidebar v1 so a thread
+// reads the same color everywhere it appears.
 const STATUS_LABEL_BY_STATUS: Partial<
   Record<ThreadListV2Status, { label: string; className: string }>
 > = {

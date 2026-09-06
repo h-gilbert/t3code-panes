@@ -54,7 +54,6 @@ export class MobileDeviceIdGenerationError extends Schema.TaggedErrorClass<Mobil
 export interface AgentAwarenessRegistrationRecord {
   readonly identity: string;
   readonly signature: string;
-  readonly pushToStartToken?: string;
 }
 
 export interface RecentThreadShortcut {
@@ -218,9 +217,6 @@ export const make = Effect.fn("MobileStorage.make")(function* () {
       return {
         identity: parsed.identity,
         signature: parsed.signature,
-        ...(typeof parsed.pushToStartToken === "string" && parsed.pushToStartToken
-          ? { pushToStartToken: parsed.pushToStartToken }
-          : {}),
       };
     }),
   );

@@ -1,6 +1,5 @@
 import type { RelayDeviceRegistrationRequest } from "@t3tools/contracts/relay";
 
-import type { Preferences } from "../../persistence/mobile-preferences";
 import { supportsAgentAwarenessPush } from "./capabilities";
 
 // Development builds are Xcode-signed and receive sandbox APNs tokens;
@@ -18,12 +17,9 @@ export function makeRelayDeviceRegistrationRequest(input: {
   readonly bundleId?: string;
   readonly apsEnvironment?: "sandbox" | "production";
   readonly pushToken?: string;
-  readonly pushToStartToken?: string;
   readonly notificationsEnabled: boolean;
-  readonly preferences: Preferences;
 }): RelayDeviceRegistrationRequest {
   const pushAvailable = supportsAgentAwarenessPush();
-  const liveActivitiesEnabled = pushAvailable && input.preferences.liveActivitiesEnabled !== false;
   return {
     deviceId: input.deviceId,
     label: input.label,
@@ -33,9 +29,8 @@ export function makeRelayDeviceRegistrationRequest(input: {
     ...(input.bundleId ? { bundleId: input.bundleId } : {}),
     ...(input.apsEnvironment ? { apsEnvironment: input.apsEnvironment } : {}),
     ...(input.pushToken ? { pushToken: input.pushToken } : {}),
-    ...(input.pushToStartToken ? { pushToStartToken: input.pushToStartToken } : {}),
     preferences: {
-      liveActivitiesEnabled,
+      liveActivitiesEnabled: false,
       notificationsEnabled: pushAvailable && input.notificationsEnabled,
       notifyOnApproval: true,
       notifyOnInput: true,

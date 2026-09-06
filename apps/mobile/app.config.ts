@@ -13,8 +13,14 @@ const isIosPersonalTeamBuild = repoEnv.T3CODE_IOS_PERSONAL_TEAM === "1";
 const runtimeVersionPolicy =
   process.env.MOBILE_VERSION_POLICY ??
   (APP_VARIANT === "development" ? "appVersion" : "fingerprint");
+const isSelfHostedBuild = repoEnv.T3CODE_MOBILE_SELF_HOSTED === "1";
+const isIosSharingEnabled = !isIosPersonalTeamBuild && !isSelfHostedBuild;
 
 const personalTeamBundleIdentifier = repoEnv.T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID?.trim();
+const selfHostedBundleIdentifier = repoEnv.T3CODE_IOS_BUNDLE_ID?.trim();
+const selfHostedAppleTeamId = repoEnv.T3CODE_IOS_TEAM_ID?.trim();
+const selfHostedApnsEnvironment =
+  repoEnv.T3CODE_APNS_ENVIRONMENT === "production" ? "production" : "sandbox";
 const IOS_BUNDLE_IDENTIFIER_PATTERN = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
 
 const fromRepoRoot = (relativePath: string) => `../../${relativePath}`;
@@ -30,6 +36,19 @@ if (
   throw new Error(
     "T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID must be a reverse-DNS identifier such as com.example.t3code when T3CODE_IOS_PERSONAL_TEAM=1.",
   );
+}
+
+if (
+  isSelfHostedBuild &&
+  (!selfHostedBundleIdentifier || !IOS_BUNDLE_IDENTIFIER_PATTERN.test(selfHostedBundleIdentifier))
+) {
+  throw new Error(
+    "T3CODE_IOS_BUNDLE_ID must be a reverse-DNS identifier such as com.example.t3code when T3CODE_MOBILE_SELF_HOSTED=1.",
+  );
+}
+
+if (isSelfHostedBuild && !selfHostedAppleTeamId) {
+  throw new Error("T3CODE_IOS_TEAM_ID is required when T3CODE_MOBILE_SELF_HOSTED=1.");
 }
 
 const DEVELOPMENT_ASSETS = {
@@ -104,35 +123,19 @@ function resolveAppVariant(value: string | undefined): AppVariant {
 }
 
 const variant = VARIANT_CONFIG[APP_VARIANT];
-const iosBundleIdentifier = isIosPersonalTeamBuild
-  ? personalTeamBundleIdentifier!
-  : variant.iosBundleIdentifier;
+const iosBundleIdentifier = isSelfHostedBuild
+  ? selfHostedBundleIdentifier!
+  : isIosPersonalTeamBuild
+    ? personalTeamBundleIdentifier!
+    : variant.iosBundleIdentifier;
+const appName = isSelfHostedBuild ? "T3 Code Self Hosted" : variant.appName;
+const appScheme = isSelfHostedBuild ? "t3code-selfhosted" : variant.scheme;
 
 const dmSansFonts = {
   regular: "@expo-google-fonts/dm-sans/400Regular/DMSans_400Regular.ttf",
   medium: "@expo-google-fonts/dm-sans/500Medium/DMSans_500Medium.ttf",
   bold: "@expo-google-fonts/dm-sans/700Bold/DMSans_700Bold.ttf",
 } as const;
-
-const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
-  "expo-widgets",
-  {
-    bundleIdentifier: `${iosBundleIdentifier}.widgets`,
-    groupIdentifier: `group.${iosBundleIdentifier}`,
-    enablePushNotifications: true,
-    // Agent activity can update many times an hour; without the
-    // frequent-updates entitlement iOS throttles the update budget sooner.
-    frequentUpdates: true,
-    widgets: [
-      {
-        name: "AgentActivity",
-        displayName: "Agent Activity",
-        description: "Shows the current state of active T3 Code agents.",
-        supportedFamilies: ["systemSmall", "systemMedium", "accessoryRectangular"],
-      },
-    ],
-  },
-];
 
 const sharingPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
   "expo-sharing",
@@ -141,7 +144,7 @@ const sharingPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
       // Personal Teams cannot sign App Groups or extension targets. Keep the
       // reduced-capability local build usable while release builds expose the
       // real system share target.
-      enabled: !isIosPersonalTeamBuild,
+      enabled: isIosSharingEnabled,
       extensionBundleIdentifier: `${iosBundleIdentifier}.sharing`,
       appGroupId: `group.${iosBundleIdentifier}`,
       activationRule: {
@@ -160,15 +163,22 @@ const sharingPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
   },
 ];
 
+const clerkPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
+  "@clerk/expo",
+  { theme: "./clerk-theme.json", appleSignIn: !isIosPersonalTeamBuild },
+];
+
 // These aliases match the fonts' PostScript names on iOS. Register the same
 // names on Android so React Native and the native composer use one set of
 // family names without waiting for runtime font loading.
 
 const config: ExpoConfig = {
-  name: variant.appName,
+  name: appName,
   slug: "t3-code",
   platforms: ["ios", "android"],
-  scheme: variant.scheme,
+  // Keep the established t3code:// alias in private builds so existing links
+  // continue to route back into the containing app.
+  scheme: isSelfHostedBuild ? [appScheme, "t3code"] : appScheme,
   version: "1.0.4",
   runtimeVersion: {
     // Development manifests resolve on every launch, so avoid fingerprint's
@@ -180,8 +190,10 @@ const config: ExpoConfig = {
   icon: variant.assets.appIcon,
   userInterfaceStyle: "automatic",
   updates: {
-    enabled: true,
-    url: "https://u.expo.dev/d763fcb8-d37c-41ea-a773-b54a0ab4a454",
+    enabled: !isSelfHostedBuild,
+    ...(!isSelfHostedBuild
+      ? { url: "https://u.expo.dev/d763fcb8-d37c-41ea-a773-b54a0ab4a454" }
+      : {}),
     checkAutomatically: "ON_LOAD",
     fallbackToCacheTimeout: 0,
   },
@@ -195,11 +207,10 @@ const config: ExpoConfig = {
     // Pin code signing to the T3 Tools team so non-interactive `expo run:ios`
     // does not fall back to a personal team (which cannot sign app groups,
     // Sign in with Apple, or push notification entitlements).
-    appleTeamId: "ARK85ZXQ4Z",
-    associatedDomains: [
-      `applinks:${variant.relyingParty}`,
-      `webcredentials:${variant.relyingParty}`,
-    ],
+    appleTeamId: isSelfHostedBuild ? selfHostedAppleTeamId : "ARK85ZXQ4Z",
+    associatedDomains: isSelfHostedBuild
+      ? []
+      : [`applinks:${variant.relyingParty}`, `webcredentials:${variant.relyingParty}`],
     infoPlist: {
       NSAppTransportSecurity: {
         NSAllowsArbitraryLoads: true,
@@ -269,20 +280,26 @@ const config: ExpoConfig = {
     ],
     "expo-secure-store",
     "expo-sqlite",
-    ...(isIosPersonalTeamBuild
-      ? [sharingPlugin]
-      : ["./plugins/withShareExtensionDisplayName.cjs", sharingPlugin]),
+    ...(isIosSharingEnabled
+      ? ["./plugins/withShareExtensionDisplayName.cjs", sharingPlugin]
+      : [sharingPlugin]),
     [
       "expo-notifications",
       {
         icon: variant.assets.androidNotificationIcon,
         color: variant.assets.androidNotificationColor,
-        mode: APP_VARIANT === "development" ? "development" : "production",
+        mode: isSelfHostedBuild
+          ? selfHostedApnsEnvironment === "sandbox"
+            ? "development"
+            : "production"
+          : APP_VARIANT === "development"
+            ? "development"
+            : "production",
       },
     ],
     // appleSignIn must be gated here: withoutIosPersonalTeamCapabilities.cjs runs before
     // plugins earlier in this array, so it cannot strip the entitlement Clerk would add.
-    ["@clerk/expo", { theme: "./clerk-theme.json", appleSignIn: !isIosPersonalTeamBuild }],
+    ...(!isSelfHostedBuild ? [clerkPlugin] : []),
     "expo-web-browser",
     [
       "expo-quick-actions",
@@ -343,12 +360,6 @@ const config: ExpoConfig = {
       },
     ],
     "./plugins/withIosCocoaPodsUuidCache.cjs",
-    // Must be listed BEFORE expo-widgets: same-type mods run last-registered-
-    // first, so registering earlier makes this plugin's mods run AFTER
-    // expo-widgets' — its dangerous mod wipes ios/ExpoWidgetsTarget/ (which
-    // would delete the asset catalog) and its xcodeproj mod creates the widget
-    // target (which must exist before the compile phase can be attached).
-    ...(!isIosPersonalTeamBuild ? ["./plugins/withWidgetLogoAsset.cjs", widgetsPlugin] : []),
     "./plugins/withIosSceneLifecycle.cjs",
     "./plugins/withAndroidCleartextTraffic.cjs",
     "./plugins/withAndroidGradleHeap.cjs",
@@ -361,32 +372,47 @@ const config: ExpoConfig = {
   extra: {
     appVariant: APP_VARIANT,
     iosPersonalTeamBuild: isIosPersonalTeamBuild,
+    selfHostedBuild: isSelfHostedBuild,
+    selfHostedApnsEnvironment,
     relay: {
-      url: repoEnv.T3CODE_RELAY_URL ?? null,
+      url: isSelfHostedBuild ? null : (repoEnv.T3CODE_RELAY_URL ?? null),
     },
     clerk: {
-      publishableKey: repoEnv.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? null,
-      jwtTemplate: repoEnv.EXPO_PUBLIC_CLERK_JWT_TEMPLATE ?? null,
+      publishableKey: isSelfHostedBuild
+        ? null
+        : (repoEnv.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? null),
+      jwtTemplate: isSelfHostedBuild ? null : (repoEnv.EXPO_PUBLIC_CLERK_JWT_TEMPLATE ?? null),
     },
     // Native Google sign-in credentials. @clerk/expo reads these from `extra`
     // under their exact env-var names (not nested), and its config plugin reads
     // the iOS URL scheme at prebuild to register it in Info.plist.
     // Unset values must be omitted (not null): the public manifest serializes
     // null to {}, which is truthy and would defeat Clerk's fallback checks.
-    EXPO_PUBLIC_CLERK_GOOGLE_WEB_CLIENT_ID: repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_WEB_CLIENT_ID,
-    EXPO_PUBLIC_CLERK_GOOGLE_IOS_CLIENT_ID: repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_IOS_CLIENT_ID,
-    EXPO_PUBLIC_CLERK_GOOGLE_ANDROID_CLIENT_ID: repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_ANDROID_CLIENT_ID,
-    EXPO_PUBLIC_CLERK_GOOGLE_IOS_URL_SCHEME: repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_IOS_URL_SCHEME,
+    ...(!isSelfHostedBuild
+      ? {
+          EXPO_PUBLIC_CLERK_GOOGLE_WEB_CLIENT_ID: repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_WEB_CLIENT_ID,
+          EXPO_PUBLIC_CLERK_GOOGLE_IOS_CLIENT_ID: repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_IOS_CLIENT_ID,
+          EXPO_PUBLIC_CLERK_GOOGLE_ANDROID_CLIENT_ID:
+            repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_ANDROID_CLIENT_ID,
+          EXPO_PUBLIC_CLERK_GOOGLE_IOS_URL_SCHEME: repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_IOS_URL_SCHEME,
+        }
+      : {}),
     observability: {
-      tracesUrl: repoEnv.EXPO_PUBLIC_OTLP_TRACES_URL ?? "https://api.axiom.co/v1/traces",
-      tracesDataset: repoEnv.EXPO_PUBLIC_OTLP_TRACES_DATASET ?? null,
-      tracesToken: repoEnv.EXPO_PUBLIC_OTLP_TRACES_TOKEN ?? null,
+      tracesUrl: isSelfHostedBuild
+        ? null
+        : (repoEnv.EXPO_PUBLIC_OTLP_TRACES_URL ?? "https://api.axiom.co/v1/traces"),
+      tracesDataset: isSelfHostedBuild ? null : (repoEnv.EXPO_PUBLIC_OTLP_TRACES_DATASET ?? null),
+      tracesToken: isSelfHostedBuild ? null : (repoEnv.EXPO_PUBLIC_OTLP_TRACES_TOKEN ?? null),
     },
-    eas: {
-      projectId: "d763fcb8-d37c-41ea-a773-b54a0ab4a454",
-    },
+    ...(!isSelfHostedBuild
+      ? {
+          eas: {
+            projectId: "d763fcb8-d37c-41ea-a773-b54a0ab4a454",
+          },
+        }
+      : {}),
   },
-  owner: "pingdotgg",
+  ...(!isSelfHostedBuild ? { owner: "pingdotgg" } : {}),
 };
 
 export default config;

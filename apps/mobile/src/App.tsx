@@ -9,6 +9,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { createStaticNavigation } from "@react-navigation/native";
 
 import { RegistryContext } from "@effect/atom-react";
+import { AgentAwarenessConnectionSync } from "./features/agent-awareness/AgentAwarenessConnectionSync";
 import { ConfirmDialogHost } from "./components/ConfirmDialogHost";
 import { CloudAuthProvider } from "./features/cloud/CloudAuthProvider";
 import { prepareNativeShowcaseCapture } from "./features/showcase/nativeShowcaseScene";
@@ -76,6 +77,7 @@ function AppContent() {
   return (
     <>
       <SplashScreenCoordinator />
+      <AgentAwarenessConnectionSync />
       <GestureHandlerRootView className="flex-1">
         <KeyboardProvider statusBarTranslucent>
           <SafeAreaProvider>

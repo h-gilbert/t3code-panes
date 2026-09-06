@@ -90,8 +90,6 @@ import {
   resolveSelectableModelSelection,
 } from "../../lib/modelOptions";
 import { resolveProviderInteractionMode } from "./legacy-plan-mode";
-import { deriveThreadTitleFromPrompt } from "../../lib/projectThreadStartTurn";
-import { armAgentAwarenessLiveActivityForLocalWork } from "../agent-awareness/remoteRegistration";
 import { enqueueThreadOutboxMessage } from "../../state/thread-outbox";
 import { removeThreadOutboxMessage } from "../../state/thread-outbox-removal";
 import { useRemoteConnectionStatus } from "../../state/use-remote-environment-registry";
@@ -988,15 +986,6 @@ export function NewTaskDraftScreen(props: {
     }
 
     flow.setSubmitting(true);
-    // Arm the lock-screen card before the async thread creation: backgrounding
-    // the app right after tapping submit would otherwise reject the foreground
-    // -only Activity start. If creation fails, the token registration's replay
-    // finds no work and ends the card within seconds.
-    armAgentAwarenessLiveActivityForLocalWork({
-      environmentId: selectedProject.environmentId,
-      threadTitle: deriveThreadTitleFromPrompt(initialMessageText),
-      projectTitle: selectedProject.title,
-    });
     const creationBranch = resolveProjectThreadCreationBranch({
       workspaceMode,
       selectedBranch: selectedBranchName,

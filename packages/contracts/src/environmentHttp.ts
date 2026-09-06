@@ -51,6 +51,10 @@ import {
   RelayEnvironmentHealthResponse,
   RelayEnvironmentLinkProof,
   RelayEnvironmentMintResponse,
+  RelayAgentActivityAggregateState,
+  RelayDeviceRegistrationRequest,
+  RelayDeviceUnregistrationParams,
+  RelayLiveActivityRegistrationRequest,
   RelayLinkProofRequest,
 } from "./relay.ts";
 
@@ -553,6 +557,61 @@ class EnvironmentPullRequestsHttpApi extends HttpApiGroup.make("pullRequests").a
   }).middleware(EnvironmentAuthenticatedAuth),
 ) {}
 
+export const EnvironmentNotificationRegistrationResult = Schema.Struct({
+  ok: Schema.Boolean,
+  aggregate: Schema.NullOr(RelayAgentActivityAggregateState),
+});
+export type EnvironmentNotificationRegistrationResult =
+  typeof EnvironmentNotificationRegistrationResult.Type;
+
+export const EnvironmentNotificationStatusResult = Schema.Struct({
+  configured: Schema.Boolean,
+  deviceRegistered: Schema.Boolean,
+  liveActivityRegistered: Schema.Boolean,
+});
+export type EnvironmentNotificationStatusResult = typeof EnvironmentNotificationStatusResult.Type;
+
+/** Direct, account-free APNs registration against a paired T3 environment. */
+export class EnvironmentNotificationsHttpApi extends HttpApiGroup.make("notifications")
+  .add(
+    HttpApiEndpoint.get("status", "/api/notifications/status", {
+      headers: OptionalBearerHeaders,
+      success: EnvironmentNotificationStatusResult,
+      error: EnvironmentScopedOperationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("registerDevice", "/api/notifications/device", {
+      headers: OptionalBearerHeaders,
+      payload: RelayDeviceRegistrationRequest,
+      success: EnvironmentNotificationRegistrationResult,
+      error: EnvironmentScopedOperationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.delete("unregisterDevice", "/api/notifications/device/:deviceId", {
+      headers: OptionalBearerHeaders,
+      params: RelayDeviceUnregistrationParams,
+      success: EnvironmentNotificationRegistrationResult,
+      error: EnvironmentScopedOperationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.post("registerLiveActivity", "/api/notifications/live-activity", {
+      headers: OptionalBearerHeaders,
+      payload: RelayLiveActivityRegistrationRequest,
+      success: EnvironmentNotificationRegistrationResult,
+      error: EnvironmentScopedOperationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  )
+  .add(
+    HttpApiEndpoint.get("agentActivity", "/api/notifications/agent-activity", {
+      headers: OptionalBearerHeaders,
+      success: EnvironmentNotificationRegistrationResult,
+      error: EnvironmentScopedOperationErrors,
+    }).middleware(EnvironmentAuthenticatedAuth),
+  ) {}
+
 class EnvironmentConnectHttpApi extends HttpApiGroup.make("connect")
   .add(
     HttpApiEndpoint.post("linkProof", "/api/connect/link-proof", {
@@ -619,4 +678,5 @@ export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentAuthHttpApi)
   .add(EnvironmentOrchestrationHttpApi)
   .add(EnvironmentPullRequestsHttpApi)
+  .add(EnvironmentNotificationsHttpApi)
   .add(EnvironmentConnectHttpApi) {}

@@ -1,4 +1,5 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
+import Constants from "expo-constants";
 import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
 import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { AsyncResult } from "effect/unstable/reactivity";
@@ -31,9 +32,12 @@ export function ConnectionsNewRouteScreen({
   } = useRemoteConnections();
   const navigation = useNavigation();
   const params = route.params ?? {};
-  // Deep-link prefill exists for development automation only. A production
-  // link must not arrive with attacker-chosen host and token already filled.
-  const routePairingUrl = __DEV__ ? (params.pairingUrl?.trim() ?? "") : "";
+  // Private self-hosted builds may prefill a one-time pairing credential so
+  // their owner can hand off a direct environment link. Automatic submission
+  // stays development-only so a production deep link cannot silently connect
+  // the app to an attacker-chosen host.
+  const allowsPairingPrefill = __DEV__ || Constants.expoConfig?.extra?.selfHostedBuild === true;
+  const routePairingUrl = allowsPairingPrefill ? (params.pairingUrl?.trim() ?? "") : "";
   const shouldAutoConnect =
     __DEV__ &&
     routePairingUrl.length > 0 &&
