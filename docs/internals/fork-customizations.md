@@ -51,9 +51,10 @@ requirements; changing assertions to accept a regression is not a resolution.
 
 ## Mobile thread order
 
-The mobile home list and iPad sidebar sort active threads by latest activity,
-including user messages and agent updates. Their relative age labels use the
-same timestamp. Preserve pinned ordering and the separate snoozed and settled
+The mobile home list and iPad sidebar sort active threads by the latest user
+prompt or turn completion. Intermediate tool activity, streaming messages, and
+metadata updates must not reorder rows or reset their relative age labels.
+Explicitly un-settling a thread still brings it to the top. Preserve pinned ordering and the separate snoozed and settled
 sections. This differs from the web and desktop creation-based order. Keep the
 private iOS source in sync when changing this behavior.
 

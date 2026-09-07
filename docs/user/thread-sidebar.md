@@ -25,9 +25,9 @@ Restoring a thread returns it to the open list and starts a fresh settlement per
 active thread first, including the time when its latest agent turn finished. Archived threads do
 not appear in `/resume` until you restore them.
 
-On mobile, the default active list puts the most recently active threads first. New messages,
-agent replies, and tool activity move a thread up. Relative time labels use that same activity
-time. Pinned threads keep their chosen order, and snoozed and settled threads have separate sections.
+On mobile, a new prompt or a completed turn moves a thread up in the default active list.
+Intermediate tool activity and streaming replies keep its position steady. Relative time labels
+use the latest prompt or turn completion. Pinned threads keep their chosen order, and snoozed and settled threads have separate sections.
 
 On web and desktop, the active list shows the newest threads up to your thread preview limit. Older threads remain
 available through sidebar search. If you open an older thread from search or a link, its row stays
