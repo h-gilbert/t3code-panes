@@ -28,6 +28,7 @@ import {
   resolveThreadListV2SnoozeMenuSelection,
   resolveThreadListV2SnoozeGateExpiryMs,
   resolveThreadListV2Status,
+  threadListV2ActivityTimestamp,
   resolveThreadListV2SwipeActions,
   type ThreadListV2Status,
 } from "./threadListV2";
@@ -58,7 +59,7 @@ const STATUS_LABEL_BY_STATUS: Partial<
 };
 
 function threadTimeLabel(thread: EnvironmentThreadShell): string {
-  return relativeTime(thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt);
+  return relativeTime(threadListV2ActivityTimestamp(thread));
 }
 
 // Menus keep lifecycle and title regeneration together. Archive keeps its

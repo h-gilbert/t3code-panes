@@ -258,7 +258,47 @@ describe("resolveThreadListV2SnoozeGateExpiryMs", () => {
 });
 
 describe("sortThreadsForListV2", () => {
-  it("orders by creation time, newest first, ignoring activity", () => {
+  it("orders by fresh user messages and agent activity, regardless of working status", () => {
+    const threads = [
+      {
+        id: "working",
+        createdAt: "2026-06-01T08:00:00.000Z",
+        updatedAt: "2026-06-01T09:00:00.000Z",
+        status: "running",
+      },
+      {
+        id: "reply",
+        createdAt: "2026-06-01T07:00:00.000Z",
+        latestUserMessageAt: "2026-06-01T08:00:00.000Z",
+        updatedAt: "2026-06-01T13:00:00.000Z",
+        status: "ready",
+      },
+      {
+        id: "message",
+        createdAt: "2026-06-01T06:00:00.000Z",
+        latestUserMessageAt: "2026-06-01T14:00:00.000Z",
+        updatedAt: "2026-06-01T10:00:00.000Z",
+        status: "ready",
+      },
+    ];
+    expect(sortThreadsForListV2(threads).map((thread) => thread.id)).toEqual([
+      "message",
+      "reply",
+      "working",
+    ]);
+    expect(threads.map((thread) => thread.id)).toEqual(["working", "reply", "message"]);
+  });
+
+  it("ignores invalid activity timestamps and breaks equal times by ID", () => {
+    const sorted = sortThreadsForListV2([
+      { id: "b", createdAt: "2026-06-01T12:00:00.000Z", updatedAt: "invalid" },
+      { id: "old", createdAt: "2026-06-01T08:00:00.000Z", latestUserMessageAt: "invalid" },
+      { id: "a", createdAt: "2026-06-01T12:00:00.000Z" },
+    ]);
+    expect(sorted.map((thread) => thread.id)).toEqual(["a", "b", "old"]);
+  });
+
+  it("falls back to creation time when there is no activity", () => {
     const sorted = sortThreadsForListV2([
       { id: "oldest", createdAt: "2026-06-01T08:00:00.000Z" },
       { id: "newest", createdAt: "2026-06-01T12:00:00.000Z" },
@@ -324,7 +364,7 @@ describe("buildThreadListV2Items", () => {
       now: NOW,
     });
 
-    // Same createdAt → static sort tiebreaks by id; the point is the woken
+    // Same activity time → sort tiebreaks by id; the point is the woken
     // thread is BACK in the card block and the snoozed one is gone.
     expect(layout.items.map((item) => item.thread.id)).toEqual(["active", "woken"]);
     expect(layout.snoozedCount).toBe(1);
@@ -618,14 +658,14 @@ describe("buildThreadListV2Items", () => {
     expect(layout.settledShelfHeaderIndex).toBe(0);
   });
 
-  it("keeps cards in creation order while settled sorts by recency", () => {
+  it("moves an older active thread above a newer thread after activity", () => {
     const { items } = buildThreadListV2Items({
       threads: [
         makeThread({
           id: ThreadId.make("older-created"),
           title: "Older",
           createdAt: "2026-06-01T08:00:00.000Z",
-          updatedAt: NOW, // recent activity must NOT promote it
+          updatedAt: NOW, // a fresh reply or tool event promotes the older thread
         }),
         makeThread({
           id: ThreadId.make("newer-created"),
@@ -638,7 +678,7 @@ describe("buildThreadListV2Items", () => {
       now: NOW,
     });
 
-    expect(items.map((item) => item.thread.id)).toEqual(["newer-created", "older-created"]);
+    expect(items.map((item) => item.thread.id)).toEqual(["older-created", "newer-created"]);
   });
 
   it("sorts settled threads by their persisted settlement timestamp", () => {
