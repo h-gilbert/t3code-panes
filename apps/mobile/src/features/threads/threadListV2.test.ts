@@ -22,6 +22,7 @@ import {
   resolveThreadListV2Status,
   resolveThreadListV2SwipeActions,
   sortThreadsForListV2,
+  threadListV2ActivityTimestamp,
 } from "./threadListV2";
 
 const environmentId = EnvironmentId.make("environment-1");
@@ -258,7 +259,41 @@ describe("resolveThreadListV2SnoozeGateExpiryMs", () => {
 });
 
 describe("sortThreadsForListV2", () => {
-  it("orders by fresh user messages and agent activity, regardless of working status", () => {
+  it("holds row order and age during a turn, then moves on completion or a new prompt", () => {
+    const older = {
+      id: "older",
+      createdAt: "2026-06-01T06:00:00.000Z",
+      latestUserMessageAt: "2026-06-01T08:00:00.000Z",
+      latestTurn: { completedAt: null as string | null },
+    };
+    const newer = {
+      id: "newer",
+      createdAt: "2026-06-01T09:00:00.000Z",
+      latestUserMessageAt: "2026-06-01T10:00:00.000Z",
+    };
+    for (const updatedAt of ["2026-06-01T11:00:00.000Z", "2026-06-01T12:00:00.000Z"]) {
+      const streaming = { ...older, updatedAt };
+      expect(sortThreadsForListV2([streaming, newer]).map((thread) => thread.id)).toEqual([
+        "newer",
+        "older",
+      ]);
+      expect(threadListV2ActivityTimestamp(streaming)).toBe(older.latestUserMessageAt);
+    }
+    const completed = { ...older, latestTurn: { completedAt: "2026-06-01T13:00:00.000Z" } };
+    expect(sortThreadsForListV2([completed, newer]).map((thread) => thread.id)).toEqual([
+      "older",
+      "newer",
+    ]);
+    expect(threadListV2ActivityTimestamp(completed)).toBe(completed.latestTurn.completedAt);
+    const prompted = { ...newer, latestUserMessageAt: "2026-06-01T14:00:00.000Z" };
+    expect(sortThreadsForListV2([completed, prompted]).map((thread) => thread.id)).toEqual([
+      "newer",
+      "older",
+    ]);
+    expect(threadListV2ActivityTimestamp(prompted)).toBe(prompted.latestUserMessageAt);
+  });
+
+  it("orders by user prompts and turn completions, regardless of working status", () => {
     const threads = [
       {
         id: "working",
@@ -270,7 +305,8 @@ describe("sortThreadsForListV2", () => {
         id: "reply",
         createdAt: "2026-06-01T07:00:00.000Z",
         latestUserMessageAt: "2026-06-01T08:00:00.000Z",
-        updatedAt: "2026-06-01T13:00:00.000Z",
+        updatedAt: "2026-06-01T15:00:00.000Z",
+        latestTurn: { completedAt: "2026-06-01T13:00:00.000Z" },
         status: "ready",
       },
       {
@@ -291,7 +327,7 @@ describe("sortThreadsForListV2", () => {
 
   it("ignores invalid activity timestamps and breaks equal times by ID", () => {
     const sorted = sortThreadsForListV2([
-      { id: "b", createdAt: "2026-06-01T12:00:00.000Z", updatedAt: "invalid" },
+      { id: "b", createdAt: "2026-06-01T12:00:00.000Z", latestTurn: { completedAt: "invalid" } },
       { id: "old", createdAt: "2026-06-01T08:00:00.000Z", latestUserMessageAt: "invalid" },
       { id: "a", createdAt: "2026-06-01T12:00:00.000Z" },
     ]);
@@ -658,14 +694,22 @@ describe("buildThreadListV2Items", () => {
     expect(layout.settledShelfHeaderIndex).toBe(0);
   });
 
-  it("moves an older active thread above a newer thread after activity", () => {
+  it("moves an older active thread above a newer thread when its turn completes", () => {
     const { items } = buildThreadListV2Items({
       threads: [
         makeThread({
           id: ThreadId.make("older-created"),
           title: "Older",
           createdAt: "2026-06-01T08:00:00.000Z",
-          updatedAt: NOW, // a fresh reply or tool event promotes the older thread
+          updatedAt: NOW,
+          latestTurn: {
+            turnId: TurnId.make("completed-turn"),
+            state: "completed",
+            requestedAt: "2026-06-01T08:00:00.000Z",
+            startedAt: "2026-06-01T08:00:01.000Z",
+            completedAt: NOW,
+            assistantMessageId: null,
+          },
         }),
         makeThread({
           id: ThreadId.make("newer-created"),

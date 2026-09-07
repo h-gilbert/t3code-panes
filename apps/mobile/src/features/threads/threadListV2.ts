@@ -151,16 +151,21 @@ function parseTimestampMs(isoDate: string): number {
 
 type ThreadActivityInput = {
   readonly createdAt: string;
-  readonly updatedAt?: string | null;
+  readonly latestTurn?: { readonly completedAt: string | null } | null;
   readonly latestUserMessageAt?: string | null;
   readonly unsettledAt?: string | null;
 };
 
-/** Use the same activity timestamp for row order and its relative age. */
+/** Prompts and turn completions move rows; streaming and tool updates do not.
+ * Explicit un-settle still brings a thread back to the top. Labels share this timestamp. */
 export function threadListV2ActivityTimestamp(thread: ThreadActivityInput): string {
   let latest = thread.createdAt;
   let latestMs = parseTimestampMs(latest);
-  for (const candidate of [thread.updatedAt, thread.latestUserMessageAt, thread.unsettledAt]) {
+  for (const candidate of [
+    thread.latestUserMessageAt,
+    thread.latestTurn?.completedAt,
+    thread.unsettledAt,
+  ]) {
     if (candidate == null) continue;
     const timestamp = parseTimestampMs(candidate);
     if (timestamp > latestMs) {
