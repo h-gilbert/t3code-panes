@@ -14,7 +14,7 @@ transition. You can resume or un-settle the thread later; its history remains av
 or terminal resources start again only when new work needs them.
 
 When you un-settle a thread, it returns to the top of the active list so you can find it right
-away. Its timestamps do not change. Other threads keep their positions.
+away. On web and desktop, other threads keep their positions.
 
 T3 Code archives an explicitly settled thread after it has remained settled for seven days. New
 activity un-settles it and cancels that pending archive. Archived threads remain available in
@@ -25,7 +25,11 @@ Restoring a thread returns it to the open list and starts a fresh settlement per
 active thread first, including the time when its latest agent turn finished. Archived threads do
 not appear in `/resume` until you restore them.
 
-The active list shows the newest threads up to your thread preview limit. Older threads remain
+On mobile, the default active list puts the most recently active threads first. New messages,
+agent replies, and tool activity move a thread up. Relative time labels use that same activity
+time. Pinned threads keep their chosen order, and snoozed and settled threads have separate sections.
+
+On web and desktop, the active list shows the newest threads up to your thread preview limit. Older threads remain
 available through sidebar search. If you open an older thread from search or a link, its row stays
 visible while it is open without making the list taller.
 

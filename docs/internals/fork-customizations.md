@@ -49,6 +49,14 @@ Run the affected tests, starting with `previewMiniPlayerStore.test.ts`,
 `hostedBrowserWebviewStyle.test.ts` in `apps/web/src`. Tests must protect these
 requirements; changing assertions to accept a regression is not a resolution.
 
+## Mobile thread order
+
+The mobile home list and iPad sidebar sort active threads by latest activity,
+including user messages and agent updates. Their relative age labels use the
+same timestamp. Preserve pinned ordering and the separate snoozed and settled
+sections. This differs from the web and desktop creation-based order. Keep the
+private iOS source in sync when changing this behavior.
+
 ## Other custom behavior
 
 - Preserve pane workspaces, independent window restoration, thread settlement,
