@@ -12,6 +12,7 @@ import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as References from "effect/References";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import { TestClock } from "effect/testing";
@@ -495,6 +496,42 @@ describe("PreviewManager", () => {
           expect(preview.off).toHaveBeenCalledWith("before-input-event", expect.any(Function));
         }),
       ),
+  );
+
+  effectIt.effect(
+    "logs delayed guest focus with its completed action and removes focus listeners",
+    () => {
+      let onFocusRecord: ((record: Record<string, unknown>) => void) | undefined;
+      const logger = Logger.make(({ fiber }) => {
+        const annotations = fiber.getRef(References.CurrentLogAnnotations);
+        if (annotations.event === "guest-focus") onFocusRecord?.(annotations);
+      });
+      return withManager((manager) =>
+        Effect.gen(function* () {
+          const preview = makeFaviconWebContents();
+          fromId.mockReturnValue(preview.webContents);
+          getFocusedWebContents.mockReturnValue(preview.webContents);
+          const tabId = '["env","thread","epoch","tab_1"]';
+          yield* manager.createTab(tabId);
+          yield* manager.registerWebview(tabId, 42);
+          yield* manager.automationPress(tabId, { key: "Escape" });
+          const record = yield* Effect.callback<Record<string, unknown>>((resume) => {
+            onFocusRecord = (value) => resume(Effect.succeed(value));
+            preview.listeners.get("focus")!();
+          });
+          expect(record).toMatchObject({
+            component: "focus-diagnostics",
+            tabId,
+            webContentsId: 42,
+            focusedWebContentsId: 42,
+            lastAction: { name: "press", webContentsId: 42, completedAt: expect.any(Number) },
+          });
+          yield* manager.closeTab(tabId);
+          expect(preview.off).toHaveBeenCalledWith("focus", expect.any(Function));
+          expect(preview.off).toHaveBeenCalledWith("blur", expect.any(Function));
+        }),
+      ).pipe(Effect.provide(Logger.layer([logger], { mergeWithExisting: false })));
+    },
   );
 
   effectIt.effect("reports an unregistered webview as temporarily unavailable", () =>

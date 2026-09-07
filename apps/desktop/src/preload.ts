@@ -8,8 +8,12 @@ import { exposeClerkBridge } from "@clerk/electron/preload";
 import { contextBridge, ipcRenderer } from "electron";
 
 import * as IpcChannels from "./ipc/channels.ts";
+import { observeRendererFocus } from "./window/RendererFocusDiagnostics.ts";
 
 exposeClerkBridge({ passkeys: true });
+observeRendererFocus(window, (evidence) =>
+  ipcRenderer.send(IpcChannels.FOCUS_DIAGNOSTICS_CHANNEL, evidence),
+);
 
 function unwrapEnsureSshEnvironmentResult(result: unknown) {
   if (

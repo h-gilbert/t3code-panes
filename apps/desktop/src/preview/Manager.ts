@@ -59,6 +59,8 @@ import * as Scope from "effect/Scope";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import { makeComponentLogger } from "../app/DesktopObservability.ts";
+import { makeFocusDiagnostics } from "../window/FocusDiagnostics.ts";
 import { PREVIEW_PICTURE_IN_PICTURE_FRAME_CHANNEL } from "../ipc/channels.ts";
 import { buildAutofillExpression, decodeAutofillOutcome } from "./AutofillScript.ts";
 import * as BrowserCredentials from "./BrowserCredentials.ts";
@@ -500,6 +502,26 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   const parentScope = yield* Scope.Scope;
   const context = yield* Effect.context<never>();
   const runFork = Effect.runForkWith(context);
+  const clock = yield* Clock.Clock;
+  const focusLogger = makeComponentLogger("focus-diagnostics");
+  const focusDiagnostics = new Map<string, ReturnType<typeof makeFocusDiagnostics>>();
+  const tabFocusDiagnostics = (tabId: string) => {
+    let diagnostics = focusDiagnostics.get(tabId);
+    if (!diagnostics) {
+      diagnostics = makeFocusDiagnostics(
+        () => clock.currentTimeMillisUnsafe(),
+        (record) => {
+          runFork(
+            focusLogger
+              .logInfo("preview focus evidence", { tabId, ...record })
+              .pipe(Effect.withSpan("desktop.focus.preview", { attributes: { tabId, ...record } })),
+          );
+        },
+      );
+      focusDiagnostics.set(tabId, diagnostics);
+    }
+    return diagnostics;
+  };
   const resolvedArtifactDirectory = path.resolve(artifactDirectory);
   const playwrightInstallExpression = yield* Effect.cached(
     playwrightInjectedRuntimeInstallExpression(),
@@ -1247,7 +1269,12 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           );
         },
       );
-      return yield* use(send, sendCleanup);
+      const finishFocusAction = tabFocusDiagnostics(tabId).startAction({
+        id: actionEvent.id,
+        name: action,
+        webContentsId: wc.id,
+      });
+      return yield* use(send, sendCleanup).pipe(Effect.ensuring(Effect.sync(finishFocusAction)));
     });
     const finalize = Effect.fn("PreviewManager.finalizeControlAction")(function* (
       exit: Exit.Exit<A, PreviewManagerError>,
@@ -1513,6 +1540,15 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       if (Option.isSome(next)) yield* emitIfCurrent(tabId, next.value);
     });
     const sync = () => runFork(syncState(true));
+    const focusEvidence = tabFocusDiagnostics(tabId);
+    const recordFocus = (event: string) => {
+      focusEvidence.record(event, {
+        webContentsId: wc.id,
+        focusedWebContentsId: webContents.getFocusedWebContents()?.id ?? null,
+      });
+    };
+    const focused = () => recordFocus("guest-focus");
+    const blurred = () => recordFocus("guest-blur");
     const syncNavigation = () =>
       runFork(
         Effect.all(
@@ -1539,6 +1575,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       event: Electron.Event<Electron.WebContentsDidStartNavigationEventParams>,
     ) => {
       if (event.isMainFrame && !event.isSameDocument) cancelFaviconCapture();
+      if (event.isMainFrame) recordFocus("navigation-start");
     };
     const audioStateChanged = (
       event: Electron.Event<Electron.WebContentsAudioStateChangedEventParams>,
@@ -1662,6 +1699,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       if (isPreviewInputSignal(rawSignal) && (yield* consumeExpectedAgentInput(tabId, rawSignal))) {
         return;
       }
+      if (isPreviewInputSignal(rawSignal)) focusEvidence.humanInput(rawSignal.kind);
       yield* Ref.update(controlEpochRef, (epochs) =>
         replaceMap(epochs, (copy) => {
           copy.set(tabId, (epochs.get(tabId) ?? 0) + 1);
@@ -1789,6 +1827,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       scope,
       attempt({ operation: "detachListeners", tabId, webContentsId: wc.id }, () => {
         cancelFaviconCapture();
+        wc.off("focus", focused);
+        wc.off("blur", blurred);
         wc.off("did-start-navigation", navigationStarted);
         wc.off("did-navigate", syncNavigation);
         wc.off("did-navigate-in-page", syncInPageNavigation);
@@ -1806,6 +1846,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     );
     const install = Effect.fn("PreviewManager.installWebContentsListeners")(function* () {
       yield* attempt({ operation: "attachListeners", tabId, webContentsId: wc.id }, () => {
+        wc.on("focus", focused);
+        wc.on("blur", blurred);
         wc.on("did-start-navigation", navigationStarted);
         wc.on("did-navigate", syncNavigation);
         wc.on("did-navigate-in-page", syncInPageNavigation);
@@ -1930,6 +1972,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
 
   const closeTabUnlocked = Effect.fn("PreviewManager.closeTabUnlocked")(function* (tabId: string) {
     if (!(yield* SynchronizedRef.get(tabsRef)).has(tabId)) return;
+    focusDiagnostics.delete(tabId);
     yield* Effect.all(
       [
         cancelPickElement(tabId),
@@ -3477,6 +3520,10 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       )
         return;
       previouslyFocused.focus();
+      tabFocusDiagnostics(tabId).record("click-focus-restored", {
+        webContentsId: wc.id,
+        restoredWebContentsId: previouslyFocused.id,
+      });
     };
     // Restore in the native focus callback, before waiting for the CDP click
     // response. Restoring only after mouseReleased leaves a typing gap.
