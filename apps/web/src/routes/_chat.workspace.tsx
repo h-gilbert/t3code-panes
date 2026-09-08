@@ -27,7 +27,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 
 import { ChatViewContent, shouldTypeToFocusComposer } from "../components/ChatView";
 import type { ChatComposerHandle } from "../components/chat/ChatComposer";
-import { threadChangeRequestSnapshotsAtom } from "../components/ThreadStatusIndicators";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider";
 import { Button } from "../components/ui/button";
@@ -623,7 +622,6 @@ export function ProjectPaneWorkspace({
   const projects = useProjects();
   const threads = useThreadShells();
   const serverConfigs = useServerConfigs();
-  const changeRequestSnapshotByKey = useAtomValue(threadChangeRequestSnapshotsAtom);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { isMacosDesktop, isWindowFullscreen } = useDesktopFullscreen();
@@ -661,7 +659,7 @@ export function ProjectPaneWorkspace({
         return thread.settledOverride === "settled" ? [threadKey] : [];
       }),
     );
-  }, [changeRequestSnapshotByKey, nowMinute, serverConfigs, threads]);
+  }, [nowMinute, serverConfigs, threads]);
   const availableThreads = useMemo(
     () =>
       buildWorkspaceThreadPickerItems({

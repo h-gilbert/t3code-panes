@@ -96,7 +96,7 @@ const SelfHostedNotificationOperation = Schema.Literals([
   "read-aggregate",
 ]);
 
-export class SelfHostedNotificationError extends Schema.TaggedErrorClass<SelfHostedNotificationError>()(
+export class SelfHostedNotificationError extends Schema.TaggedError<SelfHostedNotificationError>()(
   "SelfHostedNotificationError",
   {
     operation: SelfHostedNotificationOperation,

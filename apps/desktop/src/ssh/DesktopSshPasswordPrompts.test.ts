@@ -98,6 +98,7 @@ function makeElectronWindowLayer(window: ReturnType<typeof makeTestWindow>["wind
       fromWebContents: () => Effect.succeed(Option.none()),
       setMain: () => Effect.void,
       clearMain: () => Effect.void,
+      prepareReveal: () => Effect.succeed(false),
       reveal: () => Effect.void,
       sendAll: () => Effect.void,
       destroyAll: Effect.void,

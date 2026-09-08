@@ -20,7 +20,7 @@ import {
 } from "../notifications/config.ts";
 import { resolveCliAuthConfig, authLocationFlags, type CliAuthLocationFlags } from "./config.ts";
 
-class ApnsPrivateKeyInvalidError extends Schema.TaggedErrorClass<ApnsPrivateKeyInvalidError>()(
+class ApnsPrivateKeyInvalidError extends Schema.TaggedError<ApnsPrivateKeyInvalidError>()(
   "ApnsPrivateKeyInvalidError",
   { path: Schema.String },
 ) {

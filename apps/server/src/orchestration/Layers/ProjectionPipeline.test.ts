@@ -8,6 +8,7 @@ import {
   MessageId,
   ProjectId,
   ThreadId,
+  ThreadLinkedPullRequest,
   TurnId,
   ProviderInstanceId,
 } from "@t3tools/contracts";
@@ -18,6 +19,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { makeSqlStatementCounter } from "../../../integration/SqlStatementCounter.integration.ts";
@@ -59,6 +61,9 @@ const exists = (filePath: string) =>
   });
 
 const BaseTestLayer = makeProjectionPipelinePrefixedTestLayer("t3-projection-pipeline-test-");
+const encodeThreadLinkedPullRequest = Schema.encodeSync(
+  Schema.fromJsonString(ThreadLinkedPullRequest),
+);
 
 it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-cursor-batch-")))(
   "OrchestrationProjectionPipeline cursor batches",
@@ -199,6 +204,93 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-import-shell-")
         });
         yield* projectionPipeline.projectEvent(sessionEvent);
         assert.deepEqual(yield* readLatestUserMessageAt, [{ latestUserMessageAt: null }]);
+      }),
+    );
+  },
+);
+
+it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-branch-pr-projection-")))(
+  "branch pull request projection",
+  (it) => {
+    it.effect("persists branch pull request updates without changing manual links", () =>
+      Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const eventStore = yield* OrchestrationEventStore;
+        const sql = yield* SqlClient.SqlClient;
+        const now = "2026-01-01T00:00:00.000Z";
+        const threadId = ThreadId.make("thread-pull-request");
+        const projectId = ProjectId.make("project-pull-request");
+        const eventFields = {
+          aggregateKind: "thread" as const,
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: null,
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+        };
+        const created = yield* eventStore.append({
+          ...eventFields,
+          type: "thread.created",
+          eventId: EventId.make("evt-pull-request-created"),
+          payload: {
+            threadId,
+            projectId,
+            title: "Pull request thread",
+            modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: "feature",
+            worktreePath: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+        yield* projectionPipeline.projectEvent(created);
+        const linkedPullRequest = {
+          projectId,
+          repository: "pingdotgg/t3code",
+          number: 42,
+          url: "https://github.com/pingdotgg/t3code/pull/42",
+        };
+        const branchPullRequest = {
+          ...linkedPullRequest,
+          number: 43,
+          url: "https://github.com/pingdotgg/t3code/pull/43",
+        };
+        const updates = [
+          { payload: { linkedPullRequest, branchPullRequest }, expected: branchPullRequest },
+          { payload: { title: "Renamed thread" }, expected: branchPullRequest },
+          { payload: { branchPullRequest: null }, expected: null },
+        ];
+
+        for (const [index, update] of updates.entries()) {
+          const event = yield* eventStore.append({
+            ...eventFields,
+            type: "thread.meta-updated",
+            eventId: EventId.make(`evt-pull-request-update-${index}`),
+            payload: { threadId, updatedAt: now, ...update.payload },
+          });
+          yield* projectionPipeline.projectEvent(event);
+
+          const rows = yield* sql<{
+            readonly linkedPullRequest: string | null;
+            readonly branchPullRequest: string | null;
+          }>`
+          SELECT
+            linked_pull_request_json AS "linkedPullRequest",
+            branch_pull_request_json AS "branchPullRequest"
+          FROM projection_threads
+          WHERE thread_id = ${threadId}
+        `;
+          assert.deepEqual(rows, [
+            {
+              linkedPullRequest: encodeThreadLinkedPullRequest(linkedPullRequest),
+              branchPullRequest:
+                update.expected === null ? null : encodeThreadLinkedPullRequest(update.expected),
+            },
+          ]);
+        }
       }),
     );
   },
@@ -396,6 +488,48 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       yield* sql`DROP TRIGGER count_thread_shell_updates`;
       yield* sql`DROP TABLE thread_shell_updates`;
 
+      // Replayed order events must survive later lifecycle upserts, whose
+      // complete SQL row writes otherwise risk dropping the placement.
+      const orderUpdatedAt = "2026-01-01T00:00:00.200Z";
+      const orderEvents = [
+        { type: "thread.meta-updated", payload: { activeOrderKey: "gm" } },
+        { type: "thread.pinned", payload: { pinnedAt: now, pinOrderKey: "m" } },
+        {
+          type: "thread.snoozed",
+          payload: { snoozedAt: now, snoozedUntil: "2026-01-02T00:00:00.000Z" },
+        },
+        { type: "thread.unsnoozed", payload: { reason: "user" } },
+        { type: "thread.unpinned", payload: {} },
+        { type: "thread.meta-updated", payload: { title: "Renamed" } },
+      ] as const;
+      for (const [index, event] of orderEvents.entries()) {
+        yield* eventStore.append({
+          type: event.type,
+          eventId: EventId.make(`evt-active-order-${index}`),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-1"),
+          occurredAt: "2026-01-01T00:00:00.500Z",
+          commandId: CommandId.make(`cmd-active-order-${index}`),
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+          payload: {
+            ...event.payload,
+            threadId: ThreadId.make("thread-1"),
+            updatedAt: orderUpdatedAt,
+          },
+        });
+        yield* projectionPipeline.bootstrap;
+        const rows = yield* sql<{
+          readonly activeOrderKey: string | null;
+          readonly updatedAt: string;
+        }>`
+          SELECT active_order_key AS "activeOrderKey", updated_at AS "updatedAt"
+          FROM projection_threads WHERE thread_id = 'thread-1'
+        `;
+        assert.deepEqual(rows, [{ activeOrderKey: "gm", updatedAt: orderUpdatedAt }]);
+      }
+
       // Settled lifecycle through the DB pipeline: thread.settled writes the
       // override + timestamp, thread.unsettled(user) flips to the active pin.
       yield* eventStore.append({
@@ -420,16 +554,23 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
         readonly settledOverride: string | null;
         readonly settledAt: string | null;
         readonly unsettledAt: string | null;
+        readonly activeOrderKey: string | null;
       }>`
         SELECT
           settled_override AS "settledOverride",
           settled_at AS "settledAt",
-          unsettled_at AS "unsettledAt"
+          unsettled_at AS "unsettledAt",
+          active_order_key AS "activeOrderKey"
         FROM projection_threads
         WHERE thread_id = 'thread-1'
       `;
       assert.deepEqual(settledRows, [
-        { settledOverride: "settled", settledAt: "2026-01-01T00:00:01.000Z", unsettledAt: null },
+        {
+          settledOverride: "settled",
+          settledAt: "2026-01-01T00:00:01.000Z",
+          unsettledAt: null,
+          activeOrderKey: null,
+        },
       ]);
 
       yield* eventStore.append({
@@ -454,11 +595,13 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
         readonly settledOverride: string | null;
         readonly settledAt: string | null;
         readonly unsettledAt: string | null;
+        readonly activeOrderKey: string | null;
       }>`
         SELECT
           settled_override AS "settledOverride",
           settled_at AS "settledAt",
-          unsettled_at AS "unsettledAt"
+          unsettled_at AS "unsettledAt",
+          active_order_key AS "activeOrderKey"
         FROM projection_threads
         WHERE thread_id = 'thread-1'
       `;
@@ -469,6 +612,7 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
           settledOverride: "active",
           settledAt: null,
           unsettledAt: "2026-01-01T00:00:02.000Z",
+          activeOrderKey: null,
         },
       ]);
     }),
@@ -2697,7 +2841,7 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
     }),
   );
 
-  it.effect("maintains shell summaries without reading message bodies", () =>
+  it.effect("maintains shell summaries without decoding message or plan bodies", () =>
     Effect.gen(function* () {
       const projectionPipeline = yield* OrchestrationProjectionPipeline;
       const eventStore = yield* OrchestrationEventStore;
@@ -2923,12 +3067,13 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
           ('summary-other-thread', 'thread-shell-summary-other', NULL, 'pending', NULL,
            '2026-03-01T08:00:06.000Z', NULL)
       `;
+      // Empty markdown must not be decoded when the shell only needs plan status.
       yield* sql`
         INSERT INTO projection_thread_proposed_plans (
           plan_id, thread_id, turn_id, plan_markdown, implemented_at,
           implementation_thread_id, created_at, updated_at
         ) VALUES (
-          'summary-plan', 'thread-shell-summary', 'turn-shell-summary-1', '# Plan', NULL,
+          'summary-plan', 'thread-shell-summary', 'turn-shell-summary-1', '', NULL,
           NULL, '2026-03-01T08:00:06.000Z', '2026-03-01T08:00:06.000Z'
         )
       `;
@@ -3020,18 +3165,18 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
 
       yield* appendAndProject({
         type: "project.created",
-        eventId: EventId.make("evt-shell-summary-1"),
+        eventId: EventId.make("evt-shell-summary-bodies-1"),
         aggregateKind: "project",
-        aggregateId: ProjectId.make("project-shell-summary"),
+        aggregateId: ProjectId.make("project-shell-summary-bodies"),
         occurredAt: "2026-03-01T08:00:00.000Z",
-        commandId: CommandId.make("cmd-shell-summary-1"),
+        commandId: CommandId.make("cmd-shell-summary-bodies-1"),
         causationEventId: null,
-        correlationId: CorrelationId.make("cmd-shell-summary-1"),
+        correlationId: CorrelationId.make("cmd-shell-summary-bodies-1"),
         metadata: {},
         payload: {
-          projectId: ProjectId.make("project-shell-summary"),
+          projectId: ProjectId.make("project-shell-summary-bodies"),
           title: "Project Shell Summary",
-          workspaceRoot: "/tmp/project-shell-summary",
+          workspaceRoot: "/tmp/project-shell-summary-bodies",
           defaultModelSelection: null,
           scripts: [],
           createdAt: "2026-03-01T08:00:00.000Z",
@@ -3041,17 +3186,17 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
 
       yield* appendAndProject({
         type: "thread.created",
-        eventId: EventId.make("evt-shell-summary-2"),
+        eventId: EventId.make("evt-shell-summary-bodies-2"),
         aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-shell-summary"),
+        aggregateId: ThreadId.make("thread-shell-summary-bodies"),
         occurredAt: "2026-03-01T08:00:01.000Z",
-        commandId: CommandId.make("cmd-shell-summary-2"),
+        commandId: CommandId.make("cmd-shell-summary-bodies-2"),
         causationEventId: null,
-        correlationId: CorrelationId.make("cmd-shell-summary-2"),
+        correlationId: CorrelationId.make("cmd-shell-summary-bodies-2"),
         metadata: {},
         payload: {
-          threadId: ThreadId.make("thread-shell-summary"),
-          projectId: ProjectId.make("project-shell-summary"),
+          threadId: ThreadId.make("thread-shell-summary-bodies"),
+          projectId: ProjectId.make("project-shell-summary-bodies"),
           title: "Thread Shell Summary",
           modelSelection: {
             instanceId: ProviderInstanceId.make("codex"),
@@ -3076,25 +3221,25 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
           pending_user_input_count AS "pendingUserInputCount",
           updated_at AS "updatedAt"
         FROM projection_threads
-        WHERE thread_id = 'thread-shell-summary'
+        WHERE thread_id = 'thread-shell-summary-bodies'
       `;
 
       yield* appendAndProject({
         type: "thread.message-sent",
-        eventId: EventId.make("evt-shell-summary-3"),
+        eventId: EventId.make("evt-shell-summary-bodies-3"),
         aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-shell-summary"),
+        aggregateId: ThreadId.make("thread-shell-summary-bodies"),
         occurredAt: "2026-03-01T08:00:02.000Z",
-        commandId: CommandId.make("cmd-shell-summary-3"),
+        commandId: CommandId.make("cmd-shell-summary-bodies-3"),
         causationEventId: null,
-        correlationId: CorrelationId.make("cmd-shell-summary-3"),
+        correlationId: CorrelationId.make("cmd-shell-summary-bodies-3"),
         metadata: {},
         payload: {
-          threadId: ThreadId.make("thread-shell-summary"),
-          messageId: MessageId.make("message-shell-summary-user"),
+          threadId: ThreadId.make("thread-shell-summary-bodies"),
+          messageId: MessageId.make("message-shell-summary-bodies-user"),
           role: "user",
           text: "please do the thing",
-          turnId: TurnId.make("turn-shell-summary-1"),
+          turnId: TurnId.make("turn-shell-summary-bodies-1"),
           streaming: false,
           createdAt: "2026-03-01T08:00:02.000Z",
           updatedAt: "2026-03-01T08:00:02.000Z",
@@ -3113,20 +3258,20 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       // latestUserMessageAt or the pending counters.
       yield* appendAndProject({
         type: "thread.message-sent",
-        eventId: EventId.make("evt-shell-summary-4"),
+        eventId: EventId.make("evt-shell-summary-bodies-4"),
         aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-shell-summary"),
+        aggregateId: ThreadId.make("thread-shell-summary-bodies"),
         occurredAt: "2026-03-01T08:00:03.000Z",
-        commandId: CommandId.make("cmd-shell-summary-4"),
+        commandId: CommandId.make("cmd-shell-summary-bodies-4"),
         causationEventId: null,
-        correlationId: CorrelationId.make("cmd-shell-summary-4"),
+        correlationId: CorrelationId.make("cmd-shell-summary-bodies-4"),
         metadata: {},
         payload: {
-          threadId: ThreadId.make("thread-shell-summary"),
-          messageId: MessageId.make("message-shell-summary-assistant"),
+          threadId: ThreadId.make("thread-shell-summary-bodies"),
+          messageId: MessageId.make("message-shell-summary-bodies-assistant"),
           role: "assistant",
           text: "working on it",
-          turnId: TurnId.make("turn-shell-summary-1"),
+          turnId: TurnId.make("turn-shell-summary-bodies-1"),
           streaming: true,
           createdAt: "2026-03-01T08:00:03.000Z",
           updatedAt: "2026-03-01T08:00:03.000Z",
@@ -3145,23 +3290,23 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       // user-input counter; user-input lifecycle activities update it.
       yield* appendAndProject({
         type: "thread.activity-appended",
-        eventId: EventId.make("evt-shell-summary-5"),
+        eventId: EventId.make("evt-shell-summary-bodies-5"),
         aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-shell-summary"),
+        aggregateId: ThreadId.make("thread-shell-summary-bodies"),
         occurredAt: "2026-03-01T08:00:04.000Z",
-        commandId: CommandId.make("cmd-shell-summary-5"),
+        commandId: CommandId.make("cmd-shell-summary-bodies-5"),
         causationEventId: null,
-        correlationId: CorrelationId.make("cmd-shell-summary-5"),
+        correlationId: CorrelationId.make("cmd-shell-summary-bodies-5"),
         metadata: {},
         payload: {
-          threadId: ThreadId.make("thread-shell-summary"),
+          threadId: ThreadId.make("thread-shell-summary-bodies"),
           activity: {
-            id: EventId.make("activity-shell-summary-command"),
+            id: EventId.make("activity-shell-summary-bodies-command"),
             tone: "tool",
             kind: "command",
             summary: "Ran a command",
             payload: {},
-            turnId: TurnId.make("turn-shell-summary-1"),
+            turnId: TurnId.make("turn-shell-summary-bodies-1"),
             createdAt: "2026-03-01T08:00:04.000Z",
           },
         },
@@ -3177,23 +3322,23 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
 
       yield* appendAndProject({
         type: "thread.activity-appended",
-        eventId: EventId.make("evt-shell-summary-6"),
+        eventId: EventId.make("evt-shell-summary-bodies-6"),
         aggregateKind: "thread",
-        aggregateId: ThreadId.make("thread-shell-summary"),
+        aggregateId: ThreadId.make("thread-shell-summary-bodies"),
         occurredAt: "2026-03-01T08:00:05.000Z",
-        commandId: CommandId.make("cmd-shell-summary-6"),
+        commandId: CommandId.make("cmd-shell-summary-bodies-6"),
         causationEventId: null,
-        correlationId: CorrelationId.make("cmd-shell-summary-6"),
+        correlationId: CorrelationId.make("cmd-shell-summary-bodies-6"),
         metadata: {},
         payload: {
-          threadId: ThreadId.make("thread-shell-summary"),
+          threadId: ThreadId.make("thread-shell-summary-bodies"),
           activity: {
-            id: EventId.make("activity-shell-summary-user-input"),
+            id: EventId.make("activity-shell-summary-bodies-user-input"),
             tone: "info",
             kind: "user-input.requested",
             summary: "User input requested",
             payload: {
-              requestId: "user-input-request-shell-summary-1",
+              requestId: "user-input-request-shell-summary-bodies-1",
               questions: [
                 {
                   id: "confirm",
@@ -3203,7 +3348,7 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
                 },
               ],
             },
-            turnId: TurnId.make("turn-shell-summary-1"),
+            turnId: TurnId.make("turn-shell-summary-bodies-1"),
             createdAt: "2026-03-01T08:00:05.000Z",
           },
         },
@@ -3221,17 +3366,17 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       yield* sql`
         UPDATE projection_thread_messages
         SET attachments_json = '{not-json'
-        WHERE thread_id = 'thread-shell-summary'
+        WHERE thread_id = 'thread-shell-summary-bodies'
       `;
       yield* sql`
         INSERT INTO projection_pending_approvals (
           request_id, thread_id, turn_id, status, decision, created_at, resolved_at
         ) VALUES
-          ('summary-pending', 'thread-shell-summary', NULL, 'pending', NULL,
+          ('summary-bodies-pending', 'thread-shell-summary-bodies', NULL, 'pending', NULL,
            '2026-03-01T08:00:06.000Z', NULL),
-          ('summary-resolved', 'thread-shell-summary', NULL, 'resolved', 'accept',
+          ('summary-bodies-resolved', 'thread-shell-summary-bodies', NULL, 'resolved', 'accept',
            '2026-03-01T08:00:06.000Z', '2026-03-01T08:00:06.000Z'),
-          ('summary-other-thread', 'thread-shell-summary-other', NULL, 'pending', NULL,
+          ('summary-bodies-other-thread', 'thread-shell-summary-bodies-other', NULL, 'pending', NULL,
            '2026-03-01T08:00:06.000Z', NULL)
       `;
       yield* sql`
@@ -3239,7 +3384,7 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
           plan_id, thread_id, turn_id, plan_markdown, implemented_at,
           implementation_thread_id, created_at, updated_at
         ) VALUES (
-          'summary-plan', 'thread-shell-summary', 'turn-shell-summary-1', '# Plan', NULL,
+          'summary-bodies-plan', 'thread-shell-summary-bodies', 'turn-shell-summary-bodies-1', '# Plan', NULL,
           NULL, '2026-03-01T08:00:06.000Z', '2026-03-01T08:00:06.000Z'
         )
       `;
@@ -3247,18 +3392,18 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       const refreshEvents = [
         {
           type: "thread.session-set",
-          eventId: EventId.make("evt-shell-summary-7"),
+          eventId: EventId.make("evt-shell-summary-bodies-7"),
           aggregateKind: "thread",
-          aggregateId: ThreadId.make("thread-shell-summary"),
+          aggregateId: ThreadId.make("thread-shell-summary-bodies"),
           occurredAt: "2026-03-01T08:00:07.000Z",
-          commandId: CommandId.make("cmd-shell-summary-7"),
+          commandId: CommandId.make("cmd-shell-summary-bodies-7"),
           causationEventId: null,
-          correlationId: CorrelationId.make("cmd-shell-summary-7"),
+          correlationId: CorrelationId.make("cmd-shell-summary-bodies-7"),
           metadata: {},
           payload: {
-            threadId: ThreadId.make("thread-shell-summary"),
+            threadId: ThreadId.make("thread-shell-summary-bodies"),
             session: {
-              threadId: ThreadId.make("thread-shell-summary"),
+              threadId: ThreadId.make("thread-shell-summary-bodies"),
               status: "ready",
               providerName: "codex",
               runtimeMode: "approval-required",
@@ -3270,22 +3415,22 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
         },
         {
           type: "thread.turn-diff-completed",
-          eventId: EventId.make("evt-shell-summary-8"),
+          eventId: EventId.make("evt-shell-summary-bodies-8"),
           aggregateKind: "thread",
-          aggregateId: ThreadId.make("thread-shell-summary"),
+          aggregateId: ThreadId.make("thread-shell-summary-bodies"),
           occurredAt: "2026-03-01T08:00:08.000Z",
-          commandId: CommandId.make("cmd-shell-summary-8"),
+          commandId: CommandId.make("cmd-shell-summary-bodies-8"),
           causationEventId: null,
-          correlationId: CorrelationId.make("cmd-shell-summary-8"),
+          correlationId: CorrelationId.make("cmd-shell-summary-bodies-8"),
           metadata: {},
           payload: {
-            threadId: ThreadId.make("thread-shell-summary"),
-            turnId: TurnId.make("turn-shell-summary-1"),
+            threadId: ThreadId.make("thread-shell-summary-bodies"),
+            turnId: TurnId.make("turn-shell-summary-bodies-1"),
             checkpointTurnCount: 1,
-            checkpointRef: CheckpointRef.make("refs/t3/checkpoints/thread-shell-summary/1"),
+            checkpointRef: CheckpointRef.make("refs/t3/checkpoints/thread-shell-summary-bodies/1"),
             status: "ready",
             files: [],
-            assistantMessageId: MessageId.make("message-shell-summary-assistant"),
+            assistantMessageId: MessageId.make("message-shell-summary-bodies-assistant"),
             completedAt: "2026-03-01T08:00:08.000Z",
           },
         },
@@ -3305,7 +3450,7 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
             pending_user_input_count AS "pendingUserInputCount",
             has_actionable_proposed_plan AS "hasActionableProposedPlan"
           FROM projection_threads
-          WHERE thread_id = 'thread-shell-summary'
+          WHERE thread_id = 'thread-shell-summary-bodies'
         `;
         assert.deepEqual(summary, [
           {

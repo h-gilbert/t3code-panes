@@ -15,6 +15,8 @@ import {
   ArchivedThreadsPanel,
   GeneralSettingsPanel,
 } from "./SettingsPanels";
+import { SnapShotSettings } from "./SnapShotSettings";
+import { ProjectsSettings } from "./ProjectsSettings";
 import { KeybindingsSettingsPanel } from "./KeybindingsSettings";
 import { ProviderSettingsPanel } from "./ProviderSettingsPanel";
 import { IntegrationsSettingsPanel } from "./IntegrationsSettings";
@@ -207,12 +209,26 @@ function SettingsPanelGroup({
 }
 
 export function AllSettingsPage() {
+  const [projectScope, setProjectScope] = useState<{
+    project: string | null;
+    machine: string | null;
+  }>({ project: null, machine: null });
   return (
     <SettingsPageContainer width="expanded" className="gap-12">
       <SettingsPageSearch />
       <SettingsPageEmbedded>
         <SettingsPanelGroup id="settings-general">
           <GeneralSettingsPanel />
+        </SettingsPanelGroup>
+        <SettingsPanelGroup id="settings-projects">
+          <ProjectsSettings
+            projectKey={projectScope.project}
+            machineId={projectScope.machine}
+            onScopeChange={(project, machine) => setProjectScope({ project, machine })}
+          />
+        </SettingsPanelGroup>
+        <SettingsPanelGroup id="settings-snap-shot">
+          <SnapShotSettings />
         </SettingsPanelGroup>
         <SettingsPanelGroup id="settings-appearance">
           <AppearanceSettingsPanel />

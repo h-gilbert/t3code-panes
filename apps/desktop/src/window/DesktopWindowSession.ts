@@ -48,7 +48,7 @@ const DesktopWindowSessionWriteOperation = Schema.Literals([
 ]);
 type DesktopWindowSessionWriteOperation = typeof DesktopWindowSessionWriteOperation.Type;
 
-export class DesktopWindowSessionWriteError extends Schema.TaggedErrorClass<DesktopWindowSessionWriteError>()(
+export class DesktopWindowSessionWriteError extends Schema.TaggedError<DesktopWindowSessionWriteError>()(
   "DesktopWindowSessionWriteError",
   {
     operation: DesktopWindowSessionWriteOperation,

@@ -78,7 +78,7 @@ const decodeDocument = Schema.decodeUnknownEffect(
 );
 const encodeDocument = Schema.encodeEffect(Schema.fromJsonString(CredentialsDocument));
 
-export class BrowserCredentialStoreError extends Schema.TaggedErrorClass<BrowserCredentialStoreError>()(
+export class BrowserCredentialStoreError extends Schema.TaggedError<BrowserCredentialStoreError>()(
   "BrowserCredentialStoreError",
   {
     operation: Schema.String,
@@ -90,7 +90,7 @@ export class BrowserCredentialStoreError extends Schema.TaggedErrorClass<Browser
   }
 }
 
-export class BrowserCredentialEncryptionUnavailableError extends Schema.TaggedErrorClass<BrowserCredentialEncryptionUnavailableError>()(
+export class BrowserCredentialEncryptionUnavailableError extends Schema.TaggedError<BrowserCredentialEncryptionUnavailableError>()(
   "BrowserCredentialEncryptionUnavailableError",
   {},
 ) {
@@ -99,7 +99,7 @@ export class BrowserCredentialEncryptionUnavailableError extends Schema.TaggedEr
   }
 }
 
-export class BrowserCredentialInvalidOriginError extends Schema.TaggedErrorClass<BrowserCredentialInvalidOriginError>()(
+export class BrowserCredentialInvalidOriginError extends Schema.TaggedError<BrowserCredentialInvalidOriginError>()(
   "BrowserCredentialInvalidOriginError",
   { url: Schema.String },
 ) {

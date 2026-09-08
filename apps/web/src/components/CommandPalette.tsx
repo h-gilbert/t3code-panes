@@ -1,9 +1,9 @@
 "use client";
 
 import {
-  scopedThreadKey,
   scopeProjectRef,
   scopeThreadRef,
+  scopedThreadKey,
 } from "@t3tools/client-runtime/environment";
 import {
   canCreateProjectInEnvironment,
@@ -84,13 +84,11 @@ import { filesystemEnvironment } from "../state/filesystem";
 import { projectEnvironment } from "../state/projects";
 import { useEnvironmentQuery } from "../state/query";
 import { sourceControlEnvironment } from "../state/sourceControl";
-import { vcsEnvironment } from "../state/vcs";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
-import { useProject, useProjects, useThreadShells } from "../state/entities";
+import { useProjects, useThreadShells } from "../state/entities";
 import { useThreadSearch } from "../state/queries";
-import * as ThreadPr from "./ThreadStatusIndicators";
 import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
 import {
   appendBrowsePathSegment,
@@ -106,7 +104,11 @@ import {
 import { onOpenCommandPalette, type CommandPaletteOpenDetail } from "../commandPaletteBus";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
-import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
+import {
+  PULL_REQUESTS_PANEL_REF,
+  selectActiveRightPanel,
+  useRightPanelStore,
+} from "../rightPanelStore";
 import { getLatestThreadForProject, sortThreads } from "../lib/threadSort";
 import {
   cn,
@@ -660,46 +662,25 @@ function OpenCommandPaletteDialog(props: {
     handleNewThread,
   } = useHandleNewThread();
   const projects = useProjects();
-  const changeRequestSnapshotByKey = useAtomValue(ThreadPr.threadChangeRequestSnapshotsAtom);
-  const activeThreadProject = useProject(
-    activeThread === null
-      ? null
-      : scopeProjectRef(activeThread.environmentId, activeThread.projectId),
-  );
-  const activeThreadCwd = activeThread?.worktreePath ?? activeThreadProject?.workspaceRoot ?? null;
-  const activeThreadGitStatus = useEnvironmentQuery(
-    activeThread != null &&
-      activeThread.linkedPullRequest == null &&
-      activeThread.branch !== null &&
-      activeThreadCwd !== null
-      ? vcsEnvironment.status({
-          environmentId: activeThread.environmentId,
-          input: { cwd: activeThreadCwd },
-        })
-      : null,
-  ).data;
-  const detectedPullRequestUrl =
-    activeThread == null || activeThread.linkedPullRequest != null
-      ? null
-      : (ThreadPr.resolveDisplayedThreadPr({
-          threadBranch: activeThread.branch,
-          gitStatus: activeThreadGitStatus ?? null,
-          snapshot: changeRequestSnapshotByKey.get(
-            scopedThreadKey(scopeThreadRef(activeThread.environmentId, activeThread.id)),
-          ),
-          retainTerminalOnBranchMismatch: activeThread.worktreePath === null,
-        })?.url ?? null);
-  const openPanelPullRequestUrl = useOpenPanelPullRequestUrl(
-    activeThread ? scopeThreadRef(activeThread.environmentId, activeThread.id) : null,
-  );
+  const referenceThreadRef =
+    pathname === "/pull-requests"
+      ? environments.some(
+          (environment) => environment.serverConfig?.environment.capabilities.pullRequests === true,
+        )
+        ? PULL_REQUESTS_PANEL_REF
+        : null
+      : activeThread
+        ? scopeThreadRef(activeThread.environmentId, activeThread.id)
+        : null;
+  const openPanelPullRequestUrl = useOpenPanelPullRequestUrl(referenceThreadRef);
   const activeThreadReferenceCopyTarget =
-    activeThread == null
+    referenceThreadRef === null || (pathname === "/pull-requests" && !openPanelPullRequestUrl)
       ? null
       : resolveThreadReferenceCopyTarget({
-          threadId: activeThread.id,
+          threadId: referenceThreadRef.threadId,
           openPanelPullRequestUrl,
-          linkedPullRequestUrl: activeThread.linkedPullRequest?.url ?? null,
-          detectedPullRequestUrl,
+          linkedPullRequestUrl:
+            activeThread?.linkedPullRequest?.url ?? activeThread?.branchPullRequest?.url ?? null,
         });
   const copyActiveThreadReference = useCallback(async () => {
     const target = activeThreadReferenceCopyTarget;
@@ -1384,14 +1365,7 @@ function OpenCommandPaletteDialog(props: {
         ? [{ value: "settled-threads", label: "Settled", items: settledItems }]
         : []),
     ];
-  }, [
-    allThreadItems,
-    changeRequestSnapshotByKey,
-    clientSettings,
-    environments,
-    threads,
-    unsettleThread,
-  ]);
+  }, [allThreadItems, clientSettings, environments, threads, unsettleThread]);
 
   const pushPaletteView = useCallback(
     (view: CommandPaletteView): void => {
@@ -1963,6 +1937,8 @@ function OpenCommandPaletteDialog(props: {
     run: async () => {
       await navigate({
         to: item.to,
+        search: (previous) =>
+          item.to === "/settings/projects" ? { ...previous, project: undefined } : previous,
         hash: item.targetId ?? item.id,
         replace: pathname === item.to,
         hashScrollIntoView: false,

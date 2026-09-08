@@ -17,17 +17,24 @@ a queued settlement cleanup checks that the thread has not resumed before stoppi
 The separate archive worker archives threads only after they have remained settled for seven days.
 Clients must not materialize a time-derived settlement themselves.
 
+The composer is docked below the timeline and reserves its own layout space. Only the empty-draft
+hero overlays the view. Live-tail size changes keep following active until the user navigates away.
+
 Conversation folding keeps the first assistant message visible. Changed-file cards remain hidden
-in the conversation; file changes are available through the diff panel. New threads retain the
-fork's Claude model and medium-effort defaults unless project or explicit selections override them.
+in the conversation; file changes are available through the diff panel. New threads use Codex GPT-6 Astra at medium reasoning effort unless project or explicit selections
+override them. Mobile's default active order follows prompts and completed turns, never streaming
+or tool activity. Explicit manual ordering remains available.
 
 ## Browser presentation
 
-Browser previews have three modes: a mini preview, a movable and resizable window above the pane
-workspace, and fullscreen. Fullscreen returns to the movable window. The floating window allows
-continued interaction with the controlling chat and retains geometry separately from the mini
-preview. Viewport resizing belongs to the hosted browser's lifetime, including when the side panel
-is closed; moving controls into an optional panel must not disable them elsewhere.
+Browser automation stays in the background by default, including when only external browser tools
+are available. Preserve saved auto-show preferences and explicit visibility overrides.
+
+Visible previews start at a fixed 320 × 200 in the pane's top-right corner. Only the floating window
+can move or resize, with handles outside the native guest rectangle on every edge. Fullscreen
+restores the preceding mode. Compact previews scale the source; floating and fullscreen views fill
+the available space. Keep the header reachable and the three actions for floating, fullscreen,
+and closing the session. Browser interaction and automation must preserve composer focus and text.
 
 ## Browser storage
 
@@ -50,7 +57,7 @@ requests cannot reuse a tab from another profile, including a provider's pinned 
 Migrations 1 through 43 keep their existing numbers and contents. In particular, 41 records title
 source, 42 adds authentication client connections and 43 records when a thread was unsettled.
 The linked-pull-request migration is 44, followed by project auto-pull at 45, settlement timestamp
-repair at 46 and project icons at 47. The upstream migration that clears automatic project model
+repair at 46, project icons at 47, branch pull requests at 48 and manual active ordering at 49. The upstream migration that clears automatic project model
 defaults is omitted so saved project choices remain intact. Manually assigned titles remain protected
 from automatic title generation.
 

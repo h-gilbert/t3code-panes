@@ -18,6 +18,7 @@ import { WorkspacePageHeader } from "../components/WorkspacePageHeader";
 import { isElectron } from "../env";
 
 const LEGACY_SETTINGS_SECTION_ANCHORS: Readonly<Record<string, string>> = {
+  "/settings/snap-shot": "settings-snap-shot",
   "/settings/general": "settings-general",
   "/settings/appearance": "settings-appearance",
   "/settings/keybindings": "settings-keybindings",
@@ -50,6 +51,7 @@ function SettingsContentLayout() {
   const canGoBack = useCanGoBack();
   const [restoreSignal, setRestoreSignal] = useState(0);
   const showDiagnostics = location.pathname === "/settings/diagnostics";
+  const showScopedProjects = location.pathname === "/settings/projects";
   const showRestoreDefaults = !showDiagnostics;
   const handleRestored = () => setRestoreSignal((value) => value + 1);
   const navigateBackWithinApp = useCallback(() => {
@@ -99,7 +101,7 @@ function SettingsContentLayout() {
         </WorkspacePageHeader>
 
         <div key={restoreSignal} className="min-h-0 flex flex-1 flex-col">
-          {showDiagnostics ? <Outlet /> : <AllSettingsPage />}
+          {showDiagnostics || showScopedProjects ? <Outlet /> : <AllSettingsPage />}
         </div>
       </div>
     </SidebarInset>

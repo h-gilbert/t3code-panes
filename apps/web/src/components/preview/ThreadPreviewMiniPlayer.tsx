@@ -5,6 +5,7 @@ import { Maximize2Icon, Minimize2Icon, PictureInPicture2, XIcon } from "lucide-r
 import { type PointerEvent as ReactPointerEvent, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
+import type { BrowserViewportResizeDirection } from "~/browser/browserViewportLayout";
 import { BrowserSurfaceSlot } from "~/browser/BrowserSurfaceSlot";
 import { previewRuntimeTabId } from "~/browser/previewRuntimeTabId";
 import { Button } from "~/components/ui/button";
@@ -18,6 +19,7 @@ import { useAtomCommand } from "~/state/use-atom-command";
 
 import { closePreviewSession } from "./closePreviewSession";
 import {
+  resizeFloatingPreviewFrame,
   clampPreviewMiniPlayerPosition,
   clampPreviewMiniPlayerSize,
   PREVIEW_MINI_PLAYER_DEFAULT_SIZE,
@@ -37,6 +39,7 @@ interface DragState {
 }
 
 interface ResizeState {
+  readonly direction: BrowserViewportResizeDirection;
   readonly pointerId: number;
   readonly pointerX: number;
   readonly pointerY: number;
@@ -45,6 +48,20 @@ interface ResizeState {
   readonly width: number;
   readonly height: number;
 }
+
+const RESIZE_HANDLES: ReadonlyArray<{
+  direction: BrowserViewportResizeDirection;
+  className: string;
+}> = [
+  { direction: "north", className: "inset-x-0 -top-1 h-2 cursor-ns-resize" },
+  { direction: "south", className: "inset-x-0 -bottom-1 h-2 cursor-ns-resize" },
+  { direction: "west", className: "inset-y-0 -left-1 w-2 cursor-ew-resize" },
+  { direction: "east", className: "inset-y-0 -right-1 w-2 cursor-ew-resize" },
+  { direction: "northwest", className: "-left-2 -top-2 size-4 cursor-nwse-resize" },
+  { direction: "northeast", className: "-right-2 -top-2 size-4 cursor-nesw-resize" },
+  { direction: "southwest", className: "-bottom-2 -left-2 size-4 cursor-nesw-resize" },
+  { direction: "southeast", className: "-bottom-2 -right-2 size-4 cursor-nwse-resize" },
+];
 
 interface Props {
   readonly threadRef: ScopedThreadRef;
@@ -216,12 +233,16 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId }: Props) {
     }
   };
 
-  const handleResizePointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
+  const handleResizePointerDown = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+    direction: BrowserViewportResizeDirection,
+  ) => {
     if (event.button !== 0 || !floating || maximized) return;
     const root = rootRef.current;
     if (!root) return;
     const rootRect = root.getBoundingClientRect();
     resizeRef.current = {
+      direction,
       pointerId: event.pointerId,
       pointerX: event.clientX,
       pointerY: event.clientY,
@@ -241,20 +262,15 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId }: Props) {
     if (!resize || resize.pointerId !== event.pointerId || !root) {
       return;
     }
-    const nextSize = clampPreviewMiniPlayerSize(
-      {
-        width: resize.width + event.clientX - resize.pointerX,
-        height: resize.height + event.clientY - resize.pointerY,
-      },
-      { width: window.innerWidth, height: window.innerHeight },
-    );
-    usePreviewMiniPlayerStore.getState().resize(threadRef, tabId, nextSize);
-    const nextPosition = clampPreviewMiniPlayerPosition(
-      { x: resize.playerX, y: resize.playerY },
-      { width: window.innerWidth, height: window.innerHeight },
-      nextSize,
-    );
-    usePreviewMiniPlayerStore.getState().move(threadRef, tabId, nextPosition);
+    const next = resizeFloatingPreviewFrame({
+      start: { x: resize.playerX, y: resize.playerY, width: resize.width, height: resize.height },
+      direction: resize.direction,
+      delta: { x: event.clientX - resize.pointerX, y: event.clientY - resize.pointerY },
+      container: { width: window.innerWidth, height: window.innerHeight },
+    });
+    const store = usePreviewMiniPlayerStore.getState();
+    store.resize(threadRef, tabId, { width: next.width, height: next.height });
+    store.move(threadRef, tabId, { x: next.x, y: next.y });
   };
 
   const endResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -272,6 +288,7 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId }: Props) {
       ref={rootRef}
       aria-label={compact ? "Browser preview" : "Floating browser preview"}
       data-preview-mini-player={tabId}
+      data-preview-presentation={maximized ? "fullscreen" : floating ? "window" : "mini"}
       onPointerDownCapture={() => {
         if (!compact) usePreviewMiniPlayerStore.getState().bringToFront(threadRef);
       }}
@@ -409,17 +426,20 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId }: Props) {
           </div>
         ) : null}
       </div>
-      {floating && !maximized ? (
-        <button
-          type="button"
-          aria-label="Resize floating preview"
-          className="pointer-events-auto absolute -bottom-1.5 -right-1.5 size-3 cursor-nwse-resize"
-          onPointerDown={handleResizePointerDown}
-          onPointerMove={handleResizePointerMove}
-          onPointerUp={endResize}
-          onPointerCancel={endResize}
-        />
-      ) : null}
+      {floating && !maximized
+        ? RESIZE_HANDLES.map(({ direction, className }) => (
+            <button
+              key={direction}
+              type="button"
+              aria-label={`Resize floating preview ${direction}`}
+              className={`pointer-events-auto absolute z-[130] touch-none ${className}`}
+              onPointerDown={(event) => handleResizePointerDown(event, direction)}
+              onPointerMove={handleResizePointerMove}
+              onPointerUp={endResize}
+              onPointerCancel={endResize}
+            />
+          ))
+        : null}
     </section>
   );
 

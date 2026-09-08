@@ -60,8 +60,17 @@ The mobile home list and iPad sidebar sort active threads by the latest user
 prompt or turn completion. Intermediate tool activity, streaming messages, and
 metadata updates must not reorder rows or reset their relative age labels.
 Explicitly un-settling a thread still brings it to the top. Preserve pinned ordering and the separate snoozed and settled
-sections. This differs from the web and desktop creation-based order. Keep the
+sections. Explicit manual active ordering takes precedence over the default activity order.
+This differs from the web and desktop creation-based default order. Keep the
 private iOS source in sync when changing this behavior.
+
+## Conversation layout
+
+The composer occupies layout space below the timeline after the first message.
+Only the empty-draft hero overlays the view. Keep the latest streamed content
+visible without covering it, and stop following when the user navigates history.
+Changed-file cards stay out of assistant messages; file changes remain available
+through the diff panel.
 
 ## Other custom behavior
 

@@ -11,7 +11,7 @@ describe("chat timeline composer layout", () => {
     expect(source).toContain('data-chat-composer-overlay={isDraftHeroState ? "true" : undefined}');
     expect(source).toContain(': "pointer-events-none relative z-20 shrink-0 pt-1.5 sm:pt-2"');
     expect(source).toContain("onLiveTailSizeChange={scheduleActiveTimelineEndReveal}");
-    expect(source).toContain("animated: false,\n          viewPosition: 0,");
+    expect(source).toMatch(/animated: false,\s+viewPosition: 0,/);
     expect(source).toContain(
       "showScrollDebouncer.current.cancel();\n    setShowScrollToBottom(false);",
     );

@@ -88,6 +88,7 @@ import {
   type ExpandedImagePreview,
 } from "./chat/ExpandedImagePreview";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
+import { markdownImageGallery, markdownImageItems } from "./chat/markdownImageGallery";
 import { MediaVideoPlayer } from "./media/MediaVideoPlayer";
 import { MediaActions, type MediaActionSource } from "./media/MediaActions";
 import { resolveProtocolRelativeMediaUrl } from "./media/mediaContent";
@@ -119,6 +120,7 @@ import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 import { fnv1a32 } from "../lib/diffRendering";
 import { LRUCache } from "../lib/lruCache";
 import { getSyntaxHighlighterPromise } from "../lib/syntaxHighlighting";
+import { GitHubIcon } from "./Icons";
 import { RenderErrorBoundary } from "./RenderErrorBoundary";
 import { useTheme } from "../hooks/useTheme";
 import { getClientSettings, useClientSettings } from "../hooks/useSettings";
@@ -186,6 +188,8 @@ interface ChatMarkdownProps {
   text: string;
   cwd: string | undefined;
   threadRef?: ScopedThreadRef | undefined;
+  /** Panel that receives pull request links, including the standalone PR view. */
+  pullRequestPanelRef?: ScopedThreadRef | undefined;
   /** Environment that owns non-thread markdown, such as a pull request panel. */
   environmentId?: EnvironmentId | undefined;
   onTaskListChange?: ((input: { markerOffset: number; checked: boolean }) => void) | undefined;
@@ -341,7 +345,7 @@ function findTaskListMarkerOffset(markdown: string, listItemStart: number): numb
  * message's overflow. Widen the gutter to fit the widest marker, including a
  * negative marker's minus sign.
  */
-export function orderedListGutterStyle(
+function orderedListGutterStyle(
   itemCount: number,
   start: unknown,
 ): { "--list-gutter": string } | undefined {
@@ -1190,15 +1194,25 @@ const MARKDOWN_LINK_FAVICON_CLASS_NAME = "block size-full shrink-0 select-none";
 /** Hosts whose favicon request already failed this session — skip straight to the globe. */
 const failedFaviconHosts = new Set<string>();
 
+/** Sites whose brand mark (drawn in `currentColor`) replaces the fetched favicon so it follows the theme. */
+function brandLinkIcon(host: string): typeof GitHubIcon | null {
+  const hostname = host.toLowerCase();
+  if (hostname === "github.com" || hostname.endsWith(".github.com")) return GitHubIcon;
+  return null;
+}
+
 const MarkdownLinkFavicon = memo(function MarkdownLinkFavicon({ host }: { host: string }) {
   const [failedHost, setFailedHost] = useState<string | null>(null);
-  const faviconUrl = faviconUrlForOrigin(`https://${host}`);
+  const BrandIcon = brandLinkIcon(host);
+  const faviconUrl = BrandIcon ? null : faviconUrlForOrigin(`https://${host}`);
   return (
     <span
       className="ms-[0.25em] me-[0.2em] inline-flex size-[14px] [vertical-align:-0.125em]"
       aria-hidden
     >
-      {faviconUrl === null || failedHost === host || failedFaviconHosts.has(host) ? (
+      {BrandIcon ? (
+        <BrandIcon className={MARKDOWN_LINK_FAVICON_CLASS_NAME} />
+      ) : faviconUrl === null || failedHost === host || failedFaviconHosts.has(host) ? (
         <GlobeIcon className={MARKDOWN_LINK_FAVICON_CLASS_NAME} />
       ) : (
         <img
@@ -1236,9 +1250,15 @@ function markdownImageCopy(alt: string, src: string, title: string | undefined):
   return `![${escapedAlt}](${src}${titleSuffix})`;
 }
 
+/**
+ * `maxHeightRem` folds a height cap into the width bound: `max-height` alone
+ * would not feed back through `aspect-ratio` once `width` is definite, so a
+ * tall image would keep a box wider than the picture it draws.
+ */
 function authoredImageSizeStyle(
   width: string | number | undefined,
   height: string | number | undefined,
+  maxHeightRem = 30,
 ): CSSProperties | undefined {
   const parsedWidth = Number(width);
   const parsedHeight = Number(height);
@@ -1249,7 +1269,7 @@ function authoredImageSizeStyle(
       width: parsedWidth,
       height: "auto",
       aspectRatio: `${parsedWidth} / ${parsedHeight}`,
-      maxWidth: `min(100%, 30rem, ${(30 * parsedWidth) / parsedHeight}rem)`,
+      maxWidth: `min(100%, 30rem, ${(maxHeightRem * parsedWidth) / parsedHeight}rem)`,
     };
   }
   if (hasWidth) return { maxWidth: `min(100%, 30rem, ${parsedWidth}px)` };
@@ -1265,10 +1285,7 @@ const MarkdownLinkContext = React.createContext(false);
 
 function expandableMarkdownImageProps(
   onImageExpand: ((preview: ExpandedImagePreview) => void) | undefined,
-  src: string,
   alt: string,
-  originalUrl?: string,
-  actionsSource?: MediaActionSource,
 ) {
   if (!onImageExpand) return {};
   const previewName = alt.trim() || "image";
@@ -1276,17 +1293,8 @@ function expandableMarkdownImageProps(
     if (event.currentTarget.closest("a")) return;
     event.preventDefault();
     event.stopPropagation();
-    onImageExpand({
-      images: [
-        {
-          src,
-          name: previewName,
-          ...(originalUrl ? { originalUrl } : {}),
-          ...(actionsSource ? { actionsSource } : {}),
-        },
-      ],
-      index: 0,
-    });
+    const item = markdownImageItems.get(event.currentTarget);
+    if (item) onImageExpand(markdownImageGallery(event.currentTarget, item));
   };
   return {
     role: "button" as const,
@@ -1380,9 +1388,19 @@ function ChatMarkdownImage(props: {
   // A failure forgets the decoded image so the next URL loads behind the slot.
   const settled = src !== null && !failed && (!props.standalone || loadedSrc !== null);
   // Cached images are complete before `onLoad` can fire.
-  const markLoadedIfComplete = useCallback((image: HTMLImageElement | null) => {
-    if (image?.complete && image.naturalWidth > 0) setLoadedSrc(image.currentSrc || image.src);
-  }, []);
+  const markLoadedIfComplete = useCallback(
+    (image: HTMLImageElement | null) => {
+      if (!image) return;
+      if (image.complete && image.naturalWidth > 0) setLoadedSrc(image.currentSrc || image.src);
+      markdownImageItems.set(image, {
+        src,
+        name: props.alt.trim() || "image",
+        actionsSource: props.actionsSource,
+        ...(props.originalUrl ? { originalUrl: props.originalUrl } : {}),
+      });
+    },
+    [props.actionsSource, props.alt, props.originalUrl, src],
+  );
   const imageEvents = (loadingSrc: string) => ({
     onLoad: () => {
       setLoadedSrc(loadingSrc);
@@ -1411,13 +1429,7 @@ function ChatMarkdownImage(props: {
             props.onImageExpand && "cursor-zoom-in",
           )}
           style={props.style}
-          {...expandableMarkdownImageProps(
-            props.onImageExpand,
-            src,
-            props.alt,
-            props.originalUrl,
-            props.actionsSource,
-          )}
+          {...expandableMarkdownImageProps(props.onImageExpand, props.alt)}
           {...imageEvents(src)}
         />
       </MediaActions>
@@ -1523,6 +1535,8 @@ export const ChatMarkdownAssetImage = memo(function ChatMarkdownAssetImage(props
   readonly srcFragment?: string;
   /** Reserve a slot while loading; off for images that share a line with text. */
   readonly standalone?: boolean | undefined;
+  /** Caps the box height in rem while keeping the image's ratio; 30 by default. */
+  readonly maxHeightRem?: number | undefined;
   readonly style?: CSSProperties | undefined;
   readonly workspaceRoot?: string | undefined;
   readonly onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
@@ -1539,6 +1553,18 @@ export const ChatMarkdownAssetImage = memo(function ChatMarkdownAssetImage(props
   const reference = path ? mediaFileReference(path, props.workspaceRoot) : undefined;
   const relativePath = reference?.relativePath;
   const src = assetUrl._tag === "Success" ? assetUrl.url + (props.srcFragment ?? "") : null;
+  // The server reads the pixel size from the file header, so the slot can be
+  // the image's final box instead of a 16:9 guess. An authored size wins; a
+  // caller's height cap shrinks the box while keeping the ratio.
+  const knownSize = assetUrl._tag === "Success" ? assetUrl.imageDimensions : undefined;
+  const maxHeightRem = props.maxHeightRem ?? 30;
+  const style =
+    props.style ??
+    (knownSize
+      ? authoredImageSizeStyle(knownSize.width, knownSize.height, maxHeightRem)
+      : maxHeightRem !== 30
+        ? { maxHeight: `${maxHeightRem}rem` }
+        : undefined);
   const actionsSource: MediaActionSource = {
     kind: props.kind ?? "image",
     name: props.alt || (props.kind ?? "image"),
@@ -1582,7 +1608,7 @@ export const ChatMarkdownAssetImage = memo(function ChatMarkdownAssetImage(props
       copyMarkdown={props.copyMarkdown}
       standalone={props.standalone ?? true}
       className={CHAT_MARKDOWN_WORKSPACE_IMAGE_CLASS_NAME}
-      style={props.style}
+      style={style}
       actionsSource={actionsSource}
       onImageExpand={props.onImageExpand}
     />
@@ -2159,6 +2185,7 @@ function useChatMarkdownState({
   text,
   cwd,
   threadRef,
+  pullRequestPanelRef,
   environmentId: explicitEnvironmentId,
   onTaskListChange,
   isStreaming = false,
@@ -2169,6 +2196,7 @@ function useChatMarkdownState({
 }: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
   const [localMediaPreview, setLocalMediaPreview] = useState<ExpandedImagePreview | null>(null);
+  const markdownRef = useRef<HTMLDivElement>(null);
   const expandMedia = onImageExpand ?? setLocalMediaPreview;
   const mediaRequestId = useRef(0);
   useEffect(() => {
@@ -2199,7 +2227,7 @@ function useChatMarkdownState({
   );
   const preparedConnection = usePreparedConnection(environmentId);
   const openMarkdownMedia = useCallback(
-    (source: string, resolvedFilePath?: string) => {
+    (source: string, resolvedFilePath?: string, clickedImage?: HTMLImageElement | null) => {
       const requestId = ++mediaRequestId.current;
       void resolveMarkdownMediaPreview({
         source,
@@ -2214,7 +2242,14 @@ function useChatMarkdownState({
           : undefined,
       }).then(
         (preview) => {
-          if (preview && mediaRequestId.current === requestId) expandMedia(preview);
+          if (preview && mediaRequestId.current === requestId) {
+            const selected = preview.images[preview.index];
+            expandMedia(
+              selected && selected.type !== "video" && markdownRef.current
+                ? markdownImageGallery(clickedImage ?? markdownRef.current, selected)
+                : preview,
+            );
+          }
         },
         (error: unknown) => {
           if (mediaRequestId.current !== requestId) return;
@@ -2319,7 +2354,7 @@ function useChatMarkdownState({
     event.clipboardData.setData("text/plain", payload.text);
     event.clipboardData.setData("text/html", payload.html);
   }, []);
-  const openChangeRequestLink = useOpenChangeRequestLink(threadRef);
+  const openChangeRequestLink = useOpenChangeRequestLink(threadRef, pullRequestPanelRef);
   const openDeferredMarkdownLink = useOpenLink(threadRef);
   // Subscribed rather than read at click time: the anchor has to decide
   // synchronously whether to intercept its `_blank`, and a subscription is what
@@ -2621,6 +2656,7 @@ function useChatMarkdownState({
   return {
     componentState,
     handleCopy,
+    markdownRef,
     markdownUrlTransform,
     localMediaPreview,
     setLocalMediaPreview,
@@ -2808,13 +2844,24 @@ const CHAT_MARKDOWN_COMPONENTS = {
             ) {
               event.preventDefault();
               event.stopPropagation();
-              openMarkdownMedia(href);
+              openMarkdownMedia(
+                href,
+                undefined,
+                event.target instanceof HTMLImageElement
+                  ? event.target
+                  : event.currentTarget.querySelector("img"),
+              );
               return;
             }
             // A link to a change request in a workspace project opens beside the
             // conversation instead of in a browser: it is the thing being talked about, and
             // the panel it opens offers the browser as one of its actions.
-            if (!href || openChangeRequestLink(event, href)) return;
+            if (
+              !href ||
+              openChangeRequestLink(event, href, undefined, environmentId ?? undefined)
+            ) {
+              return;
+            }
             // Anything else follows the "Open links in" setting. The system browser
             // keeps the `_blank` the shell already handles; the in-app browser needs
             // the click intercepted here. A modifier click is the way out of the
@@ -3107,6 +3154,7 @@ function ChatMarkdown({
   const {
     componentState,
     handleCopy,
+    markdownRef,
     markdownUrlTransform,
     localMediaPreview,
     setLocalMediaPreview,
@@ -3124,6 +3172,7 @@ function ChatMarkdown({
   // complete source token instead of dropping it from the rendered message.
   return (
     <div
+      ref={markdownRef}
       className={cn(
         "chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80 [overflow-wrap:anywhere] [word-break:break-word]",
         className,

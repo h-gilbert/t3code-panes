@@ -12,7 +12,7 @@ describe("floating browser fullscreen presentation", () => {
 
     expect(source).toContain("{compact ? player : createPortal(player, document.body)}");
     expect(source).toContain("fitSourceContent={compact}");
-    expect(source).toContain("zIndex={110}");
+    expect(source).toContain("zIndex={compact ? 110 : windowLayer + 1}");
     expect(source).toContain('? "pointer-events-none fixed z-100');
   });
 });

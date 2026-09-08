@@ -109,7 +109,9 @@ existing browser login, answer a question while background work continues, and r
 queued settlement cleanup executes. Test stored-data upgrades with existing records, not only an
 empty database. Distinguish automated proof from behavior that still needs a real-client check.
 
-Use the development desktop app for the integrated review before packaging. Follow the repository's
+Use the development desktop app for the integrated review before packaging. When another dev
+instance is running, set `T3CODE_DESKTOP_DEV_USER_DATA_DIR` to a directory inside the isolated
+T3 home so Chromium storage stays separate. Follow the repository's
 permission rules for computer use and browser verification. Do not launch diagnostic servers against
 production state or stop remote work to make verification easier. Preserve the original failing test
 until the intended behavior is understood; do not change expectations merely to make upstream pass.

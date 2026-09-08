@@ -146,6 +146,25 @@ const withIdentity = <A, E, R>(
 };
 
 describe("DesktopAppIdentity", () => {
+  it.effect("isolates an explicitly configured dev profile from shared browser storage", () =>
+    withIdentity(
+      Effect.gen(function* () {
+        const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
+        assert.equal(yield* identity.resolveUserDataPath, "/tmp/t3-integration-profile");
+      }),
+      {
+        environment: {
+          isPackaged: false,
+          env: {
+            VITE_DEV_SERVER_URL: "http://127.0.0.1:6455",
+            T3CODE_DESKTOP_DEV_USER_DATA_DIR: "/tmp/t3-integration-profile",
+          },
+        },
+        legacyPathExists: true,
+      },
+    ),
+  );
+
   it.effect("keeps using the legacy userData path when it already exists", () =>
     withIdentity(
       Effect.gen(function* () {
