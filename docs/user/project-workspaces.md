@@ -58,7 +58,11 @@ On macOS desktop, the titlebar strip remains available for the traffic lights, w
 and workspace controls. It disappears in fullscreen so the panes use the entire window; the same
 actions remain available through their shortcuts.
 
-When an agent opens the shared browser, it starts as a fixed 320 × 200 preview in its pane's
+Agent browser work stays in the background by default. Agents can show a page when you ask
+to see it or need to interact, such as signing in. You can enable automatic preview display in
+Settings with **Auto-show floating preview**. Existing saved preferences are preserved.
+
+When shown, the shared browser starts as a fixed 320 × 200 preview in its pane's
 top-right corner. It cannot be dragged or resized. Its single toolbar offers a floating window
 above the panes, fullscreen, and close. The page scales to fit the preview, without a separate
 viewport toolbar or resize footer.

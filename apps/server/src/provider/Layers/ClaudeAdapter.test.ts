@@ -36,7 +36,10 @@ import * as TestClock from "effect/testing/TestClock";
 import { attachmentRelativePath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { clearMcpProviderSession, setMcpProviderSession } from "../../mcp/McpProviderSession.ts";
-import { T3_CODE_BROWSER_TOOL_INSTRUCTIONS } from "../PreviewBrowserInstructions.ts";
+import {
+  T3_CODE_BACKGROUND_BROWSER_INSTRUCTIONS,
+  T3_CODE_BROWSER_TOOL_INSTRUCTIONS,
+} from "../PreviewBrowserInstructions.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterProcessError, ProviderAdapterValidationError } from "../Errors.ts";
 import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
@@ -382,7 +385,7 @@ describe("ClaudeAdapterLive", () => {
         assert.deepEqual(createInput?.options.systemPrompt, {
           type: "preset",
           preset: "claude_code",
-          append: T3_CODE_BROWSER_TOOL_INSTRUCTIONS,
+          append: T3_CODE_BACKGROUND_BROWSER_INSTRUCTIONS + T3_CODE_BROWSER_TOOL_INSTRUCTIONS,
         });
       }).pipe(
         Effect.ensuring(Effect.sync(() => clearMcpProviderSession(THREAD_ID))),
@@ -392,7 +395,7 @@ describe("ClaudeAdapterLive", () => {
     },
   );
 
-  it.effect("keeps the stock system prompt when no t3-code MCP server is attached", () => {
+  it.effect("keeps background browser guidance when no t3-code MCP server is attached", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
@@ -406,6 +409,7 @@ describe("ClaudeAdapterLive", () => {
       assert.deepEqual(createInput?.options.systemPrompt, {
         type: "preset",
         preset: "claude_code",
+        append: T3_CODE_BACKGROUND_BROWSER_INSTRUCTIONS,
       });
       assert.equal(createInput?.options.mcpServers, undefined);
     }).pipe(

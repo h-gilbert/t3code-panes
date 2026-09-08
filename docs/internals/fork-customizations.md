@@ -14,7 +14,12 @@ also Astra, and the provider prefers Astra over Sol and Terra when available.
 
 ## Collaborative browser
 
-- Agent-opened previews start at a fixed 320 × 200 in the owning pane's top-right
+- Agent browser automation defaults to background work. Preserve Playwright availability
+  and use headless automation for routine checks. Codex and Claude receive this guidance
+  even without the T3 MCP attached. Show pages for explicit user requests or necessary
+  human interaction. Auto-show defaults off; preserve saved preferences and explicit
+  `open`/`show` overrides.
+- Visible agent-opened previews start at a fixed 320 × 200 in the owning pane's top-right
   corner. They cannot be dragged or resized. Their only toolbar actions are open
   a floating window above the panes, fullscreen, and close.
 - Only the explicit floating window can be dragged and resized across pane boundaries.

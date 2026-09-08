@@ -130,7 +130,7 @@ export type FontFamilyPreference = typeof FontFamilyPreference.Type;
  * because the Chromium guest they configure is desktop-local.
  */
 export const DEFAULT_BROWSER_VIEWPORT: PreviewViewportSetting = FILL_PREVIEW_VIEWPORT;
-export const DEFAULT_BROWSER_AUTO_SHOW_FLOATING_PREVIEW = true;
+export const DEFAULT_BROWSER_AUTO_SHOW_FLOATING_PREVIEW = false;
 
 export const ClientSettingsSchema = Schema.Struct({
   browserDefaultViewport: PreviewViewportSetting.pipe(

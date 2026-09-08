@@ -18,8 +18,8 @@ const snapshot = (navStatus: PreviewSessionSnapshot["navStatus"]): PreviewSessio
 });
 
 describe("preview automation open readiness", () => {
-  it("opens the inline preview by default", () => {
-    expect(shouldOpenPreviewMiniPlayer({} as PreviewAutomationOpenInput)).toBe(true);
+  it("keeps the inline preview hidden by default", () => {
+    expect(shouldOpenPreviewMiniPlayer({} as PreviewAutomationOpenInput)).toBe(false);
   });
 
   it("supports explicit opt-out and the legacy show alias", () => {
