@@ -12,6 +12,9 @@ const APP_VARIANT = resolveAppVariant(repoEnv.APP_VARIANT);
 const isIosPersonalTeamBuild = repoEnv.T3CODE_IOS_PERSONAL_TEAM === "1";
 const isSelfHostedBuild = repoEnv.T3CODE_MOBILE_SELF_HOSTED === "1";
 const isIosSharingEnabled = !isIosPersonalTeamBuild && !isSelfHostedBuild;
+const runtimeVersionPolicy =
+  process.env.MOBILE_VERSION_POLICY ??
+  (APP_VARIANT === "development" ? "appVersion" : "fingerprint");
 
 const personalTeamBundleIdentifier = repoEnv.T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID?.trim();
 const selfHostedBundleIdentifier = repoEnv.T3CODE_IOS_BUNDLE_ID?.trim();
@@ -148,6 +151,7 @@ const sharingPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
         supportsText: true,
         supportsWebUrlWithMaxCount: 1,
         supportsImageWithMaxCount: 8,
+        supportsMovieWithMaxCount: 8,
         supportsFileWithMaxCount: 8,
       },
     },
@@ -177,11 +181,10 @@ const config: ExpoConfig = {
   scheme: isSelfHostedBuild ? [appScheme, "t3code"] : appScheme,
   version: "1.0.4",
   runtimeVersion: {
-    // Fingerprint (not appVersion) so an OTA only reaches binaries whose native
-    // project — native deps, config plugins, AND patches/ — matches the update.
-    // With appVersion, every 0.1.0 build shares a runtime version, so a JS update
-    // could land on a binary missing the native changes it needs and crash.
-    policy: process.env.MOBILE_VERSION_POLICY ?? "fingerprint",
+    // Development manifests resolve on every launch, so avoid fingerprint's
+    // expensive native-project calculation there. Preview and production stay
+    // fingerprinted so OTAs only reach binaries with matching native projects.
+    policy: runtimeVersionPolicy,
   },
   orientation: "portrait",
   icon: variant.assets.appIcon,
@@ -214,6 +217,7 @@ const config: ExpoConfig = {
       },
       NSLocalNetworkUsageDescription:
         "Allow T3 Code to connect to T3 Code servers on your local network or tailnet.",
+      NSPhotoLibraryAddUsageDescription: "Allow T3 Code to save images to your photo library.",
       ITSAppUsesNonExemptEncryption: false,
       // The App Store screenshot harness rotates the iPad interface from
       // inside the app (CI denies osascript the Accessibility access that
@@ -302,6 +306,15 @@ const config: ExpoConfig = {
             backgroundColor: variant.assets.androidAdaptiveBackgroundColor,
           },
         },
+      },
+    ],
+    [
+      "expo-audio",
+      {
+        microphonePermission: "Allow T3 Code to use your microphone for voice input.",
+        recordAudioAndroid: false,
+        enableBackgroundPlayback: false,
+        enableBackgroundRecording: false,
       },
     ],
     [

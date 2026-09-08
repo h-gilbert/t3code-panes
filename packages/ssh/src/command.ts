@@ -1,3 +1,4 @@
+import { isPublishedT3Version } from "@t3tools/shared/releaseVersion";
 import * as NodeCrypto from "node:crypto";
 
 import type { DesktopSshEnvironmentTarget, DesktopUpdateChannel } from "@t3tools/contracts";
@@ -14,10 +15,6 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { buildSshChildEnvironment, type SshAuthOptions } from "./auth.ts";
 import { SshCommandError, SshInvalidTargetError } from "./errors.ts";
 
-// Desktop builds can carry local prerelease suffixes (for example,
-// `0.0.33-panes.9`) that were never published as `t3` packages. Only stable
-// and release-pipeline nightly versions are safe to request exactly from npm.
-const PUBLISHED_T3_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-nightly\.\d{8}\.\d+)?$/u;
 const DEFAULT_SSH_COMMAND_TIMEOUT_MS = 60_000;
 const MAX_SSH_ERROR_OUTPUT_LENGTH = 4_000;
 
@@ -83,7 +80,7 @@ export function remoteStateKey(target: DesktopSshEnvironmentTarget): string {
     .slice(0, 16);
 }
 
-export function buildSshHostSpec(target: DesktopSshEnvironmentTarget): string {
+function buildSshHostSpec(target: DesktopSshEnvironmentTarget): string {
   const destination = target.alias.trim() || target.hostname.trim();
   if (destination.length === 0) {
     throw new Error("SSH target is missing its alias/hostname.");
@@ -373,10 +370,7 @@ export function resolveRemoteT3CliPackageSpec(input: {
   readonly isDevelopment?: boolean;
 }): string {
   const appVersion = input.appVersion.trim();
-  if (
-    PUBLISHED_T3_VERSION_PATTERN.test(appVersion) &&
-    (!input.isDevelopment || !appVersion.endsWith("-dev"))
-  ) {
+  if (isPublishedT3Version(appVersion) && (!input.isDevelopment || !appVersion.endsWith("-dev"))) {
     return `t3@${appVersion}`;
   }
 

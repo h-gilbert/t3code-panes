@@ -38,6 +38,7 @@ const StoredCredential = Schema.Struct({
   environmentId: Schema.NullOr(Schema.String),
   origin: Schema.String,
   profile: Schema.NullOr(Schema.String),
+  profileId: Schema.optional(Schema.String),
   username: Schema.String,
   /** Base64 of the safeStorage ciphertext. */
   encryptedPassword: Schema.String,
@@ -59,14 +60,21 @@ const CredentialsDocumentV1 = Schema.Struct({
   ),
 });
 
-const CredentialsDocument = Schema.Struct({
+const CredentialsDocumentV2 = Schema.Struct({
   version: Schema.Literal(2),
+  credentials: Schema.Array(StoredCredential),
+});
+
+const CredentialsDocument = Schema.Struct({
+  version: Schema.Literal(3),
   credentials: Schema.Array(StoredCredential),
 });
 type CredentialsDocument = typeof CredentialsDocument.Type;
 
 const decodeDocument = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(Schema.Union([CredentialsDocumentV1, CredentialsDocument])),
+  Schema.fromJsonString(
+    Schema.Union([CredentialsDocumentV1, CredentialsDocumentV2, CredentialsDocument]),
+  ),
 );
 const encodeDocument = Schema.encodeEffect(Schema.fromJsonString(CredentialsDocument));
 
@@ -129,6 +137,7 @@ export const selectCredentialForFill = (
     readonly origin: string;
     readonly environmentId: string;
     readonly profile: string | null;
+    readonly profileId?: string | undefined;
     readonly username?: string | undefined;
   },
 ):
@@ -139,6 +148,7 @@ export const selectCredentialForFill = (
       credential.environmentId === input.environmentId &&
       credential.origin === input.origin &&
       credential.profile === input.profile &&
+      credential.profileId === input.profileId &&
       (input.username === undefined || credential.username === input.username),
   );
   const matches =
@@ -149,6 +159,7 @@ export const selectCredentialForFill = (
             credential.environmentId === null &&
             credential.origin === input.origin &&
             credential.profile === input.profile &&
+            credential.profileId === input.profileId &&
             (input.username === undefined || credential.username === input.username),
         );
   if (matches.length === 0) return { reason: "no-credential" };
@@ -161,6 +172,7 @@ const toSummary = (credential: StoredCredential): DesktopBrowserCredentialSummar
   environmentId: credential.environmentId,
   origin: credential.origin,
   profile: credential.profile,
+  ...(credential.profileId === undefined ? {} : { profileId: credential.profileId }),
   username: credential.username,
   updatedAt: credential.updatedAt,
 });
@@ -176,6 +188,7 @@ export class BrowserCredentials extends Context.Service<
       readonly environmentId: string;
       readonly url: string;
       readonly profile: string | null;
+      readonly profileId?: string | undefined;
       readonly username: string;
       readonly password: string;
     }) => Effect.Effect<DesktopBrowserCredentialSummary, BrowserCredentialsError>;
@@ -188,6 +201,7 @@ export class BrowserCredentials extends Context.Service<
       readonly origin: string;
       readonly environmentId: string;
       readonly profile: string | null;
+      readonly profileId?: string | undefined;
       readonly username?: string | undefined;
     }) => Effect.Effect<
       | { readonly username: string; readonly password: string }
@@ -214,7 +228,7 @@ export const make = Effect.gen(function* BrowserCredentialsMake() {
       .pipe(
         Effect.mapError((cause) => new BrowserCredentialStoreError({ operation: "stat", cause })),
       );
-    if (!exists) return { version: 2, credentials: [] } as CredentialsDocument;
+    if (!exists) return { version: 3, credentials: [] } as CredentialsDocument;
     const raw = yield* fileSystem
       .readFileString(storePath)
       .pipe(
@@ -223,13 +237,14 @@ export const make = Effect.gen(function* BrowserCredentialsMake() {
     const decoded = yield* decodeDocument(raw).pipe(
       Effect.mapError((cause) => new BrowserCredentialStoreError({ operation: "decode", cause })),
     );
-    return decoded.version === 2
-      ? decoded
+    return decoded.version !== 1
+      ? { ...decoded, version: 3 as const }
       : {
-          version: 2,
+          version: 3,
           credentials: decoded.credentials.map((credential) => ({
             ...credential,
             environmentId: null,
+            profileId: undefined,
           })),
         };
   });
@@ -298,6 +313,7 @@ export const make = Effect.gen(function* BrowserCredentialsMake() {
                 credential.environmentId === null) &&
               credential.origin === origin &&
               credential.profile === input.profile &&
+              credential.profileId === input.profileId &&
               credential.username === input.username,
           );
           const entry: StoredCredential = {
@@ -305,6 +321,7 @@ export const make = Effect.gen(function* BrowserCredentialsMake() {
             environmentId: input.environmentId,
             origin,
             profile: input.profile,
+            ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
             username: input.username,
             encryptedPassword,
             updatedAt,
@@ -314,7 +331,7 @@ export const make = Effect.gen(function* BrowserCredentialsMake() {
                 credential.id === existing.id ? entry : credential,
               )
             : [...document.credentials, entry];
-          yield* writeDocument({ version: 2, credentials });
+          yield* writeDocument({ version: 3, credentials });
           return [toSummary(entry), undefined] as const;
         }),
       );
@@ -326,7 +343,7 @@ export const make = Effect.gen(function* BrowserCredentialsMake() {
           const document = yield* readDocument;
           const credentials = document.credentials.filter((credential) => credential.id !== id);
           if (credentials.length !== document.credentials.length) {
-            yield* writeDocument({ version: 2, credentials });
+            yield* writeDocument({ version: 3, credentials });
           }
           return [undefined, undefined] as const;
         }),
@@ -348,7 +365,7 @@ export const make = Effect.gen(function* BrowserCredentialsMake() {
             environmentId: input.environmentId,
           };
           yield* writeDocument({
-            version: 2,
+            version: 3,
             credentials: document.credentials.map((credential) =>
               credential.id === claimed.id ? claimed : credential,
             ),

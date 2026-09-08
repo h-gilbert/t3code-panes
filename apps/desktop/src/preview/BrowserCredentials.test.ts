@@ -112,6 +112,69 @@ describe("BrowserCredentials", () => {
     }).pipe(Effect.provide(layerWith(true))),
   );
 
+  it.effect("isolates managed profiles from shared and identically named legacy profiles", () =>
+    Effect.gen(function* () {
+      files.clear();
+      const store = yield* BrowserCredentials.BrowserCredentials;
+      const base = { environmentId: ENV_A, url: "https://github.com", username: "hamish" };
+      yield* store.save({ ...base, profile: null, password: "shared" });
+      yield* store.save({ ...base, profile: "work", password: "legacy" });
+      yield* store.save({ ...base, profile: null, profileId: "work", password: "managed" });
+      const fill = { environmentId: ENV_A, origin: base.url };
+      assert.deepStrictEqual(yield* store.resolveForFill({ ...fill, profile: null }), {
+        username: "hamish",
+        password: "shared",
+      });
+      assert.deepStrictEqual(yield* store.resolveForFill({ ...fill, profile: "work" }), {
+        username: "hamish",
+        password: "legacy",
+      });
+      assert.deepStrictEqual(
+        yield* store.resolveForFill({ ...fill, profile: null, profileId: "work" }),
+        { username: "hamish", password: "managed" },
+      );
+      assert.deepStrictEqual(
+        yield* store.resolveForFill({ ...fill, profile: null, profileId: "other" }),
+        { reason: "no-credential" },
+      );
+      assert.strictEqual((yield* store.list).length, 3);
+      assert.include(files.get("/state/browser-credentials.json") ?? "", '\"version\":3');
+    }).pipe(Effect.provide(layerWith(true))),
+  );
+
+  it.effect("reads version 2 logins without making them available to managed profiles", () =>
+    Effect.gen(function* () {
+      files.clear();
+      files.set(
+        "/state/browser-credentials.json",
+        // @effect-diagnostics-next-line preferSchemaOverJson:off - fixture for the previous persisted document format.
+        JSON.stringify({
+          version: 2,
+          credentials: [
+            {
+              id: "v2",
+              environmentId: ENV_A,
+              origin: "https://github.com",
+              profile: null,
+              username: "hamish",
+              encryptedPassword: "ZW5jOnNlY3JldA==",
+              updatedAt: "2026-01-01T00:00:00Z",
+            },
+          ],
+        }),
+      );
+      const store = yield* BrowserCredentials.BrowserCredentials;
+      const input = { environmentId: ENV_A, origin: "https://github.com", profile: null };
+      assert.deepStrictEqual(yield* store.resolveForFill(input), {
+        username: "hamish",
+        password: "secret",
+      });
+      assert.deepStrictEqual(yield* store.resolveForFill({ ...input, profileId: "work" }), {
+        reason: "no-credential",
+      });
+    }).pipe(Effect.provide(layerWith(true))),
+  );
+
   it.effect("requires a username to pick between several logins for one origin", () =>
     Effect.gen(function* () {
       files.clear();
@@ -203,7 +266,7 @@ describe("BrowserCredentials", () => {
         }),
         { username: "hamish", password: "legacy-password" },
       );
-      assert.include(files.get("/state/browser-credentials.json") ?? "", '"version":2');
+      assert.include(files.get("/state/browser-credentials.json") ?? "", '"version":3');
       assert.deepStrictEqual(
         yield* store.resolveForFill({
           environmentId: ENV_B,

@@ -1,3 +1,5 @@
+import { isPublishedT3Version } from "@t3tools/shared/releaseVersion";
+import packageJson from "../../package.json" with { type: "json" };
 import {
   ServerSelfUpdateError,
   type ServerSelfUpdateCapability,
@@ -11,12 +13,14 @@ import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as HashSet from "effect/HashSet";
 import * as Ref from "effect/Ref";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 
 import * as ServerConfig from "../config.ts";
+import * as DesktopAppUpdate from "../desktopUpdate/DesktopAppUpdate.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import {
   ensurePinnedRuntimeInstalled,
@@ -30,9 +34,11 @@ import { isExactServiceVersion, SERVICE_LAUNCHER_PROTOCOL } from "./serviceProto
 const PREFLIGHT_TIMEOUT = Duration.seconds(30);
 
 export function resolveServerSelfUpdateCapability(input: {
+  readonly version?: string;
   readonly desktopManaged: boolean;
   readonly launcherManaged: boolean;
 }): ServerSelfUpdateCapability | null {
+  if (!isPublishedT3Version(input.version ?? packageJson.version)) return null;
   if (input.desktopManaged) return "desktop-managed" as const;
   return input.launcherManaged ? ("boot-service" as const) : null;
 }
@@ -47,19 +53,24 @@ export class ServerSelfUpdate extends Context.Service<
       ) => Effect.Effect<void, ServerSelfUpdateError>,
       onHandoffAccepted?: () => Effect.Effect<void>,
     ) => Effect.Effect<ServerSelfUpdateResult, ServerSelfUpdateError>;
+    readonly commitDesktopUpdate: (
+      requestId: string,
+      onHandoffAccepted?: () => Effect.Effect<void>,
+    ) => Effect.Effect<never, ServerSelfUpdateError>;
   }
 >()("t3/cloud/selfUpdate/ServerSelfUpdate") {}
 
 export const withRunningThreadContinuation = Effect.fn(
   "cloud.server_self_update.withRunningThreadContinuation",
-)((input: {
+)(function* (input: {
   readonly mode: ServerConfig.RuntimeMode;
   readonly selfUpdate: ServerSelfUpdate["Service"];
   readonly prepare: Effect.Effect<ReadonlyArray<ThreadId>, ServerSelfUpdateError>;
   readonly clear: (
     threadIds: ReadonlyArray<ThreadId>,
   ) => Effect.Effect<void, ServerSelfUpdateError>;
-}) => {
+}) {
+  const desktopContinuationTokens = yield* Ref.make(HashSet.empty<string>());
   const clearOnError = <A>(
     effect: Effect.Effect<A, ServerSelfUpdateError>,
     threadIds: () => ReadonlyArray<ThreadId>,
@@ -82,39 +93,83 @@ export const withRunningThreadContinuation = Effect.fn(
     let handoffAccepted = false;
     let continuationThreadIds: ReadonlyArray<ThreadId> = [];
     return clearOnError(
-      input.selfUpdate.update(
-        request,
-        (stage) =>
-          (request.continueRunningThreads === true &&
-          input.mode !== "desktop" &&
-          stage === "installing" &&
-          !prepared
-            ? input.prepare.pipe(
-                Effect.tap((threadIds) =>
-                  Effect.sync(() => {
-                    prepared = true;
-                    continuationThreadIds = threadIds;
-                  }),
-                ),
-                Effect.asVoid,
-              )
-            : Effect.void
-          ).pipe(Effect.andThen(reportProgress(stage))),
-        () =>
-          Effect.sync(() => {
-            handoffAccepted = true;
+      input.selfUpdate
+        .update(
+          request,
+          (stage) =>
+            (request.continueRunningThreads === true &&
+            input.mode !== "desktop" &&
+            stage === "installing" &&
+            !prepared
+              ? input.prepare.pipe(
+                  Effect.tap((threadIds) =>
+                    Effect.sync(() => {
+                      prepared = true;
+                      continuationThreadIds = threadIds;
+                    }),
+                  ),
+                  Effect.asVoid,
+                )
+              : Effect.void
+            ).pipe(Effect.andThen(reportProgress(stage))),
+          () =>
+            Effect.sync(() => {
+              handoffAccepted = true;
+            }),
+        )
+        .pipe(
+          Effect.tap((result) => {
+            if (
+              result.method === "desktop-app" &&
+              result.desktopUpdateToken !== undefined &&
+              request.continueRunningThreads === true
+            ) {
+              return Ref.update(desktopContinuationTokens, HashSet.add(result.desktopUpdateToken));
+            }
+            return Effect.void;
           }),
-      ),
+        ),
       () => continuationThreadIds,
       () => handoffAccepted,
     );
   };
 
-  return Effect.succeed(ServerSelfUpdate.of({ update }));
+  return ServerSelfUpdate.of({
+    update,
+    commitDesktopUpdate: (requestId) =>
+      Effect.gen(function* () {
+        const shouldContinue = yield* Ref.modify(desktopContinuationTokens, (tokens) => [
+          HashSet.has(tokens, requestId),
+          HashSet.remove(tokens, requestId),
+        ]);
+        let handoffAccepted = false;
+        let continuationThreadIds: ReadonlyArray<ThreadId> = [];
+        return yield* clearOnError(
+          Effect.gen(function* () {
+            continuationThreadIds = shouldContinue ? yield* input.prepare : [];
+            return yield* input.selfUpdate.commitDesktopUpdate(requestId, () =>
+              Effect.sync(() => {
+                handoffAccepted = true;
+              }),
+            );
+          }),
+          () => continuationThreadIds,
+          () => handoffAccepted,
+        ).pipe(
+          Effect.catchCause((cause) =>
+            (shouldContinue && !handoffAccepted
+              ? Ref.update(desktopContinuationTokens, HashSet.add(requestId))
+              : Effect.void
+            ).pipe(Effect.andThen(Effect.failCause(cause))),
+          ),
+        );
+      }),
+  });
 });
 
 export const make = Effect.fn("cloud.server_self_update.make")(function* () {
   const serverConfig = yield* ServerConfig.ServerConfig;
+  const desktopAppUpdate = yield* DesktopAppUpdate.DesktopAppUpdate;
   const launcher = yield* ServiceLauncherClient.ServiceLauncherClient;
   const runner = yield* ProcessRunner.ProcessRunner;
   const fs = yield* FileSystem.FileSystem;
@@ -132,7 +187,18 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
   const update: ServerSelfUpdate["Service"]["update"] = Effect.fn(
     "cloud.server_self_update.update",
   )(function* (input, reportProgress = () => Effect.void, onHandoffAccepted = () => Effect.void) {
+    if (!isPublishedT3Version(packageJson.version)) {
+      return yield* failWith(
+        "This custom build requires a local update to preserve its custom features.",
+      );
+    }
     if (capability === "desktop-managed") {
+      // input.targetVersion is meaningless here: the desktop app's own
+      // update feed decides what it downloads, and the result carries what
+      // it actually got.
+      if (desktopAppUpdate.available) {
+        return yield* desktopAppUpdate.run(reportProgress);
+      }
       return yield* failWith(
         "This server is managed by the T3 Code desktop app on its machine; update the desktop app to update it.",
       );
@@ -260,7 +326,11 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
     }).pipe(Effect.onError(() => Ref.set(inFlight, false)));
   });
 
-  return ServerSelfUpdate.of({ update });
+  return ServerSelfUpdate.of({
+    update,
+    commitDesktopUpdate: (requestId, onHandoffAccepted) =>
+      desktopAppUpdate.commit(requestId, onHandoffAccepted),
+  });
 });
 
 export const layer = Layer.effect(ServerSelfUpdate, make()).pipe(

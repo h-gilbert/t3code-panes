@@ -1,0 +1,66 @@
+# Fork compatibility
+
+This fork keeps pane workspaces, independent desktop windows, saved browser logins and a private
+mobile build alongside the upstream clients and provider adapters. Follow the
+[upstream integration runbook](../operations/upstream-integration.md) when bringing in original
+T3 Code changes. Refresh this document as lasting custom constraints change; it is not an exhaustive
+inventory of every change in the fork.
+
+## Threads and windows
+
+Pane assignments, draft state and focused panes belong to a workspace window. Changing the sidebar
+project scope also changes that window's focused pane. Closing a view or window leaves thread work
+running. The browser host moves to a surviving window when its original window closes.
+
+The server owns automatic settlement. Settling releases provider sessions and managed terminals;
+a queued settlement cleanup checks that the thread has not resumed before stopping resources.
+The separate archive worker archives threads only after they have remained settled for seven days.
+Clients must not materialize a time-derived settlement themselves.
+
+Conversation folding keeps the first assistant message visible. Changed-file cards remain hidden
+in the conversation; file changes are available through the diff panel. New threads retain the
+fork's Claude model and medium-effort defaults unless project or explicit selections override them.
+
+## Browser presentation
+
+Browser previews have three modes: a mini preview, a movable and resizable window above the pane
+workspace, and fullscreen. Fullscreen returns to the movable window. The floating window allows
+continued interaction with the controlling chat and retains geometry separately from the mini
+preview. Viewport resizing belongs to the hosted browser's lifetime, including when the side panel
+is closed; moving controls into an optional panel must not disable them elsewhere.
+
+## Browser storage
+
+Snapshots carry both legacy `browserScope` and managed `profileId`. A legacy scope takes precedence
+when both are present. Its partition hash remains unchanged so existing cookies survive upgrades.
+The built-in default profile keeps the original environment partition. Other managed profiles use
+a separate partition namespace with a JSON tuple of environment and profile IDs.
+
+Saved credentials remain bound to an environment and exact origin. Legacy profile names and managed
+profile IDs are separate identity fields, even when their text matches. Credential document version
+3 reads versions 1 and 2, preserving their identities. Old unclaimed entries can only be claimed by
+a matching legacy or shared session. Passwords remain in the desktop process, protected by the OS
+keychain. Autofill keeps the document-level script guard until full navigation.
+
+Clearing cookies or cache from a tab targets its actual storage scope. Explicit managed profile
+requests cannot reuse a tab from another profile, including a provider's pinned tab.
+
+## Database migrations
+
+Migrations 1 through 43 keep their existing numbers and contents. In particular, 41 records title
+source, 42 adds authentication client connections and 43 records when a thread was unsettled.
+The linked-pull-request migration is 44, followed by project auto-pull at 45, settlement timestamp
+repair at 46 and project icons at 47. The upstream migration that clears automatic project model
+defaults is omitted so saved project choices remain intact. Manually assigned titles remain protected
+from automatic title generation.
+
+## Distribution
+
+Self-hosted mobile builds retain direct pairing and APNs registration, private signing identifiers,
+and no managed Clerk, relay or OTA configuration. Live Activities remain removed. Personal and
+self-hosted iOS builds do not include the share extension.
+
+Custom desktop artifacts use a local version suffix and omit stock update feeds. Desktop and server
+update handlers reject stock self-updates for custom versions. Use the
+[local promotion runbook](../operations/local-desktop-promotion.md) for installed app updates.
+SSH launch still resolves published server packages when the desktop version is unpublished.

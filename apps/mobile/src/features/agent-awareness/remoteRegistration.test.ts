@@ -26,8 +26,8 @@ import { makeRelayDeviceRegistrationRequest, resolveApsEnvironment } from "./reg
 import {
   __resetAgentAwarenessRemoteRegistrationForTest,
   getAgentAwarenessRegistrationStatus,
-  refreshAgentAwarenessRegistration,
   normalizeAgentAwarenessRelayBaseUrl,
+  refreshAgentAwarenessRegistration,
   registerAgentAwarenessConnection,
   releaseAgentAwarenessRelayTokenProvider,
   setAgentAwarenessRelayTokenProvider,

@@ -39,12 +39,13 @@ import {
   DEFAULT_RUNTIME_MODE,
   type ChatFileAttachment,
   type ChatImageAttachment,
+  videoMimeType,
 } from "./types";
 import {
   type TerminalContextDraft,
   ensureInlineTerminalContextPlaceholders,
-  normalizeTerminalContextText,
   stripInlineTerminalContextPlaceholders,
+  normalizeTerminalContextText,
 } from "./lib/terminalContext";
 import {
   type ElementContextDraft,
@@ -64,7 +65,7 @@ const isProviderDriverKind = Schema.is(ProviderDriverKind);
 const isReviewCommentContext = Schema.is(ReviewCommentContextSchema);
 
 export const COMPOSER_DRAFT_STORAGE_KEY = "t3code:composer-drafts:v1";
-const COMPOSER_DRAFT_STORAGE_VERSION = 8;
+const COMPOSER_DRAFT_STORAGE_VERSION = 9;
 const DraftThreadEnvModeSchema = Schema.Literals(["local", "worktree"]);
 export type DraftThreadEnvMode = typeof DraftThreadEnvModeSchema.Type;
 
@@ -141,6 +142,29 @@ export interface ComposerFileAttachment extends Omit<ChatFileAttachment, "previe
  */
 export function composerFileNeedsReattach(file: ComposerFileAttachment): boolean {
   return file.file === null && file.uploadedAttachmentId === undefined;
+}
+
+function clearStaleFileUploadMetadata(
+  draft: ComposerThreadDraftState,
+  environmentId: EnvironmentId,
+): ComposerThreadDraftState {
+  let changed = false;
+  const files = draft.files.map((file) => {
+    if (
+      (file.uploadedAttachmentId === undefined && file.uploadEnvironmentId === undefined) ||
+      file.uploadEnvironmentId === environmentId
+    ) {
+      return file;
+    }
+
+    changed = true;
+    const nextFile = { ...file };
+    delete nextFile.uploadedAttachmentId;
+    delete nextFile.uploadEnvironmentId;
+    return nextFile;
+  });
+
+  return changed ? { ...draft, files } : draft;
 }
 
 export const PersistedComposerFileAttachment = Schema.Struct({
@@ -224,6 +248,10 @@ const PersistedComposerThreadDraftState = Schema.Struct({
   // an entry already encodes "no selection for this instance".
   modelSelectionByProvider: Schema.optionalKey(Schema.Record(ProviderInstanceId, ModelSelection)),
   activeProvider: Schema.optionalKey(Schema.NullOr(ProviderInstanceId)),
+  // True only when a human picked this selection in the composer. Seeded
+  // selections (project default / sticky) leave it unset so later seeds can
+  // replace them; legacy entries predate the flag and read as seeded too.
+  modelSelectionExplicit: Schema.optionalKey(Schema.Boolean),
   runtimeMode: Schema.optionalKey(RuntimeMode),
   interactionMode: Schema.optionalKey(ProviderInteractionMode),
 });
@@ -353,6 +381,12 @@ export interface ComposerThreadDraftState {
   modelSelectionByProvider: Partial<Record<ProviderInstanceId, ModelSelection>>;
   /** Routing key of the last picked instance (see `modelSelectionByProvider`). */
   activeProvider: ProviderInstanceId | null;
+  /**
+   * True only when a human picked the active selection in the composer.
+   * Absent/false means seeded (project default / sticky), so later seeds
+   * may replace it. Legacy entries predate the flag and read as seeded.
+   */
+  modelSelectionExplicit?: boolean;
   runtimeMode: RuntimeMode | null;
   interactionMode: ProviderInteractionMode | null;
 }
@@ -435,6 +469,7 @@ interface ComposerDraftStoreState {
   draftThreadsByThreadKey: Record<string, DraftThreadState>;
   logicalProjectDraftThreadKeyByLogicalProjectKey: Record<string, string>;
   retainedDraftThreadKeys: Record<string, true>;
+  backgroundSubmissionThreadKeys: Record<string, true>;
   stickyModelSelectionByProvider: Partial<Record<ProviderInstanceId, ModelSelection>>;
   stickyActiveProvider: ProviderInstanceId | null;
   /** Returns the editable composer content for a draft session or server thread. */
@@ -519,6 +554,7 @@ interface ComposerDraftStoreState {
     threadRef: ComposerThreadTarget,
     modelSelection: ModelSelection | null | undefined,
     opts?: {
+      explicit?: boolean;
       /**
        * Replace the stored entry outright instead of preserving its
        * existing options when the incoming selection has none. Used when
@@ -765,6 +801,26 @@ function composerImageDedupKey(image: ComposerImageAttachment): string {
   // Keep this independent from File.lastModified so dedupe is stable for hydrated
   // images reconstructed from localStorage (which get a fresh lastModified value).
   return `${image.mimeType}\u0000${image.sizeBytes}\u0000${image.name}`;
+}
+
+export function composerFileDedupKey(
+  file: Pick<ComposerFileAttachment, "mimeType" | "sizeBytes" | "name">,
+): string {
+  return `${file.mimeType}\u0000${file.sizeBytes}\u0000${file.name}`;
+}
+
+export function composerFileMatchesReattachMarker(
+  marker: Pick<ComposerFileAttachment, "mimeType" | "sizeBytes" | "name">,
+  file: Pick<ComposerFileAttachment, "mimeType" | "sizeBytes" | "name">,
+): boolean {
+  if (marker.name !== file.name || marker.sizeBytes !== file.sizeBytes) return false;
+  if (marker.mimeType === file.mimeType) return true;
+  const markerMimeType = marker.mimeType.toLowerCase();
+  return (
+    (markerMimeType === "" || markerMimeType === "application/octet-stream") &&
+    videoMimeType(marker) !== null &&
+    videoMimeType(file) !== null
+  );
 }
 
 function terminalContextDedupKey(context: TerminalContextDraft): string {
@@ -1115,6 +1171,10 @@ export function deriveEffectiveComposerModelState(input: {
 }): EffectiveComposerModelState {
   const baseModelCandidate =
     input.threadModelSelection?.model ?? input.projectModelSelection?.model ?? null;
+  const preserveThreadModel =
+    input.selectedInstanceId !== null &&
+    input.selectedInstanceId !== undefined &&
+    input.threadModelSelection?.instanceId === input.selectedInstanceId;
   const baseModel =
     (input.selectedInstanceId
       ? resolveAppModelSelectionForInstance(
@@ -1122,8 +1182,11 @@ export function deriveEffectiveComposerModelState(input: {
           input.settings,
           input.providers,
           baseModelCandidate,
+          { preserveUnavailableSelection: preserveThreadModel },
         )
       : null) ??
+    // Antigravity has no static model or cross-account catalog fallback.
+    (input.selectedProvider === "antigravity" && input.selectedInstanceId ? "" : null) ??
     resolveAppModelSelection(
       input.selectedProvider,
       input.settings,
@@ -1140,7 +1203,11 @@ export function deriveEffectiveComposerModelState(input: {
     ? input.draft?.modelSelectionByProvider?.[input.selectedInstanceId]
     : undefined;
   const legacySelection =
-    input.draft?.modelSelectionByProvider?.[ProviderInstanceId.make(input.selectedProvider)];
+    input.selectedProvider === "antigravity" &&
+    input.selectedInstanceId &&
+    input.selectedInstanceId !== defaultInstanceIdForDriver(input.selectedProvider)
+      ? undefined
+      : input.draft?.modelSelectionByProvider?.[ProviderInstanceId.make(input.selectedProvider)];
   const activeSelection = instanceSelection ?? legacySelection;
   const activeSelectionInstanceId = instanceSelection
     ? (input.selectedInstanceId ?? ProviderInstanceId.make(input.selectedProvider))
@@ -1151,7 +1218,9 @@ export function deriveEffectiveComposerModelState(input: {
         input.settings,
         input.providers,
         activeSelection.model,
+        { preserveUnavailableSelection: true },
       ) ??
+      (input.selectedProvider === "antigravity" ? "" : null) ??
       resolveAppModelSelection(
         input.selectedProvider,
         input.settings,
@@ -1559,6 +1628,7 @@ function removeDraftThreadReferences(
     | "logicalProjectDraftThreadKeyByLogicalProjectKey"
   >,
   threadKey: string,
+  composerDestination?: ScopedThreadRef,
 ): Pick<
   ComposerDraftStoreState,
   | "draftThreadsByThreadKey"
@@ -1573,7 +1643,11 @@ function removeDraftThreadReferences(
   const { [threadKey]: _removedDraftThread, ...restDraftThreadsByThreadKey } =
     state.draftThreadsByThreadKey;
   const { [threadKey]: removedComposerDraft, ...restDraftsByThreadKey } = state.draftsByThreadKey;
-  revokeDraftThreadPreviewUrls(removedComposerDraft);
+  if (composerDestination && removedComposerDraft) {
+    restDraftsByThreadKey[composerTargetKey(composerDestination)] = removedComposerDraft;
+  } else {
+    revokeDraftThreadPreviewUrls(removedComposerDraft);
+  }
   return {
     draftsByThreadKey: restDraftsByThreadKey,
     draftThreadsByThreadKey: restDraftThreadsByThreadKey,
@@ -1710,12 +1784,18 @@ function normalizePersistedDraftThreads(
       const parsedThreadRef = parseScopedThreadKey(threadKeyOrId);
       const threadKey = normalizeLegacyComposerStorageKey(threadKeyOrId);
       logicalProjectDraftThreadKeyByLogicalProjectKey[logicalProjectKey] = threadKey;
+      const existingDraftThread = draftThreadsByThreadKey[threadKey];
       if (parsedThreadRef) {
         environmentIdByThreadId.set(parsedThreadRef.threadId, parsedThreadRef.environmentId);
       }
+      // Logical project keys may contain a workspace path after the
+      // environment prefix. When the persisted draft already names that
+      // logical key, its concrete project id remains authoritative.
+      if (existingDraftThread?.logicalProjectKey === logicalProjectKey) {
+        continue;
+      }
       if (!projectRef) {
-        const existingDraftThread = draftThreadsByThreadKey[threadKey];
-        if (existingDraftThread && !existingDraftThread.logicalProjectKey) {
+        if (existingDraftThread) {
           draftThreadsByThreadKey[threadKey] = {
             ...existingDraftThread,
             logicalProjectKey,
@@ -1723,7 +1803,7 @@ function normalizePersistedDraftThreads(
         }
         continue;
       }
-      if (!draftThreadsByThreadKey[threadKey]) {
+      if (!existingDraftThread) {
         draftThreadsByThreadKey[threadKey] = {
           threadId: parsedThreadRef?.threadId ?? (threadKey as ThreadId),
           environmentId: projectRef.environmentId,
@@ -1739,12 +1819,12 @@ function normalizePersistedDraftThreads(
           promotedTo: null,
         };
       } else if (
-        draftThreadsByThreadKey[threadKey]?.projectId !== projectRef.projectId ||
-        draftThreadsByThreadKey[threadKey]?.environmentId !== projectRef.environmentId
+        existingDraftThread.projectId !== projectRef.projectId ||
+        existingDraftThread.environmentId !== projectRef.environmentId
       ) {
         draftThreadsByThreadKey[threadKey] = {
-          ...draftThreadsByThreadKey[threadKey]!,
-          threadId: draftThreadsByThreadKey[threadKey]!.threadId,
+          ...existingDraftThread,
+          threadId: existingDraftThread.threadId,
           environmentId: projectRef.environmentId,
           projectId: projectRef.projectId,
           logicalProjectKey,
@@ -1828,6 +1908,7 @@ function normalizePersistedDraftsByThreadId(
     const legacyDraftCandidate = draftValue as LegacyPersistedComposerThreadDraftState;
     let modelSelectionByProvider: Partial<Record<ProviderInstanceId, ModelSelection>> = {};
     let activeProvider: ProviderInstanceId | null = null;
+    let modelSelectionExplicit: true | undefined = undefined;
 
     if (
       draftCandidate.modelSelectionByProvider &&
@@ -1838,6 +1919,7 @@ function normalizePersistedDraftsByThreadId(
         Record<ProviderInstanceId, ModelSelection>
       >;
       activeProvider = normalizeProviderInstanceId(draftCandidate.activeProvider);
+      modelSelectionExplicit = draftCandidate.modelSelectionExplicit === true ? true : undefined;
     } else {
       // v2 or legacy format: migrate
       const normalizedModelOptions =
@@ -1908,6 +1990,7 @@ function normalizePersistedDraftsByThreadId(
         ? {
             modelSelectionByProvider: compactModelSelectionByProvider(modelSelectionByProvider),
             activeProvider,
+            ...(modelSelectionExplicit ? { modelSelectionExplicit: true } : {}),
           }
         : {}),
       ...(runtimeMode ? { runtimeMode } : {}),
@@ -1918,55 +2001,53 @@ function normalizePersistedDraftsByThreadId(
   return nextDraftsByThreadKey;
 }
 
+function persistedComposerDraftHasUserContent(draft: PersistedComposerThreadDraftState): boolean {
+  return (
+    draft.prompt.trim().length > 0 ||
+    draft.attachments.length > 0 ||
+    (draft.files?.length ?? 0) > 0 ||
+    (draft.terminalContexts?.length ?? 0) > 0 ||
+    (draft.elementContexts?.length ?? 0) > 0 ||
+    (draft.previewAnnotations?.length ?? 0) > 0 ||
+    (draft.reviewComments?.length ?? 0) > 0
+  );
+}
+
+function stripLegacyModelSeedsFromEmptyDraftSessions(
+  draftsByThreadKey: PersistedComposerDraftStoreState["draftsByThreadKey"],
+  draftThreadsByThreadKey: PersistedComposerDraftStoreState["draftThreadsByThreadKey"],
+): PersistedComposerDraftStoreState["draftsByThreadKey"] {
+  return Object.fromEntries(
+    Object.entries(draftsByThreadKey).flatMap(([threadKey, draft]) => {
+      if (
+        draftThreadsByThreadKey[threadKey] === undefined ||
+        draft.modelSelectionExplicit === true ||
+        persistedComposerDraftHasUserContent(draft)
+      ) {
+        return [[threadKey, draft]];
+      }
+
+      const {
+        activeProvider: _activeProvider,
+        modelSelectionByProvider: _modelSelectionByProvider,
+        modelSelectionExplicit: _modelSelectionExplicit,
+        ...retained
+      } = draft;
+      return retained.runtimeMode || retained.interactionMode ? [[threadKey, retained]] : [];
+    }),
+  );
+}
+
 function migratePersistedComposerDraftStoreState(
   persistedState: unknown,
 ): PersistedComposerDraftStoreState {
-  if (!persistedState || typeof persistedState !== "object") {
-    return EMPTY_PERSISTED_DRAFT_STORE_STATE;
-  }
-  const candidate = persistedState as LegacyPersistedComposerDraftStoreState;
-  const rawDraftMap = candidate.draftsByThreadKey ?? candidate.draftsByThreadId;
-  const rawDraftThreadsByThreadId =
-    candidate.draftThreadsByThreadKey ?? candidate.draftThreadsByThreadId;
-  const rawProjectDraftThreadIdByProjectKey =
-    candidate.logicalProjectDraftThreadKeyByLogicalProjectKey ??
-    candidate.projectDraftThreadKeyByProjectKey ??
-    candidate.projectDraftThreadIdByProjectKey ??
-    candidate.projectDraftThreadIdByProjectId;
-
-  // Migrate sticky state from v2 (dual) to v3 (consolidated)
-  const stickyModelOptions = normalizeProviderModelOptions(candidate.stickyModelOptions) ?? {};
-  const normalizedStickyModelSelection = normalizeModelSelection(candidate.stickyModelSelection, {
-    provider: candidate.stickyProvider ?? "codex",
-    model: candidate.stickyModel,
-    modelOptions: stickyModelOptions,
-  });
-  const nextStickyModelOptions = legacyMergeModelSelectionIntoProviderModelOptions(
-    normalizedStickyModelSelection,
-    stickyModelOptions,
-  );
-  const stickyModelSelection = legacySyncModelSelectionOptions(
-    normalizedStickyModelSelection,
-    nextStickyModelOptions,
-  );
-  const stickyModelSelectionByProvider = legacyToModelSelectionByProvider(
-    stickyModelSelection,
-    nextStickyModelOptions,
-  );
-  const stickyActiveProvider = normalizeProviderInstanceId(candidate.stickyProvider) ?? null;
-
-  const { draftThreadsByThreadKey, logicalProjectDraftThreadKeyByLogicalProjectKey } =
-    normalizePersistedDraftThreads(rawDraftThreadsByThreadId, rawProjectDraftThreadIdByProjectKey);
-  const draftsByThreadKey = normalizePersistedDraftsByThreadId(
-    rawDraftMap,
-    draftThreadsByThreadKey,
-  );
+  const normalized = normalizeCurrentPersistedComposerDraftStoreState(persistedState);
   return {
-    draftsByThreadKey,
-    draftThreadsByThreadKey,
-    logicalProjectDraftThreadKeyByLogicalProjectKey,
-    stickyModelSelectionByProvider: compactModelSelectionByProvider(stickyModelSelectionByProvider),
-    stickyActiveProvider,
+    ...normalized,
+    draftsByThreadKey: stripLegacyModelSeedsFromEmptyDraftSessions(
+      normalized.draftsByThreadKey,
+      normalized.draftThreadsByThreadKey,
+    ),
   };
 }
 
@@ -2091,6 +2172,7 @@ export function partializeComposerDraftStoreState(
               draft.modelSelectionByProvider,
             ),
             activeProvider: draft.activeProvider,
+            ...(draft.modelSelectionExplicit ? { modelSelectionExplicit: true } : {}),
           }
         : {}),
       ...(draft.runtimeMode ? { runtimeMode: draft.runtimeMode } : {}),
@@ -2157,7 +2239,7 @@ function normalizeCurrentPersistedComposerDraftStoreState(
     const normalizedStickyModelSelection = normalizeModelSelection(
       normalizedPersistedState.stickyModelSelection,
       {
-        provider: normalizedPersistedState.stickyProvider,
+        provider: normalizedPersistedState.stickyProvider ?? "codex",
         model: normalizedPersistedState.stickyModel,
         modelOptions: stickyModelOptions,
       },
@@ -2354,6 +2436,7 @@ function toHydratedThreadDraft(
     reviewComments: persistedDraft.reviewComments?.map((comment) => ({ ...comment })) ?? [],
     modelSelectionByProvider,
     activeProvider,
+    ...(persistedDraft.modelSelectionExplicit ? { modelSelectionExplicit: true } : {}),
     runtimeMode: persistedDraft.runtimeMode ?? null,
     interactionMode: persistedDraft.interactionMode ?? null,
   };
@@ -2400,6 +2483,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
         draftThreadsByThreadKey: {},
         logicalProjectDraftThreadKeyByLogicalProjectKey: {},
         retainedDraftThreadKeys: {},
+        backgroundSubmissionThreadKeys: {},
         stickyModelSelectionByProvider: {},
         stickyActiveProvider: null,
         getComposerDraft: (target) => getComposerDraftState(get(), target),
@@ -2521,18 +2605,53 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               options,
             );
             const hasSameLogicalMapping = previousThreadKeyForLogicalProject === draftId;
-            if (hasSameLogicalMapping && draftThreadsEqual(existingThread, nextDraftThread)) {
+            const hasNoStaleMappingsForDraft = Object.entries(
+              state.logicalProjectDraftThreadKeyByLogicalProjectKey,
+            ).every(
+              ([logicalKey, mappedDraftId]) =>
+                mappedDraftId !== draftId || logicalKey === normalizedLogicalProjectKey,
+            );
+            if (
+              hasSameLogicalMapping &&
+              hasNoStaleMappingsForDraft &&
+              draftThreadsEqual(existingThread, nextDraftThread)
+            ) {
               return state;
             }
-            const nextLogicalProjectDraftThreadKeyByLogicalProjectKey: Record<string, string> = {
-              ...state.logicalProjectDraftThreadKeyByLogicalProjectKey,
-              [normalizedLogicalProjectKey]: draftId,
-            };
+            // A draft session belongs to one logical project at a time. When
+            // an open draft is retargeted in place, remove any old mapping
+            // for that same draft so the previous project cannot resolve it.
+            const nextLogicalProjectDraftThreadKeyByLogicalProjectKey: Record<string, string> =
+              Object.fromEntries(
+                Object.entries(state.logicalProjectDraftThreadKeyByLogicalProjectKey).filter(
+                  ([logicalKey, mappedDraftId]) =>
+                    mappedDraftId !== draftId || logicalKey === normalizedLogicalProjectKey,
+                ),
+              );
+            nextLogicalProjectDraftThreadKeyByLogicalProjectKey[normalizedLogicalProjectKey] =
+              draftId;
             const nextDraftThreadsByThreadKey: Record<string, DraftThreadState> = {
               ...state.draftThreadsByThreadKey,
               [draftId]: nextDraftThread,
             };
+            const existingDraft = state.draftsByThreadKey[draftId];
             let nextDraftsByThreadKey = state.draftsByThreadKey;
+            if (
+              existingThread &&
+              existingThread.environmentId !== projectRef.environmentId &&
+              existingDraft !== undefined
+            ) {
+              const nextDraft = clearStaleFileUploadMetadata(
+                existingDraft,
+                projectRef.environmentId,
+              );
+              if (nextDraft !== existingDraft) {
+                nextDraftsByThreadKey = {
+                  ...state.draftsByThreadKey,
+                  [draftId]: nextDraft,
+                };
+              }
+            }
             const previousDraftThread =
               previousThreadKeyForLogicalProject === undefined
                 ? undefined
@@ -2557,7 +2676,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             ) {
               delete nextDraftThreadsByThreadKey[previousThreadKeyForLogicalProject];
               if (state.draftsByThreadKey[previousThreadKeyForLogicalProject] !== undefined) {
-                nextDraftsByThreadKey = { ...state.draftsByThreadKey };
+                nextDraftsByThreadKey = { ...nextDraftsByThreadKey };
                 delete nextDraftsByThreadKey[previousThreadKeyForLogicalProject];
               }
             }
@@ -2738,10 +2857,10 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
           }
           set((state) => {
             const existing = state.draftThreadsByThreadKey[threadKey];
-            if (!isDraftThreadPromoting(existing)) {
+            if (!existing || !isDraftThreadPromoting(existing)) {
               return state;
             }
-            return removeDraftThreadReferences(state, threadKey);
+            return removeDraftThreadReferences(state, threadKey, existing.promotedTo ?? undefined);
           });
         },
         clearDraftThread: (threadRef) => {
@@ -2790,33 +2909,19 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
           set((state) => {
             const stickyMap = state.stickyModelSelectionByProvider;
             const stickyActiveProvider = state.stickyActiveProvider;
-            if (Object.keys(stickyMap).length === 0 && stickyActiveProvider === null) {
-              return state;
-            }
             const existing = state.draftsByThreadKey[threadKey];
             const base = existing ?? createEmptyThreadDraft();
-            const nextMap = { ...base.modelSelectionByProvider };
-            for (const [provider, selection] of Object.entries(stickyMap)) {
-              if (selection) {
-                // Iteration key comes from the instance-keyed sticky map,
-                // so coerce the string back to `ProviderInstanceId` for
-                // the typed lookup.
-                const instanceKey = provider as ProviderInstanceId;
-                const current = nextMap[instanceKey];
-                nextMap[instanceKey] = {
-                  ...selection,
-                  model: current?.model ?? selection.model,
-                };
-              }
-            }
+            const nextMap = compactModelSelectionByProvider(stickyMap);
             if (
               Equal.equals(base.modelSelectionByProvider, nextMap) &&
-              base.activeProvider === stickyActiveProvider
+              base.activeProvider === stickyActiveProvider &&
+              base.modelSelectionExplicit === undefined
             ) {
               return state;
             }
+            const { modelSelectionExplicit: _modelSelectionExplicit, ...retained } = base;
             const nextDraft: ComposerThreadDraftState = {
-              ...base,
+              ...retained,
               modelSelectionByProvider: nextMap,
               activeProvider: stickyActiveProvider,
             };
@@ -2912,14 +3017,20 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             const nextActiveProvider = normalized?.instanceId ?? base.activeProvider;
             if (
               Equal.equals(base.modelSelectionByProvider, nextMap) &&
-              base.activeProvider === nextActiveProvider
+              base.activeProvider === nextActiveProvider &&
+              (base.modelSelectionExplicit ?? false) === (opts?.explicit === true)
             ) {
               return state;
             }
+            // Last writer defines intent: picker writes mark the selection
+            // explicit; seeding writes leave it unset so future seeds can
+            // replace it.
+            const { modelSelectionExplicit: _previousExplicit, ...restBase } = base;
             const nextDraft: ComposerThreadDraftState = {
-              ...base,
+              ...restBase,
               modelSelectionByProvider: nextMap,
               activeProvider: nextActiveProvider,
+              ...(opts?.explicit === true ? { modelSelectionExplicit: true as const } : {}),
             };
             const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
             if (shouldRemoveDraft(nextDraft)) {
@@ -3042,10 +3153,14 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               return state;
             }
 
+            // Trait edits are user-driven intent: mark the selection explicit
+            // so later seeds cannot silently replace the chosen options.
+            const { modelSelectionExplicit: _previousExplicit, ...restBase } = base;
             const nextDraft: ComposerThreadDraftState = {
-              ...base,
+              ...restBase,
               ...(options?.instanceId ? { activeProvider: instanceKey } : {}),
               modelSelectionByProvider: nextMap,
+              modelSelectionExplicit: true,
             };
             const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
             if (shouldRemoveDraft(nextDraft)) {
@@ -3226,29 +3341,32 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             const existing = state.draftsByThreadKey[threadKey] ?? createEmptyThreadDraft();
             const knownIds = new Set(existing.files.map((file) => file.id));
             const knownFiles = new Map<string, ComposerFileAttachment>(
-              existing.files.map((file) => [
-                `${file.mimeType}\u0000${file.sizeBytes}\u0000${file.name}`,
-                file,
-              ]),
+              existing.files.map((file) => [composerFileDedupKey(file), file]),
             );
             const accepted: ComposerFileAttachment[] = [];
             // Needs-reattach markers replaced in place by a re-pick, keyed by
             // the marker's id.
             const replacements = new Map<string, ComposerFileAttachment>();
             for (const file of files) {
-              const key = `${file.mimeType}\u0000${file.sizeBytes}\u0000${file.name}`;
+              const key = composerFileDedupKey(file);
               if (knownIds.has(file.id)) {
                 continue;
               }
-              const duplicate = knownFiles.get(key);
+              const duplicate =
+                knownFiles.get(key) ??
+                existing.files.find(
+                  (candidate) =>
+                    composerFileNeedsReattach(candidate) &&
+                    !replacements.has(candidate.id) &&
+                    composerFileMatchesReattachMarker(candidate, file),
+                );
               if (duplicate) {
-                // A needs-reattach marker persists exactly the metadata this
-                // key hashes, so re-picking the same file matches its marker.
-                // Dropping the pick as a duplicate would leave the draft
-                // blocked forever; replace the marker so the upload restarts.
+                // A needs-reattach marker is not a usable duplicate. Replace
+                // it so the upload restarts.
                 if (composerFileNeedsReattach(duplicate) && !replacements.has(duplicate.id)) {
                   replacements.set(duplicate.id, file);
                   knownIds.add(file.id);
+                  knownFiles.set(key, file);
                 }
                 continue;
               }
@@ -3974,6 +4092,40 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
 
 export const useComposerDraftStore = composerDraftStore;
 
+export function beginBackgroundDraftSubmissionByRef(threadRef: ScopedThreadRef): void {
+  const threadKey = scopedThreadKey(threadRef);
+  useComposerDraftStore.setState((state) => {
+    if (state.backgroundSubmissionThreadKeys[threadKey]) {
+      return state;
+    }
+    return {
+      backgroundSubmissionThreadKeys: {
+        ...state.backgroundSubmissionThreadKeys,
+        [threadKey]: true,
+      },
+    };
+  });
+}
+
+export function clearBackgroundDraftSubmissionByRef(threadRef: ScopedThreadRef): void {
+  const threadKey = scopedThreadKey(threadRef);
+  useComposerDraftStore.setState((state) => {
+    if (!state.backgroundSubmissionThreadKeys[threadKey]) {
+      return state;
+    }
+    const backgroundSubmissionThreadKeys = { ...state.backgroundSubmissionThreadKeys };
+    delete backgroundSubmissionThreadKeys[threadKey];
+    return { backgroundSubmissionThreadKeys };
+  });
+}
+
+export function useBackgroundDraftSubmissionPending(threadRef: ScopedThreadRef | null): boolean {
+  const threadKey = threadRef ? scopedThreadKey(threadRef) : null;
+  return useComposerDraftStore(
+    (state) => threadKey !== null && state.backgroundSubmissionThreadKeys[threadKey] === true,
+  );
+}
+
 export function clearComposerDraftsEnvironment(environmentId: EnvironmentId): void {
   useComposerDraftStore.setState((state) => {
     const removedThreadKeys = new Set<string>();
@@ -4018,11 +4170,17 @@ export function clearComposerDraftsEnvironment(environmentId: EnvironmentId): vo
         return false;
       }),
     ) as Record<string, ComposerThreadDraftState>;
+    const nextBackgroundSubmissionThreadKeys = Object.fromEntries(
+      Object.entries(state.backgroundSubmissionThreadKeys).filter(
+        ([threadKey]) => parseScopedThreadKey(threadKey)?.environmentId !== environmentId,
+      ),
+    ) as Record<string, true>;
 
     return {
       draftsByThreadKey: nextDrafts,
       draftThreadsByThreadKey: nextDraftThreads,
       logicalProjectDraftThreadKeyByLogicalProjectKey: nextLogicalMappings,
+      backgroundSubmissionThreadKeys: nextBackgroundSubmissionThreadKeys,
     };
   });
   composerDebouncedStorage.flush();
@@ -4032,6 +4190,17 @@ export function useComposerThreadDraft(threadRef: ComposerThreadTarget): Compose
   return useComposerDraftStore((state) => {
     return getComposerDraftState(state, threadRef) ?? EMPTY_THREAD_DRAFT;
   });
+}
+
+/**
+ * True when a real thread's composer holds unsent user content. Selects a
+ * boolean so the sidebar row that reads it re-renders only when the draft
+ * appears or disappears, not on every keystroke.
+ */
+export function useThreadHasUnsentDraft(threadRef: ScopedThreadRef): boolean {
+  return useComposerDraftStore((state) =>
+    composerDraftHasUserContent(getComposerDraftState(state, threadRef)),
+  );
 }
 
 export function useComposerDraftModelState(
@@ -4090,29 +4259,6 @@ export function useEffectiveComposerModelState(input: {
   );
 }
 
-/**
- * Mark a draft thread as promoting once the server has materialized the same thread id.
- *
- * Use the single-thread helper for live `thread.created` events and the
- * iterable helper for bootstrap/recovery paths that discover multiple server
- * threads at once.
- */
-export function markPromotedDraftThread(threadId: ThreadId): void {
-  const store = useComposerDraftStore.getState();
-  const draftThreadTargets: ComposerThreadTarget[] = [];
-  for (const [draftId, draftThread] of Object.entries(store.draftThreadsByThreadKey)) {
-    if (draftThread.threadId === threadId) {
-      draftThreadTargets.push(DraftId.make(draftId));
-    }
-  }
-  if (draftThreadTargets.length === 0) {
-    return;
-  }
-  for (const draftThreadTarget of draftThreadTargets) {
-    store.markDraftThreadPromoting(draftThreadTarget);
-  }
-}
-
 export function markPromotedDraftThreadByRef(threadRef: ScopedThreadRef): void {
   const draftStore = useComposerDraftStore.getState();
   for (const [draftId, draftThread] of Object.entries(draftStore.draftThreadsByThreadKey)) {
@@ -4122,18 +4268,6 @@ export function markPromotedDraftThreadByRef(threadRef: ScopedThreadRef): void {
     ) {
       draftStore.markDraftThreadPromoting(DraftId.make(draftId), threadRef);
     }
-  }
-}
-
-export function markPromotedDraftThreads(serverThreadIds: Iterable<ThreadId>): void {
-  for (const threadId of serverThreadIds) {
-    markPromotedDraftThread(threadId);
-  }
-}
-
-export function markPromotedDraftThreadsByRef(serverThreadRefs: Iterable<ScopedThreadRef>): void {
-  for (const threadRef of serverThreadRefs) {
-    markPromotedDraftThreadByRef(threadRef);
   }
 }
 
@@ -4152,12 +4286,5 @@ export function finalizePromotedDraftThreadByRef(threadRef: ScopedThreadRef): vo
       draftStore.finalizePromotedDraftThread(target);
     }
   }
-}
-
-export function finalizePromotedDraftThreadsByRef(
-  serverThreadRefs: Iterable<ScopedThreadRef>,
-): void {
-  for (const threadRef of serverThreadRefs) {
-    finalizePromotedDraftThreadByRef(threadRef);
-  }
+  clearBackgroundDraftSubmissionByRef(threadRef);
 }

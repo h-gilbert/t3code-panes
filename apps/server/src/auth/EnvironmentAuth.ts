@@ -16,6 +16,8 @@ import {
   type ServerAuthDescriptor,
   type ServerAuthSessionMethod,
   type AuthWebSocketTicketResult,
+  DpopFailureReason,
+  type DpopFailureReason as DpopFailureReasonType,
 } from "@t3tools/contracts";
 import { encodeOAuthScope } from "@t3tools/shared/oauthScope";
 import * as Context from "effect/Context";
@@ -348,6 +350,7 @@ export class ServerAuthInvalidCredentialError extends Schema.TaggedErrorClass<Se
   "ServerAuthInvalidCredentialError",
   {
     diagnostic: Schema.optional(Schema.String),
+    dpopFailureReason: Schema.optionalKey(DpopFailureReason),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
@@ -366,6 +369,11 @@ export const serverAuthCredentialReason = (
   error: ServerAuthCredentialError,
 ): "missing_credential" | "invalid_credential" =>
   error._tag === "ServerAuthMissingCredentialError" ? "missing_credential" : "invalid_credential";
+
+export const serverAuthDpopFailureReason = (
+  error: ServerAuthCredentialError,
+): DpopFailureReasonType | undefined =>
+  error._tag === "ServerAuthInvalidCredentialError" ? error.dpopFailureReason : undefined;
 
 export class ServerAuthInvalidScopeError extends Schema.TaggedErrorClass<ServerAuthInvalidScopeError>()(
   "ServerAuthInvalidScopeError",
@@ -637,6 +645,7 @@ export const make = Effect.gen(function* () {
             return Effect.fail(
               new ServerAuthInvalidCredentialError({
                 diagnostic: "DPoP-bound access token requires DPoP authorization.",
+                dpopFailureReason: "invalid_proof",
               }),
             );
           }
@@ -654,6 +663,7 @@ export const make = Effect.gen(function* () {
           return Effect.fail(
             new ServerAuthInvalidCredentialError({
               diagnostic: "DPoP authorization requires a proof-bound access token.",
+              dpopFailureReason: "invalid_proof",
             }),
           );
         }
@@ -740,6 +750,9 @@ export const make = Effect.gen(function* () {
                       ttl: Duration.hours(1),
                     }
                   : {}),
+                // Desktop restarts forget the previous bearer token. Replace
+                // its session, including stale entries left by older versions.
+                replaceActiveForSubjectAndMethod: grant.method === "desktop-bootstrap",
                 client: {
                   ...requestMetadata,
                   ...(grant.label ? { label: grant.label } : {}),
@@ -913,12 +926,10 @@ export const make = Effect.gen(function* () {
   const listClientSessions: EnvironmentAuth["Service"]["listClientSessions"] = (currentSessionId) =>
     listSessions().pipe(
       Effect.map((clientSessions) =>
-        clientSessions.map(
-          (clientSession): AuthClientSession => ({
-            ...clientSession,
-            current: clientSession.sessionId === currentSessionId,
-          }),
-        ),
+        clientSessions.map((clientSession): AuthClientSession => ({
+          ...clientSession,
+          current: clientSession.sessionId === currentSessionId,
+        })),
       ),
       Effect.withSpan("EnvironmentAuth.listClientSessions"),
     );

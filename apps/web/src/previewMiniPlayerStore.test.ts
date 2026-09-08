@@ -36,6 +36,9 @@ describe("previewMiniPlayerStore", () => {
       position: { x: 24, y: 48 },
       size: null,
       maximized: false,
+      expanded: false,
+      windowPosition: null,
+      windowSize: null,
     });
   });
 
@@ -51,6 +54,9 @@ describe("previewMiniPlayerStore", () => {
       position: null,
       size: null,
       maximized: false,
+      expanded: false,
+      windowPosition: null,
+      windowSize: null,
     });
   });
 
@@ -72,5 +78,55 @@ describe("previewMiniPlayerStore", () => {
     expect(
       selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
     ).toMatchObject({ tabId: "tab-b", maximized: true });
+  });
+});
+
+describe("browser window transitions", () => {
+  it("restores separate mini and window geometry across fullscreen and minimization", () => {
+    const store = usePreviewMiniPlayerStore.getState();
+    store.open(refA, "tab-a");
+    store.move(refA, "tab-a", { x: 20, y: 30 });
+    store.resize(refA, "tab-a", { width: 320, height: 200 });
+    store.setExpanded(refA, "tab-a", true);
+    store.move(refA, "tab-a", { x: 400, y: 100 });
+    store.resize(refA, "tab-a", { width: 900, height: 600 });
+    store.setMaximized(refA, "tab-a", true);
+    store.setMaximized(refA, "tab-a", false);
+    expect(
+      selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
+    ).toMatchObject({
+      expanded: true,
+      maximized: false,
+      windowPosition: { x: 400, y: 100 },
+      windowSize: { width: 900, height: 600 },
+    });
+    store.setExpanded(refA, "tab-a", false);
+    expect(
+      selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
+    ).toMatchObject({
+      expanded: false,
+      position: { x: 20, y: 30 },
+      size: { width: 320, height: 200 },
+    });
+    store.setExpanded(refA, "tab-a", true);
+    expect(
+      selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA)
+        ?.windowSize,
+    ).toEqual({ width: 900, height: 600 });
+  });
+  it("ignores a stale window transition and leaves another thread's browser alone", () => {
+    const store = usePreviewMiniPlayerStore.getState();
+    store.open(refA, "tab-a");
+    store.open(refB, "tab-b");
+    store.setExpanded(refA, "old-tab", true);
+    expect(
+      selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA)
+        ?.expanded,
+    ).toBe(false);
+    store.setExpanded(refA, "tab-a", true);
+    expect(
+      selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refB)
+        ?.expanded,
+    ).toBe(false);
   });
 });

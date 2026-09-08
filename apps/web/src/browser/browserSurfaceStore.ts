@@ -10,11 +10,11 @@ export interface BrowserSurfaceRect {
 export interface BrowserSurfacePresentation {
   readonly rect: BrowserSurfaceRect | null;
   readonly visible: boolean;
+  readonly zIndex: number;
   readonly content: BrowserSurfaceContentPresentation | null;
   readonly fittedSourceContent: BrowserSurfaceContentPresentation | null;
   readonly fitSourceContent: boolean;
   readonly cornerRadius: number;
-  readonly zIndex: number;
   readonly updatedAt: number;
   readonly owner: symbol | null;
 }
@@ -104,11 +104,11 @@ export const useBrowserSurfaceStore = create<BrowserSurfaceStoreState>()((set) =
           [tabId]: {
             rect: current?.rect ?? null,
             visible: false,
+            zIndex: current?.zIndex ?? 30,
             content: current?.content ?? null,
             fittedSourceContent: fitSourceContent ? (current?.content ?? null) : null,
             fitSourceContent,
             cornerRadius: current?.cornerRadius ?? 0,
-            zIndex: current?.zIndex ?? 30,
             updatedAt: Date.now(),
             owner,
           },
@@ -145,11 +145,11 @@ export const useBrowserSurfaceStore = create<BrowserSurfaceStoreState>()((set) =
             [tabId]: {
               rect: null,
               visible: false,
+              zIndex: 30,
               content,
               fittedSourceContent: null,
               fitSourceContent: false,
               cornerRadius: 0,
-              zIndex: 30,
               updatedAt: Date.now(),
               owner: null,
             },

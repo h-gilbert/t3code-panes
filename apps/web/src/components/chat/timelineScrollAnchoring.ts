@@ -1,3 +1,6 @@
+// Match the titlebar fade inset so draft promotion preserves the first row's position.
+export const CHAT_TIMELINE_ANCHOR_OFFSET = 24;
+
 export type TimelineScrollMode = "following-end" | "anchoring-new-turn" | "free-scrolling";
 
 export interface TimelineListMeasurementState {
@@ -34,13 +37,40 @@ export function getRowBottom(state: TimelineListMeasurementState, index: number)
   return top + Math.max(1, height);
 }
 
+/**
+ * Whether the timeline's real rows extend past the viewport left above the
+ * composer. The list's own content length includes the composer inset
+ * spacer, so this measures from the last row instead. Unknown row geometry
+ * or an unmeasured viewport counts as fitting.
+ */
+export function timelineContentOverflowsViewport(
+  state: TimelineListMeasurementState | undefined,
+  input: { readonly composerInset: number; readonly anchorOffset: number },
+): boolean {
+  if (!state || !state.data || state.data.length === 0) {
+    return false;
+  }
+  const scrollLength = state.scrollLength;
+  if (typeof scrollLength !== "number" || !Number.isFinite(scrollLength) || scrollLength <= 0) {
+    return false;
+  }
+  const lastBottom = getRowBottom(state, state.data.length - 1);
+  if (lastBottom === null) {
+    return false;
+  }
+  const visibleScrollLength = Math.max(0, scrollLength - input.composerInset - input.anchorOffset);
+  return lastBottom > visibleScrollLength;
+}
+
 export function getAnchoredTurnMetrics({
   state,
   anchorIndex,
+  composerOverlayHeight = 0,
   anchorOffset,
 }: {
   readonly state: TimelineListMeasurementState;
   readonly anchorIndex: number;
+  readonly composerOverlayHeight?: number;
   readonly anchorOffset: number;
 }): AnchoredTurnMetrics | null {
   if (state.data.length === 0) {
@@ -54,7 +84,10 @@ export function getAnchoredTurnMetrics({
     return null;
   }
 
-  const usableViewportHeight = Math.max(0, state.scrollLength - anchorOffset);
+  const usableViewportHeight = Math.max(
+    0,
+    state.scrollLength - composerOverlayHeight - anchorOffset,
+  );
   const turnHeight = Math.max(0, lastBottom - anchorTop);
   const visibleUsableBottom = state.scroll + usableViewportHeight;
   const targetScrollToRevealEnd = Math.max(0, lastBottom - usableViewportHeight);

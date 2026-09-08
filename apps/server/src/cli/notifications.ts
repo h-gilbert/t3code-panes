@@ -18,11 +18,7 @@ import {
   APNS_TEAM_ID_SECRET,
   readSelfHostedNotificationsConfigured,
 } from "../notifications/config.ts";
-import {
-  resolveCliAuthConfig,
-  sharedServerLocationFlags,
-  type CliAuthLocationFlags,
-} from "./config.ts";
+import { resolveCliAuthConfig, authLocationFlags, type CliAuthLocationFlags } from "./config.ts";
 
 class ApnsPrivateKeyInvalidError extends Schema.TaggedErrorClass<ApnsPrivateKeyInvalidError>()(
   "ApnsPrivateKeyInvalidError",
@@ -69,7 +65,7 @@ const environmentFlag = Flag.choice("environment", ["sandbox", "production"] as 
 );
 
 const configureCommand = Command.make("configure", {
-  ...sharedServerLocationFlags,
+  ...authLocationFlags,
   teamId: teamIdFlag,
   keyId: keyIdFlag,
   bundleId: bundleIdFlag,
@@ -111,7 +107,7 @@ const configureCommand = Command.make("configure", {
   ),
 );
 
-const statusCommand = Command.make("status", sharedServerLocationFlags).pipe(
+const statusCommand = Command.make("status", authLocationFlags).pipe(
   Command.withDescription("Show self-hosted notification configuration status."),
   Command.withHandler((flags) =>
     runWithNotificationSecrets(flags, (secrets) =>
@@ -129,7 +125,7 @@ const statusCommand = Command.make("status", sharedServerLocationFlags).pipe(
   ),
 );
 
-const disableCommand = Command.make("disable", sharedServerLocationFlags).pipe(
+const disableCommand = Command.make("disable", authLocationFlags).pipe(
   Command.withDescription("Remove APNs credentials and the registered mobile device."),
   Command.withHandler((flags) =>
     runWithNotificationSecrets(flags, (secrets) =>

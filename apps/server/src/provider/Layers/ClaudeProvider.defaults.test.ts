@@ -1,9 +1,15 @@
 import { assert, it } from "@effect/vitest";
 
-import { getClaudeModelCapabilities } from "./ClaudeProvider.ts";
+import {
+  getClaudeCatalogModelCapabilities,
+  BUNDLED_CLAUDE_MODEL_CATALOG,
+} from "../ClaudeModelCatalog.ts";
 
 it("defaults Claude Opus 4.8 to medium reasoning", () => {
-  const capabilities = getClaudeModelCapabilities("claude-opus-4-8");
+  const capabilities = getClaudeCatalogModelCapabilities(
+    BUNDLED_CLAUDE_MODEL_CATALOG,
+    "claude-opus-4-8",
+  );
   const effort = capabilities.optionDescriptors?.find(
     (descriptor) => descriptor.id === "effort" && descriptor.type === "select",
   );

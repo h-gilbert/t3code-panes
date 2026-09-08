@@ -19,6 +19,9 @@ The installed app normally uses the developer's live T3 home. Never start a diag
 directly against `~/.t3/userdata`, edit that database, or copy development state over it. The app
 itself may reopen its normal home after the bundle replacement.
 
+For updates from the original T3 Code project, complete the
+[upstream integration workflow](upstream-integration.md) before preparing an installed build.
+
 ## Workflow
 
 ### 1. Finish iteration in development
@@ -47,7 +50,7 @@ was captured from the app being replaced.
 Build the smallest normal macOS artifact needed for local installation:
 
 ```sh
-vp run dist:desktop:artifact --platform mac --target zip --arch arm64 --build-version <version>
+vp run dist:desktop:artifact --platform mac --target zip --arch arm64 --build-version <version>-panes.<build>
 ```
 
 Use the actual host architecture when it is not Apple Silicon. The artifact builder already runs
@@ -68,8 +71,9 @@ the lockfile merely to complete a local install.
 - Replace only the resolved installed bundle. Never use a wildcard or broad recursive target.
 - Reopen the new bundle normally so it selects the same production T3 home it used before.
 
-An atomic helper command does not exist yet, so filesystem replacement and application launch may
-require macOS approval. Resolve and report the exact source, destination, and backup paths.
+The promotion command stages the replacement on the destination filesystem, records recovery
+paths, then renames the old and new bundles. It restores the original if the second rename fails.
+Filesystem replacement may require macOS approval for the exact destination.
 
 ### 5. Verify the outcome
 
@@ -85,13 +89,74 @@ Confirm all of the following before reporting success:
 Report the focused checks run, the installed version, and the backup path. If turns naturally
 finished while waiting, say so rather than claiming they were restored as actively running.
 
-## Intended automation
+## Promotion commands
 
-The desired future interface is a command such as `vp run promote:desktop`. It should perform this
-same workflow: focused preflight, one cached production build, direct unpacked-app packaging where
-supported, a graceful exact-process restart, atomic replacement with one backup, reopening against
-the same T3 home, and health/workspace verification.
+Run these from the checkout containing the reviewed changes. Node 24 or newer is required.
+The standalone installer tests run with `vp run test:desktop:promotion` and are also part of
+preparation. They use temporary app bundles and never replace the installed app.
 
-Until that command is implemented and listed in `package.json`, do not invoke it or tell the
-developer it exists. Keep public distributable artifact and GitHub release workflows separate from
-this local promotion path.
+```sh
+vp run promote:desktop prepare
+vp run promote:desktop status
+# Finish local work and quit the installed app normally before installing.
+vp run promote:desktop install --app '/Applications/T3 Code (Alpha).app'
+# Subsequent installs reuse the recorded app and state paths.
+vp run promote:desktop install
+vp run promote:desktop rollback
+```
+
+Use the actual installed bundle path, which may differ from the example. The first installation
+requires `--app`; the command does not guess which copy to replace. Supply `--home-dir` if the
+installed app uses a T3 home other than `~/.t3`. Ambient `T3CODE_HOME` is deliberately ignored so a
+development shell cannot select production state accidentally. The Electron profile is resolved
+using the app's legacy `T3 Code (Alpha)` directory preference, then `t3code`, under
+`~/Library/Application Support`. `--profile-dir` identifies an existing nonstandard profile for
+backup; it does not change the app's profile configuration.
+
+`prepare` runs the promotion tests and desktop/server update safeguard tests, then calls the existing
+ZIP artifact builder once. Run the tests, lint and type checks relevant to your actual edits before
+preparing. Preparation does not replace that review. It gives the build a unique `-panes` version,
+records HEAD and a digest covering tracked, modified and untracked source files, checks that source
+did not change during the build, and verifies the extracted bundle version and contents. Uncommitted
+changes are supported, including a resolved integration merge. No commit, tag, push or publication
+occurs. A failed preparation leaves the previous candidate selected and retains build output for
+diagnosis. If packaging fails, use the artifact builder's documented cache recovery above; do not
+install an unverified artifact manually just to bypass preparation.
+
+`status` reports the prepared candidate, installation journal and any promotion lock. Detailed source
+changes are retained in the candidate manifest. This is recorded build status, not a live server
+health report. By default, artifacts and records live in `~/.t3-promotions`. `--store` selects another
+private local directory; use it consistently across commands. Storage must be separate from the
+checkout, app and production state. Backups contain credentials and conversation data. Keep this
+directory private and allow enough disk space for the app and complete state copies.
+
+`install` requires the target app to be fully quit. It refuses if a process is running from that
+bundle or has files open in the production home or Electron profile. Inspection errors also block
+installation. There is no force flag and the command never signals local or remote processes. Choose
+the safe quit boundary yourself after inspecting turns, subagents and managed terminals. Closing
+only a window is insufficient. Do not reopen the app while replacement is underway.
+
+Installation verifies the prepared checksum, copies the replacement beside the installed app,
+backs up the closed production home and Electron profile, records the migration history, and retains
+the old bundle beside the target. A durable journal records each replacement's paths. It verifies
+the installed bundle and reopens it through macOS with the same explicit T3 home. `--no-launch` leaves
+it closed. No development state is copied into production. If launch fails, the successfully installed
+app and all recovery paths remain recorded. Confirm server connection and pane restoration using the
+verification list above; the command does not claim to automate those UI checks.
+
+`rollback` restores the previous bundle while retaining current state. It requires the app to be
+quit, verifies both bundle checksums, and refuses if migration history changed or another update
+replaced the installed app. It never restores an older database automatically. If migrations changed,
+a separate recovery decision is required because restoring a snapshot would discard newer work.
+Rollback itself saves the replaced app and current state. Only the most recent installation is an
+automatic rollback target; earlier records and backups remain available for deliberate recovery.
+
+If the command is interrupted, inspect `installation.json` before retrying. A `staged` journal blocks
+further replacements until its recorded app, staged bundle and backup are reconciled. Do not delete
+those paths blindly. A surviving `lock/owner.json` records the PID and time; confirm that the owning
+process has stopped before removing the lock directory. Backups are not pruned automatically.
+
+Local builds must keep a custom version suffix such as `0.0.38-panes.1`. The artifact builder uses
+a `panes.1` suffix when no version is supplied and omits upstream update feeds for custom versions.
+Desktop and server update handlers reject stock updates for these versions. Promote subsequent
+custom builds through this runbook. SSH can still launch published versions on other environments.

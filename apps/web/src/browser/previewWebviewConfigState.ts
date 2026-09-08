@@ -45,6 +45,7 @@ type PreviewConfigBridge = Pick<DesktopPreviewBridge, "getPreviewConfig">;
 
 export const loadPreviewWebviewConfig = (
   environmentId: EnvironmentId,
+  profileId?: string,
   browserScope?: string,
   bridge: PreviewConfigBridge | null = previewBridge,
 ): Effect.Effect<DesktopPreviewWebviewConfig, PreviewWebviewConfigError> => {
@@ -53,18 +54,34 @@ export const loadPreviewWebviewConfig = (
   }
 
   return Effect.tryPromise({
-    try: () => bridge.getPreviewConfig(environmentId, browserScope),
+    try: () => bridge.getPreviewConfig(environmentId, profileId, browserScope),
     catch: (cause) => new PreviewWebviewConfigLoadError({ environmentId, cause }),
   });
 };
 
-// Atom.family keys on value identity, so the composite key is one string.
-// "\u0000" cannot appear in an environment id or a browser scope.
+// One value key retains each environment, managed profile, and legacy scope separately.
+const configKey = (
+  environmentId: EnvironmentId,
+  profileId?: string,
+  browserScope?: string,
+): string => JSON.stringify([environmentId, profileId ?? null, browserScope ?? null]);
+
+const parseConfigKey = (key: string) => {
+  const [environmentId, profileId, browserScope] = JSON.parse(key) as [
+    EnvironmentId,
+    string | null,
+    string | null,
+  ];
+  return {
+    environmentId,
+    profileId: profileId ?? undefined,
+    browserScope: browserScope ?? undefined,
+  };
+};
+
 const previewWebviewConfigAtom = Atom.family((key: string) => {
-  const [environmentId, browserScope] = key.split("\u0000") as [EnvironmentId, string];
-  return Atom.make(
-    loadPreviewWebviewConfig(environmentId, browserScope === "" ? undefined : browserScope),
-  ).pipe(
+  const { environmentId, profileId, browserScope } = parseConfigKey(key);
+  return Atom.make(loadPreviewWebviewConfig(environmentId, profileId, browserScope)).pipe(
     Atom.swr({
       staleTime: PREVIEW_CONFIG_STALE_TIME_MS,
       revalidateOnMount: true,
@@ -76,10 +93,11 @@ const previewWebviewConfigAtom = Atom.family((key: string) => {
 
 export function usePreviewWebviewConfig(
   environmentId: EnvironmentId,
+  profileId?: string,
   browserScope?: string,
 ): DesktopPreviewWebviewConfig | null {
   const result = useAtomValue(
-    previewWebviewConfigAtom(`${environmentId}\u0000${browserScope ?? ""}`),
+    previewWebviewConfigAtom(configKey(environmentId, profileId, browserScope)),
   );
   return Option.getOrNull(AsyncResult.value(result));
 }

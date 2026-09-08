@@ -1,12 +1,16 @@
-"use client";
+import { browserCredentialProfile } from "./browserCredentialProfile";
+("use client");
 
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
+import {
+  DEFAULT_BROWSER_PROFILE_ID,
   FILL_PREVIEW_VIEWPORT,
   type DesktopBrowserCredentialSummary,
   type PreviewAnnotationPayload,
-  type PreviewViewportSetting,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { normalizePreviewUrl } from "@t3tools/shared/preview";
@@ -21,13 +25,9 @@ import {
   useThreadRecentHistory,
 } from "~/browserHistoryStore";
 import { type ComposerImageAttachment, useComposerDraftStore } from "~/composerDraftStore";
-import { previewAnnotationScreenshotFile } from "~/lib/previewAnnotation";
+import { capturePreviewAnnotationScreenshot } from "~/lib/previewAnnotation";
 import { ensureLocalApi } from "~/localApi";
-import {
-  rememberPreviewUrl,
-  updatePreviewServerSnapshot,
-  useThreadPreviewState,
-} from "~/previewStateStore";
+import { rememberPreviewUrl, useThreadPreviewState } from "~/previewStateStore";
 import { resolveDiscoveredServerUrl } from "~/browser/browserTargetResolver";
 import { useEnvironmentHttpBaseUrl } from "~/state/environments";
 import { previewEnvironment } from "~/state/preview";
@@ -41,15 +41,14 @@ import { openPreviewSession } from "./openPreviewSession";
 import { PreviewChromeRow } from "./PreviewChromeRow";
 import { PreviewEmptyState } from "./PreviewEmptyState";
 import { PreviewMoreMenu } from "./PreviewMoreMenu";
-import {
-  commitBrowserViewportChange,
-  subscribeBrowserViewportChange,
-} from "~/browser/browserViewportActions";
+import { commitBrowserViewportChange } from "~/browser/browserViewportActions";
 import { browserResponsiveViewportForToggle, useBrowserDefaults } from "~/browser/browserDefaults";
 import { previewRuntimeTabId } from "~/browser/previewRuntimeTabId";
+import { BrowserSettingsReadError } from "~/browser/openFileInPreview";
 import { PreviewUnreachable } from "./PreviewUnreachable";
 import { revealInFileExplorerLabel } from "./fileExplorerLabel";
 import { shouldShowPreviewEmptyState } from "./previewEmptyStateLogic";
+import { Badge } from "~/components/ui/badge";
 import { BrowserSurfaceSlot } from "~/browser/BrowserSurfaceSlot";
 import { useBrowserSurfaceStore } from "~/browser/browserSurfaceStore";
 import { usePreviewSession } from "./usePreviewSession";
@@ -57,6 +56,7 @@ import { ZoomIndicator } from "./ZoomIndicator";
 import { AgentBrowserCursor } from "./AgentBrowserCursor";
 import {
   findActiveBrowserRecordingRuntimeTabId,
+  isBrowserRecordingStartCancelledError,
   startBrowserRecording,
   stopBrowserRecording,
   useActiveBrowserRecordingTabIds,
@@ -73,6 +73,7 @@ import {
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Label } from "~/components/ui/label";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 
 interface Props {
   threadRef: ScopedThreadRef;
@@ -83,6 +84,13 @@ interface Props {
     annotation: PreviewAnnotationPayload,
     image: ComposerImageAttachment | null,
   ) => void;
+}
+
+function previewProfileName(
+  profiles: ReadonlyArray<{ readonly id: string; readonly name: string }>,
+  profileId: string,
+): string {
+  return profiles.find((profile) => profile.id === profileId)?.name ?? "Removed profile";
 }
 
 const localApi = typeof window === "undefined" ? null : ensureLocalApi();
@@ -130,7 +138,6 @@ export function PreviewView({
     ? new URL(environmentHttpBaseUrl).hostname
     : null;
   const open = useAtomCommand(previewEnvironment.open);
-  const resize = useAtomCommand(previewEnvironment.resize, "preview viewport resize");
 
   usePreviewSession(threadRef);
 
@@ -170,11 +177,7 @@ export function PreviewView({
   const [savedLogins, setSavedLogins] = useState<ReadonlyArray<DesktopBrowserCredentialSummary>>(
     [],
   );
-  // Named-profile tabs read and write that profile's logins; shared and
-  // ephemeral tabs use the shared set.
-  const loginProfile = snapshot?.browserScope?.startsWith("profile:")
-    ? snapshot.browserScope.slice("profile:".length)
-    : null;
+  const { profile: loginProfile, profileId: loginProfileId } = browserCredentialProfile(snapshot);
   useEffect(() => {
     if (!saveLoginOpen || !previewBridge || !url) {
       setSavedLogins([]);
@@ -193,7 +196,8 @@ export function PreviewView({
               (credential.environmentId === threadRef.environmentId ||
                 credential.environmentId === null) &&
               credential.origin === origin &&
-              credential.profile === loginProfile,
+              credential.profile === loginProfile &&
+              credential.profileId === loginProfileId,
           ),
         );
       })
@@ -203,7 +207,7 @@ export function PreviewView({
     return () => {
       cancelled = true;
     };
-  }, [loginProfile, saveLoginOpen, threadRef.environmentId, url]);
+  }, [loginProfile, loginProfileId, saveLoginOpen, threadRef.environmentId, url]);
   const handleFillLogin = useCallback(() => {
     if (!previewBridge || !runtimeTabId) return;
     void previewBridge.browserCredentials
@@ -211,6 +215,7 @@ export function PreviewView({
         tabId: runtimeTabId,
         environmentId: threadRef.environmentId,
         profile: loginProfile,
+        ...(loginProfileId === undefined ? {} : { profileId: loginProfileId }),
       })
       .then((result) => {
         if (result.filled) return;
@@ -237,7 +242,7 @@ export function PreviewView({
       .catch(() => {
         toastManager.add({ type: "error", title: "Unable to fill the login" });
       });
-  }, [loginProfile, runtimeTabId, threadRef.environmentId]);
+  }, [loginProfile, loginProfileId, runtimeTabId, threadRef.environmentId]);
   const handleSaveLogin = useCallback(() => {
     if (!previewBridge || !url) return;
     const username = saveLoginUsername.trim();
@@ -247,6 +252,7 @@ export function PreviewView({
         environmentId: threadRef.environmentId,
         url,
         profile: loginProfile,
+        ...(loginProfileId === undefined ? {} : { profileId: loginProfileId }),
         username,
         password: saveLoginPassword,
       })
@@ -270,7 +276,14 @@ export function PreviewView({
           description: "OS keychain encryption may be unavailable on this machine.",
         });
       });
-  }, [loginProfile, saveLoginPassword, saveLoginUsername, threadRef.environmentId, url]);
+  }, [
+    loginProfile,
+    loginProfileId,
+    saveLoginPassword,
+    saveLoginUsername,
+    threadRef.environmentId,
+    url,
+  ]);
   const handleDeleteSavedLogin = useCallback((id: string) => {
     if (!previewBridge) return;
     void previewBridge.browserCredentials
@@ -282,6 +295,16 @@ export function PreviewView({
         toastManager.add({ type: "error", title: "Unable to remove the saved login" });
       });
   }, []);
+  // A tab created before profiles existed carries no profile of its own. It
+  // runs in the built-in `default` partition — the scope the browser used
+  // before profiles — not in whatever profile is configured as the default
+  // now, so that is what its label names and its clear actions target.
+  // Passing the snapshot's raw `undefined` through would reach the IPC layer
+  // as "every profile".
+  const activeProfileId = snapshot?.profileId ?? DEFAULT_BROWSER_PROFILE_ID;
+  const activeProfileName = snapshot?.browserScope
+    ? (loginProfile ?? "Temporary session")
+    : previewProfileName(browserDefaults.profiles, activeProfileId);
   const panelRect = useBrowserSurfaceStore((state) =>
     runtimeTabId ? (state.byTabId[runtimeTabId]?.rect ?? null) : null,
   );
@@ -306,6 +329,16 @@ export function PreviewView({
         return true;
       }
       const result = await openPreviewSession({ openPreview: open, threadRef, url: resolvedUrl });
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        if (error instanceof BrowserSettingsReadError) {
+          toastManager.add({
+            type: "error",
+            title: "Unable to open browser",
+            description: error.message,
+          });
+        }
+      }
       return result._tag === "Success";
     },
     [open, runtimeTabId, threadRef],
@@ -355,31 +388,6 @@ export function PreviewView({
     if (previewBridge && runtimeTabId) void previewBridge.resetZoom(runtimeTabId);
   }, [runtimeTabId]);
 
-  const handleViewportChange = useCallback(
-    async (nextViewport: PreviewViewportSetting) => {
-      if (!tabId) return;
-      const result = await resize({
-        environmentId: threadRef.environmentId,
-        input: {
-          threadId: threadRef.threadId,
-          tabId,
-          viewport: nextViewport,
-        },
-      });
-      if (result._tag === "Failure") {
-        const error = squashAtomCommandFailure(result);
-        toastManager.add({
-          type: "error",
-          title: "Unable to resize browser viewport",
-          description: error instanceof Error ? error.message : "An error occurred.",
-        });
-        throw error;
-      }
-      updatePreviewServerSnapshot(threadRef, result.value);
-    },
-    [resize, tabId, threadRef],
-  );
-
   const handleToggleDeviceToolbar = () => {
     if (!runtimeTabId) return;
     if (viewport._tag !== "fill") {
@@ -396,11 +404,6 @@ export function PreviewView({
       }),
     ).catch(() => undefined);
   };
-
-  useEffect(() => {
-    if (!runtimeTabId) return;
-    return subscribeBrowserViewportChange(runtimeTabId, handleViewportChange);
-  }, [handleViewportChange, runtimeTabId]);
 
   const handleBack = useCallback(() => {
     if (previewBridge && runtimeTabId) void previewBridge.goBack(runtimeTabId);
@@ -537,10 +540,12 @@ export function PreviewView({
       }
       if (record) {
         void startBrowserRecording(runtimeTabId, threadRef, tabId).catch((error) => {
+          const description = error instanceof Error ? error.message : "An error occurred.";
+          if (isBrowserRecordingStartCancelledError(error)) return;
           toastManager.add({
             type: "error",
             title: "Unable to start recording",
-            description: error instanceof Error ? error.message : "An error occurred.",
+            description,
           });
         });
         return;
@@ -697,15 +702,30 @@ export function PreviewView({
       try {
         const result = await previewBridge.pickElement(runtimeTabId);
         if (!result) return;
-        const { annotation, submission } = result;
+        const { annotation: picked, submission, screenshotFailed = false } = result;
+        // The structured annotation is still sendable when its optional crop
+        // stalls or fails, so tell the user what they lost and keep going
+        // instead of holding the composer for an attachment that never lands.
+        // The stored copy drops the screenshot on failure, otherwise the prompt
+        // would tell the agent a crop is attached when none was sent.
+        const capture = await capturePreviewAnnotationScreenshot(picked);
+        // Main reports a crop that failed or timed out on its side; the local
+        // conversion can fail too. Either way the user should hear about it.
+        const cropDropped = screenshotFailed || capture.status === "failed";
+        const annotation = capture.status === "failed" ? { ...picked, screenshot: null } : picked;
         addPreviewAnnotation(threadRef, annotation);
-        let screenshotFile: File | null = null;
-        try {
-          screenshotFile = await previewAnnotationScreenshotFile(annotation);
-        } catch {
-          // The structured annotation is still sendable when converting its
-          // optional screenshot into a composer attachment fails.
+        if (cropDropped) {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Could not capture the picked element",
+              // The send path reports its own outcome, so only say what this
+              // handler knows: the crop was dropped.
+              description: "The annotation was kept without the screenshot.",
+            }),
+          );
         }
+        const screenshotFile = capture.status === "captured" ? capture.file : null;
         const image =
           screenshotFile && annotation.screenshot
             ? ({
@@ -822,9 +842,33 @@ export function PreviewView({
         pickDisabledReason={
           isUnreachable ? "Page didn't load — pick unavailable until the page renders" : undefined
         }
+        leadingActions={
+          // Only when it differs from the default: labelling every tab
+          // "Default" would be noise on the common case, while a tab in
+          // another profile is exactly what needs calling out.
+          activeProfileId !== browserDefaults.profileId ? (
+            // Capped: profile names run to 48 characters, and an unbounded
+            // badge in this row takes its width from the URL input, the only
+            // flexible element in the compact chrome. The cap sits on the
+            // badge and the truncation on an inner span, because `Badge` is an
+            // `inline-flex` with `whitespace-nowrap` — `text-overflow` never
+            // reaches a bare text node inside it, so the name would be cut off
+            // at both ends with no ellipsis.
+            <Tooltip>
+              <TooltipTrigger render={<Badge variant="outline" className="max-w-28 shrink-0" />}>
+                <span className="truncate">{activeProfileName}</span>
+              </TooltipTrigger>
+              <TooltipPopup side="top">{activeProfileName}</TooltipPopup>
+            </Tooltip>
+          ) : null
+        }
         trailingActions={
           previewBridge ? (
             <PreviewMoreMenu
+              environmentId={threadRef.environmentId}
+              profileId={activeProfileId}
+              browserScope={snapshot?.browserScope ?? undefined}
+              profileName={activeProfileName}
               tabId={runtimeTabId}
               hasWebContents={desktopOverlay?.hasWebContents ?? false}
               zoomFactor={desktopOverlay?.zoomFactor ?? 1}

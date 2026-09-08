@@ -57,6 +57,19 @@ describe("preview automation target selection", () => {
     expect(resolvePreviewAutomationOpenTab(state, agentTab.tabId, false)).toBeNull();
   });
 
+  it("honors an explicit managed profile even for a pinned provider tab", () => {
+    const active = { ...snapshot("tab_work"), profileId: "work" };
+    const state = { snapshot: active, sessions: { [active.tabId]: active } };
+    expect(
+      resolvePreviewAutomationOpenTab(state, active.tabId, true, undefined, "other"),
+    ).toBeNull();
+    expect(resolvePreviewAutomationOpenTab(state, active.tabId, true, undefined, "work")).toBe(
+      active.tabId,
+    );
+    expect(resolvePreviewAutomationOpenTab(state, active.tabId, true, "ephemeral")).toBeNull();
+    expect(resolvePreviewAutomationOpenTab(state, active.tabId, true, "profile:work")).toBeNull();
+  });
+
   it("never reuses a tab from a different storage scope", () => {
     const sharedTab = snapshot("tab_shared");
     const state = { snapshot: sharedTab, sessions: { [sharedTab.tabId]: sharedTab } };

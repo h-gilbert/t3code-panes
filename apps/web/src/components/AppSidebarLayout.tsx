@@ -1,3 +1,6 @@
+import { isElectron } from "../env";
+import { SidebarChromeHeader } from "./sidebar/SidebarChrome";
+import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
 import { useAtomValue } from "@effect/atom-react";
 import * as Schema from "effect/Schema";
 import {
@@ -19,6 +22,11 @@ import { resolveRetainedWorkspaceKey } from "../workspaceRouteRetention";
 import { ProjectPaneWorkspace } from "../routes/_chat.workspace";
 import { useEnvironmentIdentificationMode, useLegacySidebarEnabled } from "../hooks/useSettings";
 import { useDesktopFullscreen } from "../hooks/useDesktopFullscreen";
+import {
+  PanelAnimationSuppressionProvider,
+  usePanelAnimationSettings,
+  usePanelNavigationSuppression,
+} from "../panelAnimations";
 import LegacyThreadSidebar from "./LegacySidebar";
 import ThreadSidebar from "./Sidebar";
 import {
@@ -155,6 +163,13 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   });
   const retainedWorkspaceKey = retainedWorkspaceKeyRef.current;
   const { isMacosDesktop, isWindowFullscreen } = useDesktopFullscreen();
+  const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
+    usePanelAnimationSettings();
+  // Settings routes show the settings nav in place of whichever thread
+  // sidebar is active.
+  const panelAnimationsSuppressed = usePanelNavigationSuppression(pathname);
+  const routePanelAnimationsActive = panelAnimationsActive && !panelAnimationsSuppressed;
+  const isOnSettings = pathname === "/settings" || pathname.startsWith("/settings/");
   const [sidebarWidth, setSidebarWidth] = useState(readInitialThreadSidebarWidth);
   // Subscribed rather than read once: the clamp must track live window size,
   // and a clamped drag ends with an unchanged width, which skips the re-render
@@ -171,6 +186,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   };
   const sidebarProviderStyle = {
     "--sidebar-width": `${sidebarWidth}px`,
+    "--panel-animation-duration": `${panelAnimationDurationMs}ms`,
     ...(isMacosDesktop && !isWindowFullscreen
       ? { "--workspace-controls-left": MACOS_TRAFFIC_LIGHTS_LEFT_INSET }
       : {}),
@@ -197,38 +213,54 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   }, [navigate, pathname]);
 
   return (
-    <SidebarProvider className="h-dvh! min-h-0!" defaultOpen={false} style={sidebarProviderStyle}>
-      <ProjectProjectionRetention />
-      <Sidebar
-        side="left"
-        collapsible="offcanvas"
-        data-app-sidebar=""
-        className="border-r border-sidebar-border bg-sidebar text-sidebar-foreground"
-        resizable={{
-          maxWidth: sidebarMaximumWidth,
-          minWidth: THREAD_SIDEBAR_MIN_WIDTH,
-          shouldAcceptWidth: ({ currentWidth, nextWidth, wrapper }) =>
-            nextWidth <= currentWidth ||
-            wrapper.clientWidth - nextWidth >= THREAD_MAIN_CONTENT_MIN_WIDTH,
-          storageKey: THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
-          onResize: setSidebarWidth,
-        }}
+    <PanelAnimationSuppressionProvider value={panelAnimationsSuppressed}>
+      <SidebarProvider
+        className="h-dvh! min-h-0!"
+        data-panel-animations={routePanelAnimationsActive ? "true" : "false"}
+        defaultOpen={false}
+        style={sidebarProviderStyle}
       >
-        {legacySidebarEnabled ? <LegacyThreadSidebar /> : <ThreadSidebar />}
-        <SidebarRail onDoubleClick={resetSidebarWidth} />
-      </Sidebar>
-      {retainedWorkspaceKey ? (
-        <div
-          className={isOnWorkspace ? "flex min-h-0 min-w-0 flex-1" : "hidden"}
-          aria-hidden={isOnWorkspace ? undefined : true}
+        <ProjectProjectionRetention />
+        <Sidebar
+          side="left"
+          collapsible="offcanvas"
+          data-app-sidebar=""
+          className="border-r border-sidebar-border bg-sidebar text-sidebar-foreground"
+          resizable={{
+            maxWidth: sidebarMaximumWidth,
+            minWidth: THREAD_SIDEBAR_MIN_WIDTH,
+            shouldAcceptWidth: ({ currentWidth, nextWidth, wrapper }) =>
+              nextWidth <= currentWidth ||
+              wrapper.clientWidth - nextWidth >= THREAD_MAIN_CONTENT_MIN_WIDTH,
+            storageKey: THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
+            onResize: setSidebarWidth,
+          }}
         >
-          <ProjectPaneWorkspace workspaceKey={retainedWorkspaceKey} active={isOnWorkspace} />
-        </div>
-      ) : null}
-      {isOnWorkspace ? null : children}
-      <SidebarControl
-        hidden={isWorkspacePath(pathname) && (!isMacosDesktop || isWindowFullscreen)}
-      />
-    </SidebarProvider>
+          {isOnSettings ? (
+            <>
+              <SidebarChromeHeader isElectron={isElectron} />
+              <SettingsSidebarNav pathname={pathname} />
+            </>
+          ) : legacySidebarEnabled ? (
+            <LegacyThreadSidebar />
+          ) : (
+            <ThreadSidebar />
+          )}
+          <SidebarRail onDoubleClick={resetSidebarWidth} />
+        </Sidebar>
+        {retainedWorkspaceKey ? (
+          <div
+            className={isOnWorkspace ? "flex min-h-0 min-w-0 flex-1" : "hidden"}
+            aria-hidden={isOnWorkspace ? undefined : true}
+          >
+            <ProjectPaneWorkspace workspaceKey={retainedWorkspaceKey} active={isOnWorkspace} />
+          </div>
+        ) : null}
+        {isOnWorkspace ? null : children}
+        <SidebarControl
+          hidden={isWorkspacePath(pathname) && (!isMacosDesktop || isWindowFullscreen)}
+        />
+      </SidebarProvider>
+    </PanelAnimationSuppressionProvider>
   );
 }

@@ -1,4 +1,4 @@
-import type { PreviewSessionSnapshot } from "@t3tools/contracts";
+import { DEFAULT_BROWSER_PROFILE_ID, type PreviewSessionSnapshot } from "@t3tools/contracts";
 
 interface PreviewAutomationSessionIndex {
   readonly snapshot: PreviewSessionSnapshot | null;
@@ -29,18 +29,24 @@ export function resolvePreviewAutomationOpenTab(
   requestedTabId: string | undefined,
   reuseExistingTab: boolean,
   requestedBrowserScope?: "ephemeral" | `profile:${string}`,
+  requestedProfileId?: string,
 ): string | null {
   if (!reuseExistingTab) return null;
-  if (requestedTabId !== undefined) {
-    return state.sessions[requestedTabId]?.tabId ?? null;
-  }
-  const current = state.snapshot;
+  const current = requestedTabId !== undefined ? state.sessions[requestedTabId] : state.snapshot;
   if (!current) return null;
   // A requested profile or ephemeral session must not silently land in a
   // reused tab from another storage scope; ephemeral requests always mean a
   // fresh partition, so they never reuse.
   if (requestedBrowserScope === "ephemeral") return null;
   if (requestedBrowserScope !== undefined && current.browserScope !== requestedBrowserScope) {
+    return null;
+  }
+  if (
+    requestedBrowserScope === undefined &&
+    requestedProfileId !== undefined &&
+    (current.browserScope ||
+      (current.profileId ?? DEFAULT_BROWSER_PROFILE_ID) !== requestedProfileId)
+  ) {
     return null;
   }
   return current.tabId;

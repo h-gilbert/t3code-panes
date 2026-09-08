@@ -5,6 +5,7 @@ import {
   DesktopPreviewAutomationEvaluateInputSchema,
   DesktopPreviewAutomationPressInputSchema,
   DesktopPreviewAutomationScrollInputSchema,
+  DesktopPreviewAutomationStatusSchema,
   DesktopPreviewAutomationTypeInputSchema,
   DesktopPreviewAutomationWaitForInputSchema,
   DesktopPreviewConfigInputSchema,
@@ -15,6 +16,10 @@ import {
   DesktopPreviewScreenshotArtifactSchema,
   DesktopPreviewSetAudioMutedInputSchema,
   DesktopPreviewSetColorSchemeInputSchema,
+  BrowserImportResult,
+  BrowserImportSource,
+  DesktopPreviewClearDataInputSchema,
+  DesktopPreviewImportCookiesInputSchema,
   DesktopPreviewCreateTabInputSchema,
   DesktopPreviewTabInputSchema,
   DesktopBrowserAutofillInputSchema,
@@ -24,13 +29,15 @@ import {
   DesktopPreviewWebviewConfigSchema,
   PreviewAnnotationSubmissionResultSchema,
   PreviewAutomationSnapshot,
-  PreviewAutomationStatus,
+  DEFAULT_BROWSER_PROFILE_ID,
+  INCOGNITO_BROWSER_PROFILE_ID,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as NodeURL from "node:url";
 
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
+import * as BrowserImport from "../../preview/BrowserImport/BrowserImport.ts";
 import * as PreviewManager from "../../preview/Manager.ts";
 import { PREVIEW_WEBVIEW_PREFERENCES } from "../../preview/WebviewPreferences.ts";
 import * as IpcChannels from "../channels.ts";
@@ -200,21 +207,33 @@ export const closePictureInPicture = tabMethod(
 
 export const clearCookies = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_CLEAR_COOKIES_CHANNEL,
-  payload: Schema.Void,
+  payload: DesktopPreviewClearDataInputSchema,
   result: Schema.Void,
-  handler: Effect.fn("desktop.ipc.preview.clearCookies")(function* () {
+  handler: Effect.fn("desktop.ipc.preview.clearCookies")(function* ({
+    environmentId,
+    profileId,
+    browserScope,
+  }) {
     const manager = yield* PreviewManager.PreviewManager;
-    yield* manager.clearCookies();
+    yield* manager.clearCookies(
+      yield* resolveClearPartitions(manager, environmentId, profileId, browserScope),
+    );
   }),
 });
 
 export const clearCache = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_CLEAR_CACHE_CHANNEL,
-  payload: Schema.Void,
+  payload: DesktopPreviewClearDataInputSchema,
   result: Schema.Void,
-  handler: Effect.fn("desktop.ipc.preview.clearCache")(function* () {
+  handler: Effect.fn("desktop.ipc.preview.clearCache")(function* ({
+    environmentId,
+    profileId,
+    browserScope,
+  }) {
     const manager = yield* PreviewManager.PreviewManager;
-    yield* manager.clearCache();
+    yield* manager.clearCache(
+      yield* resolveClearPartitions(manager, environmentId, profileId, browserScope),
+    );
   }),
 });
 
@@ -257,27 +276,135 @@ export const autofillBrowserCredential = DesktopIpc.makeIpcMethod({
     return yield* manager.automationAutofill(input.tabId, {
       environmentId: input.environmentId,
       profile: input.profile,
+      ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
       ...(input.username === undefined ? {} : { username: input.username }),
     });
   }),
+});
+
+/**
+ * Partition scope for an (environment, profile) pair.
+ *
+ * The default profile keeps the bare environment id it used before profiles
+ * existed, so upgrading does not strand anyone's existing logins in an
+ * orphaned partition. Incognito derives a non-persistent partition.
+ */
+export function resolvePartitionScope(
+  environmentId: string,
+  profileId: string | undefined,
+  browserScope?: string,
+): {
+  readonly scope: string;
+  readonly persistent: boolean;
+  readonly namespace?: "profile";
+} {
+  if (browserScope) {
+    return {
+      scope: `${environmentId}/${browserScope}`,
+      persistent: !browserScope.startsWith("ephemeral:"),
+    };
+  }
+  if (profileId === undefined || profileId === DEFAULT_BROWSER_PROFILE_ID) {
+    return { scope: environmentId, persistent: true };
+  }
+  // JSON's tuple framing is injective for strings, including lone UTF-16
+  // surrogates (which it escapes). URI encoding throws on those supported ids,
+  // while replacing them with U+FFFD would collapse distinct identities.
+  return {
+    scope: JSON.stringify([environmentId, profileId]),
+    persistent: profileId !== INCOGNITO_BROWSER_PROFILE_ID,
+    namespace: "profile" as const,
+  };
+}
+
+/**
+ * Clearing without a profile keeps the historical "everything" behaviour for
+ * an explicit all-profiles action; naming a profile confines it to that
+ * profile's partition so one profile's sign-out cannot reach the others.
+ */
+const resolveClearPartitions = Effect.fn("desktop.ipc.preview.resolveClearPartitions")(function* (
+  manager: PreviewManager.PreviewManager["Service"],
+  environmentId: string,
+  profileId: string | undefined,
+  browserScope?: string,
+) {
+  if (profileId === undefined && !browserScope) return undefined;
+  const { scope, persistent, namespace } = resolvePartitionScope(
+    environmentId,
+    profileId,
+    browserScope,
+  );
+  // Loading the session is what puts the partition in the map the clear walks.
+  // Deriving the partition string alone leaves nothing to match, so clearing a
+  // profile with no tab open this run — after a restart, or when deleting a
+  // profile — would report success and delete nothing.
+  yield* manager.getBrowserSession(scope, persistent, namespace);
+  return [yield* manager.getBrowserPartition(scope, persistent, namespace)];
 });
 
 export const getPreviewConfig = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_GET_CONFIG_CHANNEL,
   payload: DesktopPreviewConfigInputSchema,
   result: DesktopPreviewWebviewConfigSchema,
-  handler: Effect.fn("desktop.ipc.preview.getConfig")(function* ({ environmentId, browserScope }) {
+  handler: Effect.fn("desktop.ipc.preview.getConfig")(function* ({
+    environmentId,
+    profileId,
+    browserScope,
+  }) {
     const manager = yield* PreviewManager.PreviewManager;
-    // Profiles are namespaced per environment so two environments sharing a
-    // profile name never share cookies. The bare environment id remains the
-    // historical shared partition.
-    const scope = browserScope ? `${environmentId}/${browserScope}` : environmentId;
-    yield* manager.getBrowserSession(scope);
+    const { scope, persistent, namespace } = resolvePartitionScope(
+      environmentId,
+      profileId,
+      browserScope,
+    );
+    // Creating the session first is what installs the UA rewrite and permission
+    // handlers; a guest that attached to an untouched partition would run with
+    // Electron's default UA and Chromium's default permission behaviour.
+    yield* manager.getBrowserSession(scope, persistent, namespace);
     return {
-      partition: yield* manager.getBrowserPartition(scope),
+      partition: yield* manager.getBrowserPartition(scope, persistent, namespace),
       webPreferences: PREVIEW_WEBVIEW_PREFERENCES,
       preloadUrl: NodeURL.pathToFileURL(`${__dirname}/preview-pick-preload.cjs`).href,
     };
+  }),
+});
+
+/**
+ * Registered separately from `methods`: these carry `BrowserImport` in their
+ * context and their own failure type, so they do not unify with the
+ * manager-backed handlers the shared loop iterates.
+ */
+export const listBrowserImportSources = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_IMPORT_SOURCES_CHANNEL,
+  payload: Schema.Void,
+  result: Schema.Array(BrowserImportSource),
+  handler: Effect.fn("desktop.ipc.preview.listBrowserImportSources")(function* () {
+    const browserImport = yield* BrowserImport.BrowserImport;
+    return yield* browserImport.listSources;
+  }),
+});
+
+export const importBrowserCookies = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_IMPORT_COOKIES_CHANNEL,
+  payload: DesktopPreviewImportCookiesInputSchema,
+  result: BrowserImportResult,
+  handler: Effect.fn("desktop.ipc.preview.importBrowserCookies")(function* ({
+    environmentId,
+    ...importInput
+  }) {
+    const browserImport = yield* BrowserImport.BrowserImport;
+    // Derived in main from the same helper the webview config uses, so cookies
+    // land in exactly the partition the profile's tabs attach to.
+    const { scope, persistent, namespace } = resolvePartitionScope(
+      environmentId,
+      importInput.targetProfileId,
+    );
+    return yield* browserImport.importCookies({
+      input: importInput,
+      scope,
+      persistent,
+      ...(namespace === undefined ? {} : { namespace }),
+    });
   }),
 });
 
@@ -334,7 +461,7 @@ export const copyArtifactToClipboard = DesktopIpc.makeIpcMethod({
 export const automationStatus = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_AUTOMATION_STATUS_CHANNEL,
   payload: DesktopPreviewTabInputSchema,
-  result: PreviewAutomationStatus,
+  result: DesktopPreviewAutomationStatusSchema,
   handler: Effect.fn("desktop.ipc.preview.automationStatus")(function* ({ tabId }) {
     const manager = yield* PreviewManager.PreviewManager;
     return yield* manager.automationStatus(tabId);

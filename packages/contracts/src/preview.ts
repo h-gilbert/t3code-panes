@@ -10,6 +10,7 @@
  */
 import { Schema } from "effect";
 import { NonNegativeInt, PositiveInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { BrowserProfileId } from "./browserProfile.ts";
 
 export const PREVIEW_URL_MAX_LENGTH = 2_048;
 export const CONFIGURED_LOCAL_SERVER_URLS_MAX_ITEMS = 32;
@@ -180,12 +181,12 @@ export const PreviewSessionSnapshot = Schema.Struct({
   /** Missing snapshots from older servers are treated as fill-panel mode. */
   viewport: Schema.optional(PreviewViewportSetting),
   /**
-   * Browser storage scope this tab was opened with. `profile:<name>` selects
-   * a named persistent partition, `ephemeral:<tabId>` an in-memory partition
-   * that dies with the app. Missing means the environment's shared persistent
-   * partition (the historical behaviour).
+   * Legacy fork browser scope. Retained so existing named-profile cookies and
+   * ephemeral sessions keep their identity when connecting to older servers.
    */
   browserScope: Schema.optional(TrimmedNonEmptyString),
+  /** Managed profile identity, fixed before the browser guest attaches. */
+  profileId: Schema.optional(BrowserProfileId),
   updatedAt: Schema.String,
 });
 export type PreviewSessionSnapshot = typeof PreviewSessionSnapshot.Type;
@@ -208,6 +209,8 @@ export const PreviewOpenInput = Schema.Struct({
   profile: Schema.optional(PreviewBrowserProfileName),
   /** Open with a completely fresh in-memory session that is discarded on quit. */
   ephemeral: Schema.optional(Schema.Boolean),
+  /** Omit to open under the client's configured default profile. */
+  profileId: Schema.optional(BrowserProfileId),
 });
 export type PreviewOpenInput = typeof PreviewOpenInput.Type;
 

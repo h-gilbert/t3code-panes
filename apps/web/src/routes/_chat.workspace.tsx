@@ -5,11 +5,7 @@ import {
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import {
-  canSettle,
-  effectiveSettled,
-  effectiveSnoozed,
-} from "@t3tools/client-runtime/state/thread-settled";
+import { canSettle, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
 import { createFileRoute } from "@tanstack/react-router";
 import type { ScopedProjectRef, ScopedThreadRef } from "@t3tools/contracts";
 import {
@@ -626,8 +622,6 @@ export function ProjectPaneWorkspace({
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { isMacosDesktop, isWindowFullscreen } = useDesktopFullscreen();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
-  const autoSettleAfterDays = useClientSettings((settings) => settings.sidebarAutoSettleAfterDays);
-  const autoSettleOnMerge = useClientSettings((settings) => settings.sidebarAutoSettleOnMerge);
   const nowMinute = useNowMinute();
   const projectGroups = useMemo(
     () =>
@@ -658,29 +652,10 @@ export function ProjectPaneWorkspace({
         if (capabilities.threadSnooze === true && effectiveSnoozed(thread, { now })) return [];
         const threadRef = scopeThreadRef(thread.environmentId, thread.id);
         const threadKey = scopedThreadKey(threadRef);
-        const snapshot = changeRequestSnapshotByKey.get(threadKey);
-        const changeRequest =
-          snapshot != null && (thread.worktreePath === null || snapshot.branch === thread.branch)
-            ? snapshot.pr
-            : null;
-        return effectiveSettled(thread, {
-          now,
-          autoSettleAfterDays,
-          autoSettleOnMerge,
-          changeRequest,
-        })
-          ? [threadKey]
-          : [];
+        return thread.settledOverride === "settled" ? [threadKey] : [];
       }),
     );
-  }, [
-    autoSettleAfterDays,
-    autoSettleOnMerge,
-    changeRequestSnapshotByKey,
-    nowMinute,
-    serverConfigs,
-    threads,
-  ]);
+  }, [changeRequestSnapshotByKey, nowMinute, serverConfigs, threads]);
   const availableThreads = useMemo(
     () =>
       buildWorkspaceThreadPickerItems({

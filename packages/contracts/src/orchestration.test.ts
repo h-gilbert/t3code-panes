@@ -798,6 +798,28 @@ it.effect("accepts a title regeneration intent in thread.meta.update", () =>
   }),
 );
 
+it.effect("accepts a linked pull request in thread.meta.update", () =>
+  Effect.gen(function* () {
+    const linkedPullRequest = {
+      projectId: "project-1",
+      repository: "pingdotgg/t3code",
+      number: 42,
+      url: "https://github.com/pingdotgg/t3code/pull/42",
+    };
+    const parsed = yield* decodeOrchestrationCommand({
+      type: "thread.meta.update",
+      commandId: "cmd-link-pull-request",
+      threadId: "thread-1",
+      linkedPullRequest,
+    });
+
+    assert.strictEqual(parsed.type, "thread.meta.update");
+    if (parsed.type === "thread.meta.update") {
+      assert.deepStrictEqual(parsed.linkedPullRequest, linkedPullRequest);
+    }
+  }),
+);
+
 it.effect("accepts an internal title regeneration completion", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeOrchestrationCommand({
@@ -1080,6 +1102,51 @@ it.effect("project favicon overrides accept only supported image files", () =>
       }),
     );
     assert.strictEqual(invalid._tag, "Failure");
+  }),
+);
+
+it.effect("project icon overrides accept Lucide icons, colors, and emoji", () =>
+  Effect.gen(function* () {
+    const lucide = yield* decodeOrchestrationCommand({
+      type: "project.meta.update",
+      commandId: "cmd-project-lucide-icon",
+      projectId: "project-1",
+      projectIcon: { kind: "lucide", name: "alarm-clock", color: "violet" },
+    });
+    assert.strictEqual(lucide.type, "project.meta.update");
+
+    const emoji = yield* decodeOrchestrationCommand({
+      type: "project.meta.update",
+      commandId: "cmd-project-emoji-icon",
+      projectId: "project-1",
+      projectIcon: { kind: "emoji", emoji: "👩🏽‍💻" },
+    });
+    assert.strictEqual(emoji.type, "project.meta.update");
+
+    const invalid = yield* Effect.exit(
+      decodeOrchestrationCommand({
+        type: "project.meta.update",
+        commandId: "cmd-project-invalid-icon",
+        projectId: "project-1",
+        projectIcon: { kind: "lucide", name: "Alarm Clock", color: "ultraviolet" },
+      }),
+    );
+    assert.strictEqual(invalid._tag, "Failure");
+  }),
+);
+
+it.effect("rejects thread history imports without messages", () =>
+  Effect.gen(function* () {
+    const result = yield* Effect.exit(
+      decodeOrchestrationCommand({
+        type: "thread.history.import",
+        commandId: "command-empty-history",
+        threadId: "thread-1",
+        messages: [],
+      }),
+    );
+
+    assert.strictEqual(result._tag, "Failure");
   }),
 );
 

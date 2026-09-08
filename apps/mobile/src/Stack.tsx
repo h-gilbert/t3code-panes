@@ -1,3 +1,4 @@
+import type { StaticParamList as InferStaticParamList } from "@react-navigation/core";
 import {
   createPathConfigForStaticNavigation,
   getPathFromState,
@@ -73,6 +74,7 @@ import { NATIVE_LIQUID_GLASS_SUPPORTED } from "./native/native-glass";
 import { nativeHeaderScrollEdgeEffects } from "./native/StackHeader";
 import { FORM_SHEET_PRESENTATION_OPTIONS } from "./native/sheet-surface";
 import { useThreadOutboxDrain } from "./state/use-thread-outbox-drain";
+import { useComposerAttachmentUploadWorker } from "./state/composer-attachment-uploads";
 
 const HEADER_SCROLL_EDGE_EFFECTS = nativeHeaderScrollEdgeEffects(Platform.OS, Platform.Version);
 
@@ -355,6 +357,7 @@ function workspacePathFromState(state: NavigationState): string {
 // each enqueue, shell change, or reconnect.
 function ThreadOutboxDrainWorker() {
   useThreadOutboxDrain();
+  useComposerAttachmentUploadWorker();
   return null;
 }
 
@@ -652,6 +655,9 @@ const navigationPathConfig = {
   screens: createPathConfigForStaticNavigation(RootStack) ?? {},
 };
 
-declare module "@react-navigation/native" {
-  interface RootNavigator extends RootStackType {}
+export type AppRootParamList = InferStaticParamList<RootStackType>;
+declare global {
+  namespace ReactNavigation {
+    interface RootParamList extends AppRootParamList {}
+  }
 }

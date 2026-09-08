@@ -10,6 +10,7 @@ import {
   PreviewViewportSize,
   PreviewBrowserProfileName,
 } from "./preview.ts";
+import { BrowserProfileId } from "./browserProfile.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 
 const BoundedUrl = Schema.String.check(Schema.isTrimmed())
@@ -117,6 +118,10 @@ export const PreviewAutomationStatus = Schema.Struct({
 export type PreviewAutomationStatus = typeof PreviewAutomationStatus.Type;
 
 export const PreviewAutomationOpenInput = Schema.Struct({
+  profileId: Schema.optional(BrowserProfileId).annotate({
+    description:
+      "Managed browser profile ID for a new tab. Legacy profile or ephemeral scope takes precedence when supplied.",
+  }),
   ...PreviewAutomationTabTargetFields,
   url: Schema.optional(BoundedUrl).annotate({
     description: `Optional initial page URL. ${URL_GUIDANCE} Omit to open a blank tab.`,
