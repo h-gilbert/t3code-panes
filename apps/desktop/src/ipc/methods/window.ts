@@ -379,3 +379,13 @@ export const pickThemeFiles = DesktopIpc.makeIpcMethod({
     });
   }),
 });
+
+export const revealPath = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.REVEAL_PATH_CHANNEL,
+  payload: Schema.String,
+  result: Schema.Boolean,
+  handler: Effect.fn("desktop.ipc.window.revealPath")(function* (path) {
+    const shell = yield* ElectronShell.ElectronShell;
+    return yield* shell.revealPath(path);
+  }),
+});

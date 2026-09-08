@@ -1216,6 +1216,8 @@ export interface DesktopBridge {
     position?: { x: number; y: number },
   ) => Promise<T | null>;
   openExternal: (url: string) => Promise<boolean>;
+  /** Reveal a local file in the desktop file manager. Optional for older desktop builds. */
+  revealPath?: (path: string) => Promise<boolean>;
   /**
    * Open a System Settings pane by identifier. Optional: older desktop builds
    * lack it, and callers no-op when it is missing.

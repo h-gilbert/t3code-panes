@@ -1,3 +1,5 @@
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import {
   REMOTE_CAPABLE_EDITOR_IDS,
   remoteSchemeForEditor,
@@ -63,6 +65,9 @@ export class ElectronShell extends Context.Service<
     readonly openExternal: (rawUrl: unknown) => Effect.Effect<boolean>;
     /** Opens a known System Settings pane by identifier, not by URL. */
     readonly openSystemSettings: (pane: SystemSettingsPane) => Effect.Effect<boolean>;
+    readonly revealPath: (
+      path: string,
+    ) => Effect.Effect<boolean, never, FileSystem.FileSystem | Path.Path>;
     readonly copyText: (text: string) => Effect.Effect<void>;
   }
 >()("@t3tools/desktop/electron/ElectronShell") {}
@@ -86,6 +91,16 @@ export const make = ElectronShell.of({
         () => false,
       ),
     ),
+  revealPath: Effect.fn("ElectronShell.revealPath")(function* (filePath: string) {
+    const path = yield* Path.Path;
+    if (!path.isAbsolute(filePath) || filePath.includes("\0")) return false;
+    const fs = yield* FileSystem.FileSystem;
+    return yield* fs.access(filePath).pipe(
+      Effect.andThen(() => Effect.try(() => Electron.shell.showItemInFolder(filePath))),
+      Effect.as(true),
+      Effect.orElseSucceed(() => false),
+    );
+  }),
   copyText: (text) =>
     Effect.sync(() => {
       Electron.clipboard.writeText(text);

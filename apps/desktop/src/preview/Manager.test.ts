@@ -13,6 +13,7 @@ import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as References from "effect/References";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import { TestClock } from "effect/testing";
@@ -119,6 +120,8 @@ const {
   fromId,
   getFocusedWebContents,
   mkdir,
+  menuBuildFromTemplate,
+  menuPopup,
   showItemInFolder,
   webviewSend,
   writeFile,
@@ -130,6 +133,8 @@ const {
   fromId: vi.fn<(_id?: number) => Electron.WebContents | null>((_id?: number) => null),
   getFocusedWebContents: vi.fn(() => null),
   mkdir: vi.fn((_path: string) => undefined),
+  menuBuildFromTemplate: vi.fn(),
+  menuPopup: vi.fn(),
   showItemInFolder: vi.fn(),
   webviewSend: vi.fn(),
   writeFile: vi.fn((_path: string, _data: Uint8Array) => undefined),
@@ -137,6 +142,7 @@ const {
 }));
 
 vi.mock("electron", () => ({
+  Menu: { buildFromTemplate: menuBuildFromTemplate },
   BrowserWindow: Object.assign(browserWindowConstructor, {
     fromWebContents: browserWindowFromWebContents,
   }),
@@ -202,6 +208,7 @@ const browserCredentialsLayer = Layer.mock(BrowserCredentials.BrowserCredentials
 
 const makeLayer = (
   credentialsLayer: Layer.Layer<BrowserCredentials.BrowserCredentials> = browserCredentialsLayer,
+  platform: NodeJS.Platform = "darwin",
 ) =>
   PreviewManager.layer.pipe(
     Layer.provideMerge(browserSessionLayer),
@@ -209,7 +216,7 @@ const makeLayer = (
     Layer.provideMerge(environmentLayer),
     Layer.provideMerge(fileSystemLayer),
     Layer.provideMerge(Path.layer),
-    Layer.provideMerge(Layer.succeed(HostProcessPlatform, "darwin")),
+    Layer.provideMerge(Layer.succeed(HostProcessPlatform, platform)),
   );
 const layer = makeLayer();
 const encodePreviewManagerError = Schema.encodeSync(PreviewManager.PreviewManagerError);
@@ -496,6 +503,9 @@ describe("PreviewManager", () => {
     writeImage.mockClear();
     createFromPath.mockClear();
     webviewSend.mockClear();
+    menuPopup.mockReset();
+    menuBuildFromTemplate.mockReset();
+    menuBuildFromTemplate.mockReturnValue({ popup: menuPopup });
   });
 
   effectIt.effect("keeps preview shortcuts out of the host window", () =>
@@ -557,6 +567,167 @@ describe("PreviewManager", () => {
         expect(setIgnoreMenuShortcuts).toHaveBeenCalledWith(true);
       }),
     ),
+  );
+
+  for (const platform of ["darwin", "win32", "linux"] as const) {
+    effectIt.effect(
+      `pastes once into the guest and consumes the ${platform} shortcut before native menu routing`,
+      () =>
+        withManager(
+          (manager) =>
+            Effect.gen(function* () {
+              const preview = makeFaviconWebContents();
+              const pasted = yield* Deferred.make<void>();
+              const paste = vi.fn(() => Deferred.doneUnsafe(pasted, Effect.void));
+              fromId.mockReturnValue({
+                ...(preview.webContents as Electron.WebContents),
+                paste,
+              } as never);
+              yield* manager.createTab("tab_paste");
+              yield* manager.registerWebview("tab_paste", 42);
+              const beforeInput = preview.listeners.get("before-input-event")!;
+              const event = { preventDefault: vi.fn() };
+              beforeInput(
+                event as never,
+                {
+                  type: "keyDown",
+                  key: "v",
+                  code: "KeyV",
+                  meta: platform === "darwin",
+                  control: platform !== "darwin",
+                  alt: false,
+                  shift: false,
+                } as never,
+              );
+              expect(event.preventDefault).toHaveBeenCalledOnce();
+              yield* Deferred.await(pasted);
+              expect(paste).toHaveBeenCalledOnce();
+
+              for (const overrides of [
+                { type: "keyUp" },
+                { meta: false, control: false },
+                { meta: true, control: true },
+                { shift: true },
+                { alt: true },
+                { isComposing: true },
+                { key: "c" },
+              ]) {
+                const ignored = { preventDefault: vi.fn() };
+                beforeInput(
+                  ignored as never,
+                  {
+                    type: "keyDown",
+                    key: "v",
+                    code: "KeyV",
+                    meta: platform === "darwin",
+                    control: platform !== "darwin",
+                    alt: false,
+                    shift: false,
+                    ...overrides,
+                  } as never,
+                );
+                expect(ignored.preventDefault).not.toHaveBeenCalled();
+              }
+              expect(paste).toHaveBeenCalledOnce();
+            }),
+          makeLayer(browserCredentialsLayer, platform),
+        ),
+    );
+  }
+
+  effectIt.effect(
+    "binds the context menu to its guest, respects edit flags and detaches on close",
+    () =>
+      withManager((manager) =>
+        Effect.gen(function* () {
+          const preview = makeFaviconWebContents();
+          const owner = { isDestroyed: () => false };
+          browserWindowFromWebContents.mockReturnValue(owner as never);
+          const opened = yield* Deferred.make<void>();
+          menuPopup.mockImplementation(() => Deferred.doneUnsafe(opened, Effect.void));
+          const pasted = yield* Deferred.make<void>();
+          const paste = vi.fn(() => Deferred.doneUnsafe(pasted, Effect.void));
+          fromId.mockReturnValue({
+            ...(preview.webContents as Electron.WebContents),
+            paste,
+          } as never);
+          yield* manager.createTab("tab_edit_menu");
+          yield* manager.registerWebview("tab_edit_menu", 42);
+          const contextMenu = preview.listeners.get("context-menu")!;
+          const event = { preventDefault: vi.fn() };
+          contextMenu(
+            event as never,
+            {
+              editFlags: {
+                canUndo: false,
+                canRedo: false,
+                canCut: false,
+                canCopy: false,
+                canPaste: true,
+                canSelectAll: true,
+              },
+            } as never,
+          );
+          yield* Deferred.await(opened);
+          expect(event.preventDefault).toHaveBeenCalledOnce();
+          expect(menuPopup).toHaveBeenCalledWith({ window: owner });
+          const template = menuBuildFromTemplate.mock
+            .calls[0]![0] as Electron.MenuItemConstructorOptions[];
+          expect(template.find((item) => item.label === "Copy")?.enabled).toBe(false);
+          expect(template.find((item) => item.label === "Cut")?.enabled).toBe(false);
+          const pasteItem = template.find((item) => item.label === "Paste")!;
+          expect(pasteItem.enabled).toBe(true);
+          expect(pasteItem.role).toBeUndefined();
+          const otherPaste = vi.fn();
+          getFocusedWebContents.mockReturnValue({ paste: otherPaste } as never);
+          pasteItem.click!({} as never, undefined, {} as never);
+          yield* Deferred.await(pasted);
+          expect(paste).toHaveBeenCalledOnce();
+          expect(otherPaste).not.toHaveBeenCalled();
+          preview.setDestroyed(true);
+          pasteItem.click!({} as never, undefined, {} as never);
+          expect(paste).toHaveBeenCalledOnce();
+          yield* manager.closeTab("tab_edit_menu");
+          expect(preview.off).toHaveBeenCalledWith("context-menu", contextMenu);
+          expect(preview.off).toHaveBeenCalledWith("before-input-event", expect.any(Function));
+        }),
+      ),
+  );
+
+  effectIt.effect(
+    "logs delayed guest focus with its completed action and removes focus listeners",
+    () => {
+      let onFocusRecord: ((record: Record<string, unknown>) => void) | undefined;
+      const logger = Logger.make(({ fiber }) => {
+        const annotations = fiber.getRef(References.CurrentLogAnnotations);
+        if (annotations.event === "guest-focus") onFocusRecord?.(annotations);
+      });
+      return withManager((manager) =>
+        Effect.gen(function* () {
+          const preview = makeFaviconWebContents();
+          fromId.mockReturnValue(preview.webContents);
+          getFocusedWebContents.mockReturnValue(preview.webContents);
+          const tabId = '["env","thread","epoch","tab_1"]';
+          yield* manager.createTab(tabId);
+          yield* manager.registerWebview(tabId, 42);
+          yield* manager.automationPress(tabId, { key: "Escape" });
+          const record = yield* Effect.callback<Record<string, unknown>>((resume) => {
+            onFocusRecord = (value) => resume(Effect.succeed(value));
+            preview.listeners.get("focus")!();
+          });
+          expect(record).toMatchObject({
+            component: "focus-diagnostics",
+            tabId,
+            webContentsId: 42,
+            focusedWebContentsId: 42,
+            lastAction: { name: "press", webContentsId: 42, completedAt: expect.any(Number) },
+          });
+          yield* manager.closeTab(tabId);
+          expect(preview.off).toHaveBeenCalledWith("focus", expect.any(Function));
+          expect(preview.off).toHaveBeenCalledWith("blur", expect.any(Function));
+        }),
+      ).pipe(Effect.provide(Logger.layer([logger], { mergeWithExisting: false })));
+    },
   );
 
   effectIt.effect("reports an unregistered webview as temporarily unavailable", () =>
@@ -3773,6 +3944,7 @@ describe("PreviewManager", () => {
       Effect.gen(function* () {
         let humanInput: ((_event: unknown, signal: unknown) => void) | undefined;
         const activity: string[] = [];
+        let focusListener: (() => void) | undefined;
         const sendCommand = vi.fn(async (method: string, params?: Record<string, unknown>) => {
           if (method === "Runtime.evaluate") {
             return {
@@ -3783,6 +3955,8 @@ describe("PreviewManager", () => {
           }
           if (method === "Input.dispatchMouseEvent" && params?.type === "mousePressed") {
             activity.push("mousePressed");
+            focusListener?.();
+            expect(restoreFocus).toHaveBeenCalledOnce();
             humanInput?.({}, { kind: "pointer", x: params.x, y: params.y, button: 0 });
           }
           return undefined;
@@ -3800,8 +3974,12 @@ describe("PreviewManager", () => {
           setZoomFactor: vi.fn(),
           setAudioMuted: vi.fn(),
           isCurrentlyAudible: () => false,
-          on: vi.fn(),
-          off: vi.fn(),
+          on: vi.fn((event: string, listener: () => void) => {
+            if (event === "focus") focusListener = listener;
+          }),
+          off: vi.fn((event: string) => {
+            if (event === "focus") focusListener = undefined;
+          }),
           ipc: {
             on: vi.fn((channel: string, listener: typeof humanInput) => {
               if (channel === "preview:human-input") humanInput = listener;
@@ -3858,6 +4036,7 @@ describe("PreviewManager", () => {
           clickCount: 1,
         });
         expect(restoreFocus).toHaveBeenCalledOnce();
+        expect(focusListener).toBeUndefined();
       }),
     ),
   );

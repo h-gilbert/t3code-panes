@@ -517,13 +517,17 @@ describe("T3 browser developer instructions", () => {
       NodeAssert.match(instructions, /t3-code/);
       NodeAssert.match(instructions, /preview_status/);
       NodeAssert.match(instructions, /preview_open/);
+      NodeAssert.match(instructions, /open: false/);
+      NodeAssert.match(instructions, /task requires visible interaction/);
       NodeAssert.match(instructions, /Do not switch to global browser skills/);
     }
   });
 
-  it("omits the browser block entirely when the preview tools are not attached", () => {
+  it("keeps background guidance without advertising unavailable preview tools", () => {
     for (const mode of ["default", "plan"] as const) {
       const instructions = buildCodexDeveloperInstructions(mode, runtime, false);
+      NodeAssert.match(instructions, /Run browser automation in the background by default/);
+      NodeAssert.match(instructions, /headless mode/);
       NodeAssert.doesNotMatch(instructions, /preview_status/);
       NodeAssert.doesNotMatch(instructions, /preview_open/);
       NodeAssert.doesNotMatch(instructions, /T3 Code collaborative browser/);

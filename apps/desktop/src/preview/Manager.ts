@@ -32,7 +32,15 @@ import type {
 } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { normalizePreviewUrl } from "@t3tools/shared/preview";
-import { BrowserWindow, type Session, clipboard, nativeImage, shell, webContents } from "electron";
+import {
+  BrowserWindow,
+  Menu,
+  type Session,
+  clipboard,
+  nativeImage,
+  shell,
+  webContents,
+} from "electron";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -53,6 +61,8 @@ import * as Scope from "effect/Scope";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import { makeComponentLogger } from "../app/DesktopObservability.ts";
+import { makeFocusDiagnostics } from "../window/FocusDiagnostics.ts";
 import { PREVIEW_PICTURE_IN_PICTURE_FRAME_CHANNEL } from "../ipc/channels.ts";
 import { buildAutofillExpression, decodeAutofillOutcome } from "./AutofillScript.ts";
 import * as BrowserCredentials from "./BrowserCredentials.ts";
@@ -585,6 +595,26 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   const parentScope = yield* Scope.Scope;
   const context = yield* Effect.context<never>();
   const runFork = Effect.runForkWith(context);
+  const clock = yield* Clock.Clock;
+  const focusLogger = makeComponentLogger("focus-diagnostics");
+  const focusDiagnostics = new Map<string, ReturnType<typeof makeFocusDiagnostics>>();
+  const tabFocusDiagnostics = (tabId: string) => {
+    let diagnostics = focusDiagnostics.get(tabId);
+    if (!diagnostics) {
+      diagnostics = makeFocusDiagnostics(
+        () => clock.currentTimeMillisUnsafe(),
+        (record) => {
+          runFork(
+            focusLogger
+              .logInfo("preview focus evidence", { tabId, ...record })
+              .pipe(Effect.withSpan("desktop.focus.preview", { attributes: { tabId, ...record } })),
+          );
+        },
+      );
+      focusDiagnostics.set(tabId, diagnostics);
+    }
+    return diagnostics;
+  };
   const resolvedArtifactDirectory = path.resolve(artifactDirectory);
   const playwrightInstallExpression = yield* Effect.cached(
     playwrightInjectedRuntimeInstallExpression(),
@@ -1439,7 +1469,12 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           );
         },
       );
-      return yield* use(send, sendCleanup);
+      const finishFocusAction = tabFocusDiagnostics(tabId).startAction({
+        id: actionEvent.id,
+        name: action,
+        webContentsId: wc.id,
+      });
+      return yield* use(send, sendCleanup).pipe(Effect.ensuring(Effect.sync(finishFocusAction)));
     });
     const finalize = Effect.fn("PreviewManager.finalizeControlAction")(function* (
       exit: Exit.Exit<A, PreviewManagerError>,
@@ -1695,6 +1730,15 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       if (Option.isSome(next)) yield* emitIfCurrent(tabId, next.value);
     });
     const sync = () => runFork(syncState(true));
+    const focusEvidence = tabFocusDiagnostics(tabId);
+    const recordFocus = (event: string) => {
+      focusEvidence.record(event, {
+        webContentsId: wc.id,
+        focusedWebContentsId: webContents.getFocusedWebContents()?.id ?? null,
+      });
+    };
+    const focused = () => recordFocus("guest-focus");
+    const blurred = () => recordFocus("guest-blur");
     const syncNavigation = () =>
       runFork(
         Effect.all(
@@ -1721,6 +1765,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       event: Electron.Event<Electron.WebContentsDidStartNavigationEventParams>,
     ) => {
       if (event.isMainFrame && !event.isSameDocument) cancelFaviconCapture();
+      if (event.isMainFrame) recordFocus("navigation-start");
     };
     const audioStateChanged = (
       event: Electron.Event<Electron.WebContentsAudioStateChangedEventParams>,
@@ -1844,6 +1889,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       if (isPreviewInputSignal(rawSignal) && (yield* consumeExpectedAgentInput(tabId, rawSignal))) {
         return;
       }
+      if (isPreviewInputSignal(rawSignal)) focusEvidence.humanInput(rawSignal.kind);
       yield* Ref.update(controlEpochRef, (epochs) =>
         replaceMap(epochs, (copy) => {
           copy.set(tabId, (epochs.get(tabId) ?? 0) + 1);
@@ -1883,6 +1929,27 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
     };
     const beforeInput = (event: Electron.Event, input: Electron.Input): void => {
+      const pasteModifier =
+        hostPlatform === "darwin" ? input.meta && !input.control : input.control && !input.meta;
+      if (
+        input.type === "keyDown" &&
+        input.key.toLowerCase() === "v" &&
+        pasteModifier &&
+        !input.shift &&
+        !input.alt &&
+        !input.isComposing
+      ) {
+        // macOS menu roles use the native responder chain. Address the guest
+        // directly, and consume the shortcut synchronously to avoid a second paste.
+        event.preventDefault();
+        runFork(handleHumanInput({ kind: "key", key: input.key, code: input.code }));
+        runFork(
+          attempt({ operation: "shortcut.paste", tabId, webContentsId: wc.id }, () => {
+            if (!wc.isDestroyed()) wc.paste();
+          }).pipe(Effect.ignore),
+        );
+        return;
+      }
       if (isPreviewRefreshShortcut(input)) {
         event.preventDefault();
         runFork(
@@ -1893,10 +1960,51 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         return;
       }
     };
+    const contextMenu = (event: Electron.Event, params: Electron.ContextMenuParams): void => {
+      event.preventDefault();
+      const editItem = (
+        label: string,
+        command: "undo" | "redo" | "cut" | "copy" | "paste" | "selectAll",
+        enabled: boolean,
+      ): Electron.MenuItemConstructorOptions => ({
+        label,
+        enabled,
+        // Bind the action to the clicked guest even if the app's focus changes
+        // while the native menu is open.
+        click: () => {
+          runFork(
+            attempt({ operation: `contextMenu.${command}`, tabId, webContentsId: wc.id }, () => {
+              if (!wc.isDestroyed()) wc[command]();
+            }).pipe(Effect.ignore),
+          );
+          runFork(handleHumanInput());
+        },
+      });
+      runFork(
+        attempt({ operation: "contextMenu.popup", tabId, webContentsId: wc.id }, () => {
+          if (wc.isDestroyed()) return;
+          const window = BrowserWindow.fromWebContents(wc.hostWebContents ?? wc);
+          if (!window || window.isDestroyed()) return;
+          const flags = params.editFlags;
+          Menu.buildFromTemplate([
+            editItem("Undo", "undo", flags.canUndo),
+            editItem("Redo", "redo", flags.canRedo),
+            { type: "separator" },
+            editItem("Cut", "cut", flags.canCut),
+            editItem("Copy", "copy", flags.canCopy),
+            editItem("Paste", "paste", flags.canPaste),
+            { type: "separator" },
+            editItem("Select All", "selectAll", flags.canSelectAll),
+          ]).popup({ window });
+        }).pipe(Effect.ignore),
+      );
+    };
     yield* Scope.addFinalizer(
       scope,
       attempt({ operation: "detachListeners", tabId, webContentsId: wc.id }, () => {
         cancelFaviconCapture();
+        wc.off("focus", focused);
+        wc.off("blur", blurred);
         wc.off("did-start-navigation", navigationStarted);
         wc.off("did-navigate", syncNavigation);
         wc.off("did-navigate-in-page", syncInPageNavigation);
@@ -1908,6 +2016,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         wc.off("audio-state-changed", audioStateChanged);
         wc.off("did-create-window", windowCreated);
         wc.off("before-input-event", beforeInput);
+        wc.off("context-menu", contextMenu);
         wc.ipc.off(HUMAN_INPUT_CHANNEL, humanInput);
         wc.ipc.off(MOUSE_NAVIGATE_CHANNEL, mouseNavigate);
       }).pipe(Effect.ignore),
@@ -1917,6 +2026,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         // Preview input belongs to the page, including keys injected through CDP.
         // Never let it invoke the host application's menu accelerators.
         wc.setIgnoreMenuShortcuts(true);
+        wc.on("focus", focused);
+        wc.on("blur", blurred);
         wc.on("did-start-navigation", navigationStarted);
         wc.on("did-navigate", syncNavigation);
         wc.on("did-navigate-in-page", syncInPageNavigation);
@@ -1941,6 +2052,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         });
         wc.on("did-create-window", windowCreated);
         wc.on("before-input-event", beforeInput);
+        wc.on("context-menu", contextMenu);
       });
       yield* Ref.update(attachedRef, (attached) =>
         replaceMap(attached, (copy) => {
@@ -2045,6 +2157,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   const closeTabUnlocked = Effect.fn("PreviewManager.closeTabUnlocked")(function* (tabId: string) {
     if (!(yield* SynchronizedRef.get(tabsRef)).has(tabId)) return;
     clearPendingRecording(tabId);
+    focusDiagnostics.delete(tabId);
     yield* Effect.all(
       [
         cancelPickElement(tabId),
@@ -3782,18 +3895,37 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       { operation: "automationClick.getFocusedWebContents", tabId, webContentsId: wc.id },
       () => webContents.getFocusedWebContents(),
     );
-    const restoreUserFocus = attempt(
+    const restoreUserFocus = () => {
+      if (
+        !previouslyFocused ||
+        previouslyFocused.id === wc.id ||
+        previouslyFocused.isDestroyed() ||
+        webContents.getFocusedWebContents()?.id !== wc.id
+      )
+        return;
+      previouslyFocused.focus();
+      tabFocusDiagnostics(tabId).record("click-focus-restored", {
+        webContentsId: wc.id,
+        restoredWebContentsId: previouslyFocused.id,
+      });
+    };
+    // Restore in the native focus callback, before waiting for the CDP click
+    // response. Restoring only after mouseReleased leaves a typing gap.
+    const onAgentClickFocus = () => {
+      try {
+        restoreUserFocus();
+      } catch {
+        // The user's renderer may close while the click is in flight.
+      }
+    };
+    yield* attempt({ operation: "automationClick.guardFocus", tabId, webContentsId: wc.id }, () => {
+      wc.on("focus", onAgentClickFocus);
+    });
+    const releaseFocusGuard = attempt(
       { operation: "automationClick.restoreFocusedWebContents", tabId, webContentsId: wc.id },
       () => {
-        if (
-          !previouslyFocused ||
-          previouslyFocused.id === wc.id ||
-          previouslyFocused.isDestroyed() ||
-          webContents.getFocusedWebContents()?.id !== wc.id
-        ) {
-          return;
-        }
-        previouslyFocused.focus();
+        wc.off("focus", onAgentClickFocus);
+        restoreUserFocus();
       },
     ).pipe(Effect.ignore);
     yield* Effect.gen(function* () {
@@ -3810,7 +3942,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         button: "left",
         clickCount: 1,
       });
-    }).pipe(Effect.ensuring(restoreUserFocus));
+    }).pipe(Effect.ensuring(releaseFocusGuard));
   });
 
   const automationClick = Effect.fn("PreviewManager.automationClick")(function* (

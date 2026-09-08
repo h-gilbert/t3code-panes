@@ -90,6 +90,7 @@ export function HostedBrowserWebview(props: {
         content: current?.content ?? null,
         cornerRadius: current?.cornerRadius ?? 0,
         fitSourceContent: current?.fitSourceContent ?? false,
+        fillContainer: current?.fillContainer ?? false,
         fittedSourceContent: current?.fittedSourceContent ?? null,
         rect: resolveBrowserSurfacePanelRect(state.byTabId, runtimeTabId),
         visible: current?.visible ?? false,
@@ -232,7 +233,11 @@ export function HostedBrowserWebview(props: {
           height: hiddenContentSize?.height ?? lastRect?.height ?? 800,
         };
   const containerSize = active && lastRect ? lastRect : hiddenSize;
-  const deviceToolbarVisible = active && viewport._tag !== "fill" && !presentation.fitSourceContent;
+  const deviceToolbarVisible =
+    active &&
+    viewport._tag !== "fill" &&
+    !presentation.fitSourceContent &&
+    !presentation.fillContainer;
   const {
     activeDrag,
     commitViewportChange,
@@ -242,7 +247,7 @@ export function HostedBrowserWebview(props: {
     layout: viewportLayout,
   } = useBrowserViewportResize({
     tabId: runtimeTabId,
-    viewport,
+    viewport: presentation.fillContainer ? { _tag: "fill" } : viewport,
     zoomFactor,
     containerSize,
     deviceToolbarVisible,

@@ -129,7 +129,7 @@ export const PreviewAutomationOpenInput = Schema.Struct({
   open: Schema.optional(
     Schema.Boolean.annotate({
       description:
-        "Whether to open the thread-bound inline preview for the human. Defaults to true; set false for background-only automation.",
+        "Whether to open the thread-bound inline preview for the human. Defaults to the user’s auto-show preference, which is off by default. Set false for background automation; set true when the user requests visibility or the task requires human interaction.",
     }),
   ),
   show: Schema.optional(

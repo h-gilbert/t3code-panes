@@ -39,7 +39,10 @@ import * as TestClock from "effect/testing/TestClock";
 import { attachmentRelativePath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { clearMcpProviderSession, setMcpProviderSession } from "../../mcp/McpProviderSession.ts";
-import { T3_CODE_BROWSER_TOOL_INSTRUCTIONS } from "../PreviewBrowserInstructions.ts";
+import {
+  T3_CODE_BACKGROUND_BROWSER_INSTRUCTIONS,
+  T3_CODE_BROWSER_TOOL_INSTRUCTIONS,
+} from "../PreviewBrowserInstructions.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import {
   SYNTHETIC_CLAUDE_CAPABLE_MODEL,
@@ -430,6 +433,7 @@ describe("ClaudeAdapterLive", () => {
           preset: "claude_code",
           append:
             "<runtime_info>In case you're asked: you are running in T3 Code through the Claude Code harness. No need to mention this otherwise. You can embed images and videos in your response using Markdown with absolute file paths.</runtime_info>\n\n" +
+            T3_CODE_BACKGROUND_BROWSER_INSTRUCTIONS +
             T3_CODE_BROWSER_TOOL_INSTRUCTIONS,
         });
       }).pipe(
@@ -441,7 +445,7 @@ describe("ClaudeAdapterLive", () => {
   );
 
   it.effect(
-    "keeps runtime instructions without browser instructions when no t3-code MCP server is attached",
+    "keeps runtime and background instructions without preview tools when no t3-code MCP server is attached",
     () => {
       const harness = makeHarness();
       return Effect.gen(function* () {
@@ -457,7 +461,8 @@ describe("ClaudeAdapterLive", () => {
           type: "preset",
           preset: "claude_code",
           append:
-            "<runtime_info>In case you're asked: you are running in T3 Code through the Claude Code harness. No need to mention this otherwise. You can embed images and videos in your response using Markdown with absolute file paths.</runtime_info>",
+            "<runtime_info>In case you're asked: you are running in T3 Code through the Claude Code harness. No need to mention this otherwise. You can embed images and videos in your response using Markdown with absolute file paths.</runtime_info>\n\n" +
+            T3_CODE_BACKGROUND_BROWSER_INSTRUCTIONS,
         });
         assert.equal(createInput?.options.mcpServers, undefined);
       }).pipe(

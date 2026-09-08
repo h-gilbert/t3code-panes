@@ -12,6 +12,8 @@ an existing worktree, use **New thread in this worktree** from the branch toolba
 
 When you change a new thread's project, T3 Code stays in the current environment
 if that project exists there. Otherwise it selects an environment that has it.
+When you un-settle a thread, it returns to the top of the active list so you can find it right
+away. On web and desktop, other threads keep their positions.
 
 ### Start in the background
 
@@ -19,6 +21,14 @@ In a desktop browser or the desktop app, press `Cmd+Enter` on macOS or `Ctrl+Ent
 on Windows and Linux to start a new thread and immediately open another draft. The
 next draft keeps the workspace mode and base branch you selected. With **New
 worktree**, each background submission creates its own worktree.
+
+On mobile, a new prompt or a completed turn moves a thread up in the default active list.
+Intermediate tool activity and streaming replies keep its position steady. Relative time labels
+use the latest prompt or turn completion. Pinned threads keep their chosen order, and snoozed and settled threads have separate sections.
+
+On web and desktop, the active list shows the newest threads up to your thread preview limit. Older threads remain
+available through sidebar search. If you open an older thread from search or a link, its row stays
+visible while it is open without making the list taller.
 
 ## Pin and reorder threads
 

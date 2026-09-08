@@ -8,7 +8,11 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
-import { makeApnsProviderToken, makeEnvironmentAggregate } from "./SelfHostedNotifications.ts";
+import {
+  makeApnsProviderToken,
+  makeEnvironmentAggregate,
+  notificationForTransition,
+} from "./SelfHostedNotifications.ts";
 
 const NOW = Date.parse("2026-08-24T00:00:00.000Z");
 const NOW_ISO = "2026-08-24T00:00:00.000Z";
@@ -86,4 +90,47 @@ describe("self-hosted APNs provider token", () => {
       iss: "XJN9V8FD45",
     });
   });
+});
+
+describe("iOS-origin completion notifications", () => {
+  function transition(phase: RelayAgentActivityState["phase"], ios = false) {
+    return notificationForTransition({
+      previous: makeEnvironmentAggregate([state("running")], NOW),
+      next: makeEnvironmentAggregate([state(phase)], NOW),
+      nowMs: NOW,
+      iosCompletionThreads: new Set(ios ? [ThreadId.make("thread-1")] : []),
+      registration: {
+        device: {
+          deviceId: "phone",
+          label: "iPhone",
+          platform: "ios",
+          iosMajorVersion: 18,
+          preferences: {
+            notificationsEnabled: true,
+            liveActivitiesEnabled: false,
+            notifyOnApproval: true,
+            notifyOnInput: true,
+            notifyOnFailure: true,
+            notifyOnCompletion: false,
+            notifyOnIosCompletion: true,
+          },
+        },
+        activityPushToken: null,
+        lastAggregate: null,
+        lastDeliveryAt: null,
+      },
+    });
+  }
+
+  it("alerts for a completed iOS turn and suppresses all other origins", () => {
+    expect(transition("completed", true)?.row.phase).toBe("completed");
+    expect(transition("completed", false)).toBeNull();
+  });
+
+  it.each(["waiting_for_approval", "waiting_for_input", "failed"] as const)(
+    "retains %s alerts regardless of the submitting client",
+    (phase) => {
+      expect(transition(phase, false)?.row.phase).toBe(phase);
+    },
+  );
 });

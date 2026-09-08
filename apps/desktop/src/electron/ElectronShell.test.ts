@@ -1,15 +1,18 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import { beforeEach, vi } from "vite-plus/test";
 
-const { openExternalMock, writeTextMock } = vi.hoisted(() => ({
+const { openExternalMock, writeTextMock, showItemInFolderMock } = vi.hoisted(() => ({
   openExternalMock: vi.fn(),
   writeTextMock: vi.fn(),
+  showItemInFolderMock: vi.fn(),
 }));
 
 vi.mock("electron", () => ({
   shell: {
     openExternal: openExternalMock,
+    showItemInFolder: showItemInFolderMock,
   },
   clipboard: {
     writeText: writeTextMock,
@@ -22,6 +25,7 @@ describe("ElectronShell", () => {
   beforeEach(() => {
     openExternalMock.mockReset();
     writeTextMock.mockReset();
+    showItemInFolderMock.mockReset();
   });
 
   it.effect("opens safe external URLs", () =>
@@ -118,5 +122,42 @@ describe("ElectronShell", () => {
 
       assert.equal(result, false);
     }).pipe(Effect.provide(ElectronShell.layer)),
+  );
+});
+
+describe("revealPath", () => {
+  beforeEach(() => showItemInFolderMock.mockReset());
+  it.effect("reveals an existing absolute path without opening the file", () =>
+    Effect.gen(function* () {
+      const shell = yield* ElectronShell.ElectronShell;
+      assert.equal(yield* shell.revealPath(process.execPath), true);
+      assert.deepEqual(showItemInFolderMock.mock.calls, [[process.execPath]]);
+    }).pipe(Effect.provide([ElectronShell.layer, NodeServices.layer])),
+  );
+
+  it.effect("rejects relative, missing, and malformed paths", () =>
+    Effect.gen(function* () {
+      showItemInFolderMock.mockClear();
+      const shell = yield* ElectronShell.ElectronShell;
+      for (const path of [
+        "relative.md",
+        "/t3-missing-file/reveal.md",
+        "/tmp/bad\0path",
+        "file:///tmp/test.md",
+      ]) {
+        assert.equal(yield* shell.revealPath(path), false);
+      }
+      assert.equal(showItemInFolderMock.mock.calls.length, 0);
+    }).pipe(Effect.provide([ElectronShell.layer, NodeServices.layer])),
+  );
+
+  it.effect("returns false when the file manager fails", () =>
+    Effect.gen(function* () {
+      showItemInFolderMock.mockImplementationOnce(() => {
+        throw new Error("Failed");
+      });
+      const shell = yield* ElectronShell.ElectronShell;
+      assert.equal(yield* shell.revealPath(process.execPath), false);
+    }).pipe(Effect.provide([ElectronShell.layer, NodeServices.layer])),
   );
 });

@@ -65,6 +65,12 @@ the lockfile merely to complete a local install.
 
 ### 4. Replace safely
 
+- Sign the extracted local app with the same Apple Development certificate on
+  every update, preserving its entitlements. Do not use ad hoc signing as a
+  fallback: its designated requirement changes with the executable, which can
+  make macOS ask again for Downloads and other protected-folder permissions.
+  Verify the signature before quitting the installed app. Switching an existing
+  ad hoc install to certificate signing may require one new permission grant.
 - Fully extract the artifact before installation; do not run the app from the archive or a mounted
   transient location.
 - Keep one clearly named backup of the current app bundle until the replacement is verified.
@@ -74,6 +80,17 @@ the lockfile merely to complete a local install.
 The promotion command stages the replacement on the destination filesystem, records recovery
 paths, then renames the old and new bundles. It restores the original if the second rename fails.
 Filesystem replacement may require macOS approval for the exact destination.
+For an already extracted app signed with the Apple Development certificate, run:
+
+```sh
+bash scripts/install-local-desktop-update.sh '/path/to/T3 Code (Alpha).app'
+```
+
+The script checks the signature, signing team, and bundle identifier, prints the exact paths,
+and asks for a safe restart boundary. It stages the replacement, quits the installed app normally,
+refuses to replace it while its processes remain, keeps a timestamped backup, and reopens it.
+It does not build, sign, or verify the restored workspace. Filesystem replacement and application
+launch may require macOS approval.
 
 ### 5. Verify the outcome
 

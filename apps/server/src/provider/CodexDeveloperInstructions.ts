@@ -1,17 +1,18 @@
 import type { ProviderInteractionMode } from "@t3tools/contracts";
 import { buildRuntimeInstructions } from "./RuntimeInstructions.ts";
 
-import { T3_CODE_BROWSER_TOOL_INSTRUCTIONS } from "./PreviewBrowserInstructions.ts";
+import {
+  T3_CODE_BACKGROUND_BROWSER_INSTRUCTIONS,
+  T3_CODE_BROWSER_TOOL_INSTRUCTIONS,
+} from "./PreviewBrowserInstructions.ts";
 
 /**
- * The browser block is omitted entirely when the preview tools aren't attached.
- * Describing `preview_*` tools that aren't in the turn's tool list would be
- * worse than saying nothing: the instructions actively steer the model away
- * from Playwright and agent-browser, so leaving them in would talk it out of
- * the only browser automation it still has.
+ * Always include background guidance for external browser tools. Only describe
+ * the collaborative browser when its tools are attached to this turn.
  */
 const browserToolInstructions = (browserToolsAvailable: boolean): string =>
-  browserToolsAvailable ? T3_CODE_BROWSER_TOOL_INSTRUCTIONS : "";
+  T3_CODE_BACKGROUND_BROWSER_INSTRUCTIONS +
+  (browserToolsAvailable ? T3_CODE_BROWSER_TOOL_INSTRUCTIONS : "");
 
 const codexPlanModeDeveloperInstructions = (
   browserToolsAvailable: boolean,

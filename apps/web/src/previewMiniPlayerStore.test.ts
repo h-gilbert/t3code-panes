@@ -12,13 +12,36 @@ beforeEach(() => {
 });
 
 describe("previewMiniPlayerStore", () => {
-  it("keeps floating previews scoped to their thread", () => {
+  it("returns to a fixed preview without losing the floating window's layout", () => {
+    const store = usePreviewMiniPlayerStore.getState();
+    store.open(refA, "tab-a");
+    store.setFloating(refA, "tab-a", true);
+    store.resize(refA, "tab-a", { width: 800, height: 560 });
+    store.move(refA, "tab-a", { x: 100, y: 80 });
+    store.setMaximized(refA, "tab-a", true);
+    store.setMaximized(refA, "tab-a", false);
+    expect(
+      selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
+    ).toMatchObject({ floating: true, maximized: false });
+    store.setFloating(refA, "tab-a", false);
+    store.open(refA, "tab-b");
+    store.setFloating(refA, "tab-a", true);
+    expect(
+      selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
+    ).toMatchObject({
+      floating: false,
+      size: { width: 800, height: 560 },
+      position: { x: 100, y: 80 },
+    });
+  });
+
+  it("opens floating browsers scoped to their thread", () => {
     usePreviewMiniPlayerStore.getState().open(refA, "tab-a");
     usePreviewMiniPlayerStore.getState().open(refB, "tab-b");
 
     expect(
       selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
-    ).toMatchObject({ tabId: "tab-a", maximized: false });
+    ).toMatchObject({ tabId: "tab-a", maximized: false, floating: false });
     expect(
       selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refB),
     ).toMatchObject({ tabId: "tab-b" });
@@ -36,9 +59,7 @@ describe("previewMiniPlayerStore", () => {
       position: { x: 24, y: 48 },
       size: null,
       maximized: false,
-      expanded: false,
-      windowPosition: null,
-      windowSize: null,
+      floating: false,
     });
   });
 
@@ -54,9 +75,7 @@ describe("previewMiniPlayerStore", () => {
       position: null,
       size: null,
       maximized: false,
-      expanded: false,
-      windowPosition: null,
-      windowSize: null,
+      floating: false,
     });
   });
 
@@ -82,12 +101,12 @@ describe("previewMiniPlayerStore", () => {
 });
 
 describe("browser window transitions", () => {
-  it("restores separate mini and window geometry across fullscreen and minimization", () => {
+  it("restores floating geometry across fullscreen and the fixed compact preview", () => {
     const store = usePreviewMiniPlayerStore.getState();
     store.open(refA, "tab-a");
     store.move(refA, "tab-a", { x: 20, y: 30 });
     store.resize(refA, "tab-a", { width: 320, height: 200 });
-    store.setExpanded(refA, "tab-a", true);
+    store.setFloating(refA, "tab-a", true);
     store.move(refA, "tab-a", { x: 400, y: 100 });
     store.resize(refA, "tab-a", { width: 900, height: 600 });
     store.setMaximized(refA, "tab-a", true);
@@ -95,38 +114,37 @@ describe("browser window transitions", () => {
     expect(
       selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
     ).toMatchObject({
-      expanded: true,
+      floating: true,
       maximized: false,
-      windowPosition: { x: 400, y: 100 },
-      windowSize: { width: 900, height: 600 },
+      position: { x: 400, y: 100 },
+      size: { width: 900, height: 600 },
     });
-    store.setExpanded(refA, "tab-a", false);
+    store.setFloating(refA, "tab-a", false);
     expect(
       selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
     ).toMatchObject({
-      expanded: false,
-      position: { x: 20, y: 30 },
-      size: { width: 320, height: 200 },
+      floating: false,
+      position: { x: 400, y: 100 },
+      size: { width: 900, height: 600 },
     });
-    store.setExpanded(refA, "tab-a", true);
+    store.setFloating(refA, "tab-a", true);
     expect(
-      selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA)
-        ?.windowSize,
+      selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA)?.size,
     ).toEqual({ width: 900, height: 600 });
   });
   it("ignores a stale window transition and leaves another thread's browser alone", () => {
     const store = usePreviewMiniPlayerStore.getState();
     store.open(refA, "tab-a");
     store.open(refB, "tab-b");
-    store.setExpanded(refA, "old-tab", true);
+    store.setFloating(refA, "old-tab", true);
     expect(
       selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA)
-        ?.expanded,
+        ?.floating,
     ).toBe(false);
-    store.setExpanded(refA, "tab-a", true);
+    store.setFloating(refA, "tab-a", true);
     expect(
       selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refB)
-        ?.expanded,
+        ?.floating,
     ).toBe(false);
   });
 });

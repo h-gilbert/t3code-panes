@@ -82,7 +82,10 @@ import * as Stream from "effect/Stream";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
-import { T3_CODE_BROWSER_TOOL_INSTRUCTIONS } from "../PreviewBrowserInstructions.ts";
+import {
+  T3_CODE_BACKGROUND_BROWSER_INSTRUCTIONS,
+  T3_CODE_BROWSER_TOOL_INSTRUCTIONS,
+} from "../PreviewBrowserInstructions.ts";
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import { planClaudeSkillDispatch } from "../Drivers/ClaudeSkillDispatch.ts";
@@ -4670,7 +4673,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           // Model and effort can change after this session-level prompt is set.
           append: [
             buildRuntimeInstructions({ harness: "Claude Code" }),
-            ...(mcpSession ? [T3_CODE_BROWSER_TOOL_INSTRUCTIONS] : []),
+            T3_CODE_BACKGROUND_BROWSER_INSTRUCTIONS +
+              (mcpSession ? T3_CODE_BROWSER_TOOL_INSTRUCTIONS : ""),
           ].join("\n\n"),
         },
         settingSources: [...CLAUDE_SETTING_SOURCES],

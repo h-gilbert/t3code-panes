@@ -58,12 +58,26 @@ On macOS desktop, the titlebar strip remains available for the traffic lights, w
 and workspace controls. It disappears in fullscreen so the panes use the entire window; the same
 actions remain available through their shortcuts.
 
-When an agent opens the shared browser, it appears as a movable preview in the pane. Use its header
-buttons to expand it over the T3 Code window, dock it into the right panel, pop it into a separate
-window, or close the browser. The preview is opaque, so pane content and the thread sidebar do not
-show through it. Agents can also close the browser themselves when they finish with it.
+Agent browser work stays in the background by default. Agents can show a page when you ask
+to see it or need to interact, such as signing in. You can enable automatic preview display in
+Settings with **Auto-show floating preview**. Existing saved preferences are preserved.
 
-When a tab uses an exact viewport size, a Viewport row appears above the page. Enter width and
+When shown, the shared browser starts as a fixed 320 × 200 preview in its pane's
+top-right corner. It cannot be dragged or resized. Its single toolbar offers a floating window
+above the panes, fullscreen, and close. The page scales to fit the preview, without a separate
+viewport toolbar or resize footer.
+
+The page fills the floating and fullscreen views, without letterboxing.
+The floating window can be dragged across the pane grid and resized at its bottom-right
+edge, without a footer below the page. Its toolbar can return it to the small preview. Fullscreen restores the previous mode.
+Moving or resizing the floating window does not select another pane. Agents can also close
+the browser themselves when they finish with it.
+
+When connected to a remote environment, localhost browser URLs target that environment. Local
+environments keep localhost navigation on this computer. Remote preview ports require a supported
+private-network connection; unsupported public relay routes report an error.
+
+In the docked browser, when a tab uses an exact viewport size, a Viewport row appears above the page. Enter width and
 height directly, lock the current ratio, choose a phone or tablet preset, or use Mobile for a quick
 phone-sized check. Fill returns the page to the available browser space. Only the X in the browser
 header closes the browser.

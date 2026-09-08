@@ -2,6 +2,12 @@
 
 Give the agent a task in the composer. Add files, quote a previous response, or
 include a skill when the task needs more context.
+New threads on web and desktop start with Codex GPT-6 Astra selected and medium reasoning effort.
+You can choose another model in the composer before sending.
+
+Messages can contain up to 120,000 characters. If a draft is longer, T3 Code keeps it in the
+composer and shows how many characters need to be removed. Shorten the draft or split it into
+multiple messages, then send again in the same thread.
 
 Messages can contain up to 120,000 characters. Longer drafts stay in the composer
 so you can shorten them or split them into several messages.

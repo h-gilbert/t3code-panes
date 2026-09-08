@@ -732,7 +732,10 @@ const buildAppUnderTest = (options?: {
     );
 
     const servedRoutesLayer = HttpRouter.serve(
-      makeRoutesLayer.pipe(Layer.provide(serviceLauncherClientLayer)),
+      makeRoutesLayer.pipe(
+        Layer.provide(serviceLauncherClientLayer),
+        Layer.provide(SqlitePersistenceMemory),
+      ),
       {
         disableListenLog: true,
         disableLogger: true,

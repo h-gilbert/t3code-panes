@@ -1,4 +1,5 @@
 import {
+  DEFAULT_BROWSER_AUTO_SHOW_FLOATING_PREVIEW,
   FILL_PREVIEW_VIEWPORT,
   type PreviewAutomationOperation,
   type PreviewAutomationOpenInput,
@@ -25,7 +26,7 @@ export const DEFAULT_PREVIEW_AUTOMATION_VIEWPORT = {
  */
 export function shouldOpenPreviewMiniPlayer(
   input: PreviewAutomationOpenInput,
-  autoShowFloatingPreview = true,
+  autoShowFloatingPreview = DEFAULT_BROWSER_AUTO_SHOW_FLOATING_PREVIEW,
 ): boolean {
   return input.open ?? input.show ?? autoShowFloatingPreview;
 }

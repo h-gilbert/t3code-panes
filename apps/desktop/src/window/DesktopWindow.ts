@@ -5,6 +5,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
+import * as Schema from "effect/Schema";
 
 import * as Electron from "electron";
 import * as NodeCrypto from "node:crypto";
@@ -31,6 +32,12 @@ import * as DesktopClientSettings from "../settings/DesktopClientSettings.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import { makeQuitShortcutHandler } from "./QuitHold.ts";
 import * as DesktopWindowSession from "./DesktopWindowSession.ts";
+import {
+  makeFocusDiagnostics,
+  observeWindowFocus,
+  RendererFocusEvidence,
+} from "./FocusDiagnostics.ts";
+import { FOCUS_DIAGNOSTICS_CHANNEL } from "../ipc/channels.ts";
 
 const TITLEBAR_HEIGHT = 40;
 const DEFAULT_MAIN_WORKSPACE_ID = "main";
@@ -119,6 +126,7 @@ export class DesktopWindow extends Context.Service<
 
 const { logInfo: logWindowInfo, logWarning: logWindowWarning } =
   makeComponentLogger("desktop-window");
+const decodeRendererFocusEvidence = Schema.decodeUnknownOption(RendererFocusEvidence);
 
 function getIconOption(
   iconPaths: DesktopAssets.DesktopIconPaths,
@@ -530,6 +538,51 @@ export const make = Effect.gen(function* () {
       ),
     );
     windowBoundsFlushes.set(input.workspaceId, flushBoundsPersist);
+    // Capture diagnostics handles before destruction; late blur and closed events still fire.
+    const focusIdentity = {
+      workspaceId: input.workspaceId,
+      windowId: window.id,
+      webContentsId: window.webContents.id,
+    };
+    const focusIpc = window.webContents.ipc;
+    const focusClock = yield* Clock.Clock;
+    const focusLogger = makeComponentLogger("focus-diagnostics");
+    const focusDiagnostics = makeFocusDiagnostics(
+      () => focusClock.currentTimeMillisUnsafe(),
+      (record) => {
+        const evidence = {
+          ...focusIdentity,
+          ...record,
+        };
+        void runPromise(
+          focusLogger
+            .logInfo("workspace focus evidence", evidence)
+            .pipe(Effect.withSpan("desktop.focus.workspace", { attributes: evidence })),
+        );
+      },
+    );
+    observeWindowFocus(
+      window,
+      focusDiagnostics,
+      () => Electron.webContents.getFocusedWebContents()?.id ?? null,
+    );
+    const rendererFocusEvidence = (_event: Electron.IpcMainEvent, payload: unknown) => {
+      const decoded = decodeRendererFocusEvidence(payload);
+      if (Option.isNone(decoded)) return;
+      const evidence = {
+        ...focusIdentity,
+        ...decoded.value,
+      };
+      void runPromise(
+        focusLogger
+          .logInfo("renderer focus evidence", evidence)
+          .pipe(Effect.withSpan("desktop.focus.renderer", { attributes: evidence })),
+      );
+    };
+    focusIpc.on(FOCUS_DIAGNOSTICS_CHANNEL, rendererFocusEvidence);
+    window.once("closed", () => {
+      focusIpc.off(FOCUS_DIAGNOSTICS_CHANNEL, rendererFocusEvidence);
+    });
     if (input.isMainWindow) {
       // Only the main window hosts previews. Registering secondary workspace
       // windows here would reassign PiP/recording ownership to whichever

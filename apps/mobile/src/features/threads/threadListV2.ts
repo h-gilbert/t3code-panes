@@ -9,7 +9,6 @@ import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled"
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
 import {
-  activeThreadAnchorTimestampMs,
   resolveSettledThreadTimestamp,
   sortPinnedThreadsByOrderKey,
 } from "@t3tools/client-runtime/state/thread-sort";
@@ -150,27 +149,42 @@ function parseTimestampMs(isoDate: string): number {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
-/**
- * v2 sort: static order, newest anchor on top. Activity NEVER reorders the
- * list — a row holds its position between lifecycle transitions. The anchor
- * is creation time until an un-settle re-anchors it (see
- * activeThreadAnchorTimestampMs), so an un-settled thread surfaces at the
- * top instead of sinking back to its creation-order slot. Mirrors web's
- * sortThreadsForSidebar.
- */
-export function sortThreadsForListV2<
-  T extends {
-    readonly id: string;
-    readonly createdAt: string;
-    readonly unsettledAt?: string | null | undefined;
-  },
->(threads: readonly T[]): T[] {
-  // .sort() on a copy, not .toSorted(): Hermes doesn't ship the ES2023
-  // change-by-copy array methods.
+type ThreadActivityInput = {
+  readonly createdAt: string;
+  readonly latestTurn?: { readonly completedAt: string | null } | null;
+  readonly latestUserMessageAt?: string | null;
+  readonly unsettledAt?: string | null;
+};
+
+/** Prompts and turn completions move rows; streaming and tool updates do not.
+ * Explicit un-settle still brings a thread back to the top. Labels share this timestamp. */
+export function threadListV2ActivityTimestamp(thread: ThreadActivityInput): string {
+  let latest = thread.createdAt;
+  let latestMs = parseTimestampMs(latest);
+  for (const candidate of [
+    thread.latestUserMessageAt,
+    thread.latestTurn?.completedAt,
+    thread.unsettledAt,
+  ]) {
+    if (candidate == null) continue;
+    const timestamp = parseTimestampMs(candidate);
+    if (timestamp > latestMs) {
+      latest = candidate;
+      latestMs = timestamp;
+    }
+  }
+  return latest;
+}
+
+/** Most recently active first, with a stable ID tie-break for equal timestamps. */
+export function sortThreadsForListV2<T extends ThreadActivityInput & { readonly id: string }>(
+  threads: readonly T[],
+): T[] {
+  // Sort a copy: Hermes does not ship Array.toSorted.
   return [...threads].sort(
     (left, right) =>
-      activeThreadAnchorTimestampMs(right) - activeThreadAnchorTimestampMs(left) ||
-      left.id.localeCompare(right.id),
+      parseTimestampMs(threadListV2ActivityTimestamp(right)) -
+        parseTimestampMs(threadListV2ActivityTimestamp(left)) || left.id.localeCompare(right.id),
   );
 }
 
@@ -299,7 +313,7 @@ export function buildThreadListV2ListItems(input: {
 }
 
 /**
- * Partitions visible threads into the active card block (creation order) and
+ * Partitions visible threads into the active card block (activity order) and
  * the settled recency tail, matching the web v2 list.
  */
 export function buildThreadListV2Items(input: {

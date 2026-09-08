@@ -139,6 +139,7 @@ import {
   shouldOpenMarkdownFileLinkInEditor,
   type MarkdownFileLinkMeta,
 } from "../markdown-links";
+import { useEnvironmentPresentation } from "../state/presentation";
 import { readLocalApi } from "../localApi";
 import { useAssetUrlRefresh, useAssetUrlState } from "../assets/assetUrls";
 import { cn } from "../lib/utils";
@@ -1772,6 +1773,13 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   revealLabel,
   className,
 }: MarkdownFileLinkProps) {
+  const { presentation } = useEnvironmentPresentation(threadRef?.environmentId ?? null);
+  const canRevealInFinder =
+    typeof window !== "undefined" &&
+    typeof window.desktopBridge?.revealPath === "function" &&
+    navigator.platform.toLowerCase().includes("mac") &&
+    presentation?.entry.target._tag === "PrimaryConnectionTarget";
+
   const handleOpenInEditor = useCallback(() => {
     if (!onOpen) {
       return;
@@ -1950,7 +1958,11 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
             ...(onOpenInBrowser
               ? ([{ id: "open-in-browser", label: "Open in integrated browser" }] as const)
               : []),
-            ...(onReveal && revealLabel ? ([{ id: "reveal", label: revealLabel }] as const) : []),
+            ...(canRevealInFinder
+              ? ([{ id: "reveal-local", label: "Open in Finder" }] as const)
+              : onReveal && revealLabel
+                ? ([{ id: "reveal", label: revealLabel }] as const)
+                : []),
             { id: "copy-relative", label: "Copy relative path" },
             { id: "copy-full", label: "Copy full path" },
           ] as const,
@@ -1963,6 +1975,22 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
         }
         if (clicked === "open") {
           handleOpenInEditor();
+          return;
+        }
+        if (clicked === "reveal-local") {
+          try {
+            const revealed = await window.desktopBridge?.revealPath?.(iconPath);
+            if (!revealed) throw new Error("The file could not be found or revealed.");
+          } catch (cause) {
+            reportMarkdownActionFailure({ operation: "reveal-file", target: targetPath }, cause);
+            toastManager.add(
+              stackedThreadToast({
+                type: "error",
+                title: "Unable to open in Finder",
+                description: cause instanceof Error ? cause.message : "An error occurred.",
+              }),
+            );
+          }
           return;
         }
         if (clicked === "open-in-browser") {
@@ -1988,6 +2016,8 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
       }
     },
     [
+      canRevealInFinder,
+      iconPath,
       displayPath,
       handleCopy,
       handleOpenInBrowser,
