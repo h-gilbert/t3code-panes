@@ -8,6 +8,8 @@ import type {
 import { exposeClerkBridge } from "@clerk/electron/preload";
 import { contextBridge, ipcRenderer } from "electron";
 
+import { preserveRendererFocus } from "./preview/PreserveRendererFocus.ts";
+
 import * as IpcChannels from "./ipc/channels.ts";
 import { observeRendererFocus } from "./window/RendererFocusDiagnostics.ts";
 
@@ -349,7 +351,9 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       snapshot: (tabId) =>
         ipcRenderer.invoke(IpcChannels.PREVIEW_AUTOMATION_SNAPSHOT_CHANNEL, { tabId }),
       click: (tabId, input) =>
-        ipcRenderer.invoke(IpcChannels.PREVIEW_AUTOMATION_CLICK_CHANNEL, { tabId, input }),
+        preserveRendererFocus(document, tabId, () =>
+          ipcRenderer.invoke(IpcChannels.PREVIEW_AUTOMATION_CLICK_CHANNEL, { tabId, input }),
+        ),
       type: (tabId, input) =>
         ipcRenderer.invoke(IpcChannels.PREVIEW_AUTOMATION_TYPE_CHANNEL, { tabId, input }),
       press: (tabId, input) =>
