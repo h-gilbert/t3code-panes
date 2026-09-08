@@ -80,6 +80,7 @@ import {
   rewriteMarkdownFileUriHref,
   type MarkdownFileLinkMeta,
 } from "../markdown-links";
+import { useEnvironmentPresentation } from "../state/presentation";
 import { readLocalApi } from "../localApi";
 import { cn } from "../lib/utils";
 import { useRightPanelStore } from "../rightPanelStore";
@@ -1132,6 +1133,13 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   onOpenInBrowser,
   className,
 }: MarkdownFileLinkProps) {
+  const { presentation } = useEnvironmentPresentation(threadRef?.environmentId ?? null);
+  const canRevealInFinder =
+    typeof window !== "undefined" &&
+    typeof window.desktopBridge?.revealPath === "function" &&
+    navigator.platform.toLowerCase().includes("mac") &&
+    presentation?.entry.target._tag === "PrimaryConnectionTarget";
+
   const handleOpenInEditor = useCallback(() => {
     void (async () => {
       try {
@@ -1264,6 +1272,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
         const clicked = await api.contextMenu.show(
           [
             { id: "open", label: "Open in editor" },
+            ...(canRevealInFinder ? ([{ id: "reveal", label: "Open in Finder" }] as const) : []),
             ...(onOpenInBrowser
               ? ([{ id: "open-in-browser", label: "Open in integrated browser" }] as const)
               : []),
@@ -1275,6 +1284,22 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
 
         if (clicked === "open") {
           handleOpenInEditor();
+          return;
+        }
+        if (clicked === "reveal") {
+          try {
+            const revealed = await window.desktopBridge?.revealPath?.(iconPath);
+            if (!revealed) throw new Error("The file could not be found or revealed.");
+          } catch (cause) {
+            reportMarkdownActionFailure({ operation: "reveal-file", target: targetPath }, cause);
+            toastManager.add(
+              stackedThreadToast({
+                type: "error",
+                title: "Unable to open in Finder",
+                description: cause instanceof Error ? cause.message : "An error occurred.",
+              }),
+            );
+          }
           return;
         }
         if (clicked === "open-in-browser") {
@@ -1295,7 +1320,16 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
         );
       }
     },
-    [displayPath, handleCopy, handleOpenInBrowser, handleOpenInEditor, onOpenInBrowser, targetPath],
+    [
+      canRevealInFinder,
+      iconPath,
+      displayPath,
+      handleCopy,
+      handleOpenInBrowser,
+      handleOpenInEditor,
+      onOpenInBrowser,
+      targetPath,
+    ],
   );
 
   return (
