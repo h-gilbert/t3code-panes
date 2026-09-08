@@ -16,6 +16,7 @@ import { vi } from "vite-plus/test";
 
 vi.mock("electron", async (importOriginal) => ({
   ...(await importOriginal<typeof import("electron")>()),
+  webContents: { getFocusedWebContents: vi.fn(() => null) },
   session: {
     fromPartition: vi.fn(() => ({
       getUserAgent: vi.fn(() => "Mozilla/5.0 Electron/41.5.0 t3code/1.2.3"),
@@ -77,6 +78,7 @@ function makeFakeBrowserWindow() {
     on: vi.fn((eventName: string, listener: (...args: readonly unknown[]) => void) => {
       webContentsListeners.set(eventName, listener);
     }),
+    off: vi.fn(),
     once: vi.fn(),
     openDevTools: vi.fn(),
     reload: vi.fn(),
@@ -104,6 +106,7 @@ function makeFakeBrowserWindow() {
     once: vi.fn((eventName: string, listener: (...args: readonly unknown[]) => void) => {
       windowListeners.set(eventName, listener);
     }),
+    off: vi.fn(),
     restore: vi.fn(),
     setBackgroundColor: vi.fn(),
     setAutoHideCursor: vi.fn(),
@@ -124,6 +127,7 @@ function makeFakeBrowserWindow() {
     loadURL: window.loadURL,
     maximize: window.maximize,
     on: window.on,
+    once: window.once,
     openDevTools: webContents.openDevTools,
     reload: webContents.reload,
     send: webContents.send,
@@ -607,6 +611,41 @@ describe("DesktopWindow", () => {
         if (!readyToShow) return yield* Effect.die("ready-to-show listener was not registered");
         readyToShow();
         assert.equal(fakeWindow.maximize.mock.calls.length, 1);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("handles late focus events and diagnostic cleanup after window destruction", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const layer = makeTestLayer({ window: fakeWindow.window, createCount, mainWindow });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+        const webContents = fakeWindow.window.webContents;
+        const rendererBlurred = fakeWindow.webContentsListeners.get("blur");
+        const closedCallbacks = fakeWindow.once.mock.calls
+          .filter(([event]) => event === "closed")
+          .map(([, listener]) => listener);
+        assert.isDefined(rendererBlurred);
+        assert.equal(closedCallbacks.length, 2);
+        for (const property of ["id", "webContents"]) {
+          Object.defineProperty(fakeWindow.window, property, {
+            get() {
+              throw new TypeError("Object has been destroyed");
+            },
+          });
+        }
+
+        assert.doesNotThrow(() => rendererBlurred?.());
+        assert.doesNotThrow(() => {
+          for (const closed of closedCallbacks) closed();
+        });
+        assert.equal(vi.mocked(webContents.ipc.off).mock.calls.length, 1);
+        assert.equal(vi.mocked(webContents.off).mock.calls.length, 4);
       }).pipe(Effect.provide(layer));
     }),
   );

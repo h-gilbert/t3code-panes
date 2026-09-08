@@ -523,15 +523,20 @@ export const make = Effect.gen(function* () {
       ),
     );
     windowBoundsFlushes.set(input.workspaceId, flushBoundsPersist);
+    // Capture diagnostics handles before destruction; late blur and closed events still fire.
+    const focusIdentity = {
+      workspaceId: input.workspaceId,
+      windowId: window.id,
+      webContentsId: window.webContents.id,
+    };
+    const focusIpc = window.webContents.ipc;
     const focusClock = yield* Clock.Clock;
     const focusLogger = makeComponentLogger("focus-diagnostics");
     const focusDiagnostics = makeFocusDiagnostics(
       () => focusClock.currentTimeMillisUnsafe(),
       (record) => {
         const evidence = {
-          workspaceId: input.workspaceId,
-          windowId: window.id,
-          webContentsId: window.webContents.id,
+          ...focusIdentity,
           ...record,
         };
         void runPromise(
@@ -550,9 +555,7 @@ export const make = Effect.gen(function* () {
       const decoded = decodeRendererFocusEvidence(payload);
       if (Option.isNone(decoded)) return;
       const evidence = {
-        workspaceId: input.workspaceId,
-        windowId: window.id,
-        webContentsId: window.webContents.id,
+        ...focusIdentity,
         ...decoded.value,
       };
       void runPromise(
@@ -561,9 +564,9 @@ export const make = Effect.gen(function* () {
           .pipe(Effect.withSpan("desktop.focus.renderer", { attributes: evidence })),
       );
     };
-    window.webContents.ipc.on(FOCUS_DIAGNOSTICS_CHANNEL, rendererFocusEvidence);
+    focusIpc.on(FOCUS_DIAGNOSTICS_CHANNEL, rendererFocusEvidence);
     window.once("closed", () => {
-      window.webContents.ipc.off(FOCUS_DIAGNOSTICS_CHANNEL, rendererFocusEvidence);
+      focusIpc.off(FOCUS_DIAGNOSTICS_CHANNEL, rendererFocusEvidence);
     });
     if (input.isMainWindow) {
       // Only the main window hosts previews. Registering secondary workspace

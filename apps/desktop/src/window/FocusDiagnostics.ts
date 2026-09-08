@@ -54,6 +54,7 @@ export function observeWindowFocus(
   diagnostics: ReturnType<typeof makeFocusDiagnostics>,
   focusedWebContentsId: () => number | null,
 ) {
+  const webContents = window.webContents;
   const record = (event: string) =>
     diagnostics.record(event, {
       focusedWebContentsId: focusedWebContentsId(),
@@ -70,17 +71,17 @@ export function observeWindowFocus(
   };
   window.on("focus", windowFocused);
   window.on("blur", windowBlurred);
-  window.webContents.on("focus", rendererFocused);
-  window.webContents.on("blur", rendererBlurred);
-  window.webContents.on("before-input-event", keyInput);
-  window.webContents.on("before-mouse-event", mouseInput);
+  webContents.on("focus", rendererFocused);
+  webContents.on("blur", rendererBlurred);
+  webContents.on("before-input-event", keyInput);
+  webContents.on("before-mouse-event", mouseInput);
   window.once("closed", () => {
     window.off("focus", windowFocused);
     window.off("blur", windowBlurred);
-    window.webContents.off("focus", rendererFocused);
-    window.webContents.off("blur", rendererBlurred);
-    window.webContents.off("before-input-event", keyInput);
-    window.webContents.off("before-mouse-event", mouseInput);
+    webContents.off("focus", rendererFocused);
+    webContents.off("blur", rendererBlurred);
+    webContents.off("before-input-event", keyInput);
+    webContents.off("before-mouse-event", mouseInput);
   });
 }
 import type { BrowserWindow, Event, Input, MouseInputEvent } from "electron";

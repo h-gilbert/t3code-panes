@@ -60,9 +60,15 @@ describe("focus diagnostics", () => {
     });
     expect(JSON.stringify(emit.mock.calls)).not.toContain("PRIVATE");
     expect(preventDefault).not.toHaveBeenCalled();
-    window.emit("closed");
+    const webContents = window.webContents;
+    Object.defineProperty(window, "webContents", {
+      get() {
+        throw new TypeError("Object has been destroyed");
+      },
+    });
+    expect(() => window.emit("closed")).not.toThrow();
     expect(window.eventNames()).toEqual([]);
-    expect(window.webContents.eventNames()).toEqual([]);
+    expect(webContents.eventNames()).toEqual([]);
   });
 
   it("retains completed automation for a delayed focus event and snapshots event-time evidence", () => {
