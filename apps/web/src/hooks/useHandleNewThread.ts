@@ -2,7 +2,7 @@ import { readProjects, readThreadShell, useProjects, useThread } from "../state/
 import {
   hasExplicitComposerModelSelection,
   resolveNewDraftStartFromOrigin,
-  resolveNewThreadModelSelectionOverride,
+  DEFAULT_NEW_CHAT_MODEL_SELECTION,
 } from "../lib/chatThreadActions";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -11,16 +11,11 @@ import {
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
 import {
-  DEFAULT_MODEL,
-  DEFAULT_PROVIDER_REASONING_EFFORT,
   DEFAULT_RUNTIME_MODE,
   DEFAULT_SERVER_SETTINGS,
-  defaultInstanceIdForDriver,
-  ProviderDriverKind,
   type ScopedProjectRef,
   type ThreadId,
 } from "@t3tools/contracts";
-import { createModelSelection } from "@t3tools/shared/model";
 import { useParams, useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import {
@@ -53,12 +48,6 @@ interface NewThreadWorkspaceOptions {
   envMode?: DraftThreadEnvMode;
   startFromOrigin?: boolean;
 }
-
-const DEFAULT_NEW_CHAT_MODEL_SELECTION = createModelSelection(
-  defaultInstanceIdForDriver(ProviderDriverKind.make("codex")),
-  DEFAULT_MODEL,
-  [{ id: "reasoningEffort", value: DEFAULT_PROVIDER_REASONING_EFFORT }],
-);
 
 // The workspace options the caller passed explicitly, shaped for the draft
 // store: absent keys stay absent so they never overwrite existing draft
@@ -190,14 +179,11 @@ export function useNewThreadHandler() {
           candidate.id === projectRef.projectId &&
           candidate.environmentId === projectRef.environmentId,
       );
-      const resolveModelSelectionOverride = (destinationDraftId: DraftId) =>
-        resolveNewThreadModelSelectionOverride({
-          projectDefaultSelection: project?.defaultModelSelection ?? null,
-          carrySelection: DEFAULT_NEW_CHAT_MODEL_SELECTION,
-          carrySourceDraftId:
-            currentRouteTarget?.kind === "draft" ? currentRouteTarget.draftId : null,
-          destinationDraftId,
-        });
+      const resetDefaultModel = (draftId: DraftId) => {
+        if (!hasExplicitComposerModelSelection(getComposerDraft(draftId))) {
+          setModelSelection(draftId, DEFAULT_NEW_CHAT_MODEL_SELECTION, { replaceOptions: true });
+        }
+      };
       // The shared resolver owns the priority order. The t3.json read is
       // skipped entirely when a higher-priority source decides, and its
       // query atom caches per project after the first call.
@@ -333,28 +319,7 @@ export function useNewThreadHandler() {
               ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
             });
           }
-          // Model intent: an explicit human pick always stands. Seeds and
-          // legacy entries alike re-resolve here — sticky first, mirroring
-          // the mint-fresh path, then the project default or carried
-          // selection on top. This runs even when the draft is already open:
-          // without it, a changed pin could never reach the draft the user
-          // is looking at, because explicit picks are the only thing the
-          // flag protects.
-          const storedDraft = getComposerDraft(emptyStoredDraftThread.draftId);
-          const storedDraftHasExplicitModelPick = hasExplicitComposerModelSelection(storedDraft);
-          if (!storedDraftHasExplicitModelPick) {
-            applyStickyState(emptyStoredDraftThread.draftId);
-            const modelSelectionOverride = resolveModelSelectionOverride(
-              emptyStoredDraftThread.draftId,
-            );
-            if (modelSelectionOverride) {
-              // This is a complete snapshot: absent options mean "no options",
-              // not "keep the stale draft's options".
-              setModelSelection(emptyStoredDraftThread.draftId, modelSelectionOverride, {
-                replaceOptions: true,
-              });
-            }
-          }
+          resetDefaultModel(emptyStoredDraftThread.draftId);
           // The workspace context must also ride along here: when projectRef
           // targets a different physical member of the logical project,
           // createDraftThreadState treats the remap as a project change and
@@ -420,6 +385,7 @@ export function useNewThreadHandler() {
           interactionMode: latestActiveDraftThread.interactionMode,
           ...pickExplicitWorkspaceOptions(options),
         });
+        resetDefaultModel(currentRouteTarget.draftId);
         return Promise.resolve({
           draftId: currentRouteTarget.draftId,
           threadId: latestActiveDraftThread.threadId,
@@ -491,12 +457,7 @@ export function useNewThreadHandler() {
           preservePreviousDraft: requestedFreshDraft !== undefined,
         });
         applyStickyState(draftId);
-        const modelSelectionOverride = resolveModelSelectionOverride(draftId);
-        if (modelSelectionOverride) {
-          // Project defaults and carried selections both outrank global sticky
-          // state. The project default wins when both are present.
-          setModelSelection(draftId, modelSelectionOverride, { replaceOptions: true });
-        }
+        resetDefaultModel(draftId);
         carryComposerContentTo(draftId);
 
         if (options?.navigate !== false) {

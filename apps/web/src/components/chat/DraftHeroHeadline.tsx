@@ -7,7 +7,10 @@ import { useCallback, useMemo } from "react";
 
 import { openCommandPalette } from "~/commandPaletteBus";
 import { useClientSettings } from "~/hooks/useSettings";
-import { hasExplicitComposerModelSelection } from "~/lib/chatThreadActions";
+import {
+  DEFAULT_NEW_CHAT_MODEL_SELECTION,
+  hasExplicitComposerModelSelection,
+} from "~/lib/chatThreadActions";
 import { selectProjectGroupingSettings } from "~/logicalProject";
 import {
   buildSidebarProjectPickerEntries,
@@ -152,16 +155,9 @@ export function DraftHeroHeadline({
             );
             if (!hasExplicitComposerModelSelection(currentDraft)) {
               applyStickyState(draftId);
-              const defaultModelSelection =
-                project.defaultModelSelection ??
-                environments.find(
-                  (environment) => environment.environmentId === project.environmentId,
-                )?.serverConfig?.settings.defaultModelSelection;
-              if (defaultModelSelection) {
-                setModelSelection(draftId, defaultModelSelection, {
-                  replaceOptions: true,
-                });
-              }
+              setModelSelection(draftId, DEFAULT_NEW_CHAT_MODEL_SELECTION, {
+                replaceOptions: true,
+              });
             }
           }}
         >

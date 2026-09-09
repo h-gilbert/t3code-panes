@@ -10,7 +10,7 @@ import {
   resolveThreadActionProjectRef,
   hasExplicitComposerModelSelection,
   resolveNewDraftStartFromOrigin,
-  resolveNewThreadModelSelectionOverride,
+  DEFAULT_NEW_CHAT_MODEL_SELECTION,
   startNewThreadFromContext,
   type ChatThreadActionContext,
 } from "./chatThreadActions";
@@ -22,10 +22,6 @@ const FALLBACK_PROJECT_ID = ProjectId.make("project-2");
 const PROJECT_DEFAULT_SELECTION: ModelSelection = {
   instanceId: ProviderInstanceId.make("codex"),
   model: "project-default",
-};
-const CARRIED_SELECTION: ModelSelection = {
-  instanceId: ProviderInstanceId.make("codex"),
-  model: "carried-model",
 };
 
 function createContext(overrides: Partial<ChatThreadActionContext> = {}): ChatThreadActionContext {
@@ -55,37 +51,12 @@ describe("chatThreadActions", () => {
     expect(hasExplicitComposerModelSelection({ ...draft, activeProvider: null })).toBe(false);
   });
 
-  it("does not carry a non-explicit model from the destination draft back into itself", () => {
-    expect(
-      resolveNewThreadModelSelectionOverride({
-        projectDefaultSelection: null,
-        carrySelection: CARRIED_SELECTION,
-        carrySourceDraftId: "draft-a",
-        destinationDraftId: "draft-a",
-      }),
-    ).toBeNull();
-  });
-
-  it("still carries models between different threads when the project has no default", () => {
-    expect(
-      resolveNewThreadModelSelectionOverride({
-        projectDefaultSelection: null,
-        carrySelection: CARRIED_SELECTION,
-        carrySourceDraftId: "draft-a",
-        destinationDraftId: "draft-b",
-      }),
-    ).toEqual(CARRIED_SELECTION);
-  });
-
-  it("keeps the project default above any carried selection", () => {
-    expect(
-      resolveNewThreadModelSelectionOverride({
-        projectDefaultSelection: PROJECT_DEFAULT_SELECTION,
-        carrySelection: CARRIED_SELECTION,
-        carrySourceDraftId: "draft-a",
-        destinationDraftId: "draft-b",
-      }),
-    ).toEqual(PROJECT_DEFAULT_SELECTION);
+  it("defaults new chats to Astra with medium reasoning", () => {
+    expect(DEFAULT_NEW_CHAT_MODEL_SELECTION).toEqual({
+      instanceId: "codex",
+      model: "gpt-6-astra",
+      options: [{ id: "reasoningEffort", value: "medium" }],
+    });
   });
 
   it("only applies the start-from-origin default to new worktree drafts", () => {

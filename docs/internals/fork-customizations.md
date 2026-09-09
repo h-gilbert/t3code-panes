@@ -8,8 +8,11 @@ for other customizations before each update.
 ## New-thread model
 
 Web and desktop new-thread actions select Codex GPT-6 Astra with medium reasoning
-effort, including when reusing an empty draft. Keep this default in
-`apps/web/src/hooks/useHandleNewThread.ts`. The shared Codex fallback model is
+effort for every project, including when reusing an empty draft or switching its
+project. Saved project, machine, and sticky defaults do not override Astra; explicit
+model picks in a draft remain intact. Keep the shared selection in
+`apps/web/src/lib/chatThreadActions.ts` and apply it in the new-thread hook and draft
+project picker. The shared Codex fallback model is
 also Astra, and the provider prefers Astra over Sol and Terra when available.
 
 ## Collaborative browser

@@ -21,8 +21,8 @@ The composer is docked below the timeline and reserves its own layout space. Onl
 hero overlays the view. Live-tail size changes keep following active until the user navigates away.
 
 Conversation folding keeps the first assistant message visible. Changed-file cards remain hidden
-in the conversation; file changes are available through the diff panel. New threads use Codex GPT-6 Astra at medium reasoning effort unless project or explicit selections
-override them. Mobile's default active order follows prompts and completed turns, never streaming
+in the conversation; file changes are available through the diff panel. New threads use Codex GPT-6 Astra at medium reasoning effort for every project. Saved defaults do not override it;
+explicit model picks in a draft remain intact. Mobile's default active order follows prompts and completed turns, never streaming
 or tool activity. Explicit manual ordering remains available.
 
 ## Browser presentation

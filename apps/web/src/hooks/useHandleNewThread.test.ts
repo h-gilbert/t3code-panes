@@ -40,6 +40,9 @@ const testState = vi.hoisted(() => {
       router.state.location.href = "/";
       router.navigate.mockClear();
       draftStore.setLogicalProjectDraftThreadId.mockClear();
+      draftStore.setModelSelection.mockClear();
+      draftStore.getComposerDraft.mockReset();
+      draftStore.getComposerDraft.mockReturnValue({});
       projectFileRead = new Promise<null>((resolve) => {
         completeProjectFileRead = resolve;
       });
@@ -100,10 +103,9 @@ vi.mock("../composerDraftStore", () => {
     useComposerDraftStore,
   };
 });
-vi.mock("../lib/chatThreadActions", () => ({
-  hasExplicitComposerModelSelection: () => false,
+vi.mock("../lib/chatThreadActions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/chatThreadActions")>()),
   resolveNewDraftStartFromOrigin: () => false,
-  resolveNewThreadModelSelectionOverride: () => null,
 }));
 vi.mock("../lib/t3ProjectFileDefaults", () => ({
   readT3ProjectFileDefaultThreadEnvMode: () => testState.projectFileRead,
@@ -124,7 +126,7 @@ vi.mock("../state/entities", () => ({
       environmentId: "environment-ssh",
       workspaceRoot: "/remote/project",
       defaultThreadEnvMode: null,
-      defaultModelSelection: null,
+      defaultModelSelection: { instanceId: "claudeAgent", model: "claude-fable-5" },
     },
   ],
   readThreadShell: () => null,
@@ -146,6 +148,59 @@ vi.mock("./useSettings", () => ({ useClientSettings: () => ({}) }));
 import { useNewThreadHandler } from "./useHandleNewThread";
 
 describe("useNewThreadHandler", () => {
+  it("preserves an explicit model choice when reusing a draft", async () => {
+    testState.reset({
+      draftId: "draft-existing",
+      environmentId: "environment-ssh",
+      promotedTo: null,
+      threadId: "thread-existing",
+    });
+    testState.draftStore.getComposerDraft.mockReturnValue({
+      activeProvider: "claudeAgent",
+      modelSelectionExplicit: true,
+      modelSelectionByProvider: {
+        claudeAgent: { instanceId: "claudeAgent", model: "claude-fable-5" },
+      },
+    });
+    const pendingOpen = useNewThreadHandler()({
+      environmentId: "environment-ssh",
+      projectId: "project-remote",
+    } as never);
+    testState.completeProjectFileRead(null);
+    await pendingOpen;
+    expect(testState.draftStore.setModelSelection).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["new", null],
+    [
+      "reused",
+      {
+        draftId: "draft-existing",
+        environmentId: "environment-ssh",
+        promotedTo: null,
+        threadId: "thread-existing",
+      },
+    ],
+  ] as const)("uses Astra for a %s draft despite the project's Fable default", async (_, draft) => {
+    testState.reset(draft);
+    const pendingOpen = useNewThreadHandler()({
+      environmentId: "environment-ssh",
+      projectId: "project-remote",
+    } as never);
+    testState.completeProjectFileRead(null);
+    const opened = await pendingOpen;
+    expect(testState.draftStore.setModelSelection).toHaveBeenCalledWith(
+      opened?.draftId,
+      {
+        instanceId: "codex",
+        model: "gpt-6-astra",
+        options: [{ id: "reasoningEffort", value: "medium" }],
+      },
+      { replaceOptions: true },
+    );
+  });
+
   it.each([
     ["new", null],
     [

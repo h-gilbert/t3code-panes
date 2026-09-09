@@ -235,12 +235,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             </Badge>
           ) : null}
         </span>
-        <span aria-hidden="true" className="flex items-center">
-          <ComposerControlChevron size={size} />
-        </span>
         {props.iconOnly ? null : (
           <span aria-hidden="true" className="flex items-center">
-            <ComposerControlChevron />
+            <ComposerControlChevron size={size} />
           </span>
         )}
       </PopoverTrigger>
