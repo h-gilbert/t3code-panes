@@ -4,12 +4,13 @@ import * as NodeCrypto from "node:crypto";
 
 import { beforeEach, vi } from "vite-plus/test";
 import { describe, expect, it } from "@effect/vitest";
-import Constants from "expo-constants";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import { FetchHttpClient } from "effect/unstable/http";
 import { ManagedRelay } from "@t3tools/client-runtime/relay";
+import Constants from "../../testing/expoConstantsMock";
+import * as Notifications from "../../testing/expoNotificationsMock";
 
 import type { EnvironmentId } from "@t3tools/contracts";
 import { verifyDpopProof } from "@t3tools/shared/dpop";
@@ -34,7 +35,6 @@ import {
   shouldRegisterAgentAwarenessDeviceForProvider,
   unregisterAgentAwarenessConnection,
 } from "./remoteRegistration";
-import * as Notifications from "expo-notifications";
 
 const secureStore = vi.hoisted(() => new Map<string, string>());
 vi.mock("./directRegistration", async () => {
@@ -54,22 +54,6 @@ const registrationRecordStore = vi.hoisted(() => ({
     readonly identity: string;
     readonly signature: string;
   } | null,
-}));
-
-vi.mock("expo-constants", () => ({
-  default: {
-    expoConfig: {
-      version: "1.0.0",
-      extra: {},
-    },
-  },
-}));
-
-vi.mock("expo-notifications", () => ({
-  addPushTokenListener: vi.fn(() => ({ remove: vi.fn() })),
-  getDevicePushTokenAsync: vi.fn(() => Promise.resolve({ type: "ios", data: "apns-token" })),
-  getPermissionsAsync: vi.fn(() => Promise.resolve({ granted: true })),
-  requestPermissionsAsync: vi.fn(() => Promise.resolve({ granted: true, canAskAgain: true })),
 }));
 
 vi.mock("expo-crypto", () => ({
