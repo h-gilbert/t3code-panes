@@ -1,3 +1,4 @@
+import { workspaceWindowForSender } from "../../window/workspaceWindows.ts";
 import {
   DesktopPendingSnapShot,
   DesktopSnapShot as DesktopSnapShotSchema,
@@ -34,14 +35,11 @@ class SnapShotIpcUnauthorizedSenderError extends Schema.TaggedError<SnapShotIpcU
 const ensureTrustedSnapShotSender = Effect.fn("desktop.ipc.snapShot.ensureTrustedSender")(
   function* (event: DesktopIpc.DesktopIpcInvokeEvent | undefined) {
     const main = yield* (yield* ElectronWindow.ElectronWindow).main;
-    if (
-      event === undefined ||
-      Option.isNone(main) ||
-      main.value.webContents.id !== event.sender.id
-    ) {
-      return yield* new SnapShotIpcUnauthorizedSenderError();
-    }
-    return main.value;
+    if (event === undefined) return yield* new SnapShotIpcUnauthorizedSenderError();
+    if (Option.isSome(main) && main.value.webContents.id === event.sender.id) return main.value;
+    const workspace = workspaceWindowForSender(event.sender.id);
+    if (workspace === undefined) return yield* new SnapShotIpcUnauthorizedSenderError();
+    return workspace;
   },
 );
 

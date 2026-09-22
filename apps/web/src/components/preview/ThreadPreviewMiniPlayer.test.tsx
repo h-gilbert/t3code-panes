@@ -65,9 +65,19 @@ vi.mock("./closePreviewSession", () => ({ closePreviewSession: vi.fn() }));
 vi.mock("./previewBridge", () => ({ previewBridge: null }));
 
 import { ThreadPreviewMiniPlayer } from "./ThreadPreviewMiniPlayer";
-import { usePreviewMiniPlayerStore } from "~/previewMiniPlayerStore";
+import { selectThreadPreviewMiniPlayer, usePreviewMiniPlayerStore } from "~/previewMiniPlayerStore";
 const ref = { environmentId: EnvironmentId.make("env"), threadId: ThreadId.make("thread") };
-const render = () => renderToStaticMarkup(<ThreadPreviewMiniPlayer threadRef={ref} tabId="tab" />);
+const render = () =>
+  renderToStaticMarkup(
+    <ThreadPreviewMiniPlayer
+      threadRef={ref}
+      miniPlayer={selectThreadPreviewMiniPlayer(
+        usePreviewMiniPlayerStore.getState().byThreadKey,
+        ref,
+      )!}
+      bottomInset={0}
+    />,
+  );
 beforeEach(() => {
   vi.stubGlobal("document", { body: {} });
   mocks.buttons.clear();

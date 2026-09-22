@@ -168,6 +168,7 @@ const deriveBrowserScope = (
 ): string | undefined =>
   input.ephemeral ? `ephemeral:${tabId}` : input.profile ? `profile:${input.profile}` : undefined;
 
+/** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* PreviewManagerMake() {
   const serverEpoch = NodeCrypto.randomUUID();
   const stateRef = yield* SynchronizedRef.make<ManagerState>(initialState);

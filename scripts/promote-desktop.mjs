@@ -221,16 +221,15 @@ function prepare(store) {
   run(process.execPath, ["--test", NodePath.join(repo, "scripts/promote-desktop.node-test.mjs")], {
     stdio: "inherit",
   });
-  run(
-    NodePath.join(repo, "node_modules/.bin/vp"),
-    [
-      "test",
-      "run",
-      "apps/desktop/src/updates/DesktopUpdates.test.ts",
-      "apps/server/src/cloud/selfUpdate.test.ts",
-    ],
-    { stdio: "inherit" },
-  );
+  for (const [directory, testFile] of [
+    ["apps/desktop", "src/updates/DesktopUpdates.test.ts"],
+    ["apps/server", "src/cloud/selfUpdate.test.ts"],
+  ]) {
+    run(NodePath.join(repo, "node_modules/.bin/vp"), ["test", "run", testFile], {
+      cwd: NodePath.join(repo, directory),
+      stdio: "inherit",
+    });
+  }
   run(
     process.execPath,
     [

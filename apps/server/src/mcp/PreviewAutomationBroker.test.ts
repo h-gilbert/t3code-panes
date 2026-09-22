@@ -15,13 +15,11 @@ import {
   type PreviewAutomationRequest,
   type PreviewAutomationStreamEvent,
 } from "@t3tools/contracts";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
 import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
-import * as TestClock from "effect/testing/TestClock";
 
 import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
 
@@ -130,50 +128,70 @@ it.effect("targets multiple tabs explicitly while retaining a default tab", () =
   ),
 );
 
-it.effect("does not let an older response replace a newer explicit tab target", () =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const broker = yield* makeBroker;
-      const olderTabId = PreviewTabId.make("tab-older-request");
-      const newerTabId = PreviewTabId.make("tab-newer-request");
-      const releaseOlderResponse = yield* Deferred.make<void>();
-      const routedRequests: RoutedRequest[] = [];
-      const requests = requestsFrom(yield* broker.connect(makeHost()));
-      yield* Stream.runForEach(requests, (request) => {
-        routedRequests.push(request);
-        const response = Effect.gen(function* () {
-          if (request.tabId === olderTabId) {
-            yield* Deferred.await(releaseOlderResponse);
-          }
-          yield* broker.respond({
-            clientId: "client-1",
-            connectionId: request.connectionId,
-            requestId: request.requestId,
-            ok: true,
-            result: { url: "http://localhost:3200" },
+it.effect.each([true, false])(
+  "keeps an older target stable while a newer explicit tab responds (implicit: %s)",
+  (implicit) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const broker = yield* makeBroker;
+        const olderTabId = PreviewTabId.make("tab-older-request");
+        const newerTabId = PreviewTabId.make("tab-newer-request");
+        const releaseOlderResponse = yield* Deferred.make<void>();
+        const routedRequests: RoutedRequest[] = [];
+        const requests = requestsFrom(yield* broker.connect(makeHost()));
+        yield* Stream.runForEach(requests, (request) => {
+          routedRequests.push(request);
+          const response = Effect.gen(function* () {
+            if (request.tabId === olderTabId && request.operation === "snapshot") {
+              yield* Deferred.await(releaseOlderResponse);
+            }
+            yield* broker.respond({
+              clientId: "client-1",
+              connectionId: request.connectionId,
+              requestId: request.requestId,
+              ok: true,
+              result: { url: "http://localhost:3200" },
+            });
+            if (request.tabId === newerTabId) {
+              yield* Deferred.succeed(releaseOlderResponse, undefined);
+            }
           });
-          if (request.tabId === newerTabId) {
-            yield* Deferred.succeed(releaseOlderResponse, undefined);
-          }
+          return response.pipe(Effect.forkScoped, Effect.asVoid);
+        }).pipe(Effect.forkScoped);
+        yield* Effect.yieldNow;
+
+        yield* broker.invoke({ scope, operation: "status", input: {}, tabId: olderTabId });
+        let capturedTabId: PreviewTabId | undefined;
+        const older = yield* broker
+          .invoke({
+            scope,
+            operation: "snapshot",
+            input: {},
+            ...(implicit ? {} : { tabId: olderTabId }),
+            onTargetTab: (tabId) => {
+              capturedTabId = tabId;
+            },
+          })
+          .pipe(Effect.forkScoped);
+        yield* Effect.yieldNow;
+        const newer = yield* broker
+          .invoke({ scope, operation: "snapshot", input: {}, tabId: newerTabId })
+          .pipe(Effect.forkScoped);
+        yield* Fiber.join(newer);
+        yield* Fiber.join(older);
+        yield* broker.invoke({
+          scope,
+          operation: "status",
+          input: {},
+          tabId: olderTabId,
+          updateCurrentTab: false,
         });
-        return response.pipe(Effect.forkScoped, Effect.asVoid);
-      }).pipe(Effect.forkScoped);
-      yield* Effect.yieldNow;
+        yield* broker.invoke({ scope, operation: "snapshot", input: {} });
 
-      const older = yield* broker
-        .invoke({ scope, operation: "snapshot", input: {}, tabId: olderTabId })
-        .pipe(Effect.forkScoped);
-      yield* Effect.yieldNow;
-      const newer = yield* broker
-        .invoke({ scope, operation: "snapshot", input: {}, tabId: newerTabId })
-        .pipe(Effect.forkScoped);
-      yield* Fiber.join(newer);
-      yield* Fiber.join(older);
-      yield* broker.invoke({ scope, operation: "snapshot", input: {} });
-
-      expect(routedRequests.at(-1)?.tabId).toBe(newerTabId);
-    }),
-  ),
+        expect(routedRequests.at(-1)?.tabId).toBe(newerTabId);
+        expect(capturedTabId).toBe(olderTabId);
+      }),
+    ),
 );
 
 it.effect("tracks the tab returned by a targeted recording stop", () =>
@@ -1102,18 +1120,21 @@ const competingScope = {
   threadId: ThreadId.make("thread-2"),
 };
 
-it.effect("refuses a competing provider session while another holds the shared browser", () =>
+it.effect("refuses a competing provider session mid-interaction on the same tab", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const broker = yield* makeBroker;
+      const tabId = PreviewTabId.make("tab-shared");
       const requests = requestsFrom(yield* broker.connect(makeHost()));
-      // Never respond: session one's click stays in flight, holding the lease.
+      // Never respond: session one's click stays in flight, holding the tab.
       yield* Stream.runDrain(requests).pipe(Effect.forkScoped);
-      yield* broker.invoke<void>({ scope, operation: "click", input: {} }).pipe(Effect.forkScoped);
+      yield* broker
+        .invoke<void>({ scope, operation: "click", input: {}, tabId })
+        .pipe(Effect.forkScoped);
       yield* Effect.yieldNow;
 
       const error = yield* broker
-        .invoke<void>({ scope: competingScope, operation: "click", input: {} })
+        .invoke<void>({ scope: competingScope, operation: "click", input: {}, tabId })
         .pipe(Effect.flip);
 
       expect(error).toBeInstanceOf(PreviewAutomationBusyError);
@@ -1121,17 +1142,100 @@ it.effect("refuses a competing provider session while another holds the shared b
         operation: "click",
         environmentId: scope.environmentId,
         providerSessionId: "provider-session-2",
+        tabId,
         holderProviderSessionId: "provider-session-1",
         holderThreadId: scope.threadId,
       });
+      expect(error.message).toContain(tabId);
+      expect(error.message).toContain("thread-1");
     }),
   ),
 );
 
-it.effect("lets a passive read through while another session holds the browser", () =>
+it.effect("never refuses a session its own in-flight claim", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const broker = yield* makeBroker;
+      // Subagents share their thread's provider session, so they share the claim
+      // for the tab that session resolves to. Overlapping steps from one session
+      // must proceed; only a different session is turned away.
+      const bothRouted = yield* Deferred.make<void>();
+      let routed = 0;
+      const requests = requestsFrom(yield* broker.connect(makeHost()));
+      yield* Stream.runForEach(requests, (request) =>
+        Effect.gen(function* () {
+          routed += 1;
+          if (routed >= 2) yield* Deferred.succeed(bothRouted, undefined);
+          yield* Deferred.await(bothRouted);
+          yield* broker.respond({
+            clientId: "client-1",
+            connectionId: request.connectionId,
+            requestId: request.requestId,
+            ok: true,
+            result: { opened: request.requestId },
+          });
+        }).pipe(Effect.forkScoped),
+      ).pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+
+      const opened = yield* Effect.all(
+        [
+          broker.invoke<{ opened: string }>({ scope, operation: "open", input: {} }),
+          broker.invoke<{ opened: string }>({ scope, operation: "open", input: {} }),
+        ],
+        { concurrency: 2 },
+      );
+
+      expect(opened.map((result) => result.opened)).toEqual(["preview-0", "preview-1"]);
+    }),
+  ),
+);
+
+it.effect("drives separate tabs from separate sessions concurrently", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* makeBroker;
+      const holderTabId = PreviewTabId.make("tab-holder");
+      const competingTabId = PreviewTabId.make("tab-competing");
+      const held = yield* Deferred.make<void>();
+      const requests = requestsFrom(yield* broker.connect(makeHost()));
+      // The first tab's evaluate never answers, exactly like an agent working a
+      // long page task. The second tab must not wait on it.
+      yield* Stream.runForEach(requests, (request) =>
+        (request.tabId === holderTabId
+          ? Deferred.await(held)
+          : broker.respond({
+              clientId: "client-1",
+              connectionId: request.connectionId,
+              requestId: request.requestId,
+              ok: true,
+              result: { url: "http://localhost:3200" },
+            })
+        ).pipe(Effect.forkScoped),
+      ).pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+      yield* broker
+        .invoke<void>({ scope, operation: "evaluate", input: {}, tabId: holderTabId })
+        .pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+
+      expect(
+        yield* broker.invoke<{ url: string }>({
+          scope: competingScope,
+          operation: "click",
+          input: {},
+          tabId: competingTabId,
+        }),
+      ).toEqual({ url: "http://localhost:3200" });
+    }),
+  ),
+);
+
+it.effect("frees a tab as soon as the holder's request settles", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* makeBroker;
+      const tabId = PreviewTabId.make("tab-shared");
       const requests = requestsFrom(yield* broker.connect(makeHost()));
       yield* Stream.runForEach(requests, (request) =>
         broker.respond({
@@ -1139,59 +1243,102 @@ it.effect("lets a passive read through while another session holds the browser",
           connectionId: request.connectionId,
           requestId: request.requestId,
           ok: true,
-          result: request.operation,
+          result: {},
         }),
       ).pipe(Effect.forkScoped);
       yield* Effect.yieldNow;
 
-      // Session one claims the exclusive lease with a mutating op.
-      expect(yield* broker.invoke<string>({ scope, operation: "click", input: {} })).toBe("click");
+      yield* broker.invoke({ scope, operation: "click", input: {}, tabId });
+      // No idle window to wait out: the previous step is done, so the next
+      // session drives immediately.
+      yield* broker.invoke({ scope: competingScope, operation: "click", input: {}, tabId });
+    }),
+  ),
+);
 
-      // A different session can still read the shared browser concurrently...
+it.effect("lets a passive read through while another session drives the tab", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* makeBroker;
+      const tabId = PreviewTabId.make("tab-shared");
+      const held = yield* Deferred.make<void>();
+      const requests = requestsFrom(yield* broker.connect(makeHost()));
+      yield* Stream.runForEach(requests, (request) =>
+        (request.operation === "click"
+          ? Deferred.await(held)
+          : broker.respond({
+              clientId: "client-1",
+              connectionId: request.connectionId,
+              requestId: request.requestId,
+              ok: true,
+              result: request.operation,
+            })
+        ).pipe(Effect.forkScoped),
+      ).pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+      yield* broker
+        .invoke<void>({ scope, operation: "click", input: {}, tabId })
+        .pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+
       expect(
-        yield* broker.invoke<string>({ scope: competingScope, operation: "status", input: {} }),
+        yield* broker.invoke<string>({
+          scope: competingScope,
+          operation: "status",
+          input: {},
+          tabId,
+        }),
       ).toBe("status");
-
-      // ...but cannot drive it.
-      const error = yield* broker
-        .invoke<string>({ scope: competingScope, operation: "type", input: {} })
-        .pipe(Effect.flip);
-      expect(error).toBeInstanceOf(PreviewAutomationBusyError);
     }),
   ),
 );
 
-it.effect("releases the lease after the idle window so another session can take over", () =>
+it.effect("reports the holding thread on a tab another session is driving", () =>
   Effect.scoped(
     Effect.gen(function* () {
       const broker = yield* makeBroker;
+      const tabId = PreviewTabId.make("tab-shared");
       const requests = requestsFrom(yield* broker.connect(makeHost()));
-      yield* Stream.runForEach(requests, (request) =>
-        broker.respond({
-          clientId: "client-1",
-          connectionId: request.connectionId,
-          requestId: request.requestId,
-          ok: true,
-          result: request.operation,
-        }),
-      ).pipe(Effect.forkScoped);
+      yield* Stream.runDrain(requests).pipe(Effect.forkScoped);
+
+      expect(yield* broker.readHold({ scope: competingScope, tabId })).toBeUndefined();
+
+      yield* broker
+        .invoke<void>({ scope, operation: "click", input: {}, tabId })
+        .pipe(Effect.forkScoped);
       yield* Effect.yieldNow;
 
-      expect(yield* broker.invoke<string>({ scope, operation: "click", input: {} })).toBe("click");
-
-      // Held immediately after the holder's last activity.
-      expect(
-        yield* broker
-          .invoke<string>({ scope: competingScope, operation: "click", input: {} })
-          .pipe(Effect.flip),
-      ).toBeInstanceOf(PreviewAutomationBusyError);
-
-      // Once the holder has been quiet for the idle window, the lease frees up.
-      yield* TestClock.adjust(Duration.millis(10_000));
-      yield* Effect.yieldNow;
-      expect(
-        yield* broker.invoke<string>({ scope: competingScope, operation: "click", input: {} }),
-      ).toBe("click");
+      expect(yield* broker.readHold({ scope: competingScope, tabId })).toEqual({
+        providerSessionId: "provider-session-1",
+        threadId: scope.threadId,
+      });
+      // The holder is never told its own tab is held.
+      expect(yield* broker.readHold({ scope, tabId })).toBeUndefined();
     }),
-  ).pipe(Effect.provide(TestClock.layer())),
+  ),
+);
+
+it.effect("releases a vanished host's claim so the next session can drive", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* makeBroker;
+      const tabId = PreviewTabId.make("tab-shared");
+      const connection = yield* broker.connect(makeHost());
+      const requests = requestsFrom(connection);
+      const drain = yield* Stream.runDrain(requests).pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+      yield* broker
+        .invoke<void>({ scope, operation: "click", input: {}, tabId })
+        .pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+      expect(yield* broker.readHold({ scope: competingScope, tabId })).toMatchObject({
+        providerSessionId: "provider-session-1",
+      });
+
+      yield* Fiber.interrupt(drain);
+      yield* Effect.yieldNow;
+
+      expect(yield* broker.readHold({ scope: competingScope, tabId })).toBeUndefined();
+    }),
+  ),
 );

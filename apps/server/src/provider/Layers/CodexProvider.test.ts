@@ -146,7 +146,7 @@ it("marks the most preferred available model as default", () => {
   );
 });
 
-it("prefers astra over sol and terra when all are available", () => {
+it("prefers sol over astra and terra when all are available", () => {
   const models = applyPreferredCodexDefaultModel([
     { slug: "gpt-5.6-terra", name: "GPT-5.6-Terra", isCustom: false, capabilities: null },
     {
@@ -161,17 +161,34 @@ it("prefers astra over sol and terra when all are available", () => {
 
   assert.deepStrictEqual(
     models.filter((model) => model.isDefault).map((model) => model.slug),
-    ["gpt-6-astra"],
+    ["gpt-5.6-sol"],
   );
 });
 
-it("prefers sol over terra when astra is unavailable", () => {
+it("prefers sol over terra", () => {
   const models = applyPreferredCodexDefaultModel([
     { slug: "gpt-5.6-terra", name: "GPT-5.6-Terra", isCustom: false, capabilities: null },
     { slug: "gpt-5.6-sol", name: "GPT-5.6-Sol", isCustom: false, capabilities: null },
   ]);
 
   assert.deepStrictEqual(models.find((model) => model.isDefault)?.slug, "gpt-5.6-sol");
+});
+
+it("ranks qualified Codex models while preserving their wire ids", () => {
+  const models = applyPreferredCodexDefaultModel([
+    {
+      slug: "openai.gpt-5.6-luna",
+      name: "Luna",
+      isCustom: false,
+      isDefault: true,
+      capabilities: null,
+    },
+    { slug: "openai.gpt-5.6-sol", name: "Sol", isCustom: false, capabilities: null },
+  ]);
+  assert.deepStrictEqual(
+    models.filter((model) => model.isDefault).map((model) => model.slug),
+    ["openai.gpt-5.6-sol"],
+  );
 });
 
 it("keeps Codex's own default when no preferred model is available", () => {

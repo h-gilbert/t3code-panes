@@ -5,6 +5,16 @@ import * as Option from "effect/Option";
 import { vi } from "vite-plus/test";
 
 import type * as Electron from "electron";
+import { registerWorkspaceWindow } from "../../window/workspaceWindows.ts";
+
+const { focusedWebContents, ownerWindow } = vi.hoisted(() => ({
+  focusedWebContents: vi.fn(),
+  ownerWindow: vi.fn(),
+}));
+vi.mock("electron", () => ({
+  webContents: { getFocusedWebContents: focusedWebContents },
+  BrowserWindow: { fromWebContents: ownerWindow },
+}));
 
 import * as DesktopBackendManager from "../../backend/DesktopBackendManager.ts";
 import * as DesktopBackendPool from "../../backend/DesktopBackendPool.ts";
@@ -14,6 +24,7 @@ import * as DesktopIpc from "../DesktopIpc.ts";
 import {
   getLocalEnvironmentBootstraps,
   getWindowFullscreenState,
+  pasteAsText,
   pickProjectFavicon,
 } from "./window.ts";
 
@@ -161,6 +172,78 @@ describe("getWindowFullscreenState", () => {
             return Effect.succeed(Option.some(requestingWindow));
           },
         }),
+      ),
+    );
+  });
+});
+
+describe("pasteAsText", () => {
+  it.effect(
+    "pastes into the focused guest only after the main renderer acknowledges the menu action",
+    () => {
+      const paste = vi.fn();
+      const mainPaste = vi.fn();
+      const window = {
+        webContents: { id: 42, paste: mainPaste },
+        isDestroyed: () => false,
+      } as unknown as Electron.BrowserWindow;
+      focusedWebContents.mockReturnValue({ paste, isDestroyed: () => false });
+      ownerWindow.mockReturnValue(window);
+
+      return Effect.gen(function* () {
+        yield* pasteAsText.handler(undefined, { sender: { id: 42 } });
+        assert.equal(paste.mock.calls.length, 1);
+        assert.equal(mainPaste.mock.calls.length, 0);
+
+        yield* pasteAsText.handler(undefined, { sender: { id: 99 } });
+        assert.equal(paste.mock.calls.length, 1);
+        ownerWindow.mockReturnValue({}); // A focused PiP/other BrowserWindow.
+        yield* pasteAsText.handler(undefined, { sender: { id: 42 } });
+        assert.equal(paste.mock.calls.length, 1);
+        ownerWindow.mockReturnValue(null); // Detached contents.
+        yield* pasteAsText.handler(undefined, { sender: { id: 42 } });
+        assert.equal(paste.mock.calls.length, 1);
+        ownerWindow.mockReturnValue(window);
+        focusedWebContents.mockReturnValue({ paste, isDestroyed: () => true });
+        yield* pasteAsText.handler(undefined, { sender: { id: 42 } });
+        assert.equal(paste.mock.calls.length, 1);
+        focusedWebContents.mockReturnValue(null);
+        yield* pasteAsText.handler(undefined, { sender: { id: 42 } });
+        assert.equal(paste.mock.calls.length, 1);
+      }).pipe(
+        Effect.provide(
+          Layer.mock(ElectronWindow.ElectronWindow)({
+            main: Effect.succeed(Option.some(window)),
+          }),
+        ),
+      );
+    },
+  );
+  it.effect("pastes in a registered secondary workspace without touching another window", () => {
+    const paste = vi.fn();
+    const main = { webContents: { id: 42 }, isDestroyed: () => false } as Electron.BrowserWindow;
+    const closed = vi.fn();
+    const workspace = {
+      webContents: { id: 73 },
+      isDestroyed: () => false,
+      once: (_event: string, listener: () => void) => closed.mockImplementation(listener),
+    } as unknown as Electron.BrowserWindow;
+    registerWorkspaceWindow(workspace);
+    focusedWebContents.mockReturnValue({ paste, isDestroyed: () => false });
+    ownerWindow.mockReturnValue(workspace);
+    return Effect.gen(function* () {
+      yield* pasteAsText.handler(undefined, { sender: { id: 73 } });
+      assert.equal(paste.mock.calls.length, 1);
+      ownerWindow.mockReturnValue(main);
+      yield* pasteAsText.handler(undefined, { sender: { id: 73 } });
+      assert.equal(paste.mock.calls.length, 1);
+      ownerWindow.mockReturnValue(workspace);
+      closed();
+      yield* pasteAsText.handler(undefined, { sender: { id: 73 } });
+      assert.equal(paste.mock.calls.length, 1);
+    }).pipe(
+      Effect.provide(
+        Layer.mock(ElectronWindow.ElectronWindow)({ main: Effect.succeed(Option.some(main)) }),
       ),
     );
   });

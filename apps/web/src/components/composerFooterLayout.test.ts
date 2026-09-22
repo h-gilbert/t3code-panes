@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
+import { timelineContentOverflowsViewport } from "./chat/timelineScrollAnchoring";
 import { resolveContextStripLabelsCompact } from "./BranchToolbar.logic";
 import {
   COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX,
@@ -129,8 +130,28 @@ describe("shouldUseRestingComposerLayout", () => {
     expect(shouldUseRestingComposerLayout({ ...resting, isScrollCollapsed: false })).toBe(false);
   });
 
-  it("keeps the composer expanded while the timeline fits above it", () => {
-    expect(shouldUseRestingComposerLayout({ ...resting, timelineOverflows: false })).toBe(false);
+  it("stays collapsed when the reclaimed space makes a short thread fit", () => {
+    let isResting = false;
+    const layouts: boolean[] = [];
+    const overflows: boolean[] = [];
+    for (let measurement = 0; measurement < 4; measurement++) {
+      const timelineOverflows = timelineContentOverflowsViewport(
+        {
+          data: ["message"],
+          scroll: 0,
+          scrollLength: isResting ? 500 : 406,
+          positionAtIndex: () => 24,
+          sizeAtIndex: () => 400,
+        },
+        { composerInset: 0, anchorOffset: 24 },
+      );
+      overflows.push(timelineOverflows);
+      const input = { ...resting, timelineOverflows };
+      isResting = shouldUseRestingComposerLayout(input);
+      layouts.push(isResting);
+    }
+    expect(overflows).toEqual([true, false, false, false]);
+    expect(layouts).toEqual([true, true, true, true]);
   });
 
   it("keeps new-thread composers expanded", () => {

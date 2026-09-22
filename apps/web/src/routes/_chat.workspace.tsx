@@ -464,6 +464,21 @@ function WorkspacePane({
       aria-label={`Workspace pane ${index + 1}`}
       data-workspace-pane={index}
       data-focused={focused ? "true" : "false"}
+      onDropCapture={(event) => {
+        if (
+          !event.dataTransfer.types.includes("Files") ||
+          event.dataTransfer.files.length === 0 ||
+          !(event.target instanceof Node) ||
+          !event.currentTarget.contains(event.target)
+        )
+          return;
+        const composer = composerHandleRef.current;
+        if (!composer) return;
+        // External drops do not press the pane. Select it before attachment
+        // processing so typing cannot be redirected to the previous composer.
+        focusPane(workspaceKey, index);
+        composer.focusAtEnd();
+      }}
       onPointerDownCapture={(event) => {
         // Portaled browser chrome belongs to its thread, but dragging it must
         // not select that thread's pane or redirect composer keyboard input.

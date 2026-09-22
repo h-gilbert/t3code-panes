@@ -21,9 +21,14 @@ The composer is docked below the timeline and reserves its own layout space. Onl
 hero overlays the view. Live-tail size changes keep following active until the user navigates away.
 
 Conversation folding keeps the first assistant message visible. Changed-file cards remain hidden
-in the conversation; file changes are available through the diff panel. New threads use Codex GPT-6 Astra at medium reasoning effort for every project. Saved defaults do not override it;
-explicit model picks in a draft remain intact. Mobile's default active order follows prompts and completed turns, never streaming
+in the conversation; file changes are available through the diff panel. New threads use Codex GPT-5.6 Sol at medium reasoning effort for every project. Saved defaults do not override it;
+explicit model picks in a draft remain intact. The default permission mode remains Auto unless an
+environment or project explicitly overrides it; existing draft choices stay intact. Mobile's default active order follows prompts and completed turns, never streaming
 or tool activity. Explicit manual ordering remains available.
+
+Saved streaming choices survive upgrades to the turn/paragraph/token selector. The disk loader
+maps either legacy Boolean to token or turn mode; an explicit new mode takes precedence. Do not
+import upstream's intentional reset to paragraphs over saved preferences.
 
 ## Browser presentation
 
@@ -35,6 +40,8 @@ can move or resize, with handles outside the native guest rectangle on every edg
 restores the preceding mode. Compact previews scale the source; floating and fullscreen views fill
 the available space. Keep the header reachable and the three actions for floating, fullscreen,
 and closing the session. Browser interaction and automation must preserve composer focus and text.
+Device streams use their own aspect-ratio-aware floating viewer; they must not replace the browser's
+fixed-preview and window restoration behavior.
 
 ## Browser storage
 
@@ -57,7 +64,7 @@ requests cannot reuse a tab from another profile, including a provider's pinned 
 Migrations 1 through 43 keep their existing numbers and contents. In particular, 41 records title
 source, 42 adds authentication client connections and 43 records when a thread was unsettled.
 The linked-pull-request migration is 44, followed by project auto-pull at 45, settlement timestamp
-repair at 46, project icons at 47, branch pull requests at 48 and manual active ordering at 49. The upstream migration that clears automatic project model
+repair at 46, project icons at 47, branch pull requests at 48 and manual active ordering at 49. Multiple thread pull requests use migration 50; message context uses 51. The upstream migration that clears automatic project model
 defaults is omitted so saved project choices remain intact. Manually assigned titles remain protected
 from automatic title generation.
 

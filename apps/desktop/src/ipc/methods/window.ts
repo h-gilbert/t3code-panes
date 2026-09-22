@@ -1,3 +1,5 @@
+import * as Electron from "electron";
+import { workspaceWindowForSender } from "../../window/workspaceWindows.ts";
 import {
   ContextMenuItemSchema,
   DesktopAppBrandingSchema,
@@ -330,6 +332,30 @@ export const probeRemoteEditors = DesktopIpc.makeIpcMethod({
       }
     }
     return available;
+  }),
+});
+
+export const pasteAsText = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PASTE_AS_TEXT_CHANNEL,
+  payload: Schema.Undefined,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.window.pasteAsText")(function* (_input, event) {
+    const electronWindow = yield* ElectronWindow.ElectronWindow;
+    if (event === undefined) return;
+    const main = yield* electronWindow.main;
+    const window =
+      Option.isSome(main) && main.value.webContents.id === event.sender.id
+        ? main.value
+        : workspaceWindowForSender(event.sender.id);
+    if (!window || window.isDestroyed()) return;
+    const focused = Electron.webContents.getFocusedWebContents();
+    if (
+      focused &&
+      !focused.isDestroyed() &&
+      Electron.BrowserWindow.fromWebContents(focused) === window
+    ) {
+      focused.paste();
+    }
   }),
 });
 

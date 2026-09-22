@@ -38,10 +38,28 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { UsageLimitsPooled } from "./UsageLimitsPooled";
 import { PROVIDER_PRESENTATION } from "./usageProviders";
 
-const PACE: Record<LimitPace, { readonly label: string; readonly icon: typeof GaugeIcon }> = {
-  ahead: { label: "Ahead of pace: spending faster than the window elapses", icon: TrendingUpIcon },
-  on: { label: "On pace with the window", icon: GaugeIcon },
-  under: { label: "Under pace: headroom left for the rest of the window", icon: TrendingDownIcon },
+const PACE = {
+  ahead: {
+    label: "Ahead of pace",
+    description:
+      "Usage is more than 5 percentage points ahead of the cycle elapsed. At this pace, you may reach the limit before reset.",
+    icon: TrendingUpIcon,
+    className: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  },
+  on: {
+    label: "On track",
+    description:
+      "Usage is within 5 percentage points of the cycle elapsed, on pace to use the allowance by reset.",
+    icon: GaugeIcon,
+    className: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
+  },
+  under: {
+    label: "Below pace",
+    description:
+      "Usage is more than 5 percentage points below the cycle elapsed. At this pace, you will have allowance left at reset.",
+    icon: TrendingDownIcon,
+    className: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  },
 };
 
 /** The series colour the cost chart uses for this driver, so the two views read as one. */
@@ -51,7 +69,7 @@ export function barColor(driver: ServerProvider["driver"]): string {
   return kind ? PROVIDER_PRESENTATION[kind].color : "var(--foreground)";
 }
 
-/** Pace as a glyph with the words on hover. */
+/** Visible cycle pace, with the comparison explained on hover or keyboard focus. */
 export function PaceIcon({ pace }: { readonly pace: LimitPace }) {
   const Icon = PACE[pace].icon;
   return (
@@ -59,15 +77,15 @@ export function PaceIcon({ pace }: { readonly pace: LimitPace }) {
       <TooltipTrigger
         render={
           <span
-            role="img"
-            aria-label={PACE[pace].label}
-            className="inline-flex text-muted-foreground"
+            tabIndex={0}
+            className={`inline-flex w-fit items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium ${PACE[pace].className}`}
           />
         }
       >
         <Icon className="size-3.5" aria-hidden />
+        {PACE[pace].label}
       </TooltipTrigger>
-      <TooltipPopup side="top">{PACE[pace].label}</TooltipPopup>
+      <TooltipPopup side="top">{PACE[pace].description}</TooltipPopup>
     </Tooltip>
   );
 }
@@ -316,17 +334,17 @@ export function ResetCredits({
 
 /**
  * Subscription quota across every connected environment's providers and hubs,
- * pooled per provider. Countdowns anchor to render time rather than ticking: a
- * live clock would repaint the page every minute for no decision-changing gain.
+ * pooled per provider. The page advances `now` on explicit refresh rather than
+ * ticking: a live clock would repaint the page for no decision-changing gain.
  */
 export function UsageLimitsSection({
   selectedEnvironmentIds,
+  now,
 }: {
   readonly selectedEnvironmentIds: ReadonlySet<EnvironmentId> | null;
+  readonly now: number;
 }) {
   const presentations = useAtomValue(environmentPresentations.presentationsAtom);
-  // Anchored once per mount on purpose: countdowns must not tick (see above).
-  const [now] = useState(() => Date.now());
   const selected =
     selectedEnvironmentIds === null
       ? presentations
