@@ -241,11 +241,13 @@ function MetaRow({
 function Section({
   title,
   defaultOpen = true,
+  keepMounted = false,
   actions,
   children,
 }: {
   title: string;
   defaultOpen?: boolean;
+  keepMounted?: boolean;
   /** Heading controls stay separate from the collapse trigger so they remain independently usable. */
   actions?: ReactNode;
   children: ReactNode;
@@ -275,6 +277,7 @@ function Section({
     <Collapsible
       open={open}
       onOpenChange={setOpenWithScrollAnchor}
+      render={<section aria-label={title} />}
       data-pull-request-summary-section
     >
       {/* The heading rides the top of the scroll box the way a diff's file header does, so a
@@ -296,7 +299,7 @@ function Section({
         </CollapsibleTrigger>
         {actions}
       </div>
-      <CollapsiblePanel>
+      <CollapsiblePanel keepMounted={keepMounted}>
         <div className="px-4 pb-4">{children}</div>
       </CollapsiblePanel>
     </Collapsible>
@@ -757,14 +760,6 @@ export function PullRequestSummaryTab({
               ) : null}
             </div>
           )}
-          <PullRequestReactionBar
-            className="mt-2"
-            reactions={detail.reactions ?? []}
-            canReact={detail.capabilities.reactions === true}
-            environmentId={environmentId}
-            reference={reference}
-            onRefresh={onRefresh}
-          />
         </div>
       </section>
 

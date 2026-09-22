@@ -5,8 +5,11 @@ import { type ScopedThreadRef } from "@t3tools/contracts";
 import { Maximize2Icon, Minimize2Icon, PictureInPicture2, XIcon } from "lucide-react";
 import { type PointerEvent as ReactPointerEvent, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-
 import type { BrowserViewportResizeDirection } from "~/browser/browserViewportLayout";
+import {
+  findActiveBrowserRecordingRuntimeTabId,
+  useActiveBrowserRecordingTabIds,
+} from "~/browser/browserRecording";
 import { BrowserSurfaceSlot } from "~/browser/BrowserSurfaceSlot";
 import { previewRuntimeTabId } from "~/browser/previewRuntimeTabId";
 import { Button } from "~/components/ui/button";
@@ -93,6 +96,10 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
   const snapshot = previewState.sessions[tabId] ?? null;
   const hasPreview = snapshot !== null;
   const runtimeTabId = previewRuntimeTabId(threadRef, previewState.serverEpoch, tabId);
+  const recordingTabIds = useActiveBrowserRecordingTabIds();
+  const recording =
+    recordingTabIds.has(runtimeTabId) ||
+    findActiveBrowserRecordingRuntimeTabId(threadRef, tabId) !== null;
   const desktopOverlay = previewState.desktopByTabId[tabId] ?? null;
   const position =
     miniPlayer?.source.kind === "browser" && miniPlayer.source.tabId === tabId
@@ -362,6 +369,13 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
             ? "Browser"
             : snapshot.navStatus.title.trim() || snapshot.navStatus.url.trim() || "Browser"}
         </span>
+        {recording ? (
+          <span
+            role="status"
+            aria-label="Recording browser preview"
+            className="shrink-0 rounded-full bg-red-500 size-2"
+          />
+        ) : null}
         <Tooltip>
           <TooltipTrigger
             render={

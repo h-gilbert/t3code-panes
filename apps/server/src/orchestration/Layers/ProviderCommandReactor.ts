@@ -79,7 +79,8 @@ type ProviderIntentEvent = Extract<
       | "thread.approval-response-requested"
       | "thread.user-input-response-requested"
       | "thread.session-stop-requested"
-      | "thread.settled";
+      | "thread.settled"
+      | "thread.session-set";
   }
 >;
 
@@ -948,6 +949,8 @@ const make = Effect.gen(function* () {
       readonly messageText: string;
       readonly attachments?: ReadonlyArray<ChatAttachment>;
       readonly titleSeed?: string;
+      readonly expectedTitle: string;
+      readonly expectedVersion: CommandId | null;
     }) {
       const attachments = input.attachments ?? [];
       yield* Effect.gen(function* () {
@@ -977,11 +980,14 @@ const make = Effect.gen(function* () {
         }
 
         yield* orchestrationEngine.dispatch({
-          type: "thread.meta.update",
+          type: "thread.title.generate.complete",
           commandId: yield* serverCommandId("thread-title-rename"),
           threadId: input.threadId,
-          title: generated.title,
-          titleSource: "auto",
+          title: generated.title === DEFAULT_THREAD_TITLE ? input.expectedTitle : generated.title,
+          expectedTitle: input.expectedTitle,
+          expectedVersion: input.expectedVersion,
+          needsRefinement:
+            generated.needsRefinement === true || generated.title === DEFAULT_THREAD_TITLE,
         });
       }).pipe(
         Effect.catchCause((cause) =>
@@ -994,6 +1000,30 @@ const make = Effect.gen(function* () {
       );
     },
   );
+
+  const maybeRefineThreadTitle = Effect.fn("maybeRefineThreadTitle")(function* (
+    threadId: ThreadId,
+  ) {
+    const thread = yield* resolveThreadShell(threadId);
+    if (
+      !thread?.titleState?.needsRefinement ||
+      thread.titleState.source !== "generated" ||
+      thread.titleSource === "manual" ||
+      thread.titleRegeneration != null ||
+      thread.latestTurn?.state !== "completed" ||
+      thread.session?.status !== "ready"
+    )
+      return;
+    const detail = yield* resolveThreadDetail(threadId);
+    if (!detail || detail.messages.filter((message) => message.role === "user").length !== 1)
+      return;
+    yield* orchestrationEngine.dispatch({
+      type: "thread.title.refine",
+      commandId: yield* serverCommandId("thread-title-refine"),
+      threadId,
+      expectedVersion: thread.titleState.version,
+    });
+  });
 
   const regenerateThreadTitle = Effect.fn("regenerateThreadTitle")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.meta-updated" }>,
@@ -1064,14 +1094,17 @@ const make = Effect.gen(function* () {
       ...(input.title !== undefined ? { title: input.title } : {}),
     });
   });
-  const findInterruptedThreadTitleRegenerations = Effect.fn(
-    "findInterruptedThreadTitleRegenerations",
-  )(function* () {
+  const findPendingThreadTitles = Effect.fn("findPendingThreadTitles")(function* () {
     const readModel = yield* projectionSnapshotQuery.getCommandReadModel();
-    return readModel.threads.flatMap((thread) => {
-      const requestId = thread.titleRegeneration?.requestId;
-      return requestId === undefined ? [] : [{ threadId: thread.id, requestId }];
-    });
+    return {
+      interruptedRegenerations: readModel.threads.flatMap((thread) => {
+        const requestId = thread.titleRegeneration?.requestId;
+        return requestId === undefined ? [] : [{ threadId: thread.id, requestId }];
+      }),
+      refinementThreadIds: readModel.threads
+        .filter((thread) => thread.titleState?.needsRefinement)
+        .map((thread) => thread.id),
+    };
   });
   const clearInterruptedThreadTitleRegenerations = Effect.fn(
     "clearInterruptedThreadTitleRegenerations",
@@ -1321,6 +1354,8 @@ const make = Effect.gen(function* () {
         yield* maybeGenerateThreadTitleForFirstTurn({
           threadId: event.payload.threadId,
           cwd: generationCwd,
+          expectedTitle: thread.title,
+          expectedVersion: thread.titleState?.version ?? null,
           ...generationInput,
         }).pipe(Effect.forkScoped);
       }
@@ -1775,30 +1810,6 @@ const make = Effect.gen(function* () {
     );
   });
 
-  const maybeRefineThreadTitle = Effect.fn("maybeRefineThreadTitle")(function* (
-    threadId: ThreadId,
-  ) {
-    const thread = yield* resolveThreadShell(threadId);
-    if (!thread) return;
-    const titleState = thread?.titleState;
-    if (
-      titleState?.source !== "generated" ||
-      !titleState.needsRefinement ||
-      thread.titleSource === "manual" ||
-      thread.titleRegeneration != null ||
-      thread.session?.status !== "ready" ||
-      thread.latestTurn?.state !== "completed"
-    ) {
-      return;
-    }
-    yield* orchestrationEngine.dispatch({
-      type: "thread.title.refine",
-      commandId: yield* serverCommandId("thread-title-refine"),
-      threadId,
-      expectedVersion: titleState.version,
-    });
-  });
-
   const processDomainEvent = Effect.fn("processDomainEvent")(function* (
     event: ProviderIntentEvent,
   ) {
@@ -1892,15 +1903,15 @@ const make = Effect.gen(function* () {
   const worker = yield* makeDrainableWorker(processDomainEventSafely);
 
   const start: ProviderCommandReactorShape["start"] = Effect.fn("start")(function* () {
-    const interruptedTitleRegenerations = yield* findInterruptedThreadTitleRegenerations().pipe(
+    const pendingTitles = yield* findPendingThreadTitles().pipe(
       Effect.catchCause((cause) => {
         if (Cause.hasInterruptsOnly(cause)) {
           return Effect.interrupt;
         }
-        return Effect.logWarning(
-          "provider command reactor failed to find interrupted title regenerations",
-          { cause: Cause.pretty(cause) },
-        ).pipe(Effect.as([]));
+        return Effect.logWarning("provider command reactor failed to find pending thread titles", {
+          failureKind: Cause.hasDies(cause) ? "defect" : "failure",
+          reasonCount: cause.reasons.length,
+        }).pipe(Effect.as({ interruptedRegenerations: [], refinementThreadIds: [] }));
       }),
     );
     const processEvent = Effect.fn("processEvent")(function* (event: OrchestrationEvent) {
@@ -1925,42 +1936,34 @@ const make = Effect.gen(function* () {
     const domainEvents = yield* orchestrationEngine.subscribeDomainEvents;
     yield* forkParked(Stream.runForEach(domainEvents, processEvent));
 
-    yield* Effect.gen(function* () {
-      const readModel = yield* projectionSnapshotQuery.getCommandReadModel();
-      yield* Effect.forEach(readModel.threads, (thread) => maybeRefineThreadTitle(thread.id), {
-        discard: true,
-      });
-    }).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning("provider command reactor failed to resume title refinement", {
-          cause: Cause.pretty(cause),
+    // Earlier events do not replay. Clear interrupted requests by their captured
+    // IDs, then schedule persisted refinements after subscribing to their events.
+    const recoverTitles = clearInterruptedThreadTitleRegenerations(
+      pendingTitles.interruptedRegenerations,
+    ).pipe(
+      Effect.andThen(
+        Effect.forEach(pendingTitles.refinementThreadIds, maybeRefineThreadTitle, {
+          discard: true,
         }),
       ),
-    );
-
-    // The domain event stream is hot, so work pending before this reactor
-    // starts cannot be resumed. Correlated completions only clear the request
-    // captured here, leaving any newer request untouched.
-    const clearInterrupted = clearInterruptedThreadTitleRegenerations(
-      interruptedTitleRegenerations,
-    ).pipe(
       Effect.catchCause((cause) => {
         if (Cause.hasInterruptsOnly(cause)) {
           return Effect.interrupt;
         }
         return Effect.logWarning(
-          "provider command reactor failed to clear interrupted title regenerations",
+          "provider command reactor failed to recover pending thread titles",
           {
-            cause: Cause.pretty(cause),
+            failureKind: Cause.hasDies(cause) ? "defect" : "failure",
+            reasonCount: cause.reasons.length,
           },
         );
       }),
     );
     const activation = yield* ServerActivation;
     if (activation === undefined) {
-      yield* clearInterrupted;
+      yield* recoverTitles;
     } else {
-      yield* forkParked(clearInterrupted);
+      yield* forkParked(recoverTitles);
     }
   });
 

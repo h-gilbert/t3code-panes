@@ -233,6 +233,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
         notifyOnApproval: true,
         notifyOnInput: true,
         notifyOnCompletion: false,
+        notifyOnIosCompletion: true,
         notifyOnFailure: true,
       },
     });
@@ -301,6 +302,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
         notifyOnApproval: true,
         notifyOnInput: true,
         notifyOnCompletion: false,
+        notifyOnIosCompletion: true,
         notifyOnFailure: true,
       },
     });

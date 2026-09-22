@@ -35,6 +35,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { projectFaviconUrlAtom } from "../state/assets";
 import { selectProjectIcon, type ProjectIconName } from "../projectIconModel";
 import { projectIconColorClassName } from "../projectIconColors";
+import { ProjectMonogram } from "./ProjectMonogram";
 import { cn } from "~/lib/utils";
 
 const DynamicIcon = lazy(() =>
@@ -103,7 +104,6 @@ export type ProjectFaviconProject = Pick<
   EnvironmentProject,
   "environmentId" | "workspaceRoot" | "title" | "faviconPath" | "projectIcon"
 >;
-
 export function ProjectFavicon(input: {
   project: ProjectFaviconProject;
   className?: string | undefined;
@@ -117,8 +117,23 @@ export function ProjectFavicon(input: {
       faviconPath: project.faviconPath,
     }),
   );
+  if (project.projectIcon?.kind === "lucide" && project.projectIcon.monogram) {
+    return (
+      <ProjectMonogram
+        text={project.projectIcon.monogram}
+        color={project.projectIcon.color}
+        className={input.className}
+      />
+    );
+  }
   if (project.projectIcon?.kind === "emoji") {
-    return <ProjectFaviconFallback className={input.className} emoji={project.projectIcon.emoji} />;
+    return (
+      <ProjectFaviconFallback
+        className={input.className}
+        icon={FolderCodeIcon}
+        emoji={project.projectIcon.emoji}
+      />
+    );
   }
   if (project.projectIcon?.kind === "lucide") {
     const colorClassName = projectIconColorClassName(project.projectIcon.color);
@@ -155,9 +170,9 @@ export function ProjectFavicon(input: {
     return (
       <ProjectFaviconFallback
         className={input.className}
-        colorClassName={fallbackColorClassName}
         icon={FallbackIcon}
         emoji={fallbackEmoji}
+        colorClassName={fallbackColorClassName}
       />
     );
   }
@@ -205,8 +220,12 @@ function ProjectFaviconFallback({
     );
   }
 
-  if (!Icon) return null;
-  return <Icon className={cn("size-3.5 shrink-0 text-icon-muted", colorClassName, className)} />;
+  const FallbackIcon = Icon ?? FolderCodeIcon;
+  return (
+    <FallbackIcon
+      className={cn("size-3.5 shrink-0", colorClassName ?? "text-icon-muted", className)}
+    />
+  );
 }
 
 function ProjectFaviconImage({
@@ -235,9 +254,9 @@ function ProjectFaviconImage({
       {displayedSrc === null ? (
         <ProjectFaviconFallback
           className={className}
-          colorClassName={fallbackColorClassName}
           icon={FallbackIcon}
           emoji={fallbackEmoji}
+          colorClassName={fallbackColorClassName}
         />
       ) : null}
       {displayedSrc ? (

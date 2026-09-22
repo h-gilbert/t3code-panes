@@ -745,6 +745,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           id: ThreadId.make("thread-1"),
           projectId: asProjectId("project-1"),
           title: "Thread 1",
+          titleSource: "auto",
           titleState: null,
           session: snapshot.threads[0]?.session ?? null,
         });
@@ -766,6 +767,18 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         assert.equal(changedContext.value.session?.providerName, "claudeAgent");
         assert.equal(changedContext.value.session?.providerInstanceId, "claude-secondary");
         assert.equal(changedContext.value.session?.lastError, "Starting another session");
+      }
+
+      yield* sql`
+        UPDATE projection_threads SET title_source = 'manual' WHERE thread_id = 'thread-1'
+      `;
+      const legacyManualContext = yield* snapshotQuery.getThreadRuntimeContext(
+        ThreadId.make("thread-1"),
+      );
+      assert.equal(legacyManualContext._tag, "Some");
+      if (legacyManualContext._tag === "Some") {
+        assert.equal(legacyManualContext.value.titleSource, "manual");
+        assert.equal(legacyManualContext.value.titleState, null);
       }
     }),
   );

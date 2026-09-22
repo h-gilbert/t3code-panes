@@ -1,5 +1,6 @@
+"use client";
+
 import type { ScopedThreadRef } from "@t3tools/contracts";
-("use client");
 
 import { PanelRightIcon, XIcon } from "lucide-react";
 import {
@@ -160,13 +161,19 @@ function MiniPlayerShell({
   const gestureRef = useRef<PointerGesture | null>(null);
   const [container, setContainer] = useState<PreviewMiniPlayerSize | null>(null);
   const sourceKey = previewMiniPlayerSourceKey(miniPlayer.source);
+  const obstacles = {
+    composer:
+      container && bottomInset > 0
+        ? { left: 0, right: container.width, height: bottomInset }
+        : null,
+  };
   const frame = container
     ? resolvePreviewMiniPlayerFrame({
         width: miniPlayer.width,
         position: miniPlayer.position,
         source: sourceSize,
         container,
-        bottomInset,
+        obstacles,
       })
     : null;
 
@@ -225,7 +232,7 @@ function MiniPlayerShell({
           { x: gesture.frame.x + delta.x, y: gesture.frame.y + delta.y },
           container,
           gesture.frame,
-          bottomInset,
+          obstacles,
         ),
       );
       return;
@@ -236,7 +243,7 @@ function MiniPlayerShell({
       delta,
       source: sourceSize,
       container,
-      bottomInset,
+      obstacles,
     });
     store.resize(threadRef, sourceKey, next.width);
     store.move(threadRef, sourceKey, { x: next.x, y: next.y });

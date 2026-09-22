@@ -194,29 +194,38 @@ const MARKDOWN_FENCE_PATTERN = /^( *)(`{3,}|~{3,})/;
 // CommonMark blank lines hold only spaces and tabs. Other whitespace, such as
 // a no-break space, is paragraph content.
 const BLANK_LINE_PATTERN = /^[ \t]*$/;
-const LIST_ITEM_PATTERN = /^ {0,3}(?:[-+*]|[0-9]{1,9}[.)])[ \t]+\S/;
+// A bullet or ordered marker followed by whitespace, at any indentation so
+// nested items count. The trailing space is required, so a partial `-` or
+// `1.` never matches before the model finishes the marker.
+const LIST_ITEM_START_PATTERN = /^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]/;
 
 /**
- * Splits buffered assistant text at the last blank line or closing code fence
- * that is not inside an open fenced code block. `ready` is safe to deliver now
- * because the markdown before it will not change shape as more text arrives.
- * `rest` stays buffered until the next boundary or completion. Only fully
- * terminated lines count, so a trailing partial line never leaks.
+ * Splits buffered assistant text at the last blank line, closing code fence,
+ * or list item start that is not inside an open fenced code block. `ready` is
+ * safe to deliver now because the markdown before it will not change shape as
+ * more text arrives. `rest` stays buffered until the next boundary or
+ * completion. Only fully terminated lines count, so a trailing partial line
+ * never leaks; a list item start is the one lookahead that may sit on the
+ * partial line, since tight lists have no blank lines between items and would
+ * otherwise land all at once.
  */
 export function splitBufferedAssistantText(text: string): { ready: string; rest: string } {
   let openFence: { marker: string; indent: number } | null = null;
   let boundary = -1;
   let lineStart = 0;
-  let inListItem = false;
   for (;;) {
     const newline = text.indexOf("\n", lineStart);
+    const line = text
+      .slice(lineStart, newline === -1 ? text.length : newline)
+      .replace(/[ \t\r]+$/, "");
+    if (openFence === null && lineStart > 0 && LIST_ITEM_START_PATTERN.test(line)) {
+      boundary = lineStart;
+    }
     if (newline === -1) {
       break;
     }
-    const line = text.slice(lineStart, newline).replace(/[ \t\r]+$/, "");
     const fenceMatch = MARKDOWN_FENCE_PATTERN.exec(line);
     if (fenceMatch) {
-      inListItem = false;
       const indent = fenceMatch[1]!.length;
       const marker = fenceMatch[2]!;
       if (openFence === null) {
@@ -233,15 +242,8 @@ export function splitBufferedAssistantText(text: string): { ready: string; rest:
       }
     } else if (openFence === null && BLANK_LINE_PATTERN.test(line) && lineStart > 0) {
       boundary = newline + 1;
-      inListItem = false;
-    } else if (openFence === null && LIST_ITEM_PATTERN.test(line)) {
-      if (inListItem) boundary = lineStart;
-      inListItem = true;
     }
     lineStart = newline + 1;
-  }
-  if (openFence === null && inListItem && LIST_ITEM_PATTERN.test(text.slice(lineStart))) {
-    boundary = lineStart;
   }
   if (boundary === -1) {
     return { ready: "", rest: text };
@@ -2063,13 +2065,19 @@ const make = Effect.gen(function* () {
       }
 
       if (event.type === "thread.metadata.updated" && event.payload.name) {
-        if (canReplaceThreadTitle(thread.title)) {
+        if (
+          thread.titleSource !== "manual" &&
+          thread.titleState?.source !== "manual" &&
+          canReplaceThreadTitle(thread.title)
+        ) {
           yield* orchestrationEngine.dispatch({
-            type: "thread.meta.update",
+            type: "thread.title.generate.complete",
             commandId: yield* providerCommandId(event, "thread-meta-update"),
             threadId: thread.id,
             title: event.payload.name,
-            titleSource: "auto",
+            expectedTitle: thread.title,
+            expectedVersion: thread.titleState?.version ?? null,
+            needsRefinement: false,
           });
         }
       }

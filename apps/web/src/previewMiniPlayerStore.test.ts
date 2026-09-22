@@ -3,13 +3,24 @@ import { type EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
-  selectThreadPreviewMiniPlayerTabId,
+  browserMiniPlayerSource,
+  type PreviewMiniPlayerSource,
   selectThreadPreviewMiniPlayer,
+  selectThreadPreviewMiniPlayerTabId,
   usePreviewMiniPlayerStore,
 } from "./previewMiniPlayerStore";
 
 const refA = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("thread-A"));
 const refB = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("thread-B"));
+const tabA = browserMiniPlayerSource("tab-a");
+const tabB = browserMiniPlayerSource("tab-b");
+const pixel: PreviewMiniPlayerSource = {
+  kind: "device",
+  hostId: "nucbox",
+  deviceId: "emulator-5580",
+  platform: "android",
+  name: "Pixel",
+};
 
 beforeEach(() => {
   usePreviewMiniPlayerStore.setState({ byThreadKey: {} });
@@ -56,9 +67,9 @@ describe("previewMiniPlayerStore", () => {
   });
 
   it("preserves position when switching the floating tab within one thread", () => {
-    usePreviewMiniPlayerStore.getState().open(refA, "tab-a");
-    usePreviewMiniPlayerStore.getState().move(refA, "tab-a", { x: 24, y: 48 });
-    usePreviewMiniPlayerStore.getState().open(refA, "tab-b");
+    usePreviewMiniPlayerStore.getState().open(refA, tabA);
+    usePreviewMiniPlayerStore.getState().move(refA, "browser:tab-a", { x: 24, y: 48 });
+    usePreviewMiniPlayerStore.getState().open(refA, tabB);
 
     expect(
       selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
@@ -73,9 +84,9 @@ describe("previewMiniPlayerStore", () => {
   });
 
   it("ignores stale drag updates after the floating tab changes", () => {
-    usePreviewMiniPlayerStore.getState().open(refA, "tab-a");
-    usePreviewMiniPlayerStore.getState().open(refA, "tab-b");
-    usePreviewMiniPlayerStore.getState().move(refA, "tab-a", { x: 100, y: 100 });
+    usePreviewMiniPlayerStore.getState().open(refA, tabA);
+    usePreviewMiniPlayerStore.getState().open(refA, tabB);
+    usePreviewMiniPlayerStore.getState().move(refA, "browser:tab-a", { x: 100, y: 100 });
 
     expect(
       selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA),

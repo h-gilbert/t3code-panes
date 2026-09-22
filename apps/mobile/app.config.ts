@@ -185,7 +185,7 @@ const config: ExpoConfig = {
   // Keep the established t3code:// alias in private builds so existing links
   // continue to route back into the containing app.
   scheme: isSelfHostedBuild ? [appScheme, "t3code"] : appScheme,
-  version: "1.1.1",
+  version: "1.2.0",
   runtimeVersion: {
     // Development manifests resolve on every launch, so avoid fingerprint's
     // expensive native-project calculation there. Preview and production stay

@@ -340,6 +340,9 @@ function GeneralSettingsSection() {
   return (
     <SettingsSection title="General">
       <SettingsRow icon="folder" label="Project Grouping" target="SettingsProjectGrouping" />
+      {Platform.OS === "ios" ? (
+        <SettingsRow icon="keyboard" label="Keyboard" target="SettingsKeyboard" />
+      ) : null}
       <AutoSettleSettingsRows />
       <SettingsRow icon="chart.bar.xaxis" label="Usage" target="SettingsUsage" />
     </SettingsSection>
@@ -587,6 +590,12 @@ function AppSettingsSection() {
   return (
     <SettingsSection title="App">
       <SettingsRow icon="internaldrive" label="Client Storage" target="SettingsClientStorage" />
+      <SettingsRow icon="stethoscope" label="Diagnostics" target="SettingsDiagnostics" />
+      <SettingsRow
+        icon="doc.on.doc"
+        label="Open source licenses"
+        target="SettingsOpenSourceLicenses"
+      />
       <SettingsRow icon="doc.text" label="Legal" fullScreenTarget="SettingsLegal" />
       {updateCheckAvailable ? (
         <Pressable

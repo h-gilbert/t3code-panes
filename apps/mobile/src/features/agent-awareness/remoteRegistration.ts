@@ -146,6 +146,8 @@ export function setAgentAwarenessRelayTokenProvider(
     provider !== null &&
     !shouldRegisterAgentAwarenessDeviceForProvider(relayTokenProviderIdentity, identity);
   if (!isExistingIdentity) {
+    // Native configure compares the persisted account on cold start. An
+    // unset JS identity is a remount, not evidence of a different account.
     deviceRegistrationGeneration++;
     activeDeviceRegistration = null;
     pendingDeviceRegistration = null;
@@ -275,6 +277,7 @@ function registrationSignature(body: RelayDeviceRegistrationRequest): string {
     body.preferences.notifyOnApproval,
     body.preferences.notifyOnInput,
     body.preferences.notifyOnCompletion,
+    body.preferences.notifyOnIosCompletion,
     body.preferences.notifyOnFailure,
   ].join("|");
 }

@@ -5,6 +5,8 @@ export type SettingsSheetTarget =
   | "SettingsKeyboard"
   | "SettingsProjectGrouping"
   | "SettingsClientStorage"
+  | "SettingsDiagnostics"
+  | "SettingsOpenSourceLicenses"
   | "SettingsUsage";
 
 export type SettingsLegalDocumentTarget = "SettingsLegal";

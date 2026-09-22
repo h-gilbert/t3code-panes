@@ -1,3 +1,4 @@
+import * as MacPermissions from "./permissions/MacPermissions.ts";
 for (const stream of [process.stdout, process.stderr]) {
   stream.on("error", (err: NodeJS.ErrnoException) => {
     if (err.code !== "EPIPE") throw err;
@@ -16,6 +17,7 @@ import * as Electron from "electron";
 
 import * as NetService from "@t3tools/shared/Net";
 import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { isPublishedT3Version } from "@t3tools/shared/releaseVersion";
 import { resolveRemoteT3CliPackageSpec } from "@t3tools/ssh/command";
 import type { RemoteT3RunnerOptions } from "@t3tools/ssh/tunnel";
 import serverPackageJson from "../../server/package.json" with { type: "json" };
@@ -87,6 +89,9 @@ const desktopEnvironmentLayer = Layer.unwrap(
   }),
 );
 
+// Published builds run the matching self-contained archive. Local fork builds
+// have no public archive, so SSH keeps the package fallback until distribution
+// can host one. Development can point at a remote source checkout instead.
 const resolveDesktopSshCliRunner = (
   environment: DesktopEnvironment.DesktopEnvironment["Service"],
   settings: DesktopAppSettings.DesktopSettings,
@@ -98,14 +103,17 @@ const resolveDesktopSshCliRunner = (
       nodeEngineRange: serverPackageJson.engines.node,
     };
   }
-  return {
-    packageSpec: resolveRemoteT3CliPackageSpec({
-      appVersion: environment.isDevelopment ? serverPackageJson.version : environment.appVersion,
-      updateChannel: settings.updateChannel,
-      isDevelopment: environment.isDevelopment,
-    }),
-    nodeEngineRange: serverPackageJson.engines.node,
-  };
+  if (!isPublishedT3Version(environment.appVersion)) {
+    return {
+      packageSpec: resolveRemoteT3CliPackageSpec({
+        appVersion: environment.isDevelopment ? serverPackageJson.version : environment.appVersion,
+        updateChannel: settings.updateChannel,
+        isDevelopment: environment.isDevelopment,
+      }),
+      nodeEngineRange: serverPackageJson.engines.node,
+    };
+  }
+  return { archiveVersion: environment.appVersion };
 };
 
 const desktopSshEnvironmentLayer = Layer.unwrap(
@@ -135,6 +143,7 @@ const electronLayer = Layer.mergeAll(
 );
 
 const desktopFoundationLayer = Layer.mergeAll(
+  MacPermissions.layer,
   DesktopState.layer,
   DesktopShutdown.layer,
   DesktopAppSettings.layer,

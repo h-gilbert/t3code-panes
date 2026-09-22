@@ -145,12 +145,13 @@ export const make = Effect.gen(function* () {
     const newWorkspaceWindowClick = () => {
       runMenuEffect("new-workspace-window", createWorkspaceWindow);
     };
+    // Chromium already handles the accelerator. Only a menu click needs IPC.
     const pasteAsTextClick: NonNullable<Electron.MenuItemConstructorOptions["click"]> = (
       _item,
       _window,
       event,
     ) => {
-      if (event?.triggeredByAccelerator) return;
+      if (event?.triggeredByAccelerator === true) return;
       runMenuEffect("paste-as-text", dispatchMenuAction("paste-as-text"));
     };
     const zoomClick = (direction: DesktopWindow.MainWindowZoomDirection) => () => {

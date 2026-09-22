@@ -768,6 +768,7 @@ export function PullRequestDetailPanel({
         detail.number,
         detail.headBranch,
         detail.headRepositoryNameWithOwner,
+        repositoryUrl,
       )
     : null;
   const branchRefsQuery = useEnvironmentQuery(
@@ -825,11 +826,14 @@ export function PullRequestDetailPanel({
     if (!coreDetail) return;
     const next = { key: tabScopeKey, updatedAt: coreDetail.updatedAt };
     if (shouldRefreshPullRequestActivity(activityRevision.current, next)) {
+      // Let an existing read settle before revalidating the new revision. Interrupting a
+      // mutation's activity refresh can leave SWR displaying its previous value.
+      if (activityQuery.isPending) return;
       activityQuery.refresh();
       setRefreshToken((token) => token + 1);
     }
     activityRevision.current = next;
-  }, [activityQuery.refresh, coreDetail, tabScopeKey]);
+  }, [activityQuery.isPending, activityQuery.refresh, coreDetail, tabScopeKey]);
   // Reuse activity and diff until core detail reports a changed revision. Keyed by
   // the pull request rather than by the panel, because this one panel shows a different pull
   // request every time it is opened.
@@ -1517,7 +1521,7 @@ export function PullRequestDetailPanel({
   }
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col bg-background">
+    <div className="relative flex h-full min-h-0 w-full flex-col bg-background">
       {threadPickerOpen && detail ? (
         <PullRequestThreadLinks
           key={`${environmentId}:${detail.url}`}
@@ -2691,7 +2695,7 @@ export function PullRequestDetailPanel({
               <div className={cn("absolute inset-0", tab !== "code" && "invisible")}>
                 <Suspense fallback={<DiffPanelLoadingState label="Loading pull request diff..." />}>
                   <PullRequestCodeTab
-                    {...(attachTarget ? { onAddToAgentSelection: addSelectionToAgent } : {})}
+                    onAddToAgentSelection={addSelectionToAgent}
                     environmentId={environmentId}
                     reference={reference}
                     detail={detail}

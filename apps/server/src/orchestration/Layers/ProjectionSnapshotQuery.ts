@@ -149,6 +149,7 @@ const ProjectionThreadRuntimeContextDbRowSchema = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
   title: Schema.String,
+  titleSource: Schema.Literals(["auto", "manual"]),
   session: Schema.NullOr(ProjectionThreadSessionDbRowSchema),
 });
 const ProjectionCheckpointDbRowSchema = ProjectionCheckpoint.mapFields(
@@ -1255,6 +1256,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           threads.thread_id AS id,
           threads.project_id AS "projectId",
           threads.title,
+          threads.title_source AS "titleSource",
           threads.title_state_json AS "titleState",
           sessions.thread_id AS "threadId",
           sessions.status,
@@ -3260,6 +3262,7 @@ pending_approval_requests AS (
         id: row.id,
         projectId: row.projectId,
         title: row.title,
+        titleSource: row.titleSource,
         titleState: row.titleState,
         session: row.session === null ? null : mapSessionRow(row.session),
       }));

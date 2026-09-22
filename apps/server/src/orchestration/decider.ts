@@ -1245,7 +1245,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
       const current =
         thread.deletedAt === null &&
-        thread.titleState?.source !== "manual" &&
+        (thread.titleState?.source !== "manual" || command.expectedTitle.endsWith("...")) &&
+        (thread.titleSource !== "manual" || command.expectedTitle.endsWith("...")) &&
         thread.title === command.expectedTitle &&
         (thread.titleState?.version ?? null) === command.expectedVersion &&
         thread.titleRegeneration == null;

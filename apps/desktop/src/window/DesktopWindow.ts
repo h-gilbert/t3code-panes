@@ -101,7 +101,7 @@ export class DesktopWindow extends Context.Service<
     readonly activate: Effect.Effect<void, DesktopWindowError>;
     readonly createMainIfBackendReady: Effect.Effect<void, DesktopWindowError>;
     // Show a lightweight "Connecting to WSL" splash window immediately (wsl-only
-    // mode), before the WSL backend that serves the renderer is ready. It is
+    // mode), before the WSL backend that acts as the primary is ready. It is
     // dismissed automatically once the real main window reveals.
     readonly showConnectingSplash: Effect.Effect<void>;
     // Marks the primary backend as ready so `createMainIfBackendReady` and the
@@ -875,6 +875,7 @@ export const make = Effect.gen(function* () {
       clearDevelopmentLoadRetry();
       developmentLoadRetryIndex = 0;
       window.setTitle(windowTitle);
+      positionMacWindowButtons(window, environment.platform);
     });
     window.webContents.on(
       "did-fail-load",
@@ -1053,9 +1054,15 @@ export const make = Effect.gen(function* () {
     return window;
   }).pipe(Effect.withSpan("desktop.window.revealOrCreateMain"));
 
+  // With the local environment disabled there is no backend to wait for: the
+  // renderer is served from bundled assets and only talks to remote environments.
+  const waitingForBackend = Effect.gen(function* () {
+    if (yield* Ref.get(backendReadyRef)) return false;
+    return (yield* desktopSettings.get).localEnvironmentEnabled;
+  });
+
   const createMainIfBackendReady = Effect.gen(function* () {
-    const backendReady = yield* Ref.get(backendReadyRef);
-    if (!backendReady) return;
+    if (yield* waitingForBackend) return;
     const existingWindow = yield* currentMainWindow;
     if (Option.isSome(existingWindow)) return;
     if (!workspaceSessionRestored) {
@@ -1158,7 +1165,7 @@ export const make = Effect.gen(function* () {
     const existingWindow = yield* reveal || channel === MENU_ACTION_CHANNEL
       ? focusedMainWindow
       : electronWindow.main;
-    if (Option.isNone(existingWindow) && (!reveal || !(yield* Ref.get(backendReadyRef)))) return;
+    if (Option.isNone(existingWindow) && (!reveal || (yield* waitingForBackend))) return;
     const targetWindow = Option.isSome(existingWindow) ? existingWindow.value : yield* ensureMain;
     if (targetWindow.isDestroyed()) return;
     const send = Effect.sync(() => {

@@ -54,6 +54,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   // No mod+n default for chat.new: the desktop menu's CmdOrCtrl+N accelerator
   // (New Workspace Window) consumes it before the renderer, and browsers
   // reserve it for their own new window — so it never reached the app anyway.
+  { key: "mod+shift+enter", command: "thread.steerQueuedMessage", when: "!terminalFocus" },
   { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+n", command: "chat.newLocal", when: "!terminalFocus" },
   { key: "mod+shift+m", command: "modelPicker.toggle", when: "!terminalFocus" },

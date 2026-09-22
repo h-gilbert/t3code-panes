@@ -7,6 +7,10 @@
       "types": "./src/releaseVersion.ts",
       "import": "./src/releaseVersion.ts"
     },
+    "./legacyCliLauncher": {
+      "types": "./src/legacyCliLauncher.ts",
+      "import": "./src/legacyCliLauncher.ts"
+    },
     "./delimitedPreview": {
       "types": "./src/delimitedPreview.ts",
       "import": "./src/delimitedPreview.ts"
@@ -307,6 +311,10 @@
       "types": "./src/desktopAppControl.ts",
       "import": "./src/desktopAppControl.ts"
     },
+    "./thirdPartyLicenses": {
+      "types": "./src/thirdPartyLicenses.ts",
+      "import": "./src/thirdPartyLicenses.ts"
+    },
     "./claudeCompaction": {
       "types": "./src/claudeCompaction.ts",
       "import": "./src/claudeCompaction.ts"
@@ -322,6 +330,10 @@
     "./dateTime": {
       "types": "./src/dateTime.ts",
       "import": "./src/dateTime.ts"
+    },
+    "./cliRelease": {
+      "types": "./src/cliRelease.ts",
+      "import": "./src/cliRelease.ts"
     }
   },
   "scripts": {

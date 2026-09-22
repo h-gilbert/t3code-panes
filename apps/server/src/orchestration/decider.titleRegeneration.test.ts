@@ -100,6 +100,32 @@ it.layer(NodeServices.layer)("title regeneration decider", (it) => {
     }),
   );
 
+  it.effect("preserves a legacy manual title without title state", () =>
+    Effect.gen(function* () {
+      const result = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.title.generate.complete",
+          commandId: CommandId.make("generated-legacy"),
+          threadId: ThreadId.make("thread-1"),
+          expectedTitle: "Manual title",
+          expectedVersion: null,
+          title: "Automatic title",
+          needsRefinement: false,
+        },
+        readModel: {
+          ...readModel,
+          threads: readModel.threads.map((thread) => ({
+            ...thread,
+            titleSource: "manual" as const,
+            titleState: null,
+          })),
+        },
+      });
+      const event = Array.isArray(result) ? result[0] : result;
+      expect(event.payload).toEqual({ threadId: ThreadId.make("thread-1"), updatedAt: UPDATED_AT });
+    }),
+  );
+
   it.effect("records manual ownership even when the title text does not change", () =>
     Effect.gen(function* () {
       const result = yield* decideOrchestrationCommand({

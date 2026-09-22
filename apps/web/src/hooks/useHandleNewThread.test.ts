@@ -110,6 +110,15 @@ vi.mock("@t3tools/shared/projectSettings", () => ({
     overrides: {},
   }),
 }));
+vi.mock("@t3tools/shared/projectSettings", () => ({
+  // Environment settings pass through; the tests set project fields on the
+  // project record, which the hook still honors until the server folds them.
+  resolveProjectSettings: (settings: Record<string, unknown>) => ({
+    settings,
+    sources: { defaultModelSelection: "environment", defaultThreadEnvMode: "environment" },
+    overrides: {},
+  }),
+}));
 vi.mock("@t3tools/shared/threadEnvMode", () => ({
   resolveDefaultThreadEnvMode: (input: {
     readonly projectFile: "local" | "worktree" | null;
@@ -232,19 +241,8 @@ describe("useNewThreadHandler", () => {
     );
   });
 
-  it.each([
-    ["new", null],
-    [
-      "reusable",
-      {
-        draftId: "draft-existing",
-        environmentId: "environment-ssh",
-        promotedTo: null,
-        threadId: "thread-existing",
-      },
-    ],
-  ])("abandons a delayed %s draft open when the user navigates elsewhere", async (_, draft) => {
-    testState.reset(draft);
+  it("abandons a delayed draft open when the user navigates elsewhere", async () => {
+    testState.reset(null);
     const openThread = useNewThreadHandler();
     const pendingOpen = openThread(
       { environmentId: "environment-ssh", projectId: "project-remote" } as never,

@@ -8,10 +8,15 @@ export const AGENT_NOTIFICATION_POLICY = {
   notifyOnApproval: true,
   notifyOnInput: true,
   notifyOnCompletion: false,
+  notifyOnIosCompletion: true,
   notifyOnFailure: true,
 } as const satisfies Pick<
   RelayDeviceRegistrationRequest["preferences"],
-  "notifyOnApproval" | "notifyOnInput" | "notifyOnCompletion" | "notifyOnFailure"
+  | "notifyOnApproval"
+  | "notifyOnInput"
+  | "notifyOnCompletion"
+  | "notifyOnIosCompletion"
+  | "notifyOnFailure"
 >;
 
 // Development builds are Xcode-signed and receive sandbox APNs tokens;

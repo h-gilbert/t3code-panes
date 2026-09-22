@@ -45,7 +45,7 @@ const LEGACY_SETTINGS_SECTION_ANCHORS: Readonly<Record<string, string>> = {
   "/settings/archived": "settings-archive",
 };
 
-function RestoreDefaultsButton({ onRestored }: { onRestored: () => void }) {
+function RestoreDeviceDefaultsButton({ onRestored }: { onRestored: () => void }) {
   const { changedSettingLabels, restoreDefaults } = useSettingsRestore(onRestored);
   return (
     <Button
@@ -55,7 +55,7 @@ function RestoreDefaultsButton({ onRestored }: { onRestored: () => void }) {
       onClick={() => void restoreDefaults()}
     >
       <RotateCcwIcon className="mx-1 size-3.5" />
-      Restore defaults
+      Restore device defaults
     </Button>
   );
 }
@@ -65,6 +65,7 @@ const DEVICE_ONLY_PATHS = new Set([
   "/settings/appearance",
   "/settings/snap-shot",
   "/settings/connections",
+  "/settings/open-source-licenses",
 ]);
 
 function SettingsScopeBoundary({ pathname, children }: { pathname: string; children: ReactNode }) {
@@ -137,8 +138,9 @@ function SettingsContentLayout() {
   const [restoreSignal, setRestoreSignal] = useState(0);
   const showDiagnostics = location.pathname === "/settings/diagnostics";
   const showScopedProjects = location.pathname === "/settings/projects";
-  const showRestoreDefaults = !showDiagnostics;
-  const showScope = !showDiagnostics;
+  const showLicenses = location.pathname === "/settings/open-source-licenses";
+  const showRestoreDefaults = !showDiagnostics && !showLicenses;
+  const showScope = !showDiagnostics && !showLicenses;
   const navigateBackWithinApp = useCallback(() => {
     if (canGoBack) {
       window.history.back();
@@ -174,7 +176,7 @@ function SettingsContentLayout() {
         <WorkspacePageHeader electron={isElectron}>
           <div className="flex w-full items-center gap-3">
             <SettingsBreadcrumb
-              pathname={showDiagnostics ? location.pathname : "/settings"}
+              pathname={showDiagnostics || showLicenses ? location.pathname : "/settings"}
               scope={
                 showScope
                   ? { value: search, groups, environments, onChange: selectScope }
@@ -183,7 +185,9 @@ function SettingsContentLayout() {
             />
             {showRestoreDefaults ? (
               <div className="ms-auto flex shrink-0 items-center">
-                <RestoreDefaultsButton onRestored={() => setRestoreSignal((value) => value + 1)} />
+                <RestoreDeviceDefaultsButton
+                  onRestored={() => setRestoreSignal((value) => value + 1)}
+                />
               </div>
             ) : null}
           </div>
@@ -194,7 +198,11 @@ function SettingsContentLayout() {
           className="min-h-0 flex flex-1 flex-col"
         >
           <SettingsScopeBoundary pathname={location.pathname}>
-            {showDiagnostics || showScopedProjects ? <Outlet /> : <AllSettingsPage />}
+            {showDiagnostics || showScopedProjects || showLicenses ? (
+              <Outlet />
+            ) : (
+              <AllSettingsPage />
+            )}
           </SettingsScopeBoundary>
         </div>
       </div>
