@@ -2,8 +2,6 @@
 
 Give the agent a task in the composer. Add files, quote a previous response, or
 include a skill when the task needs more context.
-New threads on web and desktop start with Codex GPT-6 Sol selected and medium reasoning effort.
-You can choose another model in the composer before sending.
 
 Messages can contain up to 120,000 characters. If a draft is longer, T3 Code keeps it in the
 composer and shows how many characters need to be removed. Shorten the draft or split it into
@@ -50,9 +48,9 @@ uses its account catalog and does not support custom models.
 
 ## Model defaults
 
-T3 Code remembers your provider, model, and model options for new threads. A
-project's configured model takes precedence; resetting that project setting
-returns to the remembered selection.
+On web and desktop, new threads start with Codex GPT-6 Sol at medium reasoning
+even when a project has a saved model default. A model you explicitly select in
+an existing draft stays selected.
 
 Leaving reasoning level or service tier unset uses the provider's own configuration.
 
