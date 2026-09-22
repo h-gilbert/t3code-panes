@@ -1012,8 +1012,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.title !== undefined
             ? {
                 title: command.title,
+                titleSource: command.titleSource ?? "manual",
                 titleState: {
-                  source: "manual" as const,
+                  source:
+                    command.titleSource === "auto" ? ("generated" as const) : ("manual" as const),
                   version: command.commandId,
                   needsRefinement: false,
                 },
@@ -1260,6 +1262,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(current
             ? {
                 title: command.title,
+                titleSource: "auto" as const,
                 titleState: {
                   source: "generated" as const,
                   version: command.commandId,
@@ -1328,7 +1331,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         type: "thread.meta-updated",
         payload: {
           threadId: command.threadId,
-          ...(requestIsCurrent && command.title !== undefined ? { title: command.title } : {}),
+          ...(requestIsCurrent && command.title !== undefined
+            ? { title: command.title, titleSource: "auto" as const }
+            : {}),
           ...(requestIsCurrent ? { titleRegeneration: null } : {}),
           updatedAt: requestIsCurrent ? occurredAt : thread.updatedAt,
         },

@@ -44,6 +44,8 @@ import { FOCUS_DIAGNOSTICS_CHANNEL } from "../ipc/channels.ts";
 const TITLEBAR_HEIGHT = 40;
 const DEFAULT_MAIN_WORKSPACE_ID = "main";
 const TITLEBAR_COLOR = "#01000000"; // #00000000 does not work correctly on Linux
+const MAC_HEADER_HEIGHT = 52;
+const MAC_WINDOW_BUTTON_HEIGHT = 14;
 const TITLEBAR_LIGHT_SYMBOL_COLOR = "#1f2937";
 const TITLEBAR_DARK_SYMBOL_COLOR = "#f8fafc";
 const MAIN_WINDOW_BOUNDS_PERSIST_DEBOUNCE_MS = 500;
@@ -279,7 +281,7 @@ function getWindowTitleBarOptions(
   if (platform === "darwin") {
     return {
       titleBarStyle: "hiddenInset",
-      trafficLightPosition: { x: 16, y: 18 },
+      trafficLightPosition: { x: 16, y: 19 },
     };
   }
 
@@ -291,6 +293,16 @@ function getWindowTitleBarOptions(
       symbolColor: shouldUseDarkColors ? TITLEBAR_DARK_SYMBOL_COLOR : TITLEBAR_LIGHT_SYMBOL_COLOR,
     },
   };
+}
+
+function positionMacWindowButtons(window: Electron.BrowserWindow, platform: NodeJS.Platform): void {
+  if (platform !== "darwin" || window.isFullScreen()) return;
+  window.setWindowButtonPosition({
+    x: 16,
+    y: Math.round(
+      (MAC_HEADER_HEIGHT * window.webContents.getZoomFactor() - MAC_WINDOW_BUTTON_HEIGHT) / 2,
+    ),
+  });
 }
 
 function syncWindowAppearance(
@@ -803,6 +815,7 @@ export const make = Effect.gen(function* () {
       });
       window.on("leave-full-screen", () => {
         window.webContents.send(WINDOW_FULLSCREEN_STATE_CHANNEL, false);
+        positionMacWindowButtons(window, environment.platform);
       });
     }
 
@@ -1232,6 +1245,7 @@ export const make = Effect.gen(function* () {
       webContents.setZoomLevel(
         direction === "reset" ? 0 : webContents.getZoomLevel() + (direction === "in" ? 0.5 : -0.5),
       );
+      positionMacWindowButtons(window.value, environment.platform);
       // Chromium pushes the new level down to embedded guests, which would zoom
       // the previewed page along with the app UI. The preview browser keeps its
       // own zoom, so put each guest back where the preview left it.

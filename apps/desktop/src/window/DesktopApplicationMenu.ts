@@ -145,7 +145,12 @@ export const make = Effect.gen(function* () {
     const newWorkspaceWindowClick = () => {
       runMenuEffect("new-workspace-window", createWorkspaceWindow);
     };
-    const pasteAsTextClick = () => {
+    const pasteAsTextClick: NonNullable<Electron.MenuItemConstructorOptions["click"]> = (
+      _item,
+      _window,
+      event,
+    ) => {
+      if (event?.triggeredByAccelerator) return;
       runMenuEffect("paste-as-text", dispatchMenuAction("paste-as-text"));
     };
     const zoomClick = (direction: DesktopWindow.MainWindowZoomDirection) => () => {

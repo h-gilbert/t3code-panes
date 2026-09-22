@@ -15,6 +15,7 @@ import {
   ProviderInteractionMode,
   RuntimeMode,
   ThreadLinkedPullRequest,
+  ThreadTitleState,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
@@ -31,6 +32,7 @@ export const ProjectionThread = Schema.Struct({
   title: Schema.String,
   // Optional for rows/test fixtures from before title provenance existed.
   titleSource: Schema.optional(Schema.Literals(["auto", "manual"])),
+  titleState: Schema.optional(Schema.NullOr(ThreadTitleState)),
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,

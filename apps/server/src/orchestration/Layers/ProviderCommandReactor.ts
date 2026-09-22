@@ -40,6 +40,10 @@ import {
 } from "../../provider/Errors.ts";
 import type { ProviderServiceError } from "../../provider/Errors.ts";
 import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
+import {
+  formatThreadTitleContext,
+  type ThreadTitleMessage,
+} from "../../textGeneration/ThreadTitleContext.ts";
 import { ProviderAuthService } from "../../provider/Services/ProviderAuthService.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
@@ -68,6 +72,7 @@ type ProviderIntentEvent = Extract<
   {
     type:
       | "thread.meta-updated"
+      | "thread.session-set"
       | "thread.runtime-mode-set"
       | "thread.turn-start-requested"
       | "thread.turn-interrupt-requested"
@@ -87,6 +92,13 @@ const isCompactCommandMessage = (message: ThreadTitleMessage): boolean =>
   message.role === "user" &&
   (message.attachments?.length ?? 0) === 0 &&
   message.text.trim().toLowerCase() === "/compact";
+const canAutoReplaceSeededTitle = (
+  thread: { title: string; titleSource?: "auto" | "manual" | undefined },
+  titleSeed: string | undefined,
+) =>
+  canReplaceThreadTitle(thread.title, titleSeed) &&
+  (thread.titleSource !== "manual" ||
+    (titleSeed?.endsWith("...") === true && thread.title === titleSeed));
 function mapProviderSessionStatusToOrchestrationStatus(
   status: "connecting" | "ready" | "running" | "error" | "closed",
 ): OrchestrationSession["status"] {
@@ -110,126 +122,6 @@ const turnStartKeyForEvent = (event: ProviderIntentEvent): string =>
 
 const HANDLED_TURN_START_KEY_MAX = 10_000;
 const HANDLED_TURN_START_KEY_TTL = Duration.minutes(30);
-const MAX_REGENERATION_ATTACHMENTS = 4;
-const MAX_THREAD_TITLE_CONTEXT_CHARS = 8_000;
-const MAX_FIRST_USER_TITLE_CONTEXT_CHARS = 2_000;
-const THREAD_TITLE_CONTEXT_TRUNCATION_MARKER = "[Earlier content truncated]\n\n";
-const FIRST_USER_CONTEXT_TRUNCATION_MARKER = "\n[First user message truncated]";
-
-type ThreadTitleMessage = {
-  readonly role: "user" | "assistant" | "system";
-  readonly text: string;
-  readonly attachments?: ReadonlyArray<ChatAttachment> | undefined;
-};
-
-function formatThreadTitleSection(message: ThreadTitleMessage): string | undefined {
-  if (message.role === "system") {
-    return undefined;
-  }
-  const text = assistantCitationsToPlainText(message.text).trim();
-  const attachmentSummary = (message.attachments ?? [])
-    .map((attachment) => attachment.name)
-    .join(", ");
-  const contents = [
-    ...(text.length > 0 ? [text] : []),
-    ...(attachmentSummary.length > 0 ? [`[Attachments: ${attachmentSummary}]`] : []),
-  ].join("\n");
-  return contents.length > 0 ? `${message.role.toUpperCase()}:\n${contents}` : undefined;
-}
-
-function limitFirstUserSection(section: string): string {
-  if (section.length <= MAX_FIRST_USER_TITLE_CONTEXT_CHARS) {
-    return section;
-  }
-  return `${section.slice(
-    0,
-    MAX_FIRST_USER_TITLE_CONTEXT_CHARS - FIRST_USER_CONTEXT_TRUNCATION_MARKER.length,
-  )}${FIRST_USER_CONTEXT_TRUNCATION_MARKER}`;
-}
-
-function collectRecentThreadTitleContext(
-  messages: ReadonlyArray<ThreadTitleMessage>,
-  maxChars: number,
-): {
-  readonly context: string;
-  readonly attachments: ReadonlyArray<ChatAttachment>;
-  readonly truncated: boolean;
-} {
-  let context = "";
-  let truncated = false;
-  const retainedAttachments: Array<ChatAttachment> = [];
-
-  for (const message of messages.toReversed()) {
-    const section = formatThreadTitleSection(message);
-    if (section === undefined) {
-      continue;
-    }
-
-    const separator = context.length > 0 ? "\n\n" : "";
-    const available = maxChars - context.length - separator.length;
-    if (section.length > available) {
-      if (available > 0) {
-        context = `${section.slice(-available)}${separator}${context}`;
-        retainedAttachments.unshift(...(message.attachments ?? []));
-      }
-      truncated = true;
-      break;
-    }
-    context = `${section}${separator}${context}`;
-    retainedAttachments.unshift(...(message.attachments ?? []));
-  }
-
-  return { context, attachments: retainedAttachments, truncated };
-}
-
-function formatThreadTitleContext(messages: ReadonlyArray<ThreadTitleMessage>): {
-  readonly message: string;
-  readonly attachments: ReadonlyArray<ChatAttachment>;
-} {
-  const recent = collectRecentThreadTitleContext(messages, MAX_THREAD_TITLE_CONTEXT_CHARS);
-  if (!recent.truncated) {
-    return {
-      message: recent.context,
-      attachments: recent.attachments.slice(-MAX_REGENERATION_ATTACHMENTS),
-    };
-  }
-
-  const firstUserMessage = messages.find(
-    (message) => message.role === "user" && formatThreadTitleSection(message),
-  );
-  const firstUserSection = firstUserMessage
-    ? formatThreadTitleSection(firstUserMessage)
-    : undefined;
-  if (!firstUserMessage || !firstUserSection) {
-    return {
-      message: `${THREAD_TITLE_CONTEXT_TRUNCATION_MARKER}${recent.context}`,
-      attachments: recent.attachments.slice(-MAX_REGENERATION_ATTACHMENTS),
-    };
-  }
-
-  const pinnedSection = limitFirstUserSection(firstUserSection);
-  const recentContextBudget =
-    MAX_THREAD_TITLE_CONTEXT_CHARS -
-    pinnedSection.length -
-    "\n\n".length -
-    THREAD_TITLE_CONTEXT_TRUNCATION_MARKER.length;
-  const retainedRecent = collectRecentThreadTitleContext(messages, recentContextBudget);
-  const pinnedAttachment = firstUserMessage.attachments?.[0];
-  const recentAttachments = retainedRecent.attachments.filter(
-    (attachment) => attachment.id !== pinnedAttachment?.id,
-  );
-
-  return {
-    message: `${pinnedSection}\n\n${THREAD_TITLE_CONTEXT_TRUNCATION_MARKER}${retainedRecent.context}`,
-    attachments: [
-      ...(pinnedAttachment ? [pinnedAttachment] : []),
-      ...recentAttachments.slice(
-        -(MAX_REGENERATION_ATTACHMENTS - (pinnedAttachment === undefined ? 0 : 1)),
-      ),
-    ],
-  };
-}
-
 function providerErrorLabel(value: string | undefined): string {
   const normalized = value?.trim();
   return normalized && normalized.length > 0 ? normalized : "unknown";
@@ -1080,7 +972,7 @@ const make = Effect.gen(function* () {
 
         const thread = yield* resolveThreadShell(input.threadId);
         if (!thread) return;
-        if (!canReplaceThreadTitle(thread.title, input.titleSeed)) {
+        if (!canAutoReplaceSeededTitle(thread, input.titleSeed)) {
           return;
         }
 
@@ -1425,7 +1317,7 @@ const make = Effect.gen(function* () {
         ...generationInput,
       }).pipe(Effect.forkScoped);
 
-      if (canReplaceThreadTitle(thread.title, event.payload.titleSeed)) {
+      if (canAutoReplaceSeededTitle(thread, event.payload.titleSeed)) {
         yield* maybeGenerateThreadTitleForFirstTurn({
           threadId: event.payload.threadId,
           cwd: generationCwd,
@@ -1883,6 +1775,30 @@ const make = Effect.gen(function* () {
     );
   });
 
+  const maybeRefineThreadTitle = Effect.fn("maybeRefineThreadTitle")(function* (
+    threadId: ThreadId,
+  ) {
+    const thread = yield* resolveThreadShell(threadId);
+    if (!thread) return;
+    const titleState = thread?.titleState;
+    if (
+      titleState?.source !== "generated" ||
+      !titleState.needsRefinement ||
+      thread.titleSource === "manual" ||
+      thread.titleRegeneration != null ||
+      thread.session?.status !== "ready" ||
+      thread.latestTurn?.state !== "completed"
+    ) {
+      return;
+    }
+    yield* orchestrationEngine.dispatch({
+      type: "thread.title.refine",
+      commandId: yield* serverCommandId("thread-title-refine"),
+      threadId,
+      expectedVersion: titleState.version,
+    });
+  });
+
   const processDomainEvent = Effect.fn("processDomainEvent")(function* (
     event: ProviderIntentEvent,
   ) {
@@ -1896,7 +1812,16 @@ const make = Effect.gen(function* () {
     });
     switch (event.type) {
       case "thread.meta-updated":
-        yield* threadTitleRegenerationWorker.enqueue(event);
+        if (event.payload.regenerateTitle === true) {
+          yield* threadTitleRegenerationWorker.enqueue(event);
+        } else if (event.payload.titleState?.needsRefinement === true) {
+          yield* maybeRefineThreadTitle(event.payload.threadId);
+        }
+        return;
+      case "thread.session-set":
+        if (event.payload.session.status === "ready") {
+          yield* maybeRefineThreadTitle(event.payload.threadId);
+        }
         return;
       case "thread.runtime-mode-set": {
         const thread = yield* resolveThreadShell(event.payload.threadId);
@@ -1980,7 +1905,10 @@ const make = Effect.gen(function* () {
     );
     const processEvent = Effect.fn("processEvent")(function* (event: OrchestrationEvent) {
       if (
-        (event.type === "thread.meta-updated" && event.payload.regenerateTitle === true) ||
+        (event.type === "thread.meta-updated" &&
+          (event.payload.regenerateTitle === true ||
+            event.payload.titleState?.needsRefinement === true)) ||
+        (event.type === "thread.session-set" && event.payload.session.status === "ready") ||
         event.type === "thread.runtime-mode-set" ||
         event.type === "thread.turn-start-requested" ||
         event.type === "thread.turn-interrupt-requested" ||
@@ -1996,6 +1924,19 @@ const make = Effect.gen(function* () {
     // Subscribe before returning, even while event handling waits for server activation.
     const domainEvents = yield* orchestrationEngine.subscribeDomainEvents;
     yield* forkParked(Stream.runForEach(domainEvents, processEvent));
+
+    yield* Effect.gen(function* () {
+      const readModel = yield* projectionSnapshotQuery.getCommandReadModel();
+      yield* Effect.forEach(readModel.threads, (thread) => maybeRefineThreadTitle(thread.id), {
+        discard: true,
+      });
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("provider command reactor failed to resume title refinement", {
+          cause: Cause.pretty(cause),
+        }),
+      ),
+    );
 
     // The domain event stream is hot, so work pending before this reactor
     // starts cannot be resumed. Correlated completions only clear the request
