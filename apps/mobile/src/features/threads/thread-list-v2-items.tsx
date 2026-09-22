@@ -45,6 +45,7 @@ import {
   resolveThreadListV2SnoozeGateExpiryMs,
   resolveThreadListV2Status,
   resolveThreadListV2SwipeActions,
+  threadListV2ActivityTimestamp,
   type ThreadListV2Status,
 } from "./threadListV2";
 import { QueuedMessageIcon } from "./queued-message-icon";
@@ -70,7 +71,7 @@ const STATUS_LABEL_BY_STATUS: Partial<
 };
 
 function threadTimeLabel(thread: EnvironmentThreadShell): string {
-  return relativeTime(thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt);
+  return relativeTime(threadListV2ActivityTimestamp(thread));
 }
 
 // Menus keep lifecycle and title regeneration together. Archive keeps its

@@ -318,7 +318,7 @@ export function sortPinnedThreadsByOrderKey<
 }
 
 /** New and reopened threads lead the active list. Arranged threads follow
-    their saved keys; activity leaves both groups in place. */
+    their saved keys; a client may choose how unarranged rows are ordered. */
 export function sortActiveThreadsByOrderKey<
   T extends {
     readonly id: string;
@@ -327,11 +327,11 @@ export function sortActiveThreadsByOrderKey<
     readonly activeOrderKey?: string | null | undefined;
     readonly environmentId?: string | undefined;
   },
->(threads: readonly T[]): T[] {
+>(threads: readonly T[], compareUnordered?: (left: T, right: T) => number): T[] {
   if (threads.length < 2) return [...threads];
   const timestamps = new Map<T, number>();
   for (const thread of threads) {
-    if (thread.activeOrderKey == null) {
+    if (!compareUnordered && thread.activeOrderKey == null) {
       timestamps.set(thread, activeThreadAnchorTimestampMs(thread));
     }
   }
@@ -344,7 +344,9 @@ export function sortActiveThreadsByOrderKey<
     if (leftKey != null && rightKey != null) {
       order = leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
     } else {
-      order = timestamps.get(right)! - timestamps.get(left)!;
+      order = compareUnordered
+        ? compareUnordered(left, right)
+        : timestamps.get(right)! - timestamps.get(left)!;
     }
     return (
       order ||

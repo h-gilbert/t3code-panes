@@ -157,18 +157,45 @@ function parseTimestampMs(isoDate: string): number {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
-/** The active order shared by web and native: new/reopened rows, then the
-    saved arrangement. Activity does not move a thread. */
-export function sortThreadsForListV2<
-  T extends {
-    readonly id: string;
-    readonly createdAt: string;
-    readonly unsettledAt?: string | null | undefined;
-    readonly activeOrderKey?: string | null | undefined;
-    readonly environmentId?: string | undefined;
-  },
->(threads: readonly T[]): T[] {
-  return sortActiveThreadsByOrderKey(threads);
+type ThreadActivityInput = {
+  readonly activeOrderKey?: string | null;
+  readonly environmentId?: string;
+  readonly createdAt: string;
+  readonly latestTurn?: { readonly completedAt: string | null } | null;
+  readonly latestUserMessageAt?: string | null;
+  readonly unsettledAt?: string | null;
+};
+
+/** Prompts and turn completions move rows; streaming and tool updates do not.
+ * Explicit un-settle still brings a thread back to the top. Labels share this timestamp. */
+export function threadListV2ActivityTimestamp(thread: ThreadActivityInput): string {
+  let latest = thread.createdAt;
+  let latestMs = parseTimestampMs(latest);
+  for (const candidate of [
+    thread.latestUserMessageAt,
+    thread.latestTurn?.completedAt,
+    thread.unsettledAt,
+  ]) {
+    if (candidate == null) continue;
+    const timestamp = parseTimestampMs(candidate);
+    if (timestamp > latestMs) {
+      latest = candidate;
+      latestMs = timestamp;
+    }
+  }
+  return latest;
+}
+
+/** Most recently active first, with a stable ID tie-break for equal timestamps. */
+export function sortThreadsForListV2<T extends ThreadActivityInput & { readonly id: string }>(
+  threads: readonly T[],
+): T[] {
+  return sortActiveThreadsByOrderKey(
+    threads,
+    (left, right) =>
+      parseTimestampMs(threadListV2ActivityTimestamp(right)) -
+        parseTimestampMs(threadListV2ActivityTimestamp(left)) || left.id.localeCompare(right.id),
+  );
 }
 
 /** Canonical card section for Move up/down, independent of search or scope. */
@@ -201,7 +228,7 @@ export function getThreadListV2OrderedSection(input: {
   const ordered =
     input.section === "pinned"
       ? sortPinnedThreadsByOrderKey(threads)
-      : sortActiveThreadsByOrderKey(threads);
+      : sortThreadsForListV2(threads);
   const pending =
     input.pendingOrder?.section === input.section
       ? reconcilePendingThreadOrder(input.pendingOrder, ordered)
@@ -334,7 +361,7 @@ export function buildThreadListV2ListItems(input: {
 }
 
 /**
- * Partitions visible threads into the active card block (saved order) and
+ * Partitions visible threads into the active card block (activity order) and
  * the settled recency tail, matching the web v2 list.
  */
 export function buildThreadListV2Items(input: {
