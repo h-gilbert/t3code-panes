@@ -166,7 +166,7 @@ it("prefers GPT-6 Sol over Astra and older Sol when all are available", () => {
   );
 });
 
-it("prefers sol over terra when astra is unavailable", () => {
+it("prefers sol over terra", () => {
   const models = applyPreferredCodexDefaultModel([
     { slug: "gpt-5.6-terra", name: "GPT-5.6-Terra", isCustom: false, capabilities: null },
     { slug: "gpt-5.6-sol", name: "GPT-5.6-Sol", isCustom: false, capabilities: null },

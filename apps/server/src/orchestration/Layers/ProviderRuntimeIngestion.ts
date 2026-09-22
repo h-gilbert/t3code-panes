@@ -194,6 +194,7 @@ const MARKDOWN_FENCE_PATTERN = /^( *)(`{3,}|~{3,})/;
 // CommonMark blank lines hold only spaces and tabs. Other whitespace, such as
 // a no-break space, is paragraph content.
 const BLANK_LINE_PATTERN = /^[ \t]*$/;
+const LIST_ITEM_PATTERN = /^ {0,3}(?:[-+*]|[0-9]{1,9}[.)])[ \t]+\S/;
 
 /**
  * Splits buffered assistant text at the last blank line or closing code fence
@@ -206,6 +207,7 @@ export function splitBufferedAssistantText(text: string): { ready: string; rest:
   let openFence: { marker: string; indent: number } | null = null;
   let boundary = -1;
   let lineStart = 0;
+  let inListItem = false;
   for (;;) {
     const newline = text.indexOf("\n", lineStart);
     if (newline === -1) {
@@ -214,6 +216,7 @@ export function splitBufferedAssistantText(text: string): { ready: string; rest:
     const line = text.slice(lineStart, newline).replace(/[ \t\r]+$/, "");
     const fenceMatch = MARKDOWN_FENCE_PATTERN.exec(line);
     if (fenceMatch) {
+      inListItem = false;
       const indent = fenceMatch[1]!.length;
       const marker = fenceMatch[2]!;
       if (openFence === null) {
@@ -230,8 +233,15 @@ export function splitBufferedAssistantText(text: string): { ready: string; rest:
       }
     } else if (openFence === null && BLANK_LINE_PATTERN.test(line) && lineStart > 0) {
       boundary = newline + 1;
+      inListItem = false;
+    } else if (openFence === null && LIST_ITEM_PATTERN.test(line)) {
+      if (inListItem) boundary = lineStart;
+      inListItem = true;
     }
     lineStart = newline + 1;
+  }
+  if (openFence === null && inListItem && LIST_ITEM_PATTERN.test(text.slice(lineStart))) {
+    boundary = lineStart;
   }
   if (boundary === -1) {
     return { ready: "", rest: text };

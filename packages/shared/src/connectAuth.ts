@@ -20,7 +20,7 @@ export const DEFAULT_HOSTED_APP_URL = "https://app.t3.codes";
  * Requested at authorize time by the hosted page and honored by the CLI's
  * token exchange; keep both sides on this single definition.
  */
-export const CONNECT_OAUTH_SCOPES = ["openid", "profile", "email"] as const;
+export const CONNECT_OAUTH_SCOPES = ["openid", "profile", "email", "offline_access"] as const;
 
 export interface ConnectAuthorizeRequest {
   readonly state: string;

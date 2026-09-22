@@ -12,8 +12,6 @@ an existing worktree, use **New thread in this worktree** from the branch toolba
 
 When you change a new thread's project, T3 Code stays in the current environment
 if that project exists there. Otherwise it selects an environment that has it.
-When you un-settle a thread, it returns to the top of the active list so you can find it right
-away. On web and desktop, other threads keep their positions.
 
 ### Start in the background
 
@@ -21,15 +19,6 @@ In a desktop browser or the desktop app, press `Cmd+Enter` on macOS or `Ctrl+Ent
 on Windows and Linux to start a new thread and immediately open another draft. The
 next draft keeps the workspace mode and base branch you selected. With **New
 worktree**, each background submission creates its own worktree.
-
-On mobile, a new prompt or a completed turn moves a thread up in the default active list.
-Threads you arrange manually retain their chosen order.
-Intermediate tool activity and streaming replies keep its position steady. Relative time labels
-use the latest prompt or turn completion. Pinned threads keep their chosen order, and snoozed and settled threads have separate sections.
-
-On web and desktop, the active list shows the newest threads up to your thread preview limit. Older threads remain
-available through sidebar search. If you open an older thread from search or a link, its row stays
-visible while it is open without making the list taller.
 
 ## Pin and reorder threads
 
@@ -39,6 +28,9 @@ On web and desktop, you can also drag files from your computer onto any thread r
 the thread opens and the files are attached in its composer, ready for
 your next message. The same per-message file limits apply as when attaching
 files directly; see [Attach files](./composer.md#attach-files).
+
+On web and desktop, pinning or unpinning a thread keeps the sidebar at your current
+scroll position instead of following the thread to its new place in the list.
 
 Pinning does not prevent automatic settlement. Settling a thread removes its pin.
 
@@ -134,17 +126,9 @@ Expand a tool call in the conversation to see its full command and output.
 Summaries shorten shell wrappers and can still describe the latest call after it
 finishes; the call's own result shows its status.
 
-## Pane workspaces and settled threads
+## Snooze until later
 
-Clearing a pane removes the view and leaves its thread running. Settling a thread stops its
-provider session and background work, closes managed terminal processes, and keeps their history.
-Finish or interrupt active work and answer pending questions before settling.
-
-A thread that remains settled for seven days is archived. New activity cancels the pending
-archive. Restore archived threads through **Settings → Archive**.
-
-The `/resume` picker lists open threads before settled threads and orders both groups by recent
-activity. Archived threads appear again after you restore them.
-
-Automatically generated titles can refresh as the conversation develops. Renaming a thread
-manually prevents automatic title changes. **Regenerate title** requests a new title explicitly.
+Choose **Snooze → Custom…** from a thread's menu to pick a date and time in your
+local time zone, or a duration in minutes, hours, or days. Durations start when
+you confirm; one day means 24 hours. On web and desktop, you can also snooze
+several selected threads together. Choose **Wake thread** to bring a thread back early.

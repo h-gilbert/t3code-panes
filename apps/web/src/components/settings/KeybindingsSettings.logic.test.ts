@@ -43,6 +43,15 @@ describe("KeybindingsSettings.logic", () => {
       expect.objectContaining({ command: "thread.copyReference", key: "mod+shift+c" }),
     ]);
   });
+  it.each(["pu", "pull request", "copy link", "thread id"])(
+    "finds the copy link shortcut with %s",
+    (query) => {
+      const rows = buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS, query);
+      expect(rows).toContainEqual(
+        expect.objectContaining({ command: "thread.copyReference", key: "mod+shift+c" }),
+      );
+    },
+  );
   it("builds searchable rows with readable key and when values", () => {
     const rows = buildKeybindingRows(
       [

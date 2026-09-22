@@ -64,7 +64,7 @@ requests cannot reuse a tab from another profile, including a provider's pinned 
 Migrations 1 through 43 keep their existing numbers and contents. In particular, 41 records title
 source, 42 adds authentication client connections and 43 records when a thread was unsettled.
 The linked-pull-request migration is 44, followed by project auto-pull at 45, settlement timestamp
-repair at 46, project icons at 47, branch pull requests at 48 and manual active ordering at 49. Multiple thread pull requests use migration 50; message context uses 51. The upstream migration that clears automatic project model
+repair at 46, project icons at 47, branch pull requests at 48 and manual active ordering at 49. Multiple thread pull requests use migration 50; message context uses 51; thread title state uses 52. The upstream migration that clears automatic project model
 defaults is omitted so saved project choices remain intact. Manually assigned titles remain protected
 from automatic title generation.
 
