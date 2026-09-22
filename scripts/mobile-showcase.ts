@@ -708,13 +708,19 @@ async function warmMetroBundle(
 
 async function buildIos(): Promise<string> {
   const derivedData = NodePath.join(MOBILE_ROOT, ".showcase/ios-derived-data");
+  const buildLock = NodePath.join(NodeOS.homedir(), ".claude/hooks/build-lock");
+  const locked = await NodeFSP.access(buildLock).then(
+    () => true,
+    () => false,
+  );
   await runCommand("pnpm", ["exec", "expo", "prebuild", "--clean", "--platform", "ios"], {
     cwd: MOBILE_ROOT,
     env: MOBILE_BUILD_ENV,
   });
   await runCommand(
-    "xcodebuild",
+    locked ? buildLock : "xcodebuild",
     [
+      ...(locked ? ["xcodebuild"] : []),
       "-workspace",
       NodePath.join(MOBILE_ROOT, "ios/T3Code.xcworkspace"),
       "-scheme",
@@ -725,6 +731,8 @@ async function buildIos(): Promise<string> {
       "iphonesimulator",
       "-derivedDataPath",
       derivedData,
+      "-jobs",
+      "2",
       "-quiet",
       `ARCHS=${IOS_SIMULATOR_ARCH}`,
       "ONLY_ACTIVE_ARCH=YES",

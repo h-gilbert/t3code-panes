@@ -459,11 +459,21 @@ const ProjectLucideIconName = TrimmedNonEmptyString.check(
 
 const ProjectEmoji = TrimmedNonEmptyString.check(Schema.isMaxLength(32));
 
-const monogramSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+const monogramSegmenter =
+  typeof Intl.Segmenter === "function"
+    ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
+    : null;
+// Hermes does not provide Intl.Segmenter. Monograms contain only letters,
+// numbers, marks, and joiners, so this fallback covers their allowed clusters.
+const monogramGraphemeCount = (text: string) =>
+  monogramSegmenter
+    ? Array.from(monogramSegmenter.segment(text)).length
+    : Array.from(text.matchAll(/[\p{L}\p{N}]\p{M}*(?:(?:\u200c|\u200d)[\p{L}\p{N}]\p{M}*)*/gu))
+        .length;
 export const ProjectMonogramText = TrimmedNonEmptyString.check(
   Schema.isMaxLength(32),
   Schema.isPattern(/^[\p{L}\p{N}][\p{L}\p{N}\p{M}\u200c\u200d]*$/u),
-  Schema.makeFilter((text) => Array.from(monogramSegmenter.segment(text)).length <= 2),
+  Schema.makeFilter((text) => monogramGraphemeCount(text) <= 2),
 );
 
 export const ProjectIconOverride = Schema.Union([

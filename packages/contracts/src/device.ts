@@ -153,6 +153,8 @@ export const DeviceOpenInput = Schema.Struct({
   platform: DevicePlatform,
   /** Boot the simulator or emulator when it is not running. Defaults to true. */
   boot: Schema.optional(Schema.Boolean),
+  /** Only for an explicit request to run more than one iOS Simulator on this host. */
+  allowMultipleSimulators: Schema.optional(Schema.Boolean),
 });
 export type DeviceOpenInput = typeof DeviceOpenInput.Type;
 
@@ -375,7 +377,7 @@ export class DeviceNotFoundError extends Schema.TaggedError<DeviceNotFoundError>
 export class DeviceBootError extends Schema.TaggedError<DeviceBootError>()("DeviceBootError", {
   hostId: DeviceHostId,
   deviceId: DeviceId,
-  reason: Schema.Literals(["disk_space", "timeout", "launch_failed"]),
+  reason: Schema.Literals(["disk_space", "timeout", "launch_failed", "simulator_limit"]),
   cause: Schema.Defect(),
 }) {
   override get message(): string {
@@ -384,6 +386,8 @@ export class DeviceBootError extends Schema.TaggedError<DeviceBootError>()("Devi
       timeout: "The device did not become ready in time.",
       launch_failed:
         "The simulator or emulator could not start. Check its configuration on the environment server.",
+      simulator_limit:
+        "Another iOS Simulator is already running. Power it off first, or explicitly request multiple simulators.",
     }[this.reason];
     return `Device ${this.deviceId} failed to boot: ${explanation}`;
   }
@@ -467,6 +471,12 @@ export const DeviceToolOpenInput = Schema.Struct({
   ),
   hostId: Schema.optional(
     DeviceHostId.annotate({ description: "Device host from device_list. Defaults to local." }),
+  ),
+  allowMultipleSimulators: Schema.optional(
+    Schema.Boolean.annotate({
+      description:
+        "Permit booting a second iOS Simulator on the same host. Set true only when the user explicitly asks for multiple simulators.",
+    }),
   ),
 }).annotate({
   description:

@@ -167,6 +167,7 @@ const handlers = {
         hostId: target.hostId,
         deviceId: target.id,
         platform: target.platform,
+        allowMultipleSimulators: input.allowMultipleSimulators,
       });
       const after = yield* devices.state;
       const device =

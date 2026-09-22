@@ -15,6 +15,10 @@ installed, the setup screen says so and reuses it.
 
 Choose a running device to watch it, or choose **Start** next to a stopped
 device to boot it. The panel shows when you or an agent starts a device.
+This fork starts only one iOS Simulator per host by default. If another is
+running, T3 asks you to power it off before starting a different one. An agent
+can start an additional simulator only when you explicitly ask it to. T3 does
+not shut down simulators you start directly in Apple's Simulator app.
 Each device opens in its own tab. Use **+ → Device** to open another, and
 double-click a tab name or choose **Rename** from its context menu to rename it.
 Only the visible tab streams video; switching tabs keeps both devices running.
@@ -25,6 +29,10 @@ to bring it back.
 Turn off the device hub in **Settings → Integrations → Devices** to stop the
 helper processes; simulators and emulators keep running until you power them
 off.
+
+For a full-screen view on your Mac, use the Simulator app's own window. It can
+stay open while T3 streams the same running simulator. Opening the device in T3
+attaches its stream; it does not take over the Simulator window.
 
 Simulators run on the machine that hosts the environment server. iOS needs
 macOS with Xcode. Android needs the SDK Platform-Tools, Android Emulator,
@@ -56,7 +64,11 @@ When an agent opens a device, it floats over the chat in web and desktop clients
 connected to the thread, the same way an agent-driven browser does. Turn off
 **Auto-show floating preview** in **Settings → Integrations → Browser** to open a
 right-panel tab instead. Mobile clients show device activity in the thread
-timeline. Agents drive the device through the `agent-device` command line. T3
+timeline. In the iOS app, a thread with an open iOS Simulator also has a
+simulator button in its header. Tap it for a full-screen, read-only live view.
+If you started the simulator directly on your Mac, first open that running
+device in the desktop Device panel to attach it to the thread. Agents drive
+the device through the `agent-device` command line. T3
 Code installs and starts it only after **Agent device access** is enabled. iOS
 taps build a small test runner on first use, which takes a couple of minutes
 once per server. Restart an existing agent session after granting access so it

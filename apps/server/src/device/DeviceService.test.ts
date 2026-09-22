@@ -61,6 +61,8 @@ const fixture = Effect.fn("fixture")(function* (
   onBoot: Effect.Effect<void> = Effect.void,
   bootError?: string,
   failListAfterShutdown = false,
+  iosBooted: ReadonlyArray<string> = [],
+  iosDevices = false,
 ) {
   const settings = yield* Ref.make(DEFAULT_SERVER_SETTINGS);
   const starts: string[] = [];
@@ -68,6 +70,7 @@ const fixture = Effect.fn("fixture")(function* (
   const agentStops: string[] = [];
   const requests: string[] = [];
   let booted = false;
+  const bootedIos = new Set(iosBooted);
   let shutDown = false;
   const ready: DeviceHost.DeviceHostReady = {
     nodePath: process.execPath,
@@ -81,7 +84,10 @@ const fixture = Effect.fn("fixture")(function* (
       id: LOCAL_DEVICE_HOST_ID,
       kind: "local",
       label: "Test server",
-      platforms: [{ platform: "android", available: true }],
+      platforms: [
+        { platform: "android", available: true },
+        { platform: "ios", available: true },
+      ],
       hubInstalled: true,
       agentDeviceInstalled: false,
     }),
@@ -154,18 +160,38 @@ const fixture = Effect.fn("fixture")(function* (
           }
           if (request.url.endsWith("/boot")) {
             yield* onBoot;
-            booted = true;
+            if (iosDevices) {
+              bootedIos.add(bootedIos.has("SIM-A") ? "SIM-B" : "SIM-A");
+            } else {
+              booted = true;
+            }
             return HttpClientResponse.fromWeb(
               request,
               Response.json(
-                bootError ? { ok: false, error: bootError } : { ok: true, serial: "emulator-5554" },
+                bootError
+                  ? { ok: false, error: bootError }
+                  : iosDevices
+                    ? { ok: true }
+                    : { ok: true, serial: "emulator-5554" },
               ),
             );
+          }
+          if (request.url.endsWith("/grid/api/start")) {
+            return HttpClientResponse.fromWeb(request, Response.json({ ok: true }));
           }
           return HttpClientResponse.fromWeb(
             request,
             Response.json({
-              simulators: [],
+              simulators: iosDevices
+                ? ["SIM-A", "SIM-B"].map((id) => ({
+                    id,
+                    name: id,
+                    platform: "ios",
+                    version: "iOS 26.5",
+                    booted: bootedIos.has(id),
+                    physical: false,
+                  }))
+                : [],
               emulators: booted
                 ? [
                     {
@@ -280,6 +306,59 @@ it.effect("publishes boot progress and does not restore sessions after support i
     expect(state.devices).toEqual([]);
     expect(state.sessions).toEqual([]);
     expect(state.bootingDevices).toEqual([]);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("refuses a second iOS Simulator boot but permits an explicit override", () =>
+  Effect.gen(function* () {
+    const { service, requests } = yield* fixture(Effect.void, undefined, false, ["SIM-A"], true);
+    yield* service.configure({ enabled: true });
+    const threadId = ThreadId.make("ios-simulator-limit");
+    const existing = yield* service.open({ threadId, deviceId: "SIM-A", platform: "ios" });
+    expect(existing.deviceId).toBe("SIM-A");
+    const refused = yield* service
+      .open({ threadId, deviceId: "SIM-B", platform: "ios" })
+      .pipe(Effect.flip);
+    expect(refused._tag).toBe("DeviceBootError");
+    expect(refused.message).toContain("Another iOS Simulator is already running");
+    expect(requests.filter((url) => url.endsWith("/boot"))).toHaveLength(0);
+
+    const second = yield* service.open({
+      threadId,
+      deviceId: "SIM-B",
+      platform: "ios",
+      allowMultipleSimulators: true,
+    });
+    expect(second.deviceId).toBe("SIM-B");
+    expect(requests.filter((url) => url.endsWith("/boot"))).toHaveLength(1);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("serializes two competing iOS Simulator opens", () =>
+  Effect.gen(function* () {
+    const firstStarted = yield* Deferred.make<void>();
+    const finishFirst = yield* Deferred.make<void>();
+    const { service, requests } = yield* fixture(
+      Deferred.succeed(firstStarted, undefined).pipe(Effect.andThen(Deferred.await(finishFirst))),
+      undefined,
+      false,
+      [],
+      true,
+    );
+    yield* service.configure({ enabled: true });
+    const first = yield* service
+      .open({ threadId: ThreadId.make("first"), deviceId: "SIM-A", platform: "ios" })
+      .pipe(Effect.forkChild);
+    yield* Deferred.await(firstStarted);
+    const second = yield* service
+      .open({ threadId: ThreadId.make("second"), deviceId: "SIM-B", platform: "ios" })
+      .pipe(Effect.result, Effect.forkChild);
+    yield* Effect.yieldNow;
+    expect(requests.filter((url) => url.endsWith("/boot"))).toHaveLength(1);
+    yield* Deferred.succeed(finishFirst, undefined);
+    expect((yield* Fiber.join(first)).deviceId).toBe("SIM-A");
+    expect((yield* Fiber.join(second))._tag).toBe("Failure");
+    expect(requests.filter((url) => url.endsWith("/boot"))).toHaveLength(1);
   }).pipe(Effect.scoped),
 );
 

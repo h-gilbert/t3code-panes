@@ -182,6 +182,7 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
 ) {
   const settings = yield* ServerSettings.ServerSettingsService;
   const lifecycleLock = yield* Semaphore.make(1);
+  const iosOpenLock = yield* Semaphore.make(1);
   const readDeviceSettings = settings.getSettings.pipe(
     Effect.map((value) => ({
       enabled: value.enableDeviceSupport,
@@ -556,94 +557,119 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
     return result.serial ?? result.id ?? device.id;
   });
 
-  const open: DeviceService["Service"]["open"] = Effect.fn("DeviceService.open")(function* (input) {
-    const host = yield* resolveHost(input.hostId);
-    yield* ensurePlatform(host, input.platform);
-    const ready = yield* readiness(host.id);
-    let state = yield* refresh(ready);
-    let device = findDevice(state, host.id, input.deviceId);
-    if (!device) {
-      return yield* new DeviceNotFoundError({ hostId: host.id, deviceId: input.deviceId });
-    }
-    if (!device.booted && input.boot !== false) {
-      const booting = { ...device, threadId: input.threadId };
-      yield* publish((current) => ({
-        ...current,
-        bootingDevices: [
-          ...(current.bootingDevices ?? []).filter(
-            (entry) => entry.hostId !== booting.hostId || entry.id !== booting.id,
-          ),
-          booting,
-        ],
-      }));
-      const bootedId = yield* boot(ready, device).pipe(
-        Effect.ensuring(
-          publish((current) => ({
-            ...current,
-            bootingDevices: (current.bootingDevices ?? []).filter(
-              (entry) => entry.hostId !== booting.hostId || entry.id !== booting.id,
-            ),
-          })),
-        ),
-      );
-      state = yield* refresh(ready);
-      device = findDevice(state, host.id, bootedId) ?? findDevice(state, host.id, device.id);
+  const openUnlocked: DeviceService["Service"]["open"] = Effect.fn("DeviceService.open")(
+    function* (input) {
+      const host = yield* resolveHost(input.hostId);
+      yield* ensurePlatform(host, input.platform);
+      const ready = yield* readiness(host.id);
+      let state = yield* refresh(ready);
+      let device = findDevice(state, host.id, input.deviceId);
       if (!device) {
-        return yield* new DeviceNotFoundError({ hostId: host.id, deviceId: bootedId });
+        return yield* new DeviceNotFoundError({ hostId: host.id, deviceId: input.deviceId });
       }
-    } else if (device.platform === "ios" && device.booted) {
-      // A simulator booted outside T3 has no helper attached yet.
-      yield* HttpClientRequest.post(
-        `${ready.hub.origin}${vendorPrefix("ios")}/grid/api/start`,
-      ).pipe(
-        HttpClientRequest.bodyJson({ udid: device.id }),
-        Effect.mapError(
-          (cause) =>
-            new DeviceOperationError({ operation: "open", reason: "invalid_payload", cause }),
-        ),
-        Effect.flatMap((request) =>
-          hubJson(request, HubActionResult, "attach stream", BOOT_TIMEOUT),
-        ),
-      );
-    }
-    if (hosts.get(host.id) !== host)
-      return yield* new DeviceHostUnavailableError({
-        hostId: host.id,
-        reason: "Host configuration changed. Retry the operation.",
-      });
-    const openedAt = DateTime.formatIso(yield* DateTime.now);
-    const session: DeviceSession = {
-      threadId: input.threadId,
-      hostId: host.id,
-      deviceId: device.id,
-      platform: device.platform,
-      openedAt,
-    };
-    yield* lifecycleLock.withPermit(
-      Effect.gen(function* () {
-        if (!(yield* readDeviceSettings).enabled)
-          return yield* new DeviceHostUnavailableError({
+      if (!device.booted && input.boot !== false) {
+        if (
+          device.platform === "ios" &&
+          !device.physical &&
+          !input.allowMultipleSimulators &&
+          state.devices.some(
+            (other) =>
+              other.hostId === host.id &&
+              other.platform === "ios" &&
+              !other.physical &&
+              other.booted &&
+              other.id !== input.deviceId,
+          )
+        ) {
+          return yield* new DeviceBootError({
             hostId: host.id,
-            reason: "Device support was turned off while the device was opening.",
+            deviceId: device.id,
+            reason: "simulator_limit",
+            cause: "Another simulator is already booted on this host.",
           });
+        }
+        const booting = { ...device, threadId: input.threadId };
         yield* publish((current) => ({
           ...current,
-          sessions: [
-            ...current.sessions.filter(
-              (existing) =>
-                !(
-                  existing.threadId === session.threadId &&
-                  existing.hostId === session.hostId &&
-                  existing.deviceId === session.deviceId
-                ),
+          bootingDevices: [
+            ...(current.bootingDevices ?? []).filter(
+              (entry) => entry.hostId !== booting.hostId || entry.id !== booting.id,
             ),
-            session,
+            booting,
           ],
         }));
-      }),
-    );
-    return session;
-  });
+        const bootedId = yield* boot(ready, device).pipe(
+          Effect.ensuring(
+            publish((current) => ({
+              ...current,
+              bootingDevices: (current.bootingDevices ?? []).filter(
+                (entry) => entry.hostId !== booting.hostId || entry.id !== booting.id,
+              ),
+            })),
+          ),
+        );
+        state = yield* refresh(ready);
+        device = findDevice(state, host.id, bootedId) ?? findDevice(state, host.id, device.id);
+        if (!device) {
+          return yield* new DeviceNotFoundError({ hostId: host.id, deviceId: bootedId });
+        }
+      } else if (device.platform === "ios" && device.booted) {
+        // A simulator booted outside T3 has no helper attached yet.
+        yield* HttpClientRequest.post(
+          `${ready.hub.origin}${vendorPrefix("ios")}/grid/api/start`,
+        ).pipe(
+          HttpClientRequest.bodyJson({ udid: device.id }),
+          Effect.mapError(
+            (cause) =>
+              new DeviceOperationError({ operation: "open", reason: "invalid_payload", cause }),
+          ),
+          Effect.flatMap((request) =>
+            hubJson(request, HubActionResult, "attach stream", BOOT_TIMEOUT),
+          ),
+        );
+      }
+      if (hosts.get(host.id) !== host)
+        return yield* new DeviceHostUnavailableError({
+          hostId: host.id,
+          reason: "Host configuration changed. Retry the operation.",
+        });
+      const openedAt = DateTime.formatIso(yield* DateTime.now);
+      const session: DeviceSession = {
+        threadId: input.threadId,
+        hostId: host.id,
+        deviceId: device.id,
+        platform: device.platform,
+        openedAt,
+      };
+      yield* lifecycleLock.withPermit(
+        Effect.gen(function* () {
+          if (!(yield* readDeviceSettings).enabled)
+            return yield* new DeviceHostUnavailableError({
+              hostId: host.id,
+              reason: "Device support was turned off while the device was opening.",
+            });
+          yield* publish((current) => ({
+            ...current,
+            sessions: [
+              ...current.sessions.filter(
+                (existing) =>
+                  !(
+                    existing.threadId === session.threadId &&
+                    existing.hostId === session.hostId &&
+                    existing.deviceId === session.deviceId
+                  ),
+              ),
+              session,
+            ],
+          }));
+        }),
+      );
+      return session;
+    },
+  );
+  // A second open must re-discover after the first boot before deciding whether it may start.
+  const open: DeviceService["Service"]["open"] = (input) =>
+    input.platform === "ios" ? iosOpenLock.withPermit(openUnlocked(input)) : openUnlocked(input);
 
   const shutdownDevice = Effect.fn("DeviceService.shutdownDevice")(function* (
     hostId: DeviceHostId,

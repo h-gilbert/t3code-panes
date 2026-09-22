@@ -43,6 +43,15 @@ and closing the session. Browser interaction and automation must preserve compos
 Device streams use their own aspect-ratio-aware floating viewer; they must not replace the browser's
 fixed-preview and window restoration behavior.
 
+## Simulator ownership
+
+T3 refuses to boot a second iOS Simulator on the same host unless the user explicitly requests
+multiple simulators. It may attach to any already-running simulator, including one started directly
+in Apple's Simulator app, and must not shut down another simulator to satisfy the limit. The
+private iOS client can watch a thread's open simulator through the authenticated MJPEG proxy;
+watching does not grant simulator control. Repository iOS build helpers use the Mac's shared build
+lock when present, with at most two Xcode compilation jobs.
+
 ## Browser storage
 
 Snapshots carry both legacy `browserScope` and managed `profileId`. A legacy scope takes precedence

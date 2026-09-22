@@ -30,6 +30,7 @@ import { restoredNewTaskDraftKey } from "../../state/new-task-draft-key";
 import { clearPendingThreadCreationOutcome } from "../../state/pending-thread-creation";
 import { recoverFailedThreadDraft } from "../../state/recover-failed-thread-draft";
 import { useEnvironmentQuery } from "../../state/query";
+import { useDeviceState } from "../../state/device";
 import { dismissGitActionResult, useGitActionProgress } from "../../state/use-vcs-action-state";
 import { vcsEnvironment } from "../../state/vcs";
 
@@ -69,6 +70,7 @@ import {
   useThreadGitRightHeaderItems,
 } from "./ThreadGitControls";
 import { GitOverviewSheet } from "./git/GitOverviewSheet";
+import { SimulatorViewer } from "../devices/SimulatorViewer";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useSelectedThreadGitActions } from "../../state/use-selected-thread-git-actions";
 import { useSelectedThreadGitState } from "../../state/use-selected-thread-git-state";
@@ -260,6 +262,17 @@ function ThreadRouteContent(
     };
   }, [selectedThread, selectedThreadDetailState]);
   const { selectedThreadCwd } = useSelectedThreadWorktree();
+  const deviceState = useDeviceState(selectedThread?.environmentId ?? null);
+  const [simulatorViewerOpen, setSimulatorViewerOpen] = useState(false);
+  const simulatorSession = deviceState?.sessions.find(
+    (session) => session.threadId === selectedThread?.id && session.platform === "ios",
+  );
+  const simulatorDevice = simulatorSession
+    ? deviceState?.devices.find(
+        (device) =>
+          device.hostId === simulatorSession.hostId && device.id === simulatorSession.deviceId,
+      )
+    : undefined;
   const composer = useThreadComposerState();
   const gitState = useSelectedThreadGitState();
   const gitActions = useSelectedThreadGitActions();
@@ -693,6 +706,15 @@ function ThreadRouteContent(
   };
   const threadCenterHeaderItems = useThreadGitCenterHeaderItems(threadGitControlProps);
   const compactRightHeaderItems = useThreadGitRightHeaderItems(threadGitControlProps);
+  const simulatorHeaderItem = simulatorDevice
+    ? withNativeGlassHeaderItem({
+        accessibilityLabel: `View ${simulatorDevice.name} live`,
+        icon: { name: "iphone", type: "sfSymbol" as const },
+        identifier: "thread-view-simulator",
+        onPress: () => setSimulatorViewerOpen(true),
+        type: "button" as const,
+      })
+    : null;
   const splitLeftHeaderItems = useMemo<NativeHeaderItems>(
     () => [
       {
@@ -962,7 +984,7 @@ function ThreadRouteContent(
     <>
       {activeInspectorRenderer ? <InspectorPaneRoleActivation /> : null}
       <NativeStackScreenOptions
-        optionsVersion={threadGitControlProps.projectScripts}
+        optionsVersion={[threadGitControlProps.projectScripts, simulatorDevice?.id]}
         options={{
           // Android draws its own in-flow header (AndroidScreenHeader below);
           // the native stack header stays iOS-only.
@@ -992,7 +1014,10 @@ function ThreadRouteContent(
           // reserved for future breadcrumbs/status).
           unstable_headerRightItems:
             Platform.OS === "ios"
-              ? () => (layout.usesSplitView ? threadCenterHeaderItems : compactRightHeaderItems)
+              ? () => [
+                  ...(layout.usesSplitView ? threadCenterHeaderItems : compactRightHeaderItems),
+                  ...(simulatorHeaderItem ? [simulatorHeaderItem] : []),
+                ]
               : undefined,
           unstable_headerSubtitle: usesNativeHeaderGlass ? headerSubtitle : undefined,
           contentStyle:
@@ -1026,6 +1051,13 @@ function ThreadRouteContent(
       {renderThreadRouteBody(
         Platform.OS !== "android" && !layout.usesSplitView && !usesNativeHeaderGlass,
       )}
+      {simulatorViewerOpen && simulatorDevice ? (
+        <SimulatorViewer
+          environmentId={selectedThread.environmentId}
+          device={simulatorDevice}
+          onClose={() => setSimulatorViewerOpen(false)}
+        />
+      ) : null}
     </>
   );
 }
