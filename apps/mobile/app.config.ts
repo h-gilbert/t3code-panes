@@ -185,7 +185,7 @@ const config: ExpoConfig = {
   // Keep the established t3code:// alias in private builds so existing links
   // continue to route back into the containing app.
   scheme: isSelfHostedBuild ? [appScheme, "t3code"] : appScheme,
-  version: "1.1.0",
+  version: "1.1.1",
   runtimeVersion: {
     // Development manifests resolve on every launch, so avoid fingerprint's
     // expensive native-project calculation there. Preview and production stay
@@ -196,7 +196,7 @@ const config: ExpoConfig = {
   icon: variant.assets.appIcon,
   userInterfaceStyle: "automatic",
   updates: {
-    enabled: !isSelfHostedBuild,
+    enabled: !isSelfHostedBuild && repoEnv.T3CODE_MOBILE_UPDATES_ENABLED !== "0",
     ...(!isSelfHostedBuild
       ? { url: "https://u.expo.dev/d763fcb8-d37c-41ea-a773-b54a0ab4a454" }
       : {}),
@@ -218,9 +218,7 @@ const config: ExpoConfig = {
       ? []
       : [`applinks:${variant.relyingParty}`, `webcredentials:${variant.relyingParty}`],
     entitlements: {
-      "keychain-access-groups": [
-        `$(AppIdentifierPrefix)${iosBundleIdentifier}`,
-      ],
+      "keychain-access-groups": [`$(AppIdentifierPrefix)${iosBundleIdentifier}`],
     },
     infoPlist: {
       NSAppTransportSecurity: {
@@ -250,6 +248,9 @@ const config: ExpoConfig = {
   android: {
     icon: variant.assets.appIcon,
     package: variant.androidPackage,
+    ...(repoEnv.T3CODE_ANDROID_GOOGLE_SERVICES_FILE
+      ? { googleServicesFile: repoEnv.T3CODE_ANDROID_GOOGLE_SERVICES_FILE }
+      : {}),
     adaptiveIcon: {
       backgroundColor: variant.assets.androidAdaptiveBackgroundColor,
       ...(variant.assets.androidAdaptiveBackgroundImage
@@ -369,6 +370,10 @@ const config: ExpoConfig = {
     [
       "expo-build-properties",
       {
+        android: {
+          // Keep the supported floor explicit and covered by native notification tests.
+          minSdkVersion: 24,
+        },
         ios: {
           deploymentTarget: "18.0",
           // AppCheckCore 11.3+ includes Swift and needs module maps for these Objective-C dependencies.

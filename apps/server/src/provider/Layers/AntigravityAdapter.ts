@@ -220,6 +220,38 @@ function isInsideRoot(path: Path.Path, root: string, candidate: string): boolean
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
+/**
+ * `directory` resolved through symlinks, including when it does not exist yet.
+ *
+ * `realPath` fails outright on a missing directory, and falling back to the
+ * unresolved path then compares it against resolved roots — so a workspace
+ * reached through a symlink (every macOS temp dir, and any symlinked project
+ * directory) rejected writes that create their parent directories. Resolve the
+ * deepest ancestor that does exist and re-append the missing segments.
+ */
+const resolveDirectoryThroughSymlinks = Effect.fn(
+  "AntigravityAdapter.resolveDirectoryThroughSymlinks",
+)(function* (input: {
+  readonly fileSystem: FileSystem.FileSystem;
+  readonly path: Path.Path;
+  readonly directory: string;
+}) {
+  const { path } = input;
+  const missing: Array<string> = [];
+  let current = input.directory;
+  while (true) {
+    const resolved = yield* input.fileSystem
+      .realPath(current)
+      .pipe(Effect.orElseSucceed(() => null));
+    if (resolved !== null) return path.join(resolved, ...missing);
+    const parent = path.dirname(current);
+    // A filesystem root that cannot be resolved leaves nothing to anchor to.
+    if (parent === current) return input.directory;
+    missing.unshift(path.basename(current));
+    current = parent;
+  }
+});
+
 /** Resolves an agent-supplied path and rejects anything outside the session roots. */
 const resolveClientFilePath = Effect.fn("AntigravityAdapter.resolveClientFilePath")(
   function* (input: {
@@ -231,9 +263,11 @@ const resolveClientFilePath = Effect.fn("AntigravityAdapter.resolveClientFilePat
     const { path } = input;
     const resolved = path.resolve(input.requestPath);
     // Follow symlinks on the parent so a link out of the workspace cannot escape it.
-    const parent = yield* input.fileSystem
-      .realPath(path.dirname(resolved))
-      .pipe(Effect.orElseSucceed(() => path.dirname(resolved)));
+    const parent = yield* resolveDirectoryThroughSymlinks({
+      fileSystem: input.fileSystem,
+      path,
+      directory: path.dirname(resolved),
+    });
     const real = path.join(parent, path.basename(resolved));
     const roots = yield* Effect.forEach(input.allowedRoots, (root) =>
       input.fileSystem.realPath(root).pipe(Effect.orElseSucceed(() => root)),
@@ -793,6 +827,9 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
                 cwd,
                 clientInfo: { name: "t3-code", version: "0.0.0" },
                 clientFileSystem: true,
+                ...(mcp?.agentDeviceEnvironment
+                  ? { agentDeviceEnvironment: mcp.agentDeviceEnvironment }
+                  : {}),
                 additionalDirectories: [serverConfig.attachmentsDir],
                 ...(Option.isSome(cursor) ? { resumeSessionId: cursor.value.sessionId } : {}),
                 mcpServers: mcp

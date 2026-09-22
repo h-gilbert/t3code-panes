@@ -51,10 +51,10 @@ describe("chatThreadActions", () => {
     expect(hasExplicitComposerModelSelection({ ...draft, activeProvider: null })).toBe(false);
   });
 
-  it("defaults new chats to Astra with medium reasoning", () => {
+  it("defaults new chats to Sol with medium reasoning", () => {
     expect(DEFAULT_NEW_CHAT_MODEL_SELECTION).toEqual({
       instanceId: "codex",
-      model: "gpt-6-astra",
+      model: "gpt-6-sol",
       options: [{ id: "reasoningEffort", value: "medium" }],
     });
   });

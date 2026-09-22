@@ -31,7 +31,11 @@ import {
   reconcilePreviewServerSessions,
   updatePreviewServerSnapshot,
 } from "~/previewStateStore";
-import { selectThreadPreviewMiniPlayer, usePreviewMiniPlayerStore } from "~/previewMiniPlayerStore";
+import {
+  browserMiniPlayerSource,
+  selectThreadPreviewMiniPlayerTabId,
+  usePreviewMiniPlayerStore,
+} from "~/previewMiniPlayerStore";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { resolveBrowserNavigationTarget } from "~/browser/browserTargetResolver";
 import {
@@ -385,7 +389,9 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
                     ?.has(runtimeTabId) ?? false,
               })
             ) {
-              usePreviewMiniPlayerStore.getState().open(threadRef, readyTabId);
+              usePreviewMiniPlayerStore
+                .getState()
+                .open(threadRef, browserMiniPlayerSource(readyTabId));
             }
           }
           browserActivity.release ??= acquireBrowserSurfaceActivity(runtimeTabId);
@@ -508,11 +514,11 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
                   new Set([activeRuntimeTabId]),
                 );
               }
-              const miniPlayer = selectThreadPreviewMiniPlayer(
+              const miniPlayerTabId = selectThreadPreviewMiniPlayerTabId(
                 usePreviewMiniPlayerStore.getState().byThreadKey,
                 threadRef,
               );
-              if (miniPlayer?.tabId === activeTabId) {
+              if (miniPlayerTabId === activeTabId) {
                 usePreviewMiniPlayerStore.getState().close(threadRef);
               }
             } else if (shouldPresentPreview) {
@@ -522,7 +528,9 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
               }
             }
             if (shouldPresentPreview) {
-              usePreviewMiniPlayerStore.getState().open(threadRef, activeTabId);
+              usePreviewMiniPlayerStore
+                .getState()
+                .open(threadRef, browserMiniPlayerSource(activeTabId));
             }
             if (activeSnapshot && previewAutomationOpenNeedsOverlay(input, activeSnapshot)) {
               await requireReadyTab();
@@ -787,11 +795,11 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
             }
             // The session is gone; remove every client presentation of the
             // tab so a close by the agent never strands an orphaned surface.
-            const miniPlayer = selectThreadPreviewMiniPlayer(
+            const miniPlayerTabId = selectThreadPreviewMiniPlayerTabId(
               usePreviewMiniPlayerStore.getState().byThreadKey,
               threadRef,
             );
-            if (miniPlayer?.tabId === closeTabId) {
+            if (miniPlayerTabId === closeTabId) {
               usePreviewMiniPlayerStore.getState().close(threadRef);
             }
             useRightPanelStore.getState().closeSurface(threadRef, `browser:${closeTabId}`);

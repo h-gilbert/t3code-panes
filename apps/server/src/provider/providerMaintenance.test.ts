@@ -35,10 +35,15 @@ const driver = (value: string) => ProviderDriverKind.make(value);
 // These write `#!/bin/sh` stubs and evaluate them with darwin/linux path
 // semantics; a Windows temp path cannot be split on `:`.
 const windowsHost = HostProcessPlatform.defaultValue() === "win32";
+// macOS reports the temp root as /var/folders/... but resolves it to
+// /private/var, and npm ownership is decided by comparing resolved paths, so
+// canonicalise once here rather than in each expectation.
+const TEMP_ROOT = NodeFS.realpathSync(NodeOS.tmpdir());
+
 const makeTempDir = (name: string) =>
   Crypto.Crypto.pipe(
     Effect.flatMap((crypto) => crypto.randomUUIDv4),
-    Effect.map((id) => NodePath.join(NodeOS.tmpdir(), `${name}-${id}`)),
+    Effect.map((id) => NodePath.join(TEMP_ROOT, `${name}-${id}`)),
   );
 const isNativeTestCommandPath =
   (expectedPathSegment: string) =>

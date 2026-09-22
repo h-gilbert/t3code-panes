@@ -63,4 +63,4 @@ if ! mv "$staged_app" "$installed_app"; then
 fi
 /usr/bin/open "$installed_app"
 echo "Installed $version. Previous app: $backup"
-echo 'Check that your connections, threads, and panes reappear and a new thread selects Astra.'
+echo 'Check that your connections, threads, and panes reappear and a new thread selects Sol.'

@@ -1,3 +1,5 @@
+import type * as Electron from "electron";
+import { registerWorkspaceWindow } from "../../window/workspaceWindows.ts";
 import { assert, describe, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
@@ -9,6 +11,7 @@ import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as ElectronDialog from "../../electron/ElectronDialog.ts";
 import * as DesktopSnapShot from "../../snapShot/DesktopSnapShot.ts";
 import {
+  listPendingSnapShots,
   checkSnapShotShortcut,
   requestSnapShotPermissions,
   setupSnapShot,
@@ -21,6 +24,47 @@ import {
 } from "./snapShot.ts";
 
 describe("window capture IPC", () => {
+  it.effect("allows a managed secondary workspace and rejects it after close", () => {
+    let close = () => {};
+    registerWorkspaceWindow({
+      webContents: { id: 9001 },
+      isDestroyed: () => false,
+      once: (_event: string, listener: () => void) => {
+        close = listener;
+      },
+    } as unknown as Electron.BrowserWindow);
+    return Effect.gen(function* () {
+      try {
+        assert.deepEqual(
+          yield* listPendingSnapShots.handler(undefined, { sender: { id: 9001 } }),
+          [],
+        );
+        const guest = yield* Effect.exit(
+          listPendingSnapShots.handler(undefined, { sender: { id: 9002 } }),
+        );
+        assert(Exit.isFailure(guest));
+        close();
+        const closed = yield* Effect.exit(
+          listPendingSnapShots.handler(undefined, { sender: { id: 9001 } }),
+        );
+        assert(Exit.isFailure(closed));
+      } finally {
+        close();
+      }
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          Layer.succeed(ElectronWindow.ElectronWindow, {
+            main: Effect.succeed(Option.none()),
+          } as ElectronWindow.ElectronWindow["Service"]),
+          Layer.succeed(DesktopSnapShot.DesktopSnapShot, {
+            listPending: Effect.succeed([]),
+          } as unknown as DesktopSnapShot.DesktopSnapShot["Service"]),
+        ),
+      ),
+    );
+  });
+
   const configPreview = {
     id: "12345678-1234-1234-1234-123456789abc",
     path: "/config/niri/config.kdl",

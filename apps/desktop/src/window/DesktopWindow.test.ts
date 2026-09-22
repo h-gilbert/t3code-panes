@@ -235,6 +235,7 @@ function makeTestLayer(input: {
   readonly workspaceWindowRemovals?: string[];
   readonly desktopStateLayer?: Layer.Layer<DesktopState.DesktopState>;
   readonly onReveal?: (window: Electron.BrowserWindow) => void;
+  readonly focusedWindow?: Electron.BrowserWindow;
 }) {
   let desktopSettings = input.desktopSettings ?? DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS;
   const desktopAppSettingsLayer = Layer.succeed(DesktopAppSettings.DesktopAppSettings, {
@@ -304,7 +305,9 @@ function makeTestLayer(input: {
       ),
     main: Ref.get(input.mainWindow),
     currentMainOrFirst: Ref.get(input.mainWindow),
-    focusedMainOrFirst: Ref.get(input.mainWindow),
+    focusedMainOrFirst: input.focusedWindow
+      ? Effect.succeed(Option.some(input.focusedWindow))
+      : Ref.get(input.mainWindow),
     fromWebContents: () => Effect.succeed(Option.none()),
     setMain: (window) => Ref.set(input.mainWindow, Option.some(window)),
     clearMain: () => Ref.set(input.mainWindow, Option.none()),
@@ -675,6 +678,30 @@ describe("DesktopWindow", () => {
     );
   });
 
+  it.each(["t3code", "t3code-dev"])(
+    "opens %s hash workspace routes only on the app host",
+    (scheme) => {
+      assert.isTrue(
+        DesktopWindow.isWorkspaceRendererWindow({
+          applicationUrl: `${scheme}://app/`,
+          navigationUrl: `${scheme}://app/#/workspace?workspace=independent-window`,
+        }),
+      );
+      for (const navigationUrl of [
+        `${scheme}://other/#/workspace?workspace=other`,
+        `other-app://app/#/workspace?workspace=other`,
+        `${scheme}://app/#/settings`,
+      ]) {
+        assert.isFalse(
+          DesktopWindow.isWorkspaceRendererWindow({
+            applicationUrl: `${scheme}://app/`,
+            navigationUrl,
+          }),
+        );
+      }
+    },
+  );
+
   it.effect("does not open a development window until the backend is ready", () =>
     Effect.gen(function* () {
       const fakeWindow = makeFakeBrowserWindow();
@@ -795,7 +822,7 @@ describe("DesktopWindow", () => {
           .filter(([event]) => event === "closed")
           .map(([, listener]) => listener);
         assert.isDefined(rendererBlurred);
-        assert.equal(closedCallbacks.length, 2);
+        assert.equal(closedCallbacks.length, 3);
         for (const property of ["id", "webContents"]) {
           Object.defineProperty(fakeWindow.window, property, {
             get() {
@@ -1677,6 +1704,28 @@ describe("DesktopWindow", () => {
           assert.deepEqual(yield* Ref.get(scenario.revealedWindows), [splash.window]);
         }).pipe(Effect.provide(scenario.layer));
       }),
+  );
+
+  it.effect("sends paste-as-text to the focused workspace without revealing or focusing it", () =>
+    Effect.gen(function* () {
+      const main = makeFakeBrowserWindow();
+      const secondary = makeFakeBrowserWindow();
+      const reveal = vi.fn();
+      const layer = makeTestLayer({
+        window: main.window,
+        focusedWindow: secondary.window,
+        mainWindow: yield* Ref.make(Option.some(main.window)),
+        createCount: yield* Ref.make(0),
+        onReveal: reveal,
+      });
+      yield* Effect.gen(function* () {
+        const service = yield* DesktopWindow.DesktopWindow;
+        yield* service.dispatchMenuAction("paste-as-text", { reveal: false });
+        assert.deepEqual(secondary.send.mock.calls, [[MENU_ACTION_CHANNEL, "paste-as-text"]]);
+        assert.equal(main.send.mock.calls.length, 0);
+        assert.equal(reveal.mock.calls.length, 0);
+      }).pipe(Effect.provide(layer));
+    }),
   );
 
   it.effect("does not dispatch menu actions to the splash before the backend is ready", () =>

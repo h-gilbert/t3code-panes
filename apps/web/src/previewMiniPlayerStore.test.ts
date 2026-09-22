@@ -2,7 +2,11 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { type EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { selectThreadPreviewMiniPlayer, usePreviewMiniPlayerStore } from "./previewMiniPlayerStore";
+import {
+  selectThreadPreviewMiniPlayerTabId,
+  selectThreadPreviewMiniPlayer,
+  usePreviewMiniPlayerStore,
+} from "./previewMiniPlayerStore";
 
 const refA = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("thread-A"));
 const refB = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("thread-B"));
@@ -41,10 +45,14 @@ describe("previewMiniPlayerStore", () => {
 
     expect(
       selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
-    ).toMatchObject({ tabId: "tab-a", maximized: false, floating: false });
+    ).toMatchObject({
+      source: { kind: "browser", tabId: "tab-a" },
+      maximized: false,
+      floating: false,
+    });
     expect(
       selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refB),
-    ).toMatchObject({ tabId: "tab-b" });
+    ).toMatchObject({ source: { kind: "browser", tabId: "tab-b" } });
   });
 
   it("preserves position when switching the floating tab within one thread", () => {
@@ -55,9 +63,10 @@ describe("previewMiniPlayerStore", () => {
     expect(
       selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
     ).toEqual({
-      tabId: "tab-b",
+      source: { kind: "browser", tabId: "tab-b" },
       position: { x: 24, y: 48 },
       size: null,
+      width: null,
       maximized: false,
       floating: false,
     });
@@ -71,9 +80,10 @@ describe("previewMiniPlayerStore", () => {
     expect(
       selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
     ).toEqual({
-      tabId: "tab-b",
+      source: { kind: "browser", tabId: "tab-b" },
       position: null,
       size: null,
+      width: null,
       maximized: false,
       floating: false,
     });
@@ -86,7 +96,10 @@ describe("previewMiniPlayerStore", () => {
 
     expect(
       selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
-    ).toMatchObject({ tabId: "tab-b", size: { width: 480, height: 320 } });
+    ).toMatchObject({
+      source: { kind: "browser", tabId: "tab-b" },
+      size: { width: 480, height: 320 },
+    });
   });
 
   it("preserves fullscreen state while switching tabs", () => {
@@ -96,7 +109,7 @@ describe("previewMiniPlayerStore", () => {
 
     expect(
       selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
-    ).toMatchObject({ tabId: "tab-b", maximized: true });
+    ).toMatchObject({ source: { kind: "browser", tabId: "tab-b" }, maximized: true });
   });
 });
 
@@ -146,5 +159,48 @@ describe("browser window transitions", () => {
       selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refB)
         ?.floating,
     ).toBe(false);
+  });
+});
+
+describe("device mini players", () => {
+  it("replaces the browser without borrowing its fullscreen geometry", () => {
+    const store = usePreviewMiniPlayerStore.getState();
+    store.open(refA, "tab-a");
+    store.setMaximized(refA, "tab-a", true);
+    store.resize(refA, "tab-a", { width: 900, height: 600 });
+    const source = {
+      kind: "device",
+      platform: "ios",
+      hostId: "local",
+      deviceId: "phone",
+      name: "iPhone",
+    } as const;
+    store.open(refA, source);
+    const state = selectThreadPreviewMiniPlayer(
+      usePreviewMiniPlayerStore.getState().byThreadKey,
+      refA,
+    );
+    expect(state).toMatchObject({
+      source,
+      maximized: false,
+      position: null,
+      size: null,
+      width: null,
+    });
+    expect(
+      selectThreadPreviewMiniPlayerTabId(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
+    ).toBeNull();
+    store.move(refA, "tab-a", { x: 999, y: 999 });
+    expect(
+      selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
+    ).toBe(state);
+    store.resize(refA, "device:local:phone", 240);
+    expect(
+      selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA)?.width,
+    ).toBe(240);
+    store.open(refA, { ...source, name: "Renamed" });
+    expect(
+      selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA)?.width,
+    ).toBe(240);
   });
 });

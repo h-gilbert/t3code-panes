@@ -50,35 +50,23 @@ export const fetchEnvironmentPullRequestDiff = Effect.fn(
 }) {
   return yield* executeAuthenticatedEnvironmentHttpRequest({
     ...input,
+    group: "pullRequests",
     method: "POST",
     url: (httpBaseUrl) => makeEnvironmentHttpApiUrlBuilder(httpBaseUrl).pullRequests.diff(),
     timeoutMs: input.timeoutMs ?? DEFAULT_PULL_REQUEST_DIFF_TIMEOUT_MS,
-    request: ({ client, headers }) => client.pullRequests.diff({ payload: input.diff, headers }),
-  })
-    .pipe(
-      Effect.mapError((error) =>
-        error._tag === "EnvironmentAuthInvalidError" && error.reason === "invalid_credential"
-          ? new PullRequestDiffCredentialRejectedError({
-              repository: input.diff.repository,
-              number: input.diff.number,
-              traceId: error.traceId,
-              cause: error,
-            })
-          : error,
-      ),
-    )
-    .pipe(
-      Effect.mapError((error) =>
-        error._tag === "EnvironmentAuthInvalidError" && error.reason === "invalid_credential"
-          ? new PullRequestDiffCredentialRejectedError({
-              repository: input.diff.repository,
-              number: input.diff.number,
-              traceId: error.traceId,
-              cause: error,
-            })
-          : error,
-      ),
-    );
+    request: ({ client, headers }) => client.diff({ payload: input.diff, headers }),
+  }).pipe(
+    Effect.mapError((error) =>
+      error._tag === "EnvironmentAuthInvalidError" && error.reason === "invalid_credential"
+        ? new PullRequestDiffCredentialRejectedError({
+            repository: input.diff.repository,
+            number: input.diff.number,
+            traceId: error.traceId,
+            cause: error,
+          })
+        : error,
+    ),
+  );
 });
 
 export class PullRequestDiffLoader extends Context.Service<

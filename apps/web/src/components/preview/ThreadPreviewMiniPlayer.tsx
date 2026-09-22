@@ -1,3 +1,4 @@
+import { DeviceMiniPlayer } from "./DeviceMiniPlayer";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 
 import { type ScopedThreadRef } from "@t3tools/contracts";
@@ -12,7 +13,12 @@ import { Button } from "~/components/ui/button";
 import { toastManager } from "~/components/ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { useThreadPreviewState } from "~/previewStateStore";
-import { selectThreadPreviewMiniPlayer, usePreviewMiniPlayerStore } from "~/previewMiniPlayerStore";
+import {
+  previewMiniPlayerSourceKey,
+  type PreviewMiniPlayerState,
+  selectThreadPreviewMiniPlayer,
+  usePreviewMiniPlayerStore,
+} from "~/previewMiniPlayerStore";
 
 import { previewEnvironment } from "~/state/preview";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -63,12 +69,12 @@ const RESIZE_HANDLES: ReadonlyArray<{
   { direction: "southeast", className: "-bottom-2 -right-2 size-4 cursor-nwse-resize" },
 ];
 
-interface Props {
+interface BrowserProps {
   readonly threadRef: ScopedThreadRef;
   readonly tabId: string;
 }
 
-export function ThreadPreviewMiniPlayer({ threadRef, tabId }: Props) {
+function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
   const [anchorLayout, setAnchorLayout] = useState(0);
   const rootRef = useRef<HTMLElement | null>(null);
   const anchorRef = useRef<HTMLDivElement | null>(null);
@@ -88,13 +94,23 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId }: Props) {
   const hasPreview = snapshot !== null;
   const runtimeTabId = previewRuntimeTabId(threadRef, previewState.serverEpoch, tabId);
   const desktopOverlay = previewState.desktopByTabId[tabId] ?? null;
-  const position = miniPlayer?.tabId === tabId ? miniPlayer.position : null;
+  const position =
+    miniPlayer?.source.kind === "browser" && miniPlayer.source.tabId === tabId
+      ? miniPlayer.position
+      : null;
   const size =
-    miniPlayer?.tabId === tabId && miniPlayer.size
+    miniPlayer?.source.kind === "browser" && miniPlayer.source.tabId === tabId && miniPlayer.size
       ? miniPlayer.size
       : PREVIEW_MINI_PLAYER_DEFAULT_SIZE;
-  const maximized = miniPlayer?.tabId === tabId && miniPlayer.maximized;
-  const floating = Boolean(miniPlayer?.tabId === tabId && miniPlayer.floating);
+  const maximized =
+    miniPlayer?.source.kind === "browser" &&
+    miniPlayer.source.tabId === tabId &&
+    miniPlayer.maximized;
+  const floating = Boolean(
+    miniPlayer?.source.kind === "browser" &&
+    miniPlayer.source.tabId === tabId &&
+    miniPlayer.floating,
+  );
   const compact = !floating && !maximized;
   const closePreview = useAtomCommand(previewEnvironment.close, {
     reportFailure: false,
@@ -281,7 +297,8 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId }: Props) {
     }
   };
 
-  if (!snapshot || miniPlayer?.tabId !== tabId) return null;
+  if (!snapshot || miniPlayer?.source.kind !== "browser" || miniPlayer.source.tabId !== tabId)
+    return null;
 
   const player = (
     <section
@@ -448,5 +465,28 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId }: Props) {
       <div ref={anchorRef} className="pointer-events-none absolute inset-0" aria-hidden="true" />
       {compact ? player : createPortal(player, document.body)}
     </>
+  );
+}
+
+export function ThreadPreviewMiniPlayer({
+  threadRef,
+  miniPlayer,
+  bottomInset,
+}: {
+  readonly threadRef: ScopedThreadRef;
+  readonly miniPlayer: PreviewMiniPlayerState;
+  readonly bottomInset: number;
+}) {
+  const { source } = miniPlayer;
+  return source.kind === "browser" ? (
+    <BrowserMiniPlayer key={source.tabId} threadRef={threadRef} tabId={source.tabId} />
+  ) : (
+    <DeviceMiniPlayer
+      key={previewMiniPlayerSourceKey(source)}
+      threadRef={threadRef}
+      source={source}
+      miniPlayer={miniPlayer}
+      bottomInset={bottomInset}
+    />
   );
 }

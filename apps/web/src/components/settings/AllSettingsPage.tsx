@@ -209,10 +209,6 @@ function SettingsPanelGroup({
 }
 
 export function AllSettingsPage() {
-  const [projectScope, setProjectScope] = useState<{
-    project: string | null;
-    machine: string | null;
-  }>({ project: null, machine: null });
   return (
     <SettingsPageContainer width="expanded" className="gap-12">
       <SettingsPageSearch />
@@ -221,11 +217,7 @@ export function AllSettingsPage() {
           <GeneralSettingsPanel />
         </SettingsPanelGroup>
         <SettingsPanelGroup id="settings-projects">
-          <ProjectsSettings
-            projectKey={projectScope.project}
-            machineId={projectScope.machine}
-            onScopeChange={(project, machine) => setProjectScope({ project, machine })}
-          />
+          <ProjectsSettings />
         </SettingsPanelGroup>
         <SettingsPanelGroup id="settings-snap-shot">
           <SnapShotSettings />

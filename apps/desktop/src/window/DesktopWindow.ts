@@ -1,3 +1,4 @@
+import { registerWorkspaceWindow } from "./workspaceWindows.ts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -216,7 +217,9 @@ export function isSameOriginRendererNavigation(input: {
   readonly navigationUrl: string;
 }): boolean {
   try {
-    return new URL(input.applicationUrl).origin === new URL(input.navigationUrl).origin;
+    const application = new URL(input.applicationUrl);
+    const navigation = new URL(input.navigationUrl);
+    return application.protocol === navigation.protocol && application.host === navigation.host;
   } catch {
     return false;
   }
@@ -228,7 +231,11 @@ export function isWorkspaceRendererWindow(input: {
 }): boolean {
   if (!isSameOriginRendererNavigation(input)) return false;
   try {
-    return new URL(input.navigationUrl).pathname === "/workspace";
+    const navigation = new URL(input.navigationUrl);
+    const route = navigation.hash.startsWith("#/")
+      ? new URL(navigation.hash.slice(1), input.applicationUrl)
+      : navigation;
+    return route.pathname === "/workspace";
   } catch {
     return false;
   }
@@ -447,6 +454,7 @@ export const make = Effect.gen(function* () {
         webviewTag: true,
       },
     });
+    registerWorkspaceWindow(window);
     nextWorkspaceWindowNumber = Math.max(nextWorkspaceWindowNumber, workspaceWindowNumber + 1);
 
     if (environment.platform === "darwin") {
@@ -696,15 +704,25 @@ export const make = Effect.gen(function* () {
 
     window.webContents.setWindowOpenHandler(({ url }) => {
       if (isWorkspaceRendererWindow({ applicationUrl, navigationUrl: url })) {
-        return {
-          action: "allow",
-          overrideBrowserWindowOptions: {
-            width: 1600,
-            height: 1000,
-            minWidth: 900,
-            minHeight: 600,
-          },
-        };
+        const navigation = new URL(url);
+        const route = navigation.hash.startsWith("#/")
+          ? new URL(navigation.hash.slice(1), applicationUrl)
+          : navigation;
+        // Use the managed window path so popups retain preload, browser hosting,
+        // and the persisted workspace identity just like Cmd+N windows.
+        void runPromise(
+          createWindow({
+            workspaceId: route.searchParams.get("workspace")?.trim() || NodeCrypto.randomUUID(),
+            isMainWindow: false,
+          }).pipe(
+            Effect.catch((error) =>
+              logWindowWarning("failed to open renderer workspace window", {
+                message: error.message,
+              }),
+            ),
+          ),
+        );
+        return { action: "deny" };
       }
       if (Option.isSome(ElectronShell.parseSafeExternalUrl(url))) {
         void runPromise(electronShell.openExternal(url));
@@ -1124,7 +1142,9 @@ export const make = Effect.gen(function* () {
     payload: unknown,
     { reveal = true }: { readonly reveal?: boolean } = {},
   ) {
-    const existingWindow = yield* reveal ? focusedMainWindow : electronWindow.main;
+    const existingWindow = yield* reveal || channel === MENU_ACTION_CHANNEL
+      ? focusedMainWindow
+      : electronWindow.main;
     if (Option.isNone(existingWindow) && (!reveal || !(yield* Ref.get(backendReadyRef)))) return;
     const targetWindow = Option.isSome(existingWindow) ? existingWindow.value : yield* ensureMain;
     if (targetWindow.isDestroyed()) return;

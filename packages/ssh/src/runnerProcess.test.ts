@@ -20,6 +20,22 @@ const Started = Schema.Struct({
 });
 const decodeStarted = Schema.decodeUnknownSync(Schema.fromJsonString(Started));
 
+/**
+ * The runner discovers Node by prepending the standard system directories, which
+ * on a developer machine puts the real npm and npx ahead of the fixture's fakes
+ * — the install would then reach the registry instead of the stub. Drop just
+ * those lines so the fixture's PATH is authoritative; every other part of the
+ * script, including the npx-before-npm fallback under test, runs unchanged.
+ */
+const withFixturePathOnly = (script: string) => {
+  const isolated = script.replace(
+    /^ *prepend_path_if_dir "(?:\/bin|\/usr\/bin|\/usr\/local\/bin|\/opt\/homebrew\/bin)"\n/gmu,
+    "",
+  );
+  assert.notEqual(isolated, script);
+  return isolated;
+};
+
 describe.skipIf(HostProcessPlatform.defaultValue() === "win32")(
   "remote runner process ownership",
   () => {
@@ -32,6 +48,8 @@ describe.skipIf(HostProcessPlatform.defaultValue() === "win32")(
           const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
           const fixture = yield* fs.makeTempDirectoryScoped({ prefix: "t3-runner-" });
           const bin = path.join(fixture, "bin");
+          const home = path.join(fixture, "home");
+          yield* fs.makeDirectory(home, { recursive: true });
           const cliPath = path.join(fixture, "installed cli.mjs");
           const callsPath = path.join(fixture, "package-manager-calls.jsonl");
           const packageSpec = "t3@0.0.35";
@@ -82,13 +100,18 @@ if (args.includes("--package")) {
                   cwd: fixture,
                   env: {
                     PATH: bin,
+                    // A real SSH session always has HOME; the runner reads it
+                    // while probing version managers, under `set -u`.
+                    HOME: home,
                     T3_TEST_CLI: cliPath,
                     T3_TEST_CALLS: callsPath,
                     T3_TEST_PORT: String(port),
                   },
                   detached: false,
                   stdin: Stream.make(
-                    new TextEncoder().encode(buildRemoteT3RunnerScript({ packageSpec })),
+                    new TextEncoder().encode(
+                      withFixturePathOnly(buildRemoteT3RunnerScript({ packageSpec })),
+                    ),
                   ),
                 }),
               );
@@ -316,6 +339,8 @@ describe.skipIf(HostProcessPlatform.defaultValue() === "win32")(
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
         const fixture = yield* fs.makeTempDirectoryScoped({ prefix: "t3-runner-install-" });
         const bin = path.join(fixture, "bin");
+        const home = path.join(fixture, "home");
+        yield* fs.makeDirectory(home, { recursive: true });
         const cliPath = path.join(fixture, "installed cli.mjs");
         const callsPath = path.join(fixture, "installer-calls.jsonl");
         const packageSpec = "t3@0.0.39-nightly.20260905.1286";
@@ -357,16 +382,19 @@ if (mode === "etarget" || mode === "failed-with-path") {
             extendEnv: false,
             env: {
               PATH: bin,
+              HOME: home,
               T3_TEST_MODE: mode,
               T3_TEST_CLI: cliPath,
               T3_TEST_CALLS: callsPath,
             },
             stdin: Stream.make(
               new TextEncoder().encode(
-                buildRemoteT3RunnerScript({
-                  packageSpec,
-                  ...(mode === "node-override" ? { nodeScriptPath: cliPath } : {}),
-                }),
+                withFixturePathOnly(
+                  buildRemoteT3RunnerScript({
+                    packageSpec,
+                    ...(mode === "node-override" ? { nodeScriptPath: cliPath } : {}),
+                  }),
+                ),
               ),
             ),
           }),

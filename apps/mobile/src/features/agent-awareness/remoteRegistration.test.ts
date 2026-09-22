@@ -8,7 +8,12 @@ import Constants from "expo-constants";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
-import { FetchHttpClient } from "effect/unstable/http";
+import {
+  Cookies,
+  FetchHttpClient,
+  HttpClientRequest,
+  HttpClientResponse,
+} from "effect/unstable/http";
 import { ManagedRelay } from "@t3tools/client-runtime/relay";
 
 import type { EnvironmentId } from "@t3tools/contracts";
@@ -35,6 +40,10 @@ import {
   unregisterAgentAwarenessConnection,
 } from "./remoteRegistration";
 import * as Notifications from "expo-notifications";
+import { Platform } from "react-native";
+vi.mock("./androidNotifications", () => ({
+  supportsAndroidAgentNotifications: vi.fn(() => false),
+}));
 
 const secureStore = vi.hoisted(() => new Map<string, string>());
 const backgroundRuntime = vi.hoisted(() => ({
@@ -96,8 +105,12 @@ vi.mock("expo-secure-store", () => ({
 
 vi.mock("react-native", () => ({
   Platform: {
-    OS: "ios",
-    Version: "18.0",
+    get OS() {
+      return "ios";
+    },
+    get Version() {
+      return "18.0";
+    },
   },
 }));
 
@@ -179,6 +192,11 @@ const runBackgroundOperations = Effect.fn("TestRemoteRegistration.runBackgroundO
 
 describe("makeRelayDeviceRegistrationRequest", () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.mocked(Notifications.getDevicePushTokenAsync).mockResolvedValue({
+      type: "ios",
+      data: "apns-token",
+    });
     vi.unstubAllGlobals();
     vi.stubGlobal("__DEV__", false);
     secureStore.clear();
@@ -614,4 +632,101 @@ describe("makeRelayDeviceRegistrationRequest", () => {
       }).pipe(Effect.provide(relayTestLayer));
     },
   );
+  for (const os of ["ios"] as const) {
+    it.effect(
+      `does not enable ${os} notifications when a token rotates after permission is revoked`,
+      () => {
+        vi.spyOn(Platform, "OS", "get").mockReturnValue(os);
+        vi.spyOn(Platform, "Version", "get").mockReturnValue(os === "ios" ? 18 : 36);
+        vi.mocked(Notifications.getDevicePushTokenAsync).mockResolvedValue({
+          type: os,
+          data: "initial",
+        });
+        const registrations: unknown[] = [];
+        vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = new Request(input, init);
+          if (request.url.endsWith("/v1/client/dpop-token")) {
+            return Response.json({
+              access_token: "dpop",
+              issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
+              token_type: "DPoP",
+              expires_in: 300,
+              scope: "mobile:registration",
+            });
+          }
+          registrations.push(await request.json());
+          return Response.json({ ok: true });
+        });
+        Constants.expoConfig!.extra = { relay: { url: "https://permission-relay.example.test" } };
+        setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk"), "user-a");
+        return Effect.gen(function* () {
+          yield* runBackgroundOperations();
+          expect(registrations.at(-1)).toMatchObject({
+            preferences: { notificationsEnabled: true },
+          });
+          vi.mocked(Notifications.getPermissionsAsync).mockResolvedValueOnce({
+            granted: false,
+          } as Awaited<ReturnType<typeof Notifications.getPermissionsAsync>>);
+          const listener = vi.mocked(Notifications.addPushTokenListener).mock.calls.at(-1)![0];
+          listener({ type: os, data: "rotated" });
+          yield* runBackgroundOperations();
+          expect(registrations.at(-1)).toMatchObject({
+            preferences: { notificationsEnabled: false },
+          });
+          expect(registrations.at(-1)).not.toHaveProperty("pushToken");
+        }).pipe(
+          Effect.provideService(FetchHttpClient.Fetch, globalThis.fetch),
+          Effect.provide(
+            managedRelayClientLayer("https://permission-relay.example.test").pipe(
+              Layer.provide(Layer.mergeAll(FetchHttpClient.layer, cryptoLayer)),
+            ),
+          ),
+        );
+      },
+    );
+  }
+  it.effect("preserves relay rejection errors with React Native response headers", () => {
+    vi.spyOn(Platform, "OS", "get").mockReturnValue("ios");
+    vi.mocked(Notifications.getDevicePushTokenAsync).mockResolvedValue({
+      type: "ios",
+      data: "apns-token",
+    });
+    const rejectedResponse = new Response("Unsupported device platform", { status: 400 });
+    Object.defineProperty(rejectedResponse.headers, "getSetCookie", { value: undefined });
+    vi.stubGlobal("fetch", (request: RequestInfo | URL) => {
+      const url = request instanceof Request ? request.url : String(request);
+      const response = url.endsWith("/v1/client/dpop-token")
+        ? Response.json({
+            access_token: "relay-dpop-token",
+            issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
+            token_type: "DPoP",
+            expires_in: 300,
+            scope: "mobile:registration",
+          })
+        : rejectedResponse;
+      Object.defineProperty(response.headers, "getSetCookie", { value: undefined });
+      return Promise.resolve(response);
+    });
+    Constants.expoConfig!.extra = { relay: { url: "https://headers-relay.example.test" } };
+    setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-user-a"), "user-a");
+
+    return Effect.gen(function* () {
+      // Hermes' compiled error hashing reads the response's cookie getter.
+      const httpResponse = HttpClientResponse.fromWeb(
+        HttpClientRequest.post("https://headers-relay.example.test/v1/mobile/devices"),
+        rejectedResponse,
+      );
+      expect(httpResponse.cookies).toEqual(Cookies.empty);
+      yield* refreshAgentAwarenessRegistration();
+      expect(getAgentAwarenessRegistrationStatus()).toBe("failed");
+      expect(saveAgentAwarenessRegistrationRecord).not.toHaveBeenCalled();
+    }).pipe(
+      Effect.provide(
+        managedRelayClientLayer("https://headers-relay.example.test").pipe(
+          Layer.provide(Layer.mergeAll(FetchHttpClient.layer, cryptoLayer)),
+        ),
+      ),
+      Effect.provideService(FetchHttpClient.Fetch, globalThis.fetch),
+    );
+  });
 });
