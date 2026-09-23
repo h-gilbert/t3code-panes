@@ -27,6 +27,7 @@ import {
   type PreviewAutomationStreamEvent,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -45,6 +46,8 @@ export interface PreviewAutomationInvokeInput {
   readonly input: unknown;
   readonly tabId?: PreviewTabId;
   readonly timeoutMs?: number;
+  /** A best-effort read may time out while the guest navigates without losing its host. */
+  readonly disconnectOnTimeout?: boolean;
   /** Background metadata reads must not change the agent's current tab. */
   readonly updateCurrentTab?: boolean;
   /** Capture the routed tab before another request changes the current assignment. */
@@ -83,7 +86,7 @@ interface ClientConnection {
   readonly supportedOperations: ReadonlySet<PreviewAutomationOperation>;
   readonly focused: boolean;
   readonly focusOrder: number;
-  readonly queue: Queue.Queue<PreviewAutomationStreamEvent>;
+  readonly queue: Queue.Queue<PreviewAutomationStreamEvent, Cause.Done>;
 }
 
 interface PendingRequest {
@@ -437,7 +440,10 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
         Deferred.fail(deferred, new PreviewAutomationClientDisconnectedError(context)),
       { discard: true },
     );
-    yield* Queue.shutdown(queue);
+    // End the RPC stream normally so a still-mounted client can register again.
+    // Pending requests have already failed; discard any offers not yet consumed.
+    yield* Queue.clear(queue);
+    yield* Queue.end(queue);
   });
 
   const disconnect = Effect.fn("PreviewAutomationBroker.disconnect")(function* (
@@ -455,7 +461,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
     host: PreviewAutomationHost,
   ) {
     const clientId = host.clientId;
-    const queue = yield* Queue.unbounded<PreviewAutomationStreamEvent>();
+    const queue = yield* Queue.unbounded<PreviewAutomationStreamEvent, Cause.Done>();
     const connectionId = yield* crypto.randomUUIDv4.pipe(Effect.orDie);
     yield* Queue.offer(queue, { type: "connected", connectionId });
     const connection: ClientConnection = {
@@ -746,7 +752,9 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
           Effect.gen(function* () {
             // An unanswered request invalidates this connection. Do not replay
             // actions: the client may have applied them before becoming unreachable.
-            yield* disconnect(connection.clientId, connection.queue);
+            if (input.disconnectOnTimeout !== false) {
+              yield* disconnect(connection.clientId, connection.queue);
+            }
             return yield* new PreviewAutomationTimeoutError(requestContext);
           }),
         onSome: (value) => Effect.succeed(value as A),

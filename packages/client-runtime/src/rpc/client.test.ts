@@ -88,6 +88,53 @@ const makeHarness = Effect.fn("TestEnvironmentRpc.makeHarness")(function* () {
 });
 
 describe("environment RPC", () => {
+  it.effect("reattaches a completed preview host stream in the same session", () =>
+    Effect.gen(function* () {
+      const firstConnected = yield* Deferred.make<void>();
+      const firstEnded = yield* Deferred.make<void>();
+      const reattached = yield* Deferred.make<void>();
+      const firstQueue = yield* Queue.unbounded<never, Cause.Done>();
+      let connections = 0;
+      const client = {
+        [WS_METHODS.previewAutomationConnect]: () => {
+          connections += 1;
+          if (connections === 1) {
+            return Stream.fromEffect(Deferred.succeed(firstConnected, undefined)).pipe(
+              Stream.drain,
+              Stream.concat(
+                Stream.fromQueue(firstQueue).pipe(
+                  Stream.ensuring(Deferred.succeed(firstEnded, undefined)),
+                ),
+              ),
+            );
+          }
+          return Stream.fromEffect(Deferred.succeed(reattached, undefined)).pipe(
+            Stream.drain,
+            Stream.concat(Stream.never),
+          );
+        },
+      } as unknown as WsRpcProtocolClient;
+      const { activeSession, supervisor } = yield* makeHarness();
+      yield* SubscriptionRef.set(activeSession, Option.some(session(client)));
+      const fiber = yield* subscribe(
+        WS_METHODS.previewAutomationConnect,
+        { clientId: "host-1", environmentId: TARGET.environmentId },
+        { retryOnCompletionAfter: 1_000 },
+      ).pipe(
+        Stream.runDrain,
+        Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+        Effect.forkChild,
+      );
+      yield* Deferred.await(firstConnected);
+      yield* Queue.end(firstQueue);
+      yield* Deferred.await(firstEnded);
+      yield* TestClock.adjust(1_000);
+      yield* Deferred.await(reattached);
+      expect(connections).toBe(2);
+      yield* Fiber.interrupt(fiber);
+    }),
+  );
+
   it.effect("reuses the session config stream instead of opening a duplicate subscription", () =>
     Effect.gen(function* () {
       const event: ServerConfigStreamEvent = {

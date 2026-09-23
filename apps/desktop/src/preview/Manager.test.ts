@@ -917,6 +917,45 @@ describe("PreviewManager", () => {
     ),
   );
 
+  effectIt.effect("keeps automation available across navigation and webview replacement", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const capturePage = vi.fn(async () => ({
+          toJPEG: () => Buffer.from("preview-frame"),
+          getSize: () => ({ width: 1280, height: 720 }),
+        }));
+        const firstListeners = new Map<string, (...args: never[]) => void>();
+        let firstUrl = "https://example.com/start";
+        const first = Object.assign(makeTestPreviewWebContents(capturePage, 42), {
+          getURL: () => firstUrl,
+          on: vi.fn((event: string, listener: (...args: never[]) => void) => {
+            firstListeners.set(event, listener);
+          }),
+        });
+        const replacement = Object.assign(makeTestPreviewWebContents(capturePage, 43), {
+          getURL: () => "https://example.com/after-submit",
+        });
+        fromId.mockImplementation((id) => (id === 42 ? first : id === 43 ? replacement : null));
+
+        yield* manager.createTab("tab_navigation_replacement");
+        yield* manager.registerWebview("tab_navigation_replacement", 42);
+        firstUrl = "https://example.com/after-link";
+        firstListeners.get("did-navigate")?.();
+        yield* Effect.yieldNow;
+        expect(yield* manager.automationStatus("tab_navigation_replacement")).toMatchObject({
+          available: true,
+          url: firstUrl,
+        });
+
+        yield* manager.registerWebview("tab_navigation_replacement", 43);
+        expect(yield* manager.automationStatus("tab_navigation_replacement")).toMatchObject({
+          available: true,
+          url: "https://example.com/after-submit",
+        });
+      }),
+    ),
+  );
+
   effectIt.effect("promotes a surviving workspace window after the preview host closes", () =>
     withManager((manager) =>
       Effect.gen(function* () {

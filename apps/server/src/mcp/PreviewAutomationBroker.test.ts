@@ -17,7 +17,6 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
-import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
 import * as Result from "effect/Result";
@@ -521,6 +520,73 @@ it.effect("rejects calls when no connected host exists", () =>
       providerInstanceId: scope.providerInstanceId,
     });
   }),
+);
+
+it.effect("keeps a host after a best-effort status read times out during navigation", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* makeBroker;
+      const connected = yield* Deferred.make<void>();
+      const statusReceived = yield* Deferred.make<void>();
+      const secondStatusReceived = yield* Deferred.make<void>();
+      let statusRequests = 0;
+      const events = yield* broker.connect(makeHost());
+      yield* Stream.runForEach(events, (event) => {
+        if (event.type === "connected") return Deferred.succeed(connected, undefined);
+        if (event.request.operation === "status") {
+          statusRequests += 1;
+          return statusRequests === 1
+            ? Deferred.succeed(statusReceived, undefined)
+            : Deferred.succeed(secondStatusReceived, undefined);
+        }
+        return broker.respond({
+          clientId: "client-1",
+          connectionId: event.connectionId,
+          requestId: event.request.requestId,
+          ok: true,
+          result: { tabId: "tab-after-navigation" },
+        });
+      }).pipe(Effect.forkScoped);
+      yield* Deferred.await(connected);
+
+      const status = yield* broker
+        .invoke({
+          scope,
+          operation: "status",
+          input: {},
+          timeoutMs: 500,
+          disconnectOnTimeout: false,
+        })
+        .pipe(Effect.flip, Effect.forkScoped);
+      yield* Deferred.await(statusReceived);
+      yield* TestClock.adjust(500);
+      expect(yield* Fiber.join(status)).toMatchObject({ _tag: "PreviewAutomationTimeoutError" });
+
+      expect(yield* broker.invoke({ scope, operation: "open", input: {} })).toEqual({
+        tabId: "tab-after-navigation",
+      });
+      expect(yield* broker.invoke({ scope, operation: "click", input: {} })).toEqual({
+        tabId: "tab-after-navigation",
+      });
+      const secondStatus = yield* broker
+        .invoke({
+          scope,
+          operation: "status",
+          input: {},
+          timeoutMs: 500,
+          disconnectOnTimeout: false,
+        })
+        .pipe(Effect.flip, Effect.forkScoped);
+      yield* Deferred.await(secondStatusReceived);
+      yield* TestClock.adjust(500);
+      expect(yield* Fiber.join(secondStatus)).toMatchObject({
+        _tag: "PreviewAutomationTimeoutError",
+      });
+      expect(yield* broker.invoke({ scope, operation: "open", input: {} })).toEqual({
+        tabId: "tab-after-navigation",
+      });
+    }),
+  ),
 );
 
 it.effect("does not create host state from focus updates without a live stream", () =>
@@ -1370,10 +1436,7 @@ it.effect("evicts an unanswered host and lets later calls use a healthy runtime"
         _tag: "PreviewAutomationClientDisconnectedError",
       });
       const consumerExit = yield* Fiber.await(consumer);
-      expect(Exit.isFailure(consumerExit)).toBe(true);
-      if (Exit.isFailure(consumerExit)) {
-        expect(Cause.hasInterruptsOnly(consumerExit.cause)).toBe(true);
-      }
+      expect(Exit.isSuccess(consumerExit)).toBe(true);
 
       // Late traffic from the evicted connection cannot restore its assignment.
       yield* broker.respond({

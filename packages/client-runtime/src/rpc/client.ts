@@ -182,6 +182,8 @@ interface SubscriptionOptions<TTag extends EnvironmentSubscriptionRpcTag> {
     cause: Cause.Cause<EnvironmentRpcStreamFailure<TTag>>,
   ) => Effect.Effect<void, never, never>;
   readonly retryExpectedFailureAfter?: Duration.Input;
+  /** Reopen a server-ended durable stream while the environment session remains live. */
+  readonly retryOnCompletionAfter?: Duration.Input;
   readonly resubscribe?: Stream.Stream<unknown, never, never>;
 }
 
@@ -291,7 +293,14 @@ function subscribeDynamicMapped<TTag extends EnvironmentSubscriptionRpcTag, A>(
                     }),
                   ),
                 );
-              return subscribeToSession();
+              const retryAfter = options?.retryOnCompletionAfter;
+              if (retryAfter === undefined) return subscribeToSession();
+              const reconnect = (): Stream.Stream<A, EnvironmentRpcStreamFailure<TTag>> =>
+                subscribeToSession().pipe(
+                  Stream.concat(Stream.fromEffect(Effect.sleep(retryAfter)).pipe(Stream.drain)),
+                  Stream.concat(Stream.suspend(reconnect)),
+                );
+              return reconnect();
             },
           }),
         ),

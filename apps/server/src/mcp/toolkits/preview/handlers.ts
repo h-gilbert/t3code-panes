@@ -86,6 +86,7 @@ const invoke = Effect.fn("PreviewToolkit.invoke")(function* <A>(
       operation: "status",
       input: {},
       timeoutMs: 500,
+      disconnectOnTimeout: false,
       updateCurrentTab: false,
       ...(statusTabId === undefined ? {} : { tabId: statusTabId }),
     })
