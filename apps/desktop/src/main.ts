@@ -17,9 +17,6 @@ import * as Electron from "electron";
 
 import * as NetService from "@t3tools/shared/Net";
 import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
-import { isPublishedT3Version } from "@t3tools/shared/releaseVersion";
-import { resolveRemoteT3CliPackageSpec } from "@t3tools/ssh/command";
-import type { RemoteT3RunnerOptions } from "@t3tools/ssh/tunnel";
 import serverPackageJson from "../../server/package.json" with { type: "json" };
 
 import * as DesktopIpc from "./ipc/DesktopIpc.ts";
@@ -58,6 +55,7 @@ import * as DesktopPreReadyPlatform from "./app/DesktopPreReadyPlatform.ts";
 import * as DesktopShellEnvironment from "./shell/DesktopShellEnvironment.ts";
 import * as DesktopSshEnvironment from "./ssh/DesktopSshEnvironment.ts";
 import * as DesktopSshPasswordPrompts from "./ssh/DesktopSshPasswordPrompts.ts";
+import { resolveDesktopSshCliRunner } from "./ssh/remoteRunner.ts";
 import * as DesktopState from "./app/DesktopState.ts";
 import * as DesktopTelemetryPublisher from "./telemetry/DesktopTelemetryPublisher.ts";
 import * as DesktopUpdates from "./updates/DesktopUpdates.ts";
@@ -89,40 +87,22 @@ const desktopEnvironmentLayer = Layer.unwrap(
   }),
 );
 
-// Published builds run the matching self-contained archive. Local fork builds
-// have no public archive, so SSH keeps the package fallback until distribution
-// can host one. Development can point at a remote source checkout instead.
-const resolveDesktopSshCliRunner = (
-  environment: DesktopEnvironment.DesktopEnvironment["Service"],
-  settings: DesktopAppSettings.DesktopSettings,
-): RemoteT3RunnerOptions => {
-  const devRemoteEntryPath = Option.getOrUndefined(environment.devRemoteT3ServerEntryPath);
-  if (environment.isDevelopment && devRemoteEntryPath !== undefined) {
-    return {
-      nodeScriptPath: devRemoteEntryPath,
-      nodeEngineRange: serverPackageJson.engines.node,
-    };
-  }
-  if (!isPublishedT3Version(environment.appVersion)) {
-    return {
-      packageSpec: resolveRemoteT3CliPackageSpec({
-        appVersion: environment.isDevelopment ? serverPackageJson.version : environment.appVersion,
-        updateChannel: settings.updateChannel,
-        isDevelopment: environment.isDevelopment,
-      }),
-      nodeEngineRange: serverPackageJson.engines.node,
-    };
-  }
-  return { archiveVersion: environment.appVersion };
-};
-
 const desktopSshEnvironmentLayer = Layer.unwrap(
   Effect.gen(function* () {
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
     const settings = yield* DesktopAppSettings.DesktopAppSettings;
     return DesktopSshEnvironment.layer({
       resolveCliRunner: settings.get.pipe(
-        Effect.map((currentSettings) => resolveDesktopSshCliRunner(environment, currentSettings)),
+        Effect.map((currentSettings) =>
+          resolveDesktopSshCliRunner({
+            isDevelopment: environment.isDevelopment,
+            appVersion: environment.appVersion,
+            devRemoteEntryPath: Option.getOrUndefined(environment.devRemoteT3ServerEntryPath),
+            serverVersion: serverPackageJson.version,
+            nodeEngineRange: serverPackageJson.engines.node,
+            updateChannel: currentSettings.updateChannel,
+          }),
+        ),
       ),
     });
   }),

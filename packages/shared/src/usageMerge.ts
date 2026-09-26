@@ -400,6 +400,7 @@ export function mergeUsage(
     .sort((a, b) => b.costUsd - a.costUsd);
 
   const models: ModelTotals[] = [...modelAccumulator.entries()]
+    .filter(([, totals]) => totals.totalTokens > 0 || totals.costUsd > 0)
     .map(([key, totals]) => ({
       model: key.slice(key.indexOf(" ") + 1),
       provider: totals.provider,

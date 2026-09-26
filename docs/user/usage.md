@@ -3,7 +3,7 @@
 ## Understand your usage
 
 **Usage** combines Codex, Claude Code, and Grok Build session history from your connected
-environments. It shows token use, cache savings, model breakdowns, and estimated API-equivalent
+environments, including CLI sessions outside T3 Code. It shows token use, cache savings, model breakdowns, and estimated API-equivalent
 cost. These estimates are not your subscription bill.
 
 Totals depend on the history available on each server. Grok turns without a saved completed-turn
@@ -18,6 +18,12 @@ by Usage. Accounts sharing a history directory count once.
 On web and desktop, use the environment dropdown to filter costs, tokens, and limits. All
 environments are selected by default. The dropdown shows which environments are still scanning;
 results appear as each one responds.
+
+Press **⌘⇧U** on Mac or **Ctrl+Shift+U** on Windows/Linux, then choose **Model usage** to see
+recorded tokens and estimated cost by model without leaving your workspace. The bars compare each
+model's share of recorded tokens within its provider. They cannot show a model's share of your
+subscription allowance because providers do not report that split. Choose a time period in the
+dialog. Open the full Usage page to filter by environment or inspect daily trends.
 
 If recent work is missing or a new model shows no cost, refresh to rescan session history and
 update model pricing.
