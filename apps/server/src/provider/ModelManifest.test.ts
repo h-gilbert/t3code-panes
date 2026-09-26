@@ -2,9 +2,11 @@ import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ProviderDriverKind, type ServerProviderModel } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 
@@ -377,6 +379,41 @@ describe("ModelManifest service", () => {
       ),
     ),
   );
+
+  it.effect("announces fetched manifests only when they change the data in memory", () => {
+    let responseIndex = 0;
+    const responses = [REMOTE_MANIFEST, REMOTE_MANIFEST, REMOTE_CLAUDE_MANIFEST];
+
+    return Effect.gen(function* () {
+      const service = yield* make;
+      const announced = yield* service.changes.pipe(
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+      yield* Effect.yieldNow;
+
+      yield* service.refresh;
+      for (let index = 1; index < responses.length; index += 1) {
+        yield* TestClock.adjust("1 hour");
+        responseIndex = index;
+        yield* service.refresh;
+      }
+
+      assert.deepStrictEqual(Array.from(yield* Fiber.join(announced)), [
+        REMOTE_MANIFEST,
+        REMOTE_CLAUDE_MANIFEST,
+      ]);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        serviceLayers({
+          prefix: "model-manifest-changes-test",
+          response: () => Response.json(responses[responseIndex]),
+        }),
+      ),
+    );
+  });
 
   it.effect("preserves the last-good remote cache when later payloads are invalid", () => {
     let responseIndex = 0;

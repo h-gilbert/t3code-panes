@@ -26,8 +26,10 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
+import * as Stream from "effect/Stream";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 
 import { ServerConfig } from "../config.ts";
@@ -134,6 +136,7 @@ export interface ResolvedProviderCatalog {
 }
 
 const decodeManifest = Schema.decodeUnknownEffect(ModelManifestSchema);
+const manifestsEqual = Schema.toEquivalence(ModelManifestSchema);
 
 export const BUNDLED_MODEL_MANIFEST: ModelManifestData =
   Schema.decodeUnknownSync(ModelManifestSchema)(bundledManifestJson);
@@ -319,6 +322,11 @@ export class ModelManifest extends Context.Service<
      * provider checks: the fetch is process-shared state, so it must survive
      * the teardown of whichever instance happened to trigger it. */
     readonly refreshInBackground: Effect.Effect<void>;
+    /** Emits each fetched manifest that replaces different in-memory data.
+     * Drivers re-check on it: a check that read `current` before a background
+     * fetch landed would otherwise publish the stale catalog until its next
+     * scheduled refresh. */
+    readonly changes: Stream.Stream<ModelManifestData>;
   }
 >()("t3/provider/ModelManifest") {}
 
@@ -327,6 +335,7 @@ const BundledOnlyModelManifest: ModelManifest["Service"] = {
   current: Effect.succeed(BUNDLED_MODEL_MANIFEST),
   refresh: Effect.succeed(BUNDLED_MODEL_MANIFEST),
   refreshInBackground: Effect.void,
+  changes: Stream.empty,
 };
 
 export const layerTest = Layer.succeed(ModelManifest, BundledOnlyModelManifest);
@@ -344,6 +353,10 @@ export const make = Effect.gen(function* () {
   let fetchedAtMs: number | null = null;
   let lastAttemptMs: number | null = null;
   const refreshSemaphore = yield* Semaphore.make(1);
+  const changesPubSub = yield* Effect.acquireRelease(
+    PubSub.unbounded<ModelManifestData>(),
+    PubSub.shutdown,
+  );
 
   // `Effect.cached` makes concurrent first readers await the same disk load
   // rather than racing a "loaded" flag. Only `refreshed` takes the fetch
@@ -399,12 +412,14 @@ export const make = Effect.gen(function* () {
     );
     if (fetched === null) return manifest;
 
+    const changed = !manifestsEqual(fetched, manifest);
     manifest = fetched;
     fetchedAtMs = now;
     yield* encodeManifestCache({ fetchedAtMs: now, manifest: fetched }).pipe(
       Effect.flatMap((serialized) => fileSystem.writeFileString(cachePath, serialized)),
       Effect.catchCause(() => Effect.void),
     );
+    if (changed) yield* PubSub.publish(changesPubSub, fetched);
     return manifest;
   });
 
@@ -414,7 +429,22 @@ export const make = Effect.gen(function* () {
     current: ensureDiskCacheLoaded.pipe(Effect.map(() => manifest)),
     refresh: guardedRefresh,
     refreshInBackground: Effect.forkIn(guardedRefresh, serviceScope).pipe(Effect.asVoid),
+    get changes() {
+      return Stream.fromPubSub(changesPubSub);
+    },
   });
 });
 
 export const layer = Layer.effect(ModelManifest, make);
+
+/** Re-checks a provider whenever a fetch replaces the manifest in memory, for
+ * the lifetime of the calling scope. */
+export const refreshOnManifestChange = (
+  manifest: ModelManifest["Service"],
+  refresh: Effect.Effect<unknown>,
+) =>
+  manifest.changes.pipe(
+    Stream.runForEach(() => refresh),
+    Effect.ignoreCause({ log: true }),
+    Effect.forkScoped,
+  );

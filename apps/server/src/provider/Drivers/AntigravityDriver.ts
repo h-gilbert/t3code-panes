@@ -358,6 +358,7 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
             }),
         ),
       );
+      yield* ModelManifest.refreshOnManifestChange(modelManifest, provider.snapshot.refresh);
       const defaultModel = modelManifest.current.pipe(
         Effect.map((manifest) => ModelManifest.manifestDefaultModel(manifest, DRIVER)),
       );
