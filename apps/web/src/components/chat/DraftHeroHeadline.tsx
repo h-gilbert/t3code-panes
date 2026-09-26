@@ -2,15 +2,13 @@ import type { DraftId } from "~/composerDraftStore";
 import { useComposerDraftStore } from "~/composerDraftStore";
 import { resolveEnvironmentMachineKind, type ScopedProjectRef } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { FolderPlusIcon } from "lucide-react";
 import { useCallback, useMemo } from "react";
 
 import { openCommandPalette } from "~/commandPaletteBus";
 import { useClientSettings } from "~/hooks/useSettings";
-import {
-  DEFAULT_NEW_CHAT_MODEL_SELECTION,
-  hasExplicitComposerModelSelection,
-} from "~/lib/chatThreadActions";
+import { hasExplicitComposerModelSelection } from "~/lib/chatThreadActions";
 import { selectProjectGroupingSettings } from "~/logicalProject";
 import {
   buildSidebarProjectPickerEntries,
@@ -33,7 +31,6 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 
 interface DraftHeroHeadlineProps {
   readonly draftId: DraftId | null;
@@ -179,9 +176,18 @@ export function DraftHeroHeadline({
             );
             if (!hasExplicitComposerModelSelection(currentDraft)) {
               applyStickyState(draftId);
-              setModelSelection(draftId, DEFAULT_NEW_CHAT_MODEL_SELECTION, {
-                replaceOptions: true,
-              });
+              const environmentSettings = environments.find(
+                (environment) => environment.environmentId === project.environmentId,
+              )?.serverConfig?.settings;
+              const defaultModelSelection = environmentSettings
+                ? resolveProjectSettings(environmentSettings, project.id, project).settings
+                    .defaultModelSelection
+                : project.defaultModelSelection;
+              if (defaultModelSelection) {
+                setModelSelection(draftId, defaultModelSelection, {
+                  replaceOptions: true,
+                });
+              }
             }
           }}
         >

@@ -10,7 +10,7 @@ import {
   resolveThreadActionProjectRef,
   hasExplicitComposerModelSelection,
   resolveNewDraftStartFromOrigin,
-  DEFAULT_NEW_CHAT_MODEL_SELECTION,
+  resolveNewThreadModelSelectionOverride,
   startNewThreadFromContext,
   type ChatThreadActionContext,
 } from "./chatThreadActions";
@@ -22,6 +22,10 @@ const FALLBACK_PROJECT_ID = ProjectId.make("project-2");
 const PROJECT_DEFAULT_SELECTION: ModelSelection = {
   instanceId: ProviderInstanceId.make("codex"),
   model: "project-default",
+};
+const CARRIED_SELECTION: ModelSelection = {
+  instanceId: ProviderInstanceId.make("claudeAgent"),
+  model: "carried-model",
 };
 
 function createContext(overrides: Partial<ChatThreadActionContext> = {}): ChatThreadActionContext {
@@ -51,12 +55,37 @@ describe("chatThreadActions", () => {
     expect(hasExplicitComposerModelSelection({ ...draft, activeProvider: null })).toBe(false);
   });
 
-  it("defaults new chats to Sol with medium reasoning", () => {
-    expect(DEFAULT_NEW_CHAT_MODEL_SELECTION).toEqual({
-      instanceId: "codex",
-      model: "gpt-6-sol",
-      options: [{ id: "reasoningEffort", value: "medium" }],
-    });
+  it("does not carry a non-explicit model from the destination draft back into itself", () => {
+    expect(
+      resolveNewThreadModelSelectionOverride({
+        projectDefaultSelection: null,
+        carrySelection: CARRIED_SELECTION,
+        carrySourceDraftId: "draft-a",
+        destinationDraftId: "draft-a",
+      }),
+    ).toBeNull();
+  });
+
+  it("still carries models between different threads when there is no saved default", () => {
+    expect(
+      resolveNewThreadModelSelectionOverride({
+        projectDefaultSelection: null,
+        carrySelection: CARRIED_SELECTION,
+        carrySourceDraftId: "draft-a",
+        destinationDraftId: "draft-b",
+      }),
+    ).toEqual(CARRIED_SELECTION);
+  });
+
+  it("keeps the saved default above any carried selection", () => {
+    expect(
+      resolveNewThreadModelSelectionOverride({
+        projectDefaultSelection: PROJECT_DEFAULT_SELECTION,
+        carrySelection: CARRIED_SELECTION,
+        carrySourceDraftId: "draft-a",
+        destinationDraftId: "draft-b",
+      }),
+    ).toEqual(PROJECT_DEFAULT_SELECTION);
   });
 
   it("only applies the start-from-origin default to new worktree drafts", () => {

@@ -65,9 +65,10 @@ uses its account catalog and does not support custom models.
 
 ## Model defaults
 
-On web and desktop, new threads start with Codex GPT-6 Sol at medium reasoning
-even when a project has a saved model default. A model you explicitly select in
-an existing draft stays selected.
+New threads start with the model set in Settings → General → New threads →
+**Model**. A project's model override takes precedence. Without a saved default,
+a new thread carries the model from the thread you were viewing, or your last
+selection. A model you explicitly select in an existing draft stays selected.
 
 Leaving reasoning level or service tier unset uses the provider's own configuration.
 

@@ -2,7 +2,7 @@ import { readProjects, readThreadShell, useProjects, useThread } from "../state/
 import {
   hasExplicitComposerModelSelection,
   resolveNewDraftStartFromOrigin,
-  DEFAULT_NEW_CHAT_MODEL_SELECTION,
+  resolveNewThreadModelSelectionOverride,
 } from "../lib/chatThreadActions";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -112,10 +112,10 @@ export function useNewThreadHandler() {
       const requestingRouteHref = router.state.location.href;
       const routeChangedSinceRequest = () => router.state.location.href !== requestingRouteHref;
       const currentRouteTarget = getCurrentRouteTarget();
-      // New chats use the product model and configured permission defaults. Interaction
-      // mode still carries so an explicit plan/default choice is not lost;
-      // branch, worktree, and env mode come from configured defaults unless
-      // the caller passes them explicitly.
+      // A new thread carries the user's working mode from the thread being
+      // viewed. The target project's configured model still wins; interaction
+      // mode carries independently. Permissions, branch, worktree, and env mode
+      // come from configured defaults unless the caller passes them explicitly.
       const carrySourceShell =
         currentRouteTarget?.kind === "server"
           ? readThreadShell(currentRouteTarget.threadRef)
@@ -131,6 +131,12 @@ export function useNewThreadHandler() {
               : currentRouteTarget.draftId,
           )
         : null;
+      const composerActiveProvider = carrySourceComposer?.activeProvider ?? null;
+      const composerModelSelection = composerActiveProvider
+        ? (carrySourceComposer?.modelSelectionByProvider[composerActiveProvider] ?? null)
+        : null;
+      const carryModelSelection =
+        composerModelSelection ?? carrySourceShell?.modelSelection ?? null;
       const carryInteractionMode =
         carrySourceComposer?.interactionMode ??
         carrySourceShell?.interactionMode ??
@@ -174,11 +180,6 @@ export function useNewThreadHandler() {
           candidate.id === projectRef.projectId &&
           candidate.environmentId === projectRef.environmentId,
       );
-      const resetDefaultModel = (draftId: DraftId) => {
-        if (!hasExplicitComposerModelSelection(getComposerDraft(draftId))) {
-          setModelSelection(draftId, DEFAULT_NEW_CHAT_MODEL_SELECTION, { replaceOptions: true });
-        }
-      };
       // The resolver applies project overrides and, until the server has
       // folded them, the aggregate's own legacy fields.
       const projectSettings = resolveProjectSettings(
@@ -187,6 +188,25 @@ export function useNewThreadHandler() {
         project,
       );
       const defaultRuntimeMode = projectSettings.settings.defaultRuntimeMode;
+      // An explicit human pick in the draft always stands. Otherwise the draft
+      // re-seeds from sticky state, then the saved default model (project
+      // override, then environment) or, without one, the viewed thread's model.
+      const applyDefaultModel = (draftId: DraftId) => {
+        if (hasExplicitComposerModelSelection(getComposerDraft(draftId))) return;
+        applyStickyState(draftId);
+        const modelSelectionOverride = resolveNewThreadModelSelectionOverride({
+          projectDefaultSelection: projectSettings.settings.defaultModelSelection ?? null,
+          carrySelection: carryModelSelection,
+          carrySourceDraftId:
+            currentRouteTarget?.kind === "draft" ? currentRouteTarget.draftId : null,
+          destinationDraftId: draftId,
+        });
+        if (modelSelectionOverride) {
+          // A complete snapshot: absent options mean "no options", not
+          // "keep the stale draft's options".
+          setModelSelection(draftId, modelSelectionOverride, { replaceOptions: true });
+        }
+      };
       const projectThreadEnvMode =
         projectSettings.sources.defaultThreadEnvMode === "project"
           ? projectSettings.settings.defaultThreadEnvMode
@@ -326,7 +346,7 @@ export function useNewThreadHandler() {
               ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
             });
           }
-          resetDefaultModel(emptyStoredDraftThread.draftId);
+          applyDefaultModel(emptyStoredDraftThread.draftId);
           // The workspace context must also ride along here: when projectRef
           // targets a different physical member of the logical project,
           // createDraftThreadState treats the remap as a project change and
@@ -392,7 +412,7 @@ export function useNewThreadHandler() {
           interactionMode: latestActiveDraftThread.interactionMode,
           ...pickExplicitWorkspaceOptions(options),
         });
-        resetDefaultModel(currentRouteTarget.draftId);
+        applyDefaultModel(currentRouteTarget.draftId);
         return Promise.resolve({
           draftId: currentRouteTarget.draftId,
           threadId: latestActiveDraftThread.threadId,
@@ -463,8 +483,7 @@ export function useNewThreadHandler() {
           ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
           preservePreviousDraft: requestedFreshDraft !== undefined,
         });
-        applyStickyState(draftId);
-        resetDefaultModel(draftId);
+        applyDefaultModel(draftId);
         carryComposerContentTo(draftId);
 
         if (options?.navigate !== false) {

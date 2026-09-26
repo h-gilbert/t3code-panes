@@ -7,7 +7,7 @@ const testState = vi.hoisted(() => {
   let targetSettings = {
     defaultThreadEnvMode: "local" as "local" | "worktree",
     newWorktreesStartFromOrigin: false,
-    defaultModelSelection: null,
+    defaultModelSelection: null as { instanceId: string; model: string } | null,
     defaultRuntimeMode: "full-access" as RuntimeMode,
   };
   let storedDraft: {
@@ -64,6 +64,7 @@ const testState = vi.hoisted(() => {
       draftStore.setDraftThreadContext.mockClear();
       draftStore.setLogicalProjectDraftThreadId.mockClear();
       draftStore.setModelSelection.mockClear();
+      draftStore.applyStickyState.mockClear();
       draftStore.getComposerDraft.mockReset();
       draftStore.getComposerDraft.mockReturnValue({});
       projectFileRead = new Promise<null>((resolve) => {
@@ -222,23 +223,34 @@ describe("useNewThreadHandler", () => {
         threadId: "thread-existing",
       },
     ],
-  ] as const)("uses Sol for a %s draft despite the project's Fable default", async (_, draft) => {
+  ] as const)("uses the saved default model for a %s draft", async (_, draft) => {
     testState.reset(draft);
+    const savedDefault = { instanceId: "claudeAgent", model: "claude-opus-5-5" };
+    testState.targetSettings.defaultModelSelection = savedDefault;
     const pendingOpen = useNewThreadHandler()({
       environmentId: "environment-ssh",
       projectId: "project-remote",
     } as never);
     testState.completeProjectFileRead(null);
     const opened = await pendingOpen;
+    expect(testState.draftStore.applyStickyState).toHaveBeenCalledWith(opened?.draftId);
     expect(testState.draftStore.setModelSelection).toHaveBeenCalledWith(
       opened?.draftId,
-      {
-        instanceId: "codex",
-        model: "gpt-6-sol",
-        options: [{ id: "reasoningEffort", value: "medium" }],
-      },
+      savedDefault,
       { replaceOptions: true },
     );
+  });
+
+  it("keeps the sticky model when there is no saved default or thread to carry from", async () => {
+    testState.reset(null);
+    const pendingOpen = useNewThreadHandler()({
+      environmentId: "environment-ssh",
+      projectId: "project-remote",
+    } as never);
+    testState.completeProjectFileRead(null);
+    const opened = await pendingOpen;
+    expect(testState.draftStore.applyStickyState).toHaveBeenCalledWith(opened?.draftId);
+    expect(testState.draftStore.setModelSelection).not.toHaveBeenCalled();
   });
 
   it("abandons a delayed draft open when the user navigates elsewhere", async () => {
