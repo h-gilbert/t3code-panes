@@ -39,14 +39,8 @@ import {
   DEFAULT_SERVER_SETTINGS,
   MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
   MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
-  type ServerSettingsPatch,
 } from "@t3tools/contracts";
-import {
-  filterSharedServerPatch,
-  findSharedSettingsMismatches,
-  pickSharedServerSettings,
-  supportsSharedSettingsSync,
-} from "@t3tools/client-runtime/state/shared-settings";
+import { supportsSharedSettingsSync } from "@t3tools/client-runtime/state/shared-settings";
 import { useThreadListV2Enabled } from "../threads/use-thread-list-v2-enabled";
 import {
   type AppUpdateCheckState,
@@ -59,6 +53,7 @@ import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
 import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
 import { resolveAgentAwarenessPlatformPresentation } from "./SettingsRouteScreen.logic";
+import { planAutoSettleSettingsSync, type AutoSettleSettings } from "./autoSettleSettingsSync";
 
 type NotificationStatus = "checking" | "enabled" | "disabled" | "unsupported";
 
@@ -154,6 +149,10 @@ function LocalSettingsRouteScreen() {
 function ConfiguredSettingsRouteScreen() {
   const agentAwarenessPushAvailable = supportsAgentAwarenessPush();
   const agentAwarenessPlatform = resolveAgentAwarenessPlatformPresentation(Platform.OS);
+  const agentAwarenessSubtitle =
+    Platform.OS === "android" && !agentAwarenessPushAvailable
+      ? "Install a newer app build to enable notifications"
+      : agentAwarenessPlatform.subtitle;
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
@@ -171,7 +170,7 @@ function ConfiguredSettingsRouteScreen() {
   }, [isLoaded, isSignedIn, user?.primaryEmailAddress?.emailAddress]);
 
   const refreshNotifications = useCallback(async () => {
-    if (process.env.EXPO_OS !== "ios") {
+    if (Platform.OS !== "ios" && Platform.OS !== "android") {
       setNotificationStatus("unsupported");
       return;
     }
@@ -213,7 +212,7 @@ function ConfiguredSettingsRouteScreen() {
       // Permission alone is not enough: the switch stays off until the relay
       // registration succeeds, so tell the user the truth about which happened.
       if (getAgentAwarenessRegistrationStatus() === "registered") {
-        Alert.alert("Notifications enabled", "Notifications are enabled for this device.");
+        Alert.alert("Notifications enabled", "Agent notifications are enabled for this device.");
       } else {
         Alert.alert(
           "Couldn't finish enabling notifications",
@@ -224,7 +223,10 @@ function ConfiguredSettingsRouteScreen() {
     }
     if (result.value.type === "unsupported") {
       setNotificationStatus("unsupported");
-      Alert.alert("Notifications unavailable", "Notifications are only available on iOS.");
+      Alert.alert(
+        "Notifications unavailable",
+        "Agent notifications are unavailable on this platform.",
+      );
       return;
     }
     setNotificationStatus("disabled");
@@ -251,7 +253,7 @@ function ConfiguredSettingsRouteScreen() {
 
       Alert.alert(
         "Disable notifications",
-        "Notification permission is controlled by iOS. Open Settings to disable notifications for T3 Code.",
+        "Open system Settings to disable notifications for T3 Code.",
         [
           { text: "Cancel", style: "cancel" },
           { text: "Open Settings", onPress: () => void Linking.openSettings() },
@@ -307,7 +309,7 @@ function ConfiguredSettingsRouteScreen() {
               notificationStatus === "checking" ||
               notificationStatus === "unsupported"
             }
-            subtitle={agentAwarenessPlatform.subtitle}
+            subtitle={agentAwarenessSubtitle}
             // Only reads as on when this device is actually registered with the
             // relay; otherwise notifications cannot be delivered regardless of
             // the local iOS permission.
@@ -338,6 +340,9 @@ function GeneralSettingsSection() {
   return (
     <SettingsSection title="General">
       <SettingsRow icon="folder" label="Project Grouping" target="SettingsProjectGrouping" />
+      {Platform.OS === "ios" ? (
+        <SettingsRow icon="keyboard" label="Keyboard" target="SettingsKeyboard" />
+      ) : null}
       <AutoSettleSettingsRows />
       <SettingsRow icon="chart.bar.xaxis" label="Usage" target="SettingsUsage" />
     </SettingsSection>
@@ -347,10 +352,9 @@ function GeneralSettingsSection() {
 const AUTO_SETTLE_DEFAULT_DAYS = DEFAULT_SERVER_SETTINGS.sidebarAutoSettleAfterDays ?? 3;
 
 /**
- * Auto-settlement is a user preference that every server has to hold. Mobile
- * has no primary environment, so the first eligible sync target provides the
- * reference value. Edits fan out to every eligible target, and a mismatch row
- * lets the user push the reference out.
+ * Mobile edits auto-settle defaults across connected, capable environments.
+ * The first target supplies the displayed values. Applying them leaves each
+ * environment's other defaults and overrides intact.
  */
 function AutoSettleSettingsRows() {
   const { environments } = useEnvironments();
@@ -369,24 +373,20 @@ function AutoSettleSettingsRows() {
     return null;
   }
 
-  const writeToAll = (patch: ServerSettingsPatch) => {
+  const writeToAll = (patch: Partial<AutoSettleSettings>) => {
     for (const environment of syncTargets) {
       void updateSettings({ environmentId: environment.environmentId, input: { patch } });
     }
   };
 
-  const mismatches = findSharedSettingsMismatches({
-    primaryEnvironmentId: reference.environmentId,
-    primarySettings: referenceSettings,
-    primaryCapabilities: reference.serverConfig?.environment.capabilities,
-    environments: environments.map((environment) => ({
+  const { patch: autoSettlePatch, mismatches } = planAutoSettleSettingsSync(
+    { environmentId: reference.environmentId, settings: referenceSettings },
+    syncTargets.map((environment) => ({
       environmentId: environment.environmentId,
       label: environment.label,
-      syncEligible: supportsSharedSettingsSync(environment),
       settings: environment.serverConfig?.settings ?? null,
-      capabilities: environment.serverConfig?.environment.capabilities,
     })),
-  });
+  );
 
   const afterDays = referenceSettings.sidebarAutoSettleAfterDays;
   const commitDays = () => {
@@ -440,7 +440,7 @@ function AutoSettleSettingsRows() {
       {mismatches.length > 0 ? (
         <View className="flex-row items-center gap-4 border-t border-border-subtle p-4">
           <View className="min-w-0 flex-1">
-            <Text className="text-lg text-foreground">Settings differ</Text>
+            <Text className="text-lg text-foreground">Auto-settle defaults differ</Text>
             <Text className="text-sm text-foreground-muted">
               {mismatches.map((mismatch) => mismatch.label).join(", ")}
             </Text>
@@ -448,30 +448,18 @@ function AutoSettleSettingsRows() {
           <Pressable
             accessibilityRole="button"
             onPress={() => {
-              const patch = pickSharedServerSettings(
-                referenceSettings,
-                reference.serverConfig?.environment.capabilities,
-              );
               for (const mismatch of mismatches) {
-                const target = environments.find(
-                  (candidate) => candidate.environmentId === mismatch.environmentId,
-                );
                 void updateSettings({
                   environmentId: mismatch.environmentId,
-                  input: {
-                    patch: filterSharedServerPatch(
-                      patch,
-                      target?.serverConfig?.environment.capabilities,
-                      target?.serverConfig?.settings,
-                      referenceSettings,
-                    ),
-                  },
+                  input: { patch: autoSettlePatch },
                 });
               }
             }}
             className="rounded-full bg-subtle px-4 py-2 active:opacity-70"
           >
-            <Text className="text-base font-t3-medium text-foreground">Apply to all</Text>
+            <Text className="text-base font-t3-medium text-foreground">
+              Apply auto-settle defaults
+            </Text>
           </Pressable>
         </View>
       ) : null}
@@ -602,6 +590,12 @@ function AppSettingsSection() {
   return (
     <SettingsSection title="App">
       <SettingsRow icon="internaldrive" label="Client Storage" target="SettingsClientStorage" />
+      <SettingsRow icon="stethoscope" label="Diagnostics" target="SettingsDiagnostics" />
+      <SettingsRow
+        icon="doc.on.doc"
+        label="Open source licenses"
+        target="SettingsOpenSourceLicenses"
+      />
       <SettingsRow icon="doc.text" label="Legal" fullScreenTarget="SettingsLegal" />
       {updateCheckAvailable ? (
         <Pressable

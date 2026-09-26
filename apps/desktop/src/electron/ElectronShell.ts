@@ -1,5 +1,6 @@
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import { MAC_PERMISSION_SETTINGS_URLS } from "../permissions/MacPermission.ts";
 import {
   REMOTE_CAPABLE_EDITOR_IDS,
   remoteSchemeForEditor,
@@ -12,22 +13,9 @@ import * as Option from "effect/Option";
 
 import * as Electron from "electron";
 
-/**
- * Deep links to individual System Settings panes. These are app-fixed, not
- * renderer-supplied, so they skip `parseSafeExternalUrl` — which exists to keep
- * arbitrary link schemes from reaching the OS handler — and open through their
- * own path below. The pane rather than the URL crosses the IPC boundary, so a
- * renderer can only ask for one of these known destinations.
- *
- * Full Disk Access uses the post-Ventura `PrivacySecurity.extension` anchor.
- */
-const SYSTEM_SETTINGS_URLS: Record<SystemSettingsPane, string> = {
-  "full-disk-access":
-    "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles",
-};
-
-// Remote open-in-editor deep links (`vscode://vscode-remote/ssh-remote+…`)
-// must reach the OS handler; every other non-web scheme stays blocked.
+// Remote open-in-editor deep links (`vscode://vscode-remote/ssh-remote+…`,
+// `zed://ssh/<host>/<path>`) must reach the OS handler; every other non-web
+// scheme stays blocked.
 const SAFE_WEB_PROTOCOLS = new Set(["http:", "https:"]);
 const REMOTE_EDITOR_PROTOCOLS = new Set(
   REMOTE_CAPABLE_EDITOR_IDS.flatMap((id) => {
@@ -36,13 +24,18 @@ const REMOTE_EDITOR_PROTOCOLS = new Set(
   }),
 );
 
+// Zed's host sits in the first path segment, so it needs its own userinfo ban.
+const ZED_SSH_PATHNAME = /^\/[^/@:]+\/.*$/;
+
 const isRemoteEditorUrl = (url: URL) =>
   REMOTE_EDITOR_PROTOCOLS.has(url.protocol) &&
   url.username.length === 0 &&
   url.password.length === 0 &&
-  url.host === "vscode-remote" &&
-  url.pathname.startsWith("/ssh-remote+") &&
-  url.pathname.length > "/ssh-remote+".length;
+  (url.protocol === "zed:"
+    ? url.host === "ssh" && ZED_SSH_PATHNAME.test(url.pathname)
+    : url.host === "vscode-remote" &&
+      url.pathname.startsWith("/ssh-remote+") &&
+      url.pathname.length > "/ssh-remote+".length);
 
 export function parseSafeExternalUrl(rawUrl: unknown): Option.Option<string> {
   if (typeof rawUrl !== "string") {
@@ -87,7 +80,7 @@ export const make = ElectronShell.of({
     }),
   openSystemSettings: (pane) =>
     Effect.promise(() =>
-      Electron.shell.openExternal(SYSTEM_SETTINGS_URLS[pane]).then(
+      Electron.shell.openExternal(MAC_PERMISSION_SETTINGS_URLS[pane]).then(
         () => true,
         () => false,
       ),

@@ -10,7 +10,7 @@ import {
   type LimitPoolWindow,
   remainingPercent,
 } from "@t3tools/shared/usageLimits";
-import { TicketIcon } from "lucide-react";
+import { AlertTriangleIcon, TicketIcon } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
 import { usePrimarySettings } from "../../hooks/useSettings";
@@ -20,6 +20,7 @@ import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { getDriverOption } from "../settings/providerDriverMeta";
 import { RedactedSensitiveText } from "../settings/RedactedSensitiveText";
 import { Button } from "../ui/button";
+import { Alert, AlertTitle } from "../ui/alert";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import {
   PaceIcon,
@@ -449,42 +450,50 @@ function PoolBar({
     <div className="@container/pool min-w-0">
       <div
         className="grid gap-x-1 gap-y-1"
-        style={{ gridTemplateColumns: `repeat(${pool.members.length}, minmax(0, 1fr))` }}
+        style={{ gridTemplateColumns: `repeat(${pool.columns.length}, minmax(0, 1fr))` }}
       >
-        {pool.members.map(({ account, window }, position) => (
-          <PoolSegment
-            key={account.key}
-            account={account}
-            window={window}
-            reset={restores.get(account.key)}
-            color={color}
-            now={now}
-            index={position + 1}
-          />
-        ))}
+        {pool.columns.map((member, position) =>
+          member.window ? (
+            <PoolSegment
+              key={member.account.key}
+              account={member.account}
+              window={member.window}
+              reset={restores.get(member.account.key)}
+              color={color}
+              now={now}
+              index={position + 1}
+            />
+          ) : null,
+        )}
       </div>
     </div>
   );
 }
 
 /**
- * Big pooled number and the segment bar. The bar is sorted by reset, so who
- * refills next is its left edge; the exact time and share restored live in
- * each segment's popover rather than a list restating the bar.
+ * Big pooled number and the segment bar. Accounts keep the same column across
+ * windows; each segment's popover shows its own reset time and share restored.
  */
 function PoolWindowCard({
   pool,
   color,
   now,
+  compact,
 }: {
   readonly pool: LimitPoolWindow;
   readonly color: string;
   readonly now: number;
+  readonly compact: boolean;
 }) {
   // The soonest reset that hands anything back; an untouched account resets to no effect.
   const nextRefill = pool.resets.find((reset) => reset.restoresPercent > 0);
   return (
-    <div className="grid items-center gap-x-6 gap-y-3 rounded-lg border border-border/60 p-4 md:grid-cols-[11rem_minmax(0,1fr)]">
+    <div
+      className={cn(
+        "grid items-center gap-x-6 gap-y-3 rounded-lg border border-border/60 p-4",
+        !compact && "md:grid-cols-[11rem_minmax(0,1fr)]",
+      )}
+    >
       <div className="flex flex-col gap-1">
         <span className="text-sm font-medium text-foreground">{pool.label}</span>
         <span className="flex items-baseline gap-2">
@@ -492,8 +501,8 @@ function PoolWindowCard({
             {pool.remainingPercent}%
           </span>
           <span className="text-sm text-muted-foreground">left</span>
-          {pool.pace ? <PaceIcon pace={pool.pace} /> : null}
         </span>
+        {pool.pace ? <PaceIcon pace={pool.pace} /> : null}
         {nextRefill ? (
           <span className="text-xs text-muted-foreground tabular-nums">
             <span className="font-medium text-foreground">↻ +{nextRefill.restoresPercent}%</span>{" "}
@@ -506,7 +515,18 @@ function PoolWindowCard({
   );
 }
 
-function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: number }) {
+function PoolSection({
+  pool,
+  now,
+  compact,
+}: {
+  readonly pool: LimitPool;
+  readonly now: number;
+  readonly compact: boolean;
+}) {
+  const windows = compact
+    ? pool.windows.toSorted((a, b) => Number(b.kind === "weekly") - Number(a.kind === "weekly"))
+    : pool.windows;
   const color = barColor(pool.driver);
   const label = getDriverOption(pool.driver)?.label ?? String(pool.driver);
   return (
@@ -521,8 +541,14 @@ function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: nu
         />
         {label}
       </h2>
-      {pool.windows.map((window) => (
-        <PoolWindowCard key={`${window.kind}:${window.id}`} pool={window} color={color} now={now} />
+      {windows.map((window) => (
+        <PoolWindowCard
+          key={`${window.kind}:${window.id}`}
+          pool={window}
+          color={color}
+          now={now}
+          compact={compact}
+        />
       ))}
     </section>
   );
@@ -536,22 +562,26 @@ function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: nu
 export function UsageLimitsPooled({
   presentations,
   now,
+  compact = false,
 }: {
   readonly presentations: Parameters<typeof collectLimitAccounts>[0];
   readonly now: number;
+  readonly compact?: boolean;
 }) {
   const pools = collectLimitPools(collectLimitAccounts(presentations), now);
   const notices = collectLimitNotices(presentations);
   return (
     <div className="flex flex-col gap-8">
-      {pools.length === 0 ? (
+      {pools.length === 0 && notices.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           No provider on the selected environments reports subscription limits.
         </p>
       ) : null}
-      {pools.map((pool) => (
-        <PoolSection key={pool.driver} pool={pool} now={now} />
-      ))}
+      <div className={cn("grid gap-8", compact && "sm:grid-cols-2")}>
+        {pools.map((pool) => (
+          <PoolSection key={pool.driver} pool={pool} now={now} compact={compact} />
+        ))}
+      </div>
       <LimitNotices notices={notices} />
     </div>
   );
@@ -561,10 +591,13 @@ export function UsageLimitsPooled({
 function LimitNotices({ notices }: { readonly notices: readonly string[] }) {
   if (notices.length === 0) return null;
   return (
-    <ul className="flex flex-col gap-1 text-xs text-muted-foreground">
+    <Alert variant="warning" controlAlignment="first-line">
+      <AlertTriangleIcon />
       {notices.map((notice) => (
-        <li key={notice}>{notice}</li>
+        <AlertTitle key={notice} className="break-words">
+          {notice}
+        </AlertTitle>
       ))}
-    </ul>
+    </Alert>
   );
 }

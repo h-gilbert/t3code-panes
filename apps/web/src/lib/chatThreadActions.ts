@@ -1,13 +1,9 @@
-import { createModelSelection } from "@t3tools/shared/model";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import {
-  DEFAULT_MODEL,
-  DEFAULT_PROVIDER_REASONING_EFFORT,
-  defaultInstanceIdForDriver,
-  ProviderDriverKind,
-  type EnvironmentId,
-  type ProjectId,
-  type ScopedProjectRef,
+import type {
+  EnvironmentId,
+  ModelSelection,
+  ProjectId,
+  ScopedProjectRef,
 } from "@t3tools/contracts";
 import type { ComposerThreadDraftState, DraftThreadEnvMode } from "../composerDraftStore";
 
@@ -49,11 +45,17 @@ export function resolveNewDraftStartFromOrigin(input: {
   return input.envMode === "worktree" && input.newWorktreesStartFromOrigin;
 }
 
-export const DEFAULT_NEW_CHAT_MODEL_SELECTION = createModelSelection(
-  defaultInstanceIdForDriver(ProviderDriverKind.make("codex")),
-  DEFAULT_MODEL,
-  [{ id: "reasoningEffort", value: DEFAULT_PROVIDER_REASONING_EFFORT }],
-);
+export function resolveNewThreadModelSelectionOverride(input: {
+  readonly projectDefaultSelection: ModelSelection | null;
+  readonly carrySelection: ModelSelection | null;
+  readonly carrySourceDraftId: string | null;
+  readonly destinationDraftId: string;
+}): ModelSelection | null {
+  return (
+    input.projectDefaultSelection ??
+    (input.carrySourceDraftId === input.destinationDraftId ? null : input.carrySelection)
+  );
+}
 
 export function hasExplicitComposerModelSelection(
   draft: ComposerModelSelectionState | null | undefined,

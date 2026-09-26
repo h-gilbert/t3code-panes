@@ -1,3 +1,4 @@
+import { registerWorkspaceWindow } from "./workspaceWindows.ts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -43,6 +44,8 @@ import { FOCUS_DIAGNOSTICS_CHANNEL } from "../ipc/channels.ts";
 const TITLEBAR_HEIGHT = 40;
 const DEFAULT_MAIN_WORKSPACE_ID = "main";
 const TITLEBAR_COLOR = "#01000000"; // #00000000 does not work correctly on Linux
+const MAC_HEADER_HEIGHT = 52;
+const MAC_WINDOW_BUTTON_HEIGHT = 14;
 const TITLEBAR_LIGHT_SYMBOL_COLOR = "#1f2937";
 const TITLEBAR_DARK_SYMBOL_COLOR = "#f8fafc";
 const MAIN_WINDOW_BOUNDS_PERSIST_DEBOUNCE_MS = 500;
@@ -98,7 +101,7 @@ export class DesktopWindow extends Context.Service<
     readonly activate: Effect.Effect<void, DesktopWindowError>;
     readonly createMainIfBackendReady: Effect.Effect<void, DesktopWindowError>;
     // Show a lightweight "Connecting to WSL" splash window immediately (wsl-only
-    // mode), before the WSL backend that serves the renderer is ready. It is
+    // mode), before the WSL backend that acts as the primary is ready. It is
     // dismissed automatically once the real main window reveals.
     readonly showConnectingSplash: Effect.Effect<void>;
     // Marks the primary backend as ready so `createMainIfBackendReady` and the
@@ -216,7 +219,9 @@ export function isSameOriginRendererNavigation(input: {
   readonly navigationUrl: string;
 }): boolean {
   try {
-    return new URL(input.applicationUrl).origin === new URL(input.navigationUrl).origin;
+    const application = new URL(input.applicationUrl);
+    const navigation = new URL(input.navigationUrl);
+    return application.protocol === navigation.protocol && application.host === navigation.host;
   } catch {
     return false;
   }
@@ -228,7 +233,11 @@ export function isWorkspaceRendererWindow(input: {
 }): boolean {
   if (!isSameOriginRendererNavigation(input)) return false;
   try {
-    return new URL(input.navigationUrl).pathname === "/workspace";
+    const navigation = new URL(input.navigationUrl);
+    const route = navigation.hash.startsWith("#/")
+      ? new URL(navigation.hash.slice(1), input.applicationUrl)
+      : navigation;
+    return route.pathname === "/workspace";
   } catch {
     return false;
   }
@@ -272,7 +281,7 @@ function getWindowTitleBarOptions(
   if (platform === "darwin") {
     return {
       titleBarStyle: "hiddenInset",
-      trafficLightPosition: { x: 16, y: 18 },
+      trafficLightPosition: { x: 16, y: 19 },
     };
   }
 
@@ -284,6 +293,16 @@ function getWindowTitleBarOptions(
       symbolColor: shouldUseDarkColors ? TITLEBAR_DARK_SYMBOL_COLOR : TITLEBAR_LIGHT_SYMBOL_COLOR,
     },
   };
+}
+
+function positionMacWindowButtons(window: Electron.BrowserWindow, platform: NodeJS.Platform): void {
+  if (platform !== "darwin" || window.isFullScreen()) return;
+  window.setWindowButtonPosition({
+    x: 16,
+    y: Math.round(
+      (MAC_HEADER_HEIGHT * window.webContents.getZoomFactor() - MAC_WINDOW_BUTTON_HEIGHT) / 2,
+    ),
+  });
 }
 
 function syncWindowAppearance(
@@ -447,6 +466,7 @@ export const make = Effect.gen(function* () {
         webviewTag: true,
       },
     });
+    registerWorkspaceWindow(window);
     nextWorkspaceWindowNumber = Math.max(nextWorkspaceWindowNumber, workspaceWindowNumber + 1);
 
     if (environment.platform === "darwin") {
@@ -696,15 +716,25 @@ export const make = Effect.gen(function* () {
 
     window.webContents.setWindowOpenHandler(({ url }) => {
       if (isWorkspaceRendererWindow({ applicationUrl, navigationUrl: url })) {
-        return {
-          action: "allow",
-          overrideBrowserWindowOptions: {
-            width: 1600,
-            height: 1000,
-            minWidth: 900,
-            minHeight: 600,
-          },
-        };
+        const navigation = new URL(url);
+        const route = navigation.hash.startsWith("#/")
+          ? new URL(navigation.hash.slice(1), applicationUrl)
+          : navigation;
+        // Use the managed window path so popups retain preload, browser hosting,
+        // and the persisted workspace identity just like Cmd+N windows.
+        void runPromise(
+          createWindow({
+            workspaceId: route.searchParams.get("workspace")?.trim() || NodeCrypto.randomUUID(),
+            isMainWindow: false,
+          }).pipe(
+            Effect.catch((error) =>
+              logWindowWarning("failed to open renderer workspace window", {
+                message: error.message,
+              }),
+            ),
+          ),
+        );
+        return { action: "deny" };
       }
       if (Option.isSome(ElectronShell.parseSafeExternalUrl(url))) {
         void runPromise(electronShell.openExternal(url));
@@ -785,6 +815,7 @@ export const make = Effect.gen(function* () {
       });
       window.on("leave-full-screen", () => {
         window.webContents.send(WINDOW_FULLSCREEN_STATE_CHANNEL, false);
+        positionMacWindowButtons(window, environment.platform);
       });
     }
 
@@ -844,6 +875,7 @@ export const make = Effect.gen(function* () {
       clearDevelopmentLoadRetry();
       developmentLoadRetryIndex = 0;
       window.setTitle(windowTitle);
+      positionMacWindowButtons(window, environment.platform);
     });
     window.webContents.on(
       "did-fail-load",
@@ -1022,9 +1054,15 @@ export const make = Effect.gen(function* () {
     return window;
   }).pipe(Effect.withSpan("desktop.window.revealOrCreateMain"));
 
+  // With the local environment disabled there is no backend to wait for: the
+  // renderer is served from bundled assets and only talks to remote environments.
+  const waitingForBackend = Effect.gen(function* () {
+    if (yield* Ref.get(backendReadyRef)) return false;
+    return (yield* desktopSettings.get).localEnvironmentEnabled;
+  });
+
   const createMainIfBackendReady = Effect.gen(function* () {
-    const backendReady = yield* Ref.get(backendReadyRef);
-    if (!backendReady) return;
+    if (yield* waitingForBackend) return;
     const existingWindow = yield* currentMainWindow;
     if (Option.isSome(existingWindow)) return;
     if (!workspaceSessionRestored) {
@@ -1124,8 +1162,10 @@ export const make = Effect.gen(function* () {
     payload: unknown,
     { reveal = true }: { readonly reveal?: boolean } = {},
   ) {
-    const existingWindow = yield* reveal ? focusedMainWindow : electronWindow.main;
-    if (Option.isNone(existingWindow) && (!reveal || !(yield* Ref.get(backendReadyRef)))) return;
+    const existingWindow = yield* reveal || channel === MENU_ACTION_CHANNEL
+      ? focusedMainWindow
+      : electronWindow.main;
+    if (Option.isNone(existingWindow) && (!reveal || (yield* waitingForBackend))) return;
     const targetWindow = Option.isSome(existingWindow) ? existingWindow.value : yield* ensureMain;
     if (targetWindow.isDestroyed()) return;
     const send = Effect.sync(() => {
@@ -1212,6 +1252,7 @@ export const make = Effect.gen(function* () {
       webContents.setZoomLevel(
         direction === "reset" ? 0 : webContents.getZoomLevel() + (direction === "in" ? 0.5 : -0.5),
       );
+      positionMacWindowButtons(window.value, environment.platform);
       // Chromium pushes the new level down to embedded guests, which would zoom
       // the previewed page along with the app UI. The preview browser keeps its
       // own zoom, so put each guest back where the preview left it.

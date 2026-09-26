@@ -82,7 +82,7 @@ function leaseKey(lease: Pick<ClientActivityLease, "sessionId" | "rpcClientId" |
   return JSON.stringify([lease.sessionId, lease.rpcClientId, lease.clientId]);
 }
 
-export function upsertClientActivityLease(
+function upsertClientActivityLease(
   leases: ReadonlyMap<string, ClientActivityLease>,
   lease: ClientActivityLease,
   now: DateTime.Utc,
@@ -208,6 +208,7 @@ function computeSnapshot(input: {
   };
 }
 
+/** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.fn("background.policy.make")(function* () {
   const hostPowerMonitor = yield* HostPowerMonitor.HostPowerMonitor;
   const serverSettings = yield* ServerSettingsService;
@@ -347,3 +348,50 @@ export const make = Effect.fn("background.policy.make")(function* () {
 });
 
 export const layer = Layer.effect(BackgroundPolicy, make());
+
+/**
+ * An awake, idle host that never reports a power transition.
+ *
+ * Tests that only care whether scope work runs still have to satisfy every
+ * method the production code reaches — a `Layer.mock` throws on an omitted one —
+ * so they take this and override the part they exercise. Reaching for it beats
+ * another hand-rolled snapshot literal per suite: each copy silently rots the
+ * next time this service grows a method.
+ */
+const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
+
+const awakeTestSnapshot: BackgroundPolicySnapshot = {
+  hostPower: {
+    source: "unknown",
+    idle: "unknown",
+    idleSeconds: null,
+    locked: "unknown",
+    suspended: false,
+    onBattery: "unknown",
+    lowPowerMode: "unknown",
+    thermalState: "unknown",
+    stale: true,
+    updatedAt: TEST_EPOCH,
+  },
+  leases: [],
+  activeForegroundLeaseCount: 0,
+  activeScopeKeys: [],
+  shouldRunOpportunisticWork: true,
+  updatedAt: TEST_EPOCH,
+};
+
+type BackgroundPolicyService = BackgroundPolicy["Service"];
+
+export const layerTest = (overrides: Partial<BackgroundPolicyService> = {}) =>
+  Layer.mock(BackgroundPolicy)({
+    reportClientActivity: () => Effect.void,
+    removeRpcClient: () => Effect.void,
+    reportHostPowerState: () => Effect.void,
+    snapshot: Effect.succeed(awakeTestSnapshot),
+    streamChanges: Stream.empty,
+    subscribe: Effect.succeed({ latest: awakeTestSnapshot, changes: Stream.empty }),
+    hasDemand: () => Effect.succeed(true),
+    shouldRunScopeWork: () => Effect.succeed(true),
+    shouldRunOpportunisticWork: Effect.succeed(true),
+    ...overrides,
+  });

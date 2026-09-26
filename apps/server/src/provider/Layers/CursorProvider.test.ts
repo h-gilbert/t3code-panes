@@ -325,10 +325,12 @@ describe("Cursor skills", () => {
           directory: NodeOS.tmpdir(),
           prefix: "cursor-skills-home-",
         });
-        const workspace = yield* fileSystem.makeTempDirectory({
-          directory: NodeOS.tmpdir(),
-          prefix: "cursor-skills-workspace-",
-        });
+        const workspace = yield* fileSystem
+          .makeTempDirectory({
+            directory: NodeOS.tmpdir(),
+            prefix: "cursor-skills-workspace-",
+          })
+          .pipe(Effect.flatMap((directory) => fileSystem.realPath(directory)));
         const writeSkill = Effect.fn("writeCursorSkill")(function* (
           root: string,
           name: string,
@@ -404,10 +406,12 @@ describe("Cursor skills", () => {
           directory: NodeOS.tmpdir(),
           prefix: "cursor-skills-home-",
         });
-        const workspace = yield* fileSystem.makeTempDirectory({
-          directory: NodeOS.tmpdir(),
-          prefix: "cursor-skills-workspace-",
-        });
+        const workspace = yield* fileSystem
+          .makeTempDirectory({
+            directory: NodeOS.tmpdir(),
+            prefix: "cursor-skills-workspace-",
+          })
+          .pipe(Effect.flatMap((directory) => fileSystem.realPath(directory)));
         const library = yield* fileSystem.makeTempDirectory({
           directory: NodeOS.tmpdir(),
           prefix: "cursor-skills-library-",
@@ -492,6 +496,7 @@ describe("buildCursorProviderSnapshot", () => {
       status: "warning",
       message: "Cursor ACP model discovery timed out after 15000ms.",
       models: [],
+      supportsConversationRollback: false,
     });
   });
 

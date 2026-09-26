@@ -113,7 +113,7 @@ The standalone installer tests run with `vp run test:desktop:promotion` and are 
 preparation. They use temporary app bundles and never replace the installed app.
 
 ```sh
-vp run promote:desktop prepare
+T3CODE_LOCAL_SIGNING_IDENTITY=<Apple-Development-certificate-SHA-1> vp run promote:desktop prepare
 vp run promote:desktop status
 # Finish local work and quit the installed app normally before installing.
 vp run promote:desktop install --app '/Applications/T3 Code (Alpha).app'
@@ -129,6 +129,11 @@ development shell cannot select production state accidentally. The Electron prof
 using the app's legacy `T3 Code (Alpha)` directory preference, then `t3code`, under
 `~/Library/Application Support`. `--profile-dir` identifies an existing nonstandard profile for
 backup; it does not change the app's profile configuration.
+
+Set `T3CODE_LOCAL_SIGNING_IDENTITY` to the SHA-1 of the Apple Development certificate used by
+the installed app. Preparation signs the extracted local bundle with that identity and records its
+signed checksum. This local signing step does not require the provisioning profile used for
+published passkey builds. Verify the certificate and team match the installed app before installation.
 
 `prepare` runs the promotion tests and desktop/server update safeguard tests, then calls the existing
 ZIP artifact builder once. Run the tests, lint and type checks relevant to your actual edits before

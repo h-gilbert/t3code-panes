@@ -52,6 +52,7 @@ export function createPreviewEnvironmentAtoms<R, E>(
       // stream immediately with its owner so stale requests cannot replay when
       // a thread remounts and the server can clear disconnected hosts promptly.
       idleTtlMs: 0,
+      retryOnCompletionAfterMs: 1_000,
     }),
     open: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:preview:open",

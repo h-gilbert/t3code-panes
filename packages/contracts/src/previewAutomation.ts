@@ -104,6 +104,11 @@ export const PreviewAutomationAutofillResult = Schema.Struct({
 export type PreviewAutomationAutofillResult = typeof PreviewAutomationAutofillResult.Type;
 
 export const PreviewAutomationStatus = Schema.Struct({
+  /**
+   * Whether this tab can be driven at all: a live host with an attachable
+   * webContents. It never means the caller may drive it right now — that is
+   * `heldByAnotherSession`, which only `preview_status` fills in.
+   */
   available: Schema.Boolean,
   visible: Schema.Boolean,
   tabId: Schema.NullOr(PreviewTabId),
@@ -114,6 +119,15 @@ export const PreviewAutomationStatus = Schema.Struct({
   viewportSetting: Schema.optional(PreviewViewportSetting),
   /** Measured guest-page viewport in CSS pixels when a webview is ready. */
   viewport: Schema.optional(PreviewRenderedViewportSize),
+  /**
+   * Set by the server, not the host: another provider session is driving this
+   * exact tab as of this read, so an interaction would fail with
+   * `PreviewAutomationBusyError`. Absent when nothing holds the tab, and on
+   * results other than `preview_status`.
+   */
+  heldByAnotherSession: Schema.optional(Schema.Boolean),
+  /** The thread driving this tab when `heldByAnotherSession` is set. */
+  heldByThreadId: Schema.optional(ThreadId),
 });
 export type PreviewAutomationStatus = typeof PreviewAutomationStatus.Type;
 
@@ -689,14 +703,32 @@ export const PreviewAutomationResponse = Schema.Struct({
 });
 export type PreviewAutomationResponse = typeof PreviewAutomationResponse.Type;
 
+const McpCapabilityErrorFields = {
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+  providerSessionId: TrimmedNonEmptyString,
+  providerInstanceId: ProviderInstanceId,
+};
+
+/** Agents read this message, so it names the next step and not only the failure. */
 export class PreviewAutomationUnavailableError extends Schema.TaggedError<PreviewAutomationUnavailableError>()(
   "PreviewAutomationUnavailableError",
   {
     capability: Schema.Literal("preview"),
-    environmentId: EnvironmentId,
-    threadId: ThreadId,
-    providerSessionId: TrimmedNonEmptyString,
-    providerInstanceId: ProviderInstanceId,
+    ...McpCapabilityErrorFields,
+  },
+) {
+  override get message(): string {
+    return `MCP credential does not grant the ${this.capability} capability: browser preview tools are off for this thread. Do not retry them. To check a page, use a headless browser from the shell, such as Playwright, or curl. The user can turn on "Agent browser access" in Settings; it applies when the agent session next starts.`;
+  }
+}
+
+/** A `t3-code` MCP tool was called with a credential that does not carry its capability. */
+export class McpCapabilityUnavailableError extends Schema.TaggedError<McpCapabilityUnavailableError>()(
+  "McpCapabilityUnavailableError",
+  {
+    capability: TrimmedNonEmptyString,
+    ...McpCapabilityErrorFields,
   },
 ) {
   override get message(): string {
@@ -752,8 +784,7 @@ export class PreviewAutomationNoAvailableHostError extends Schema.TaggedError<Pr
   },
 ) {
   override get message(): string {
-    const summary = `No preview automation host is available for ${this.operation} in environment ${this.environmentId}.`;
-    return summary;
+    return `No preview automation host is available for ${this.operation} in environment ${this.environmentId}. Preview tools run in a T3 Code desktop app that is open and connected to this environment; a headless server has no browser of its own. Do not retry. To check a page, use a headless browser from the shell, such as Playwright, or curl, or ask the user to open this thread in the T3 Code desktop app.`;
   }
 }
 
@@ -761,12 +792,22 @@ export class PreviewAutomationBusyError extends Schema.TaggedError<PreviewAutoma
   "PreviewAutomationBusyError",
   {
     ...PreviewAutomationScopeErrorFields,
+    tabId: Schema.optional(PreviewTabId),
     holderProviderSessionId: TrimmedNonEmptyString,
     holderThreadId: Schema.optional(ThreadId),
   },
 ) {
   override get message(): string {
-    return `The shared browser for environment ${this.environmentId} is currently held by another session; try again shortly.`;
+    // Exclusivity is per tab, so name the tab and the holder: the caller's own
+    // other tabs are unaffected and a competing session only blocks the step it
+    // is mid-flight with.
+    const holder = this.holderThreadId
+      ? `thread ${this.holderThreadId}`
+      : `provider session ${this.holderProviderSessionId}`;
+    const target = this.tabId
+      ? `Collaborative browser tab ${this.tabId}`
+      : `The collaborative browser tab for environment ${this.environmentId}`;
+    return `${target} is being driven by ${holder} right now; retry once that step finishes, or target another tab.`;
   }
 }
 
@@ -790,10 +831,9 @@ export class PreviewAutomationTabNotFoundError extends Schema.TaggedError<Previe
   },
 ) {
   override get message(): string {
-    const summary = this.tabId
-      ? `Preview tab ${this.tabId} was not found for ${this.operation}.`
-      : `No active preview tab was found for ${this.operation}.`;
-    return summary;
+    return this.tabId
+      ? `Preview tab ${this.tabId} was not found for ${this.operation}. Omit tabId to use the current tab, or call preview_open.`
+      : `No active preview tab was found for ${this.operation}. Call preview_open first.`;
   }
 }
 

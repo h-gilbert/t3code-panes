@@ -10,8 +10,10 @@ describe("expanded image dialog layering", () => {
       "utf8",
     );
 
-    expect(source).toContain("return createPortal(");
-    expect(source).toContain("document.body");
-    expect(source).toContain("fixed inset-0 z-[150]");
+    // The dialog primitive owns the document-level portal; what this file still
+    // has to get right is stacking above the pane grid on both of its layers.
+    expect(source).toContain("<DialogPopup");
+    expect(source).toContain('backdropClassName="z-[150]"');
+    expect(source).toMatch(/viewportClassName="z-\[150\]/);
   });
 });

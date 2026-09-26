@@ -1,4 +1,13 @@
-import type { ScopedProjectRef } from "@t3tools/contracts";
+import type {
+  ScopedProjectRef,
+  EnvironmentId,
+  PullRequestLinkedThreadsResult,
+} from "@t3tools/contracts";
+
+export interface CommandPaletteLinkedThreads {
+  readonly environmentId: EnvironmentId;
+  readonly threads: PullRequestLinkedThreadsResult["threads"];
+}
 
 // Tiny event bus allowing components to programmatically open the command palette
 // without owning its React state.
@@ -7,6 +16,8 @@ const COMMAND_PALETTE_OPEN_EVENT = "t3code:open-command-palette";
 export interface CommandPaletteOpenDetail {
   readonly open?: "add-local-project" | "add-project" | "new-thread-in" | "resume-thread";
   readonly onProjectSelected?: (projectRef: ScopedProjectRef) => void;
+  readonly query?: string;
+  readonly linkedThreads?: CommandPaletteLinkedThreads;
 }
 
 export function openCommandPalette(detail?: CommandPaletteOpenDetail): void {

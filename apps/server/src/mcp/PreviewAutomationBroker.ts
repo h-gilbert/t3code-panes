@@ -26,8 +26,8 @@ import {
   type PreviewAutomationResponse,
   type PreviewAutomationStreamEvent,
 } from "@t3tools/contracts";
-import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
+import type * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -46,6 +46,12 @@ export interface PreviewAutomationInvokeInput {
   readonly input: unknown;
   readonly tabId?: PreviewTabId;
   readonly timeoutMs?: number;
+  /** A best-effort read may time out while the guest navigates without losing its host. */
+  readonly disconnectOnTimeout?: boolean;
+  /** Background metadata reads must not change the agent's current tab. */
+  readonly updateCurrentTab?: boolean;
+  /** Capture the routed tab before another request changes the current assignment. */
+  readonly onTargetTab?: (tabId: PreviewTabId | undefined) => void;
 }
 
 export class PreviewAutomationBroker extends Context.Service<
@@ -61,6 +67,15 @@ export class PreviewAutomationBroker extends Context.Service<
     readonly invoke: <A = unknown>(
       request: PreviewAutomationInvokeInput,
     ) => Effect.Effect<A, PreviewAutomationError>;
+    /**
+     * The session driving the caller's target tab right now, when it is not the
+     * caller. `preview_status` reports this so an agent can tell "a browser
+     * exists" from "I may drive it".
+     */
+    readonly readHold: (request: {
+      readonly scope: McpInvocationContext.McpInvocationScope;
+      readonly tabId?: PreviewTabId;
+    }) => Effect.Effect<PreviewAutomationHold | undefined>;
   }
 >()("t3/mcp/PreviewAutomationBroker") {}
 
@@ -71,7 +86,7 @@ interface ClientConnection {
   readonly supportedOperations: ReadonlySet<PreviewAutomationOperation>;
   readonly focused: boolean;
   readonly focusOrder: number;
-  readonly queue: Queue.Queue<PreviewAutomationStreamEvent>;
+  readonly queue: Queue.Queue<PreviewAutomationStreamEvent, Cause.Done>;
 }
 
 interface PendingRequest {
@@ -97,16 +112,27 @@ interface HostAssignment {
 }
 
 /**
- * The provider session that currently holds a shared browser environment for
- * exclusive interaction, plus when it last drove it. Keyed per environment (one
- * shared surface per environment) rather than per connection, so it survives a
- * host reconnect within the idle window and expresses "another session owns the
- * browser" — something the per-session `assignments` map cannot.
+ * The provider session driving one browser tab for the duration of one request.
+ *
+ * Exclusivity is per tab and lasts exactly as long as the request in flight,
+ * because a tab is the only thing two drivers can actually corrupt: one
+ * webContents, one DOM, one navigation. It is deliberately not per environment
+ * and has no idle window — that shape blocked sessions whose tabs never touched
+ * each other, and held the block for seconds after the holder went quiet.
+ * Cross-tab hazards are native focus, which the desktop host serialises around
+ * the input dispatch itself.
  */
 interface HostHolder {
   readonly providerSessionId: string;
   readonly threadId: McpInvocationContext.McpInvocationScope["threadId"];
-  readonly lastActivityMs: number;
+  readonly connectionId: ClientConnection["connectionId"];
+  readonly requestId: string;
+}
+
+/** What a competing session needs to know about a tab it cannot drive yet. */
+export interface PreviewAutomationHold {
+  readonly providerSessionId: string;
+  readonly threadId: McpInvocationContext.McpInvocationScope["threadId"];
 }
 
 interface PreviewAutomationRequestErrorContext {
@@ -127,7 +153,8 @@ interface PreviewAutomationRequestErrorContext {
 interface BrokerState {
   readonly clients: ReadonlyMap<string, ClientConnection>;
   readonly assignments: ReadonlyMap<string, HostAssignment>;
-  readonly holders: ReadonlyMap<ClientConnection["environmentId"], HostHolder>;
+  /** Keyed by `driveKey`: one entry per tab being driven right now. */
+  readonly holders: ReadonlyMap<string, HostHolder>;
   readonly pending: ReadonlyMap<string, PendingRequest>;
   readonly requestSequence: number;
   readonly focusSequence: number;
@@ -135,13 +162,19 @@ interface BrokerState {
 
 type InvokeRoute =
   | { readonly type: "no-host" }
-  | { readonly type: "busy"; readonly holder: HostHolder }
+  | {
+      readonly type: "busy";
+      readonly holder: HostHolder;
+      readonly tabId: PreviewTabId | undefined;
+    }
   | {
       readonly type: "route";
       readonly connection: ClientConnection;
       readonly requestId: string;
       readonly requestContext: PreviewAutomationRequestErrorContext;
       readonly requestSequence: number;
+      /** Set when this request claimed the tab, so settling releases it. */
+      readonly driveKey: string | undefined;
     };
 
 const removeConnectionFromState = (
@@ -159,15 +192,14 @@ const removeConnectionFromState = (
   for (const [assignmentKey, assignment] of assignments) {
     if (assignment.queue === queue) assignments.delete(assignmentKey);
   }
-  // Drop the exclusive-use lease once an environment has no connected host
-  // left: nothing remains to hold the surface, and a stale holder would
-  // otherwise wrongly block the next session until the idle window elapsed.
-  if (removedConnection) {
-    const environmentId = removedConnection.environmentId;
-    const environmentStillConnected = Array.from(clients.values()).some(
-      (connection) => connection.environmentId === environmentId,
-    );
-    if (!environmentStillConnected) holders.delete(environmentId);
+  // A request settling releases its own claim, but a host that vanishes without
+  // its in-flight fiber unwinding would otherwise strand one. Drop every claim
+  // driven through the connection going away — and only that connection, since a
+  // stale client entry may name a host that has already been replaced.
+  if (removedConnection?.queue === queue) {
+    for (const [key, holder] of holders) {
+      if (holder.connectionId === removedConnection.connectionId) holders.delete(key);
+    }
   }
   for (const [requestId, entry] of pending) {
     if (entry.queue !== queue) continue;
@@ -197,10 +229,10 @@ const hostAssignmentKey = (scope: McpInvocationContext.McpInvocationScope): stri
   `${scope.environmentId}\u0000${scope.providerSessionId}`;
 
 /**
- * Operations that actively drive the shared browser surface (input, navigation,
- * lifecycle) and must not interleave between provider sessions. Passive reads
- * (`status`, `snapshot`, `waitFor`) are omitted: they neither mutate the page
- * nor steal focus, so they run concurrently and never claim the lease.
+ * Operations that actively drive a tab (input, navigation, lifecycle) and must
+ * not interleave between provider sessions on that tab. Passive reads (`status`,
+ * `snapshot`, `waitFor`) are omitted: they neither mutate the page nor steal
+ * focus, so they run concurrently and never claim a tab.
  */
 const PREVIEW_AUTOMATION_EXCLUSIVE_OPERATIONS: ReadonlySet<PreviewAutomationOperation> = new Set([
   "open",
@@ -219,12 +251,18 @@ const PREVIEW_AUTOMATION_EXCLUSIVE_OPERATIONS: ReadonlySet<PreviewAutomationOper
 ]);
 
 /**
- * How long the shared browser stays leased to its last active driver after that
- * driver goes quiet. A live multi-step interaction refreshes the lease on every
- * step, so this only elapses once a session truly stops touching the browser —
- * at which point another session (or a crashed holder's successor) may take over.
+ * What an exclusive operation claims. A resolved tab keys on the tab, so
+ * sessions driving different tabs never meet. Before a session has a tab —
+ * concurrent first `open` calls from subagents sharing one thread's credential —
+ * it keys on the session, which is the same collision domain one step earlier.
  */
-const PREVIEW_AUTOMATION_LEASE_IDLE_MS = 10_000;
+const driveKey = (
+  scope: McpInvocationContext.McpInvocationScope,
+  tabId: PreviewTabId | undefined,
+): string =>
+  tabId === undefined
+    ? `session\u0000${hostAssignmentKey(scope)}`
+    : `tab\u0000${scope.environmentId}\u0000${tabId}`;
 
 const isExclusiveOperation = (operation: PreviewAutomationOperation): boolean =>
   PREVIEW_AUTOMATION_EXCLUSIVE_OPERATIONS.has(operation);
@@ -395,32 +433,47 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
   const closeConnection = Effect.fn("PreviewAutomationBroker.closeConnection")(function* (
     queue: ClientConnection["queue"],
     disconnected: ReadonlyArray<PendingRequest>,
+    completeStream = false,
   ) {
+    if (completeStream) {
+      // Discard this generation's commands and complete the RPC stream so a
+      // responsive desktop can re-register after a timeout eviction.
+      yield* Queue.clear(queue);
+      yield* Queue.end(queue);
+    } else {
+      // Replaced registrations must not reconnect and displace their successor.
+      yield* Queue.shutdown(queue);
+    }
     yield* Effect.forEach(
       disconnected,
       ({ deferred, context }) =>
         Deferred.fail(deferred, new PreviewAutomationClientDisconnectedError(context)),
       { discard: true },
     );
-    yield* Queue.shutdown(queue);
   });
 
   const disconnect = Effect.fn("PreviewAutomationBroker.disconnect")(function* (
     clientId: string,
     queue: ClientConnection["queue"],
+    completeStream = false,
   ) {
-    const disconnected = yield* SynchronizedRef.modify(state, (current) => {
+    yield* SynchronizedRef.modifyEffect(state, (current) => {
+      // Retired generations were already closed by their replacement or eviction.
+      if (current.clients.get(clientId)?.queue !== queue) {
+        return Effect.succeed([undefined, current] as const);
+      }
       const removed = removeConnectionFromState(current, clientId, queue);
-      return [removed.disconnected, removed.state] as const;
+      return closeConnection(queue, removed.disconnected, completeStream).pipe(
+        Effect.as([undefined, removed.state] as const),
+      );
     });
-    yield* closeConnection(queue, disconnected);
   });
 
   const acquireConnection = Effect.fn("PreviewAutomationBroker.acquireConnection")(function* (
     host: PreviewAutomationHost,
   ) {
     const clientId = host.clientId;
-    const queue = yield* Queue.unbounded<PreviewAutomationStreamEvent>();
+    const queue = yield* Queue.unbounded<PreviewAutomationStreamEvent, Cause.Done>();
     const connectionId = yield* crypto.randomUUIDv4.pipe(Effect.orDie);
     yield* Queue.offer(queue, { type: "connected", connectionId });
     const connection: ClientConnection = {
@@ -525,9 +578,6 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
   ): Effect.fn.Return<A, PreviewAutomationError> {
     const timeoutMs = input.timeoutMs ?? 15_000;
     const deferred = yield* Deferred.make<unknown, PreviewAutomationError>();
-    // Read the clock outside `modify` (its reducer must stay pure): the lease
-    // guard below compares the current holder's last activity against `now`.
-    const now = yield* Clock.currentTimeMillis;
     const exclusive = isExclusiveOperation(input.operation);
     const route = yield* SynchronizedRef.modify(
       state,
@@ -572,25 +622,25 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
           if (!hasLiveAssignment) assignments.delete(assignmentKey);
           return [{ type: "no-host" as const }, { ...current, assignments }] as const;
         }
-        // Exclusive-use guard: while one provider session is actively driving the
-        // shared browser for this environment, refuse a competing session's
-        // interaction instead of stomping the surface the holder — and the human
-        // watching it — is mid-flow with. Passive reads skip this entirely.
-        if (exclusive) {
-          const holder = current.holders.get(input.scope.environmentId);
-          const holderActive =
-            holder !== undefined && now - holder.lastActivityMs < PREVIEW_AUTOMATION_LEASE_IDLE_MS;
-          if (holderActive && holder.providerSessionId !== input.scope.providerSessionId) {
-            return [
-              { type: "busy" as const, holder },
-              { ...current, assignments },
-            ] as const;
-          }
-        }
         const canReuseAssignedTab =
           assigned !== undefined &&
           assigned.connectionId === connection.connectionId &&
           assigned.queue === connection.queue;
+        const targetTabId = input.tabId ?? (canReuseAssignedTab ? assigned.tabId : undefined);
+        // Exclusive-use guard: while one provider session has a request in flight
+        // against this tab, refuse a competing session's interaction rather than
+        // interleave two drivers on one DOM. Another tab is never blocked, and
+        // passive reads skip this entirely.
+        const claimKey = exclusive ? driveKey(input.scope, targetTabId) : undefined;
+        if (claimKey !== undefined) {
+          const holder = current.holders.get(claimKey);
+          if (holder !== undefined && holder.providerSessionId !== input.scope.providerSessionId) {
+            return [
+              { type: "busy" as const, holder, tabId: targetTabId },
+              { ...current, assignments },
+            ] as const;
+          }
+        }
         assignments.set(assignmentKey, {
           clientId: connection.clientId,
           connectionId: connection.connectionId,
@@ -603,7 +653,6 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
 
         const requestSequence = current.requestSequence;
         const requestId = `preview-${requestSequence}`;
-        const tabId = input.tabId ?? (canReuseAssignedTab ? assigned.tabId : undefined);
         const selectorDiagnostics = selectorDiagnosticsFromInput(input.input);
         const context: PreviewAutomationRequestErrorContext = {
           operation: input.operation,
@@ -614,21 +663,23 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
           clientId: connection.clientId,
           connectionId: connection.connectionId,
           requestId,
-          ...(tabId === undefined ? {} : { tabId }),
+          ...(targetTabId === undefined ? {} : { tabId: targetTabId }),
           timeoutMs,
           ...selectorDiagnostics,
         };
         const pending = new Map(current.pending);
         pending.set(requestId, { queue: connection.queue, deferred, context });
-        // Claim or refresh the exclusive lease so this session's next step (and
-        // the idle timer) start from now. Passive reads leave the lease untouched.
-        const holders = exclusive
-          ? new Map(current.holders).set(input.scope.environmentId, {
-              providerSessionId: input.scope.providerSessionId,
-              threadId: input.scope.threadId,
-              lastActivityMs: now,
-            })
-          : current.holders;
+        // Claim the tab for exactly this request; settling it releases the claim.
+        // Passive reads leave claims untouched.
+        const holders =
+          claimKey === undefined
+            ? current.holders
+            : new Map(current.holders).set(claimKey, {
+                providerSessionId: input.scope.providerSessionId,
+                threadId: input.scope.threadId,
+                connectionId: connection.connectionId,
+                requestId,
+              });
         return [
           {
             type: "route" as const,
@@ -636,6 +687,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
             requestId,
             requestContext: context,
             requestSequence,
+            driveKey: claimKey,
           },
           {
             ...current,
@@ -663,30 +715,51 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
         threadId: input.scope.threadId,
         providerSessionId: input.scope.providerSessionId,
         providerInstanceId: input.scope.providerInstanceId,
+        ...(route.tabId === undefined ? {} : { tabId: route.tabId }),
         holderProviderSessionId: route.holder.providerSessionId,
         ...(route.holder.threadId === undefined ? {} : { holderThreadId: route.holder.threadId }),
       });
     }
     const { connection, requestId, requestContext, requestSequence } = route;
-    const removePending = SynchronizedRef.update(state, (next) => {
-      if (!next.pending.has(requestId)) return next;
+    input.onTargetTab?.(requestContext.tabId);
+    // Releasing the tab claim here, rather than on a timer, is what lets a
+    // competing session step in the moment this request settles — however it
+    // settles, including interruption.
+    const claimedKey = route.driveKey;
+    const releaseRequest = SynchronizedRef.update(state, (next) => {
+      const releasesClaim =
+        claimedKey !== undefined && next.holders.get(claimedKey)?.requestId === requestId;
+      if (!next.pending.has(requestId) && !releasesClaim) return next;
       const pending = new Map(next.pending);
       pending.delete(requestId);
-      return { ...next, pending };
+      if (!releasesClaim) return { ...next, pending };
+      const holders = new Map(next.holders);
+      holders.delete(claimedKey);
+      return { ...next, holders, pending };
     });
     const awaitResponse = Effect.fn("PreviewAutomationBroker.awaitResponse")(function* () {
-      const offered = yield* Queue.offer(connection.queue, {
-        type: "request",
-        connectionId: connection.connectionId,
-        request: {
-          requestId,
-          threadId: input.scope.threadId,
-          tabId: requestContext.tabId,
-          tabIdExplicit: input.tabId !== undefined,
-          operation: input.operation,
-          input: input.input,
-          timeoutMs,
-        },
+      const offered = yield* SynchronizedRef.modifyEffect(state, (current) => {
+        // A route can outlive its generation while another request evicts it.
+        // Serialize the live-generation check and offer with queue closure.
+        if (
+          current.clients.get(connection.clientId)?.queue !== connection.queue ||
+          !current.pending.has(requestId)
+        ) {
+          return Effect.succeed([false, current] as const);
+        }
+        return Queue.offer(connection.queue, {
+          type: "request",
+          connectionId: connection.connectionId,
+          request: {
+            requestId,
+            threadId: input.scope.threadId,
+            tabId: requestContext.tabId,
+            tabIdExplicit: input.tabId !== undefined,
+            operation: input.operation,
+            input: input.input,
+            timeoutMs,
+          },
+        }).pipe(Effect.map((offered) => [offered, current] as const));
       });
       if (!offered) {
         const completion = yield* Deferred.poll(deferred);
@@ -697,11 +770,20 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
       }
       const result = yield* Deferred.await(deferred).pipe(Effect.timeoutOption(timeoutMs));
       return yield* Option.match(result, {
-        onNone: () => Effect.fail(new PreviewAutomationTimeoutError(requestContext)),
+        onNone: () =>
+          Effect.gen(function* () {
+            // An unanswered request invalidates this connection. Do not replay
+            // actions: the client may have applied them before becoming unreachable.
+            if (input.disconnectOnTimeout !== false) {
+              yield* disconnect(connection.clientId, connection.queue, true);
+            }
+            return yield* new PreviewAutomationTimeoutError(requestContext);
+          }),
         onSome: (value) => Effect.succeed(value as A),
       });
     });
-    const result = yield* awaitResponse().pipe(Effect.ensuring(removePending));
+    const result = yield* awaitResponse().pipe(Effect.ensuring(releaseRequest));
+    if (input.updateCurrentTab === false) return result;
     const responseTabId = readResultTabId(result);
     const resultTabId = responseTabId === undefined ? input.tabId : responseTabId;
     if (resultTabId === undefined) return result;
@@ -732,7 +814,20 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
     return result;
   });
 
-  return PreviewAutomationBroker.of({ connect, focusHost, respond, invoke });
+  const readHold: PreviewAutomationBroker["Service"]["readHold"] = Effect.fn(
+    "PreviewAutomationBroker.readHold",
+  )(function* (request) {
+    const current = yield* SynchronizedRef.get(state);
+    const tabId = request.tabId ?? current.assignments.get(hostAssignmentKey(request.scope))?.tabId;
+    // Without a resolved tab there is nothing another session could be holding:
+    // the pre-tab claim key is the caller's own session.
+    if (tabId === undefined) return undefined;
+    const holder = current.holders.get(driveKey(request.scope, tabId));
+    if (!holder || holder.providerSessionId === request.scope.providerSessionId) return undefined;
+    return { providerSessionId: holder.providerSessionId, threadId: holder.threadId };
+  });
+
+  return PreviewAutomationBroker.of({ connect, focusHost, respond, invoke, readHold });
 }).pipe(Effect.withSpan("PreviewAutomationBroker.make"));
 
 export const layer = Layer.effect(PreviewAutomationBroker, make);

@@ -102,9 +102,7 @@ const commands = [
 ] satisfies ReadonlyArray<EffectAcpSchema.AvailableCommand>;
 
 const testLayer = Layer.merge(
-  Layer.mock(BackgroundPolicy.BackgroundPolicy)({
-    shouldRunScopeWork: () => Effect.succeed(false),
-  }),
+  BackgroundPolicy.layerTest({ shouldRunScopeWork: () => Effect.succeed(false) }),
   ServerSettingsService.layerTest(),
 );
 

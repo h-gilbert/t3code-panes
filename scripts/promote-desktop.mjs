@@ -221,16 +221,15 @@ function prepare(store) {
   run(process.execPath, ["--test", NodePath.join(repo, "scripts/promote-desktop.node-test.mjs")], {
     stdio: "inherit",
   });
-  run(
-    NodePath.join(repo, "node_modules/.bin/vp"),
-    [
-      "test",
-      "run",
-      "apps/desktop/src/updates/DesktopUpdates.test.ts",
-      "apps/server/src/cloud/selfUpdate.test.ts",
-    ],
-    { stdio: "inherit" },
-  );
+  for (const [directory, testFile] of [
+    ["apps/desktop", "src/updates/DesktopUpdates.test.ts"],
+    ["apps/server", "src/cloud/selfUpdate.test.ts"],
+  ]) {
+    run(NodePath.join(repo, "node_modules/.bin/vp"), ["test", "run", testFile], {
+      cwd: NodePath.join(repo, directory),
+      stdio: "inherit",
+    });
+  }
   run(
     process.execPath,
     [
@@ -259,6 +258,25 @@ function prepare(store) {
   const apps = NodeFS.readdirSync(unpacked).filter((file) => file.endsWith(".app"));
   if (apps.length !== 1) throw new Error("Expected one app in the archive.");
   const app = NodePath.join(unpacked, apps[0]);
+  const signingIdentity = process.env.T3CODE_LOCAL_SIGNING_IDENTITY?.trim();
+  if (signingIdentity) {
+    run(
+      "/usr/bin/codesign",
+      [
+        "--force",
+        "--deep",
+        "--sign",
+        signingIdentity,
+        "--preserve-metadata=entitlements,flags,runtime",
+        "--timestamp=none",
+        app,
+      ],
+      { stdio: "inherit" },
+    );
+    run("/usr/bin/codesign", ["--verify", "--deep", "--strict", app], {
+      stdio: "inherit",
+    });
+  }
   const info = bundleInfo(app);
   if (info.version !== version)
     throw new Error("Packaged version does not match the requested build.");

@@ -173,7 +173,7 @@ export const resolveTailscaleLocalTarget = (
   return { localPort: state.port };
 };
 
-export const formatPairOutput = (input: {
+const formatPairOutput = (input: {
   readonly serverLabel: string;
   readonly origin: string;
   readonly pairingUrl: string;
@@ -322,6 +322,8 @@ const makePairServerConfig = Effect.fn(function* (input: {
     otlpMetricsUrl: undefined,
     otlpExportIntervalMs: 10_000,
     otlpServiceName: "t3-server",
+    otlpHeaders: undefined,
+    otlpProtocol: "http/json",
     mode: "web",
     port: state.port,
     host: state.host,

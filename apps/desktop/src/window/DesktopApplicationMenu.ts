@@ -46,7 +46,9 @@ const dispatchMenuAction = Effect.fn("desktop.menu.dispatchMenuAction")(function
   action: string,
 ): Effect.fn.Return<void, DesktopWindow.DesktopWindowError, DesktopWindow.DesktopWindow> {
   const desktopWindow = yield* DesktopWindow.DesktopWindow;
-  yield* desktopWindow.dispatchMenuAction(action);
+  yield* desktopWindow.dispatchMenuAction(action, {
+    reveal: action !== "paste-as-text",
+  });
 });
 
 const zoomMainWindow = Effect.fn("desktop.menu.zoomMainWindow")(function* (
@@ -143,6 +145,15 @@ export const make = Effect.gen(function* () {
     const newWorkspaceWindowClick = () => {
       runMenuEffect("new-workspace-window", createWorkspaceWindow);
     };
+    // Chromium already handles the accelerator. Only a menu click needs IPC.
+    const pasteAsTextClick: NonNullable<Electron.MenuItemConstructorOptions["click"]> = (
+      _item,
+      _window,
+      event,
+    ) => {
+      if (event?.triggeredByAccelerator === true) return;
+      runMenuEffect("paste-as-text", dispatchMenuAction("paste-as-text"));
+    };
     const zoomClick = (direction: DesktopWindow.MainWindowZoomDirection) => () => {
       runMenuEffect(`zoom-${direction}`, zoomMainWindow(direction));
     };
@@ -198,7 +209,34 @@ export const make = Effect.gen(function* () {
           { role: environment.platform === "darwin" ? "close" : "quit" },
         ],
       },
-      { role: "editMenu" },
+      {
+        label: "Edit",
+        submenu: [
+          { role: "undo" },
+          { role: "redo" },
+          { type: "separator" },
+          { role: "cut" },
+          { role: "copy" },
+          { role: "paste" },
+          {
+            label: "Paste as Text",
+            accelerator: "CmdOrCtrl+Shift+V",
+            click: pasteAsTextClick,
+          },
+          { role: "delete" },
+          { type: "separator" },
+          { role: "selectAll" },
+          ...(environment.platform === "darwin"
+            ? [
+                { type: "separator" as const },
+                {
+                  label: "Speech",
+                  submenu: [{ role: "startSpeaking" as const }, { role: "stopSpeaking" as const }],
+                },
+              ]
+            : []),
+        ],
+      },
       {
         label: "View",
         submenu: [

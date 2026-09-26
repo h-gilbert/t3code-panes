@@ -25,7 +25,8 @@ import {
   ComposerControlChevron,
   type ComposerControlSize,
 } from "./ComposerControl";
-import { composerFloatingLayerProps } from "./composerEventScope";
+import { useComposerMenuProps } from "./composerEventScope";
+import { shortcutLabelForCommand } from "../../keybindings";
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /**
@@ -51,12 +52,15 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   open?: boolean;
   triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
   triggerClassName?: string;
+  /** Aggregate settings can show a neutral value without claiming one provider is selected. */
+  triggerLabel?: string;
   triggerAriaLabel?: string;
   onOpenChange?: (open: boolean) => void;
   onOpenProviderSetup?: (instanceId: ProviderInstanceId) => void;
   getModelDisabledReason?: (instanceId: ProviderInstanceId, model: string) => string | null;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
 }) {
+  const composerFloatingLayerProps = useComposerMenuProps();
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
   const isMenuOpen = props.open ?? uncontrolledIsMenuOpen;
   const size = props.size ?? "sm";
@@ -161,6 +165,13 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     setIsMenuOpen(false);
   };
 
+  const shortcutLabel = props.keybindings
+    ? shortcutLabelForCommand(props.keybindings, "modelPicker.toggle")
+    : null;
+  const triggerTooltipContent = shortcutLabel
+    ? `${props.triggerLabel ?? triggerLabel} · ${shortcutLabel}`
+    : (props.triggerLabel ?? triggerLabel);
+
   return (
     <Popover
       open={isMenuOpen}
@@ -175,8 +186,12 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
       <PopoverTrigger
         render={
           <ComposerControl
-            aria-label={props.triggerAriaLabel ?? `Select model. Current model: ${triggerTitle}`}
-            title={props.iconOnly ? triggerLabel : undefined}
+            aria-label={
+              props.triggerAriaLabel ??
+              props.triggerLabel ??
+              `Select model. Current model: ${triggerTitle}`
+            }
+            title={props.iconOnly ? (props.triggerLabel ?? triggerLabel) : undefined}
             variant={props.triggerVariant ?? "ghost"}
             size={size}
             data-chat-provider-model-picker="true"
@@ -186,7 +201,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                 ? "w-7 shrink-0 justify-center px-0"
                 : props.compact
                   ? "max-w-42 shrink-0"
-                  : "max-w-48 shrink sm:max-w-56",
+                  : props.isComposerOwned
+                    ? "shrink"
+                    : "max-w-48 shrink sm:max-w-56",
               props.triggerClassName,
             )}
             disabled={props.disabled}
@@ -199,7 +216,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             props.iconOnly ? "justify-center" : "min-w-0 flex-1 gap-1.5",
           )}
         >
-          {activeEntry ? (
+          {activeEntry && props.triggerLabel === undefined ? (
             <ProviderInstanceIcon
               driverKind={activeEntry.driverKind}
               displayName={activeEntry.displayName}
@@ -224,12 +241,12 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                   />
                 }
               >
-                {triggerTitle}
+                {props.triggerLabel ?? triggerTitle}
               </TooltipTrigger>
-              <TooltipPopup side="top">{triggerLabel}</TooltipPopup>
+              <TooltipPopup side="top">{triggerTooltipContent}</TooltipPopup>
             </Tooltip>
           ) : null}
-          {selectedModel?.isUnavailable ? (
+          {selectedModel?.isUnavailable && props.triggerLabel === undefined ? (
             <Badge variant="outline" size="sm">
               Unavailable
             </Badge>
