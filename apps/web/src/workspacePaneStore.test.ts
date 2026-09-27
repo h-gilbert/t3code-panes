@@ -179,6 +179,22 @@ describe("window workspace layouts", () => {
     expect(layout.panes.slice(0, 2)).toEqual([{ draftId: "draft-1" }, { draftId: "draft-2" }]);
   });
 
+  it("swaps two panes' threads and projects, keeping focus on the moved thread", () => {
+    useWorkspacePaneStore.setState({ layoutsByProjectKey: {} });
+    const thread = scopeThreadRef("environment-1" as EnvironmentId, ThreadId.make("thread-1"));
+    const actions = useWorkspacePaneStore.getState();
+    actions.setPaneCount("window-a", 5);
+    actions.setPaneProject("window-a", 0, "project-0");
+    actions.setPaneProject("window-a", 3, "project-3");
+    actions.assignThread("window-a", thread, 3);
+    actions.swapPanes("window-a", 3, 0);
+
+    const layout = selectProjectWorkspaceLayout(useWorkspacePaneStore.getState(), "window-a");
+    expect(layout.panes.slice(0, 5)).toEqual([thread, null, null, null, null]);
+    expect(layout.projectKeys.slice(0, 5)).toEqual(["project-3", null, null, "project-0", null]);
+    expect(layout.focusedPaneIndex).toBe(0);
+  });
+
   it("packs occupied panes before empty panes when shrinking", () => {
     const firstThread = scopeThreadRef("environment-1" as EnvironmentId, ThreadId.make("thread-1"));
     const secondThread = scopeThreadRef(

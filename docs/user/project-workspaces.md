@@ -18,6 +18,10 @@ for you. Settlement stops the thread's provider session, background work, and ma
 processes without deleting its history. Settled threads remain available from the sidebar and
 `/resume`; continuing the thread starts resources again as needed.
 
+Drag a pane header onto another pane to swap them. In the grid layout, a pane count that would
+leave an empty cell (3, 5, or 7) makes the first pane tall instead. Drag a thread into the first
+pane to give it the extra space.
+
 When the selected project has matching checkouts on more than one connected environment, use the
 computer menu to the left of the model selector to choose where a new thread runs. The choice is
 available until work begins; an active thread stays attached to the environment that owns its files,

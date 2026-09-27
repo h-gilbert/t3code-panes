@@ -14,6 +14,7 @@ import {
   Columns3Icon,
   FolderOpenIcon,
   Grid2X2Icon,
+  GripVerticalIcon,
   Maximize2Icon,
   MessageSquareIcon,
   Minimize2Icon,
@@ -23,7 +24,15 @@ import {
   SquareArrowOutUpRightIcon,
   XIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type RefObject,
+} from "react";
 
 import { ChatViewContent, shouldTypeToFocusComposer } from "../components/ChatView";
 import type { ChatComposerHandle } from "../components/chat/ChatComposer";
@@ -85,7 +94,10 @@ import {
   type WorkspacePaneIndex,
   type WorkspacePaneTarget,
 } from "../workspacePaneStore";
-import { resolveWorkspaceGridColumnCount } from "../workspacePaneLayout";
+import {
+  resolveWorkspaceGridColumnCount,
+  resolveWorkspaceGridLeadRowSpan,
+} from "../workspacePaneLayout";
 import {
   resolveWorkspaceDraftThreadRef,
   resolveWorkspacePaneThreadTitle,
@@ -97,6 +109,19 @@ import {
 } from "../workspacePaneThreadPicker";
 import { cn } from "~/lib/utils";
 import { newDraftId, newThreadId } from "../lib/utils";
+
+const WORKSPACE_PANE_DRAG_TYPE = "application/x-t3code-workspace-pane";
+
+function hasWorkspacePaneDrag(dataTransfer: DataTransfer): boolean {
+  return dataTransfer.types.includes(WORKSPACE_PANE_DRAG_TYPE);
+}
+
+// Panes are keyed by what they show, not by slot, so swapping two panes keeps
+// their chat views, terminals, and previews mounted.
+function workspacePaneRenderKey(target: WorkspacePaneTarget | null, index: number): string {
+  if (target === null) return `empty:${index}`;
+  return "draftId" in target ? `draft:${target.draftId}` : `thread:${scopedThreadKey(target)}`;
+}
 
 function EmptyWorkspacePane({
   paneNumber,
@@ -338,6 +363,8 @@ function WorkspacePane({
   availableThreads,
   focused,
   maximized,
+  rearrangeable,
+  style,
   composerHandleRef,
   settleThread,
 }: {
@@ -349,6 +376,8 @@ function WorkspacePane({
   readonly availableThreads: readonly WorkspaceThreadPickerItem[];
   readonly focused: boolean;
   readonly maximized: boolean;
+  readonly rearrangeable: boolean;
+  readonly style: CSSProperties;
   readonly composerHandleRef: RefObject<ChatComposerHandle | null>;
   readonly settleThread: ReturnType<typeof useThreadActions>["settleThread"];
 }) {
@@ -358,9 +387,12 @@ function WorkspacePane({
   const assignThread = useWorkspacePaneStore((state) => state.assignThread);
   const assignDraft = useWorkspacePaneStore((state) => state.assignDraft);
   const toggleMaximize = useWorkspacePaneStore((state) => state.toggleMaximize);
+  const swapPanes = useWorkspacePaneStore((state) => state.swapPanes);
   const handleNewThread = useNewThreadHandler();
   const [pendingProjectRef, setPendingProjectRef] = useState<ScopedProjectRef | null>(null);
   const [settling, setSettling] = useState(false);
+  const [draggingPane, setDraggingPane] = useState(false);
+  const [paneDropActive, setPaneDropActive] = useState(false);
   const draftRequestVersionRef = useRef(0);
   const serverThreadRef = paneTarget && "threadId" in paneTarget ? paneTarget : null;
   const serverThreadShell = useThreadShell(serverThreadRef);
@@ -461,10 +493,37 @@ function WorkspacePane({
         "relative flex min-h-0 min-w-0 flex-col overflow-hidden border bg-background",
         focused ? "z-10 border-primary ring-1 ring-primary/50" : "border-border",
       )}
+      style={style}
       aria-label={`Workspace pane ${index + 1}`}
       data-workspace-pane={index}
       data-focused={focused ? "true" : "false"}
+      onDragOverCapture={(event) => {
+        if (draggingPane || !hasWorkspacePaneDrag(event.dataTransfer)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        setPaneDropActive(true);
+      }}
+      onDragLeaveCapture={(event) => {
+        if (!hasWorkspacePaneDrag(event.dataTransfer)) return;
+        if (
+          event.relatedTarget instanceof Node &&
+          event.currentTarget.contains(event.relatedTarget)
+        )
+          return;
+        setPaneDropActive(false);
+      }}
       onDropCapture={(event) => {
+        if (hasWorkspacePaneDrag(event.dataTransfer)) {
+          event.preventDefault();
+          event.stopPropagation();
+          setPaneDropActive(false);
+          const source = event.dataTransfer.getData(WORKSPACE_PANE_DRAG_TYPE);
+          const separator = source.lastIndexOf(":");
+          const sourceIndex = Number(source.slice(separator + 1));
+          if (source.slice(0, separator) !== workspaceKey || !Number.isInteger(sourceIndex)) return;
+          swapPanes(workspaceKey, sourceIndex as WorkspacePaneIndex, index);
+          return;
+        }
         if (
           !event.dataTransfer.types.includes("Files") ||
           event.dataTransfer.files.length === 0 ||
@@ -487,15 +546,38 @@ function WorkspacePane({
         focusPane(workspaceKey, index);
       }}
     >
+      {paneDropActive ? (
+        <div
+          className="pointer-events-none absolute inset-0 z-50 border-2 border-primary bg-primary/10"
+          aria-hidden
+        />
+      ) : null}
       <div
         className={cn(
           "flex h-7 shrink-0 items-center border-b px-2 text-[11px] font-medium",
           focused
             ? "border-primary/40 bg-primary/[0.07] text-foreground"
             : "border-border bg-muted/30 text-muted-foreground",
+          rearrangeable && "cursor-grab active:cursor-grabbing",
+          draggingPane && "opacity-60",
         )}
+        draggable={rearrangeable}
+        onDragStart={(event) => {
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData(WORKSPACE_PANE_DRAG_TYPE, `${workspaceKey}:${index}`);
+          setDraggingPane(true);
+        }}
+        onDragEnd={() => setDraggingPane(false)}
         onDoubleClick={() => toggleMaximize(workspaceKey, index)}
       >
+        {rearrangeable ? (
+          <Tooltip>
+            <TooltipTrigger render={<span className="-ml-1 flex shrink-0 items-center" />}>
+              <GripVerticalIcon className="size-3 text-muted-foreground/60" aria-hidden />
+            </TooltipTrigger>
+            <TooltipPopup side="bottom">Drag onto another pane to swap</TooltipPopup>
+          </Tooltip>
+        ) : null}
         {projects.length === 0 ? (
           <button
             type="button"
@@ -661,7 +743,20 @@ export function ProjectPaneWorkspace({
   const { settleThread } = useThreadActions();
   const { panes, projectKeys, paneCount, layoutMode, focusedPaneIndex, maximizedPaneIndex } =
     layout;
-  const visiblePanes = panes.slice(0, paneCount);
+  const leadPaneRowSpan =
+    layoutMode === "grid" && maximizedPaneIndex === null
+      ? resolveWorkspaceGridLeadRowSpan(paneCount)
+      : 1;
+  // DOM order stays sorted by render key; CSS order places each pane in its
+  // slot, so a swap restyles panes instead of moving live DOM nodes.
+  const renderedPanes = panes
+    .slice(0, paneCount)
+    .map((paneTarget, index) => ({
+      paneTarget,
+      index: index as WorkspacePaneIndex,
+      key: workspacePaneRenderKey(paneTarget, index),
+    }))
+    .toSorted((left, right) => left.key.localeCompare(right.key));
   const settledThreadKeys = useMemo(() => {
     const now = `${nowMinute}:00.000Z`;
     return new Set(
@@ -868,12 +963,11 @@ export function ProjectPaneWorkspace({
                     }
           }
         >
-          {visiblePanes.map((paneTarget, rawIndex) => {
-            const index = rawIndex as WorkspacePaneIndex;
+          {renderedPanes.map(({ paneTarget, index, key }) => {
             if (maximizedPaneIndex !== null && maximizedPaneIndex !== index) return null;
             return (
               <WorkspacePane
-                key={index}
+                key={key}
                 workspaceKey={workspaceKey}
                 index={index}
                 paneTarget={paneTarget}
@@ -882,6 +976,12 @@ export function ProjectPaneWorkspace({
                 availableThreads={availableThreads}
                 focused={active && focusedPaneIndex === index}
                 maximized={maximizedPaneIndex === index}
+                rearrangeable={maximizedPaneIndex === null && paneCount > 1}
+                style={{
+                  order: index,
+                  gridRow:
+                    index === 0 && leadPaneRowSpan > 1 ? `span ${leadPaneRowSpan}` : undefined,
+                }}
                 composerHandleRef={paneComposerHandleRefs[index]!}
                 settleThread={settleThread}
               />

@@ -18,3 +18,13 @@ export function resolveWorkspaceGridColumnCount(paneCount: WorkspacePaneCount): 
 
   return bestColumns;
 }
+
+// Rows the first grid pane spans so an uneven pane count fills the grid
+// instead of leaving an empty cell, e.g. five panes become one tall pane
+// beside a 2×2 grid.
+export function resolveWorkspaceGridLeadRowSpan(paneCount: WorkspacePaneCount): number {
+  const columns = resolveWorkspaceGridColumnCount(paneCount);
+  const rows = Math.ceil(paneCount / columns);
+  const emptyCells = rows * columns - paneCount;
+  return emptyCells > 0 && emptyCells < rows ? emptyCells + 1 : 1;
+}

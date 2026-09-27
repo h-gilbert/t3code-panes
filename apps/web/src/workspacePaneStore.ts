@@ -61,6 +61,11 @@ export interface WorkspacePaneState {
     projectKey: string | null,
   ) => void;
   toggleMaximize: (projectKey: string, paneIndex: WorkspacePaneIndex) => void;
+  swapPanes: (
+    projectKey: string,
+    fromIndex: WorkspacePaneIndex,
+    toIndex: WorkspacePaneIndex,
+  ) => void;
   setPaneCount: (projectKey: string, paneCount: WorkspacePaneCount) => void;
   setLayoutMode: (projectKey: string, layoutMode: WorkspaceLayoutMode) => void;
   resetWorkspace: (projectKey: string) => void;
@@ -122,6 +127,32 @@ export function assignWorkspaceThread(
   const next: Array<WorkspacePaneTarget | null> = [...panes];
   next[paneIndex] = threadRef;
   return { panes: next as unknown as WorkspacePanes, focusedPaneIndex: paneIndex };
+}
+
+// Swaps two panes' threads and projects. Focus and maximize follow the moved
+// content rather than staying on the slot.
+export function swapWorkspaceLayoutPanes(
+  layout: ProjectWorkspaceLayout,
+  fromIndex: WorkspacePaneIndex,
+  toIndex: WorkspacePaneIndex,
+): ProjectWorkspaceLayout {
+  if (fromIndex === toIndex) return layout;
+  const panes = [...layout.panes];
+  const projectKeys = [...layout.projectKeys];
+  panes[fromIndex] = layout.panes[toIndex] ?? null;
+  panes[toIndex] = layout.panes[fromIndex] ?? null;
+  projectKeys[fromIndex] = layout.projectKeys[toIndex] ?? null;
+  projectKeys[toIndex] = layout.projectKeys[fromIndex] ?? null;
+  const followMove = (index: WorkspacePaneIndex) =>
+    index === fromIndex ? toIndex : index === toIndex ? fromIndex : index;
+  return {
+    ...layout,
+    panes,
+    projectKeys,
+    focusedPaneIndex: followMove(layout.focusedPaneIndex),
+    maximizedPaneIndex:
+      layout.maximizedPaneIndex === null ? null : followMove(layout.maximizedPaneIndex),
+  };
 }
 
 interface IndexedWorkspacePane {
@@ -332,6 +363,12 @@ export const useWorkspacePaneStore = create<WorkspacePaneState>()(
             focusedPaneIndex: paneIndex,
             maximizedPaneIndex: layout.maximizedPaneIndex === paneIndex ? null : paneIndex,
           })),
+        ),
+      swapPanes: (projectKey, fromIndex, toIndex) =>
+        set((state) =>
+          updateProjectLayout(state, projectKey, (layout) =>
+            swapWorkspaceLayoutPanes(layout, fromIndex, toIndex),
+          ),
         ),
       setPaneCount: (projectKey, paneCount) =>
         set((state) =>
