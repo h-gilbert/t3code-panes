@@ -292,6 +292,19 @@ function FloatingStatusLabel(props: {
       </StatusLabelRow>
     );
   }
+  if (props.status.kind === "background") {
+    return (
+      <StatusLabelRow
+        key="background"
+        accessibilityLabel={props.status.label}
+        onLayout={props.onLayout}
+      >
+        <Text className="font-t3-medium text-xs text-foreground" numberOfLines={1}>
+          {props.status.label}
+        </Text>
+      </StatusLabelRow>
+    );
+  }
   if (props.status.kind === "compacting") {
     return <CompactingLabel key="compacting" onLayout={props.onLayout} />;
   }

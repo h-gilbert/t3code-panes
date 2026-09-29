@@ -2094,3 +2094,42 @@ describe("buildThreadListV2ListItems row-state stamps", () => {
     expect(threadListV2ListItemsAreEqual(shelfLoading, shelfLoaded)).toBe(false);
   });
 });
+
+describe("background thread status", () => {
+  it.each([
+    ["working", "working"],
+    ["monitoring", "monitoring"],
+  ] as const)("keeps %s visible after the main turn is idle", (backgroundLiveness, expected) => {
+    const thread = makeThread({
+      id: ThreadId.make("background"),
+      title: "Background",
+      backgroundLiveness,
+    });
+    expect(resolveThreadListV2Status(thread)).toBe(expected);
+    expect(resolveThreadListV2Status({ ...thread, backgroundLiveness: null })).toBe("ready");
+    expect(resolveThreadListV2Status({ ...thread, hasPendingApprovals: true })).toBe("approval");
+    expect(resolveThreadListV2Status({ ...thread, hasPendingUserInput: true })).toBe("input");
+  });
+  it("prioritizes a failed session over monitoring", () => {
+    const thread = makeThread({
+      id: ThreadId.make("failed"),
+      title: "Failed",
+      backgroundLiveness: "monitoring",
+    });
+    expect(
+      resolveThreadListV2Status({
+        ...thread,
+        session: {
+          threadId: thread.id,
+          status: "error",
+          providerName: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: "Provider failed",
+          updatedAt: NOW,
+        },
+      }),
+    ).toBe("failed");
+  });
+});

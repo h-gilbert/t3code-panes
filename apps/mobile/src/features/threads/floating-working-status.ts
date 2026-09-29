@@ -1,3 +1,4 @@
+import type { OrchestrationThreadShell } from "@t3tools/contracts";
 import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
 
 /**
@@ -9,6 +10,7 @@ export type FloatingWorkingStatus =
   | { readonly kind: "working"; readonly startedAt: string }
   | { readonly kind: "syncing"; readonly label: string }
   | { readonly kind: "compacting" }
+  | { readonly kind: "background"; readonly label: string }
   // A task whose thread the server has not created yet: the worktree may
   // still be checking out, so there is no turn to time.
   | { readonly kind: "preparing"; readonly label: string }
@@ -64,4 +66,26 @@ export function connectionFloatingStatus(input: {
     case "connected":
       return null;
   }
+}
+
+/** Background work remains visible after the primary turn finishes. */
+export function backgroundFloatingStatus(input: {
+  readonly backgroundLiveness: OrchestrationThreadShell["backgroundLiveness"];
+  readonly liveAgentCount: number;
+  readonly failed: boolean;
+}): FloatingWorkingStatus | null {
+  if (input.failed) return null;
+  if (input.backgroundLiveness === "monitoring") {
+    return { kind: "background", label: "Monitoring" };
+  }
+  if (input.backgroundLiveness === "working") {
+    return {
+      kind: "background",
+      label:
+        input.liveAgentCount > 0
+          ? `${input.liveAgentCount} ${input.liveAgentCount === 1 ? "agent" : "agents"} working`
+          : "Background work",
+    };
+  }
+  return null;
 }

@@ -187,6 +187,7 @@ const command = Effect.fn("nativeClient.command")(function* (
         APP_VARIANT: "development",
         MOBILE_VERSION_POLICY: "appVersion",
         T3CODE_IOS_PERSONAL_TEAM: "0",
+        T3CODE_MOBILE_SELF_HOSTED: "0",
         CI: "1",
         EXPO_NO_GIT_STATUS: "1",
       },
@@ -338,7 +339,7 @@ const main = Command.make(
               "Native directory contains tracked files; clean prebuild would overwrite them.",
           });
         yield* command(
-          "vp",
+          path.join((yield* roots).repo, "node_modules/.bin/vp"),
           ["exec", "expo", "prebuild", "--clean", "--platform", platform, "--no-install"],
           true,
         );
@@ -346,11 +347,13 @@ const main = Command.make(
           const output = yield* fs.makeTempDirectoryScoped({ prefix: "t3-native-client-" });
           const { mobile } = yield* roots;
           yield* command("pod", ["install"], true, path.join(mobile, "ios"));
+          const buildLock = path.join(home, ".claude/hooks/build-lock");
+          const locked = yield* fs.exists(buildLock);
           // Target this simulator only, without Expo's desktop activation or log streaming.
           yield* command(
-            "xcrun",
+            locked ? buildLock : "xcodebuild",
             [
-              "xcodebuild",
+              ...(locked ? ["xcodebuild"] : []),
               "-workspace",
               path.join(mobile, "ios/T3CodeDev.xcworkspace"),
               "-scheme",
@@ -361,6 +364,8 @@ const main = Command.make(
               `id=${device}`,
               "-derivedDataPath",
               output,
+              "-jobs",
+              "2",
               "build",
             ],
             true,
