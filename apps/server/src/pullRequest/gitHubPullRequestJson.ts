@@ -39,6 +39,7 @@ import { dedupeChecks } from "./pullRequestChecks.ts";
  * release that adds a conclusion or a review state must not fail the whole payload.
  */
 const RawActorSchema = Schema.Struct({
+  __typename: Schema.optional(Schema.String),
   /**
    * Optional because a review can be requested from a team or a mannequin, which the query has
    * no fragment for and GraphQL answers with an empty object. A reviewer with no login names
@@ -1134,7 +1135,12 @@ function toActor(raw: Schema.Schema.Type<typeof RawActorSchema> | null | undefin
   const login = trimmed(raw?.login);
   return login === null
     ? null
-    : { login, name: trimmed(raw?.name), avatarUrl: trimmed(raw?.avatarUrl) };
+    : {
+        login,
+        name: trimmed(raw?.name),
+        avatarUrl: trimmed(raw?.avatarUrl),
+        ...(raw?.__typename === "Bot" ? { isBot: true } : {}),
+      };
 }
 
 function toCommitActor(
@@ -1677,6 +1683,151 @@ export function decodePullRequestStatsJson(
     });
   }
   return Result.succeed(stats);
+}
+
+/**
+ * The fields a linked thread keeps current, for many pull requests in one aliased read. Same
+ * shape as the search row where the two overlap: the checks arrive as GitHub's one-word rollup
+ * rather than the whole check list `gh pr view` hands back, which is what keeps a batch cheap.
+ */
+const PULL_REQUEST_SUMMARY_SELECTION =
+  "number title url state isDraft mergeable reviewDecision additions deletions changedFiles " +
+  "updatedAt mergedAt closedAt headRefName baseRefName " +
+  "author { __typename login avatarUrl ... on User { name } } " +
+  "latestReviews(first: 20) { nodes { state author { login } } } " +
+  "commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }";
+
+/**
+ * Summaries for pull requests anywhere on one host, one aliased lookup each. Checked and written
+ * into the document the way `buildPullRequestStatsGraphQlQuery` does, so null means "do not send".
+ */
+export function buildPullRequestSummariesGraphQlQuery(
+  changeRequests: ReadonlyArray<{ readonly repository: string; readonly number: number }>,
+): string | null {
+  if (changeRequests.length === 0) return null;
+  const selections: string[] = [];
+  for (const [index, changeRequest] of changeRequests.entries()) {
+    const [owner, name, ...rest] = changeRequest.repository.trim().split("/");
+    if (rest.length > 0 || owner === undefined || name === undefined) return null;
+    if (!REPOSITORY_PART.test(owner) || !REPOSITORY_PART.test(name)) return null;
+    if (!Number.isSafeInteger(changeRequest.number) || changeRequest.number <= 0) return null;
+    selections.push(
+      `  s${index}: repository(owner: "${owner}", name: "${name}") { pullRequest(number: ${changeRequest.number}) { ${PULL_REQUEST_SUMMARY_SELECTION} } }`,
+    );
+  }
+  return `query PullRequestSummaries {\n${selections.join("\n")}\n}`;
+}
+
+// GitHub can omit the verdict when no approval is required. Keep the actual
+// latest reviews visible, with change requests taking precedence over approvals.
+function toSummaryReviewDecision(
+  value: string | null | undefined,
+  reviews: ReadonlyArray<{ readonly state?: string | null | undefined } | null> | undefined,
+): PullRequestReviewDecision | null {
+  const decision = toReviewDecision(value);
+  if (decision === "approved" || decision === "changes-requested") return decision;
+  const states = new Set((reviews ?? []).map((review) => review?.state?.trim().toUpperCase()));
+  if (states.has("CHANGES_REQUESTED")) return "changes-requested";
+  if (states.has("APPROVED")) return "approved";
+  return decision;
+}
+
+const RawSummaryReviewSchema = Schema.Struct({
+  state: Schema.optional(Schema.NullOr(Schema.String)),
+});
+
+const RawSummarySchema = Schema.Struct({
+  latestReviews: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        nodes: Schema.Array(Schema.NullOr(RawSummaryReviewSchema)),
+      }),
+    ),
+  ),
+  ...RawSearchItemSchema.fields,
+  changedFiles: Schema.optional(Schema.NullOr(Schema.Int)),
+  additions: Schema.optional(Schema.NullOr(Schema.Int)),
+  deletions: Schema.optional(Schema.NullOr(Schema.Int)),
+  closedAt: Schema.optional(Schema.NullOr(Schema.String)),
+  createdAt: Schema.optional(Schema.String),
+});
+const decodeSummaries = decodeJsonResult(
+  Schema.Struct({
+    data: Schema.optional(
+      Schema.NullOr(
+        Schema.Record(
+          Schema.String,
+          Schema.NullOr(Schema.Struct({ pullRequest: Schema.optional(Schema.Unknown) })),
+        ),
+      ),
+    ),
+  }),
+);
+const decodeSummaryEntry = Schema.decodeUnknownExit(RawSummarySchema);
+
+export interface GitHubPullRequestSummary {
+  readonly number: number;
+  readonly title: string;
+  readonly url: string;
+  readonly headBranch: string;
+  readonly baseBranch: string;
+  readonly state: PullRequestState;
+  readonly isDraft: boolean;
+  readonly closedAt: string | null;
+  readonly mergedAt: string | null;
+  readonly updatedAt: string;
+  readonly author: PullRequestActor | null;
+  readonly additions: number;
+  readonly deletions: number;
+  readonly changedFiles: number;
+  readonly reviewDecision: PullRequestReviewDecision | null;
+  readonly checksState: PullRequestChecksState | null;
+  readonly mergeability: PullRequestMergeability;
+}
+
+/**
+ * Summaries by the position they were asked in. A pull request GitHub answered nothing for, or
+ * one whose fields no longer decode, is absent rather than failing the rest of the batch.
+ */
+export function decodePullRequestSummariesJson(
+  raw: string,
+): Result.Result<ReadonlyMap<number, GitHubPullRequestSummary>, DecodeFailure> {
+  const decoded = decodeSummaries(raw);
+  if (!Result.isSuccess(decoded)) return Result.fail(decoded.failure);
+  const summaries = new Map<number, GitHubPullRequestSummary>();
+  for (const [alias, value] of Object.entries(decoded.success.data ?? {})) {
+    const index = /^s(\d+)$/.exec(alias)?.[1];
+    if (index === undefined || value?.pullRequest == null) continue;
+    const entry = decodeSummaryEntry(value.pullRequest);
+    if (!Exit.isSuccess(entry)) continue;
+    const pr = entry.value;
+    summaries.set(Number(index), {
+      number: pr.number,
+      title: pr.title,
+      url: pr.url,
+      headBranch: pr.headRefName,
+      baseBranch: pr.baseRefName,
+      state: toState(pr),
+      isDraft: pr.isDraft ?? false,
+      closedAt: trimmed(pr.closedAt),
+      mergedAt: trimmed(pr.mergedAt),
+      updatedAt: pr.updatedAt,
+      author: toActor(pr.author),
+      additions: pr.additions ?? 0,
+      deletions: pr.deletions ?? 0,
+      changedFiles: pr.changedFiles ?? 0,
+      reviewDecision: toSummaryReviewDecision(pr.reviewDecision, pr.latestReviews?.nodes),
+      // One enum for the head commit, dressed as a single check like the search row's.
+      checksState: rollupChecksState(
+        (pr.commits?.nodes ?? []).flatMap((commitNode) => {
+          const state = trimmed(commitNode?.commit?.statusCheckRollup?.state);
+          return state === null ? [] : [{ state }];
+        }),
+      ),
+      mergeability: toMergeability(pr.mergeable),
+    });
+  }
+  return Result.succeed(summaries);
 }
 
 export function decodePullRequestDetailJson(

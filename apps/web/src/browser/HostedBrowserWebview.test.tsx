@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   setClientSettings: vi.fn<(settings: ClientSettings) => Promise<void>>(),
   createTab: vi.fn<DesktopPreviewBridge["createTab"]>(),
   closeTab: vi.fn<DesktopPreviewBridge["closeTab"]>(),
+  status: vi.fn<DesktopPreviewBridge["automation"]["status"]>(),
   registerWebview: vi.fn<DesktopPreviewBridge["registerWebview"]>(),
   getPreviewConfig: vi.fn<DesktopPreviewBridge["getPreviewConfig"]>(),
   activeRecordings: new Set<string>(),
@@ -35,6 +36,7 @@ vi.mock("~/components/preview/previewBridge", () => ({
     closeTab: mocks.closeTab,
     registerWebview: mocks.registerWebview,
     getPreviewConfig: mocks.getPreviewConfig,
+    automation: { status: mocks.status },
   },
 }));
 
@@ -75,6 +77,14 @@ beforeEach(() => {
   mocks.setClientSettings.mockReset().mockResolvedValue(undefined);
   mocks.createTab.mockReset().mockResolvedValue(undefined);
   mocks.closeTab.mockReset().mockResolvedValue(undefined);
+  mocks.status.mockReset().mockResolvedValue({
+    available: true,
+    visible: true,
+    tabId: "server-tab",
+    url: null,
+    title: null,
+    loading: false,
+  });
   mocks.registerWebview.mockReset().mockResolvedValue(undefined);
   mocks.getPreviewConfig.mockReset().mockResolvedValue({
     partition: "persist:t3-preview-work",
@@ -90,6 +100,7 @@ beforeEach(() => {
   );
   vi.stubGlobal("cancelAnimationFrame", vi.fn());
   vi.spyOn(console, "error").mockImplementation(() => undefined);
+  vi.spyOn(console, "warn").mockImplementation(() => undefined);
 });
 
 afterEach(async () => {
@@ -216,5 +227,184 @@ describe("HostedBrowserWebview settings hydration", () => {
     expect(mocks.updateSnapshot).toHaveBeenCalledWith(threadRef, { tabId: "server-tab" });
     expect(mocks.closeTab).not.toHaveBeenCalled();
     expect(mocks.setClientSettings).not.toHaveBeenCalled();
+  });
+});
+
+describe("HostedBrowserWebview recovery", () => {
+  async function mountTab() {
+    vi.useFakeTimers();
+    mocks.getClientSettings.mockResolvedValue(DEFAULT_CLIENT_SETTINGS);
+    const guests: Array<EventTarget & { getWebContentsId: () => number }> = [];
+    const guestAttributes: Array<Record<string, unknown>> = [];
+    const runtimeTabId = "recovery-tab";
+    await act(async () => {
+      renderer = create(
+        <HostedBrowserWebview
+          threadRef={{
+            environmentId: EnvironmentId.make("recovery-environment"),
+            threadId: ThreadId.make("recovery-thread"),
+          }}
+          tabId="server-tab"
+          runtimeTabId={runtimeTabId}
+          initialUrl="https://example.com/current"
+          viewport={FILL_PREVIEW_VIEWPORT}
+          pictureInPicture={false}
+          profileId="work"
+          zoomFactor={1.25}
+        />,
+        {
+          createNodeMock: (element) => {
+            if (element.type !== "webview") {
+              return { scrollLeft: 0, scrollTop: 0, scrollTo: () => undefined };
+            }
+            const id = 41 + guests.length;
+            const guest = Object.assign(new EventTarget(), { getWebContentsId: () => id });
+            guests.push(guest);
+            guestAttributes.push(element.props as Record<string, unknown>);
+            return guest;
+          },
+        },
+      );
+    });
+    return { guests, guestAttributes, runtimeTabId };
+  }
+
+  async function advance(ms: number) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  }
+
+  it("recreates a dead retained guest when automation uses it, without a crash event", async () => {
+    const { guests, guestAttributes, runtimeTabId } = await mountTab();
+    let registeredId = 41;
+    mocks.status.mockImplementation(async () => ({
+      available: registeredId === 42,
+      visible: true,
+      tabId: runtimeTabId,
+      url: null,
+      title: null,
+      loading: false,
+    }));
+    mocks.registerWebview.mockImplementation(async (_tabId, id) => {
+      if (id === 41) throw new Error("Guest was destroyed");
+      registeredId = id;
+    });
+    await act(() => {
+      useBrowserSurfaceStore.getState().acquireActivity(runtimeTabId);
+    });
+    await advance(1_000);
+    await advance(250);
+    expect(guests).toHaveLength(2);
+    expect(registeredId).toBe(42);
+    expect(guestAttributes[1]).toMatchObject({
+      src: "https://example.com/current",
+      partition: "persist:t3-preview-work",
+    });
+    expect(mocks.closeTab).not.toHaveBeenCalled();
+    await advance(10_000);
+    expect(guests).toHaveLength(2);
+    expect(await mocks.status(runtimeTabId)).toMatchObject({ available: true });
+  });
+
+  it("repairs missing registration without replacing the live page", async () => {
+    const { guests, runtimeTabId } = await mountTab();
+    let available = false;
+    mocks.status.mockImplementation(async () => ({
+      available,
+      visible: true,
+      tabId: runtimeTabId,
+      url: null,
+      title: null,
+      loading: false,
+    }));
+    mocks.registerWebview.mockImplementation(async () => {
+      available = true;
+    });
+    await act(() => {
+      useBrowserSurfaceStore.getState().acquireActivity(runtimeTabId);
+    });
+    await advance(10_000);
+    expect(available).toBe(true);
+    expect(guests).toHaveLength(1);
+  });
+
+  it("checks a manually shown tab once without continually polling a healthy page", async () => {
+    const { guests, runtimeTabId } = await mountTab();
+    const owner = Symbol();
+    await act(() => {
+      useBrowserSurfaceStore.getState().claim(runtimeTabId, owner, false);
+      useBrowserSurfaceStore
+        .getState()
+        .present(runtimeTabId, owner, { x: 0, y: 0, width: 800, height: 600 }, true, 0, 30);
+    });
+    await advance(60_000);
+    expect(mocks.status).toHaveBeenCalledOnce();
+    expect(guests).toHaveLength(1);
+  });
+
+  it("keeps crash recovery scheduled when automation activity ends", async () => {
+    const { guests, runtimeTabId } = await mountTab();
+    let release: (() => void) | undefined;
+    await act(() => {
+      release = useBrowserSurfaceStore.getState().acquireActivity(runtimeTabId);
+    });
+    await act(() => {
+      guests[0]?.dispatchEvent(new Event("render-process-gone"));
+    });
+    await act(() => {
+      release?.();
+    });
+    await advance(250);
+    expect(guests).toHaveLength(2);
+    expect(mocks.registerWebview).toHaveBeenLastCalledWith(runtimeTabId, 42);
+  });
+
+  it("does not reload a page when the desktop status request fails", async () => {
+    const { guests, runtimeTabId } = await mountTab();
+    mocks.status.mockRejectedValue(new Error("IPC unavailable"));
+    await act(() => {
+      useBrowserSurfaceStore.getState().acquireActivity(runtimeTabId);
+    });
+    await advance(10_000);
+    expect(guests).toHaveLength(1);
+    expect(console.warn).toHaveBeenCalledWith("Preview browser guest health check failed", {
+      runtimeTabId,
+    });
+  });
+
+  it("bounds repeated failed recovery and cancels recovery when the tab unmounts", async () => {
+    const { guests, runtimeTabId } = await mountTab();
+    mocks.status.mockResolvedValue({
+      available: false,
+      visible: true,
+      tabId: runtimeTabId,
+      url: null,
+      title: null,
+      loading: false,
+    });
+    mocks.registerWebview.mockRejectedValue(new Error("Guest was destroyed"));
+    await act(() => {
+      useBrowserSurfaceStore.getState().acquireActivity(runtimeTabId);
+    });
+    for (const delay of [250, 500, 1_000]) {
+      await advance(1_000);
+      await advance(delay);
+    }
+    await advance(60_000);
+    expect(guests).toHaveLength(4);
+    expect(console.warn).toHaveBeenCalledWith(
+      "Preview browser guest recovery",
+      expect.objectContaining({ exhausted: true }),
+    );
+    await act(() => {
+      guests.at(-1)?.dispatchEvent(new Event("render-process-gone"));
+    });
+    await act(() => {
+      renderer?.unmount();
+      renderer = undefined;
+    });
+    await advance(10_000);
+    expect(guests).toHaveLength(4);
   });
 });

@@ -2925,6 +2925,15 @@ describe("PreviewManager", () => {
         yield* manager.createTab("tab_1");
         yield* manager.registerWebview("tab_1", 42);
 
+        const textOnly = yield* manager.automationSnapshot("tab_1", false);
+        expect(textOnly).toMatchObject({
+          title: "Example",
+          visibleText: "Example",
+          interactiveElements: [],
+        });
+        expect(textOnly).not.toHaveProperty("screenshot");
+        expect(capturePage).not.toHaveBeenCalled();
+
         const snapshot = yield* Effect.exit(manager.automationSnapshot("tab_1")).pipe(
           Effect.forkChild({ startImmediately: true }),
         );
@@ -4898,6 +4907,23 @@ describe("Preview automation diagnostics", () => {
     expect(PreviewManager.PreviewAutomationEvaluationError.toTimelineMessage(error)).not.toContain(
       secret,
     );
+  });
+
+  it("reports the match count without leaking page content for an ambiguous selector", () => {
+    const error = new PreviewManager.PreviewAutomationInvalidSelectorError({
+      operation: "click",
+      tabId: "tab_1",
+      selectorKind: "locator",
+      selectorLength: 27,
+      reasonLength: 100,
+      cause: {
+        message: "strict mode violation: locator('secret') resolved to 2 elements: secret HTML",
+      },
+    });
+    expect(error.message).toBe(
+      "Preview automation click matched 2 elements; use a more specific selector from preview_snapshot.",
+    );
+    expect(error.message).not.toContain("secret");
   });
 
   it("retains bounded selector diagnostics without exposing selector or reason text", () => {

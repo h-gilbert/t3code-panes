@@ -670,7 +670,10 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           }
           case "snapshot": {
             const ready = await requireReadyTab();
-            return await ready.bridge.automation.snapshot(ready.runtimeTabId);
+            return await ready.bridge.automation.snapshot(
+              ready.runtimeTabId,
+              (request.input as { includeImage?: boolean }).includeImage,
+            );
           }
           case "click": {
             const ready = await requireReadyTab();

@@ -55,6 +55,7 @@
   "devDependencies": {
     "@effect/tsgo": "catalog:",
     "@types/node": "catalog:",
+    "jsdom": "26.1.0",
     "knip": "6.34.0",
     "typescript": "catalog:",
     "vite-plus": "catalog:"

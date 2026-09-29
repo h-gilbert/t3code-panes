@@ -125,6 +125,7 @@ export const PullRequestActor = Schema.Struct({
   name: Schema.NullOr(Schema.String),
   /** Null where a host does not report one, which is what the initials fall back to. */
   avatarUrl: Schema.NullOr(Schema.String),
+  isBot: Schema.optional(Schema.Boolean),
 });
 export type PullRequestActor = typeof PullRequestActor.Type;
 

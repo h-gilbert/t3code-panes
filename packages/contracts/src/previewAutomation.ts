@@ -607,12 +607,14 @@ export const PreviewAutomationSnapshot = Schema.Struct({
   consoleEntries: Schema.Array(PreviewAutomationConsoleEntry),
   networkEntries: Schema.Array(PreviewAutomationNetworkEntry),
   actionTimeline: Schema.Array(PreviewAutomationActionEvent),
-  screenshot: Schema.Struct({
-    mimeType: Schema.Literal("image/png"),
-    data: Schema.String,
-    width: Schema.Int,
-    height: Schema.Int,
-  }),
+  screenshot: Schema.optional(
+    Schema.Struct({
+      mimeType: Schema.Literal("image/png"),
+      data: Schema.String,
+      width: Schema.Int,
+      height: Schema.Int,
+    }),
+  ),
 });
 export type PreviewAutomationSnapshot = typeof PreviewAutomationSnapshot.Type;
 
@@ -879,15 +881,19 @@ export class PreviewAutomationInvalidSelectorError extends Schema.TaggedError<Pr
   {
     ...PreviewAutomationRequestErrorFields,
     ...PreviewAutomationRemoteDiagnosticFields,
+    matchCount: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(2))),
     selectorKind: Schema.optional(Schema.Literals(["locator", "selector"])),
     selectorLength: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   },
 ) {
   override get message(): string {
+    if (this.matchCount !== undefined) {
+      return `Preview automation ${this.operation} matched ${this.matchCount} elements. Use a more specific selector from preview_snapshot.`;
+    }
     if (this.selectorKind !== undefined && this.selectorLength !== undefined) {
       return `Preview automation ${this.operation} received an invalid ${this.selectorKind} (${this.selectorLength} characters).`;
     }
-    return `Preview automation ${this.operation} received an invalid selector.`;
+    return `Preview automation ${this.operation} received an invalid selector. Use a valid, unique selector from preview_snapshot.`;
   }
 }
 

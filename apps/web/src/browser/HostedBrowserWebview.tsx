@@ -141,6 +141,10 @@ export function HostedBrowserWebview(props: {
     [runtimeTabId, handleViewportChange],
   );
 
+  const guestHealthCheckRef = useRef<{
+    generation: number;
+    run: () => Promise<void>;
+  } | null>(null);
   const [webviewGeneration, setWebviewGeneration] = useState(0);
   const [recoverySrc, setRecoverySrc] = useState(initialSrc);
   const latestUrlRef = useRef(initialUrl);
@@ -159,28 +163,32 @@ export function HostedBrowserWebview(props: {
     if (!clientSettingsHydrated || !webview || !config || !bridge) return;
     let disposed = false;
     let recoveryTimeout: ReturnType<typeof setTimeout> | null = null;
-    const register = () => {
+    const registerGuest = async () => {
       const lease = tabLeaseRef.current;
       if (!lease) return;
-      void (async () => {
-        try {
-          // The main-process tab and the DOM webview are created by separate
-          // effects. Wait for the former so registration cannot race and fail
-          // with PreviewTabNotFoundError on a fast about:blank attachment.
-          await lease.ready;
-          if (disposed || webviewRef.current !== webview) return;
-          const webContentsId = webview.getWebContentsId();
-          if (Number.isInteger(webContentsId) && webContentsId > 0) {
-            await bridge.registerWebview(runtimeTabId, webContentsId);
-          }
-        } catch {
-          // did-attach/dom-ready will retry if the guest was not ready yet.
-        }
-      })();
+      await lease.ready;
+      if (disposed || webviewRef.current !== webview) return;
+      const webContentsId = webview.getWebContentsId();
+      if (Number.isInteger(webContentsId) && webContentsId > 0) {
+        await bridge.registerWebview(runtimeTabId, webContentsId);
+      }
     };
-    const recoverGuest = () => {
+    const register = () => {
+      // Attachment can precede main-process tab creation. The lease orders them.
+      void registerGuest().catch(() => {
+        // Attachment events retry; the activation check repairs a missed event.
+      });
+    };
+    const recoverGuest = (reason: string) => {
       if (disposed || recoveryTimeout !== null) return;
       const recovery = planWebviewCrashRecovery(crashRecoveryRef.current, Date.now());
+      console.warn("Preview browser guest recovery", {
+        runtimeTabId,
+        reason,
+        generation: webviewGeneration,
+        attempt: recovery?.state.attempts ?? null,
+        exhausted: recovery === null,
+      });
       if (!recovery) return;
       crashRecoveryRef.current = recovery.state;
       recoveryTimeout = setTimeout(() => {
@@ -191,18 +199,58 @@ export function HostedBrowserWebview(props: {
         }
       }, recovery.delayMs);
     };
+    const onRenderProcessGone = () => recoverGuest("render-process-gone");
+    const checkGuest = async () => {
+      try {
+        const status = await bridge.automation.status(runtimeTabId);
+        if (disposed || status.available) return;
+        // A missed attachment event needs registration, not a page reload.
+        try {
+          await registerGuest();
+        } catch {
+          // A destroyed guest cannot be registered. Recreate it below.
+        }
+        if (disposed) return;
+        const repaired = await bridge.automation.status(runtimeTabId);
+        if (!disposed && !repaired.available) recoverGuest("unavailable-after-registration");
+      } catch {
+        // A failed IPC call does not prove the page is dead. Keep its state.
+        if (!disposed) console.warn("Preview browser guest health check failed", { runtimeTabId });
+      }
+    };
+    guestHealthCheckRef.current = { generation: webviewGeneration, run: checkGuest };
     webview.addEventListener("did-attach", register);
     webview.addEventListener("dom-ready", register);
-    webview.addEventListener("render-process-gone", recoverGuest);
+    webview.addEventListener("render-process-gone", onRenderProcessGone);
     register();
     return () => {
       disposed = true;
       if (recoveryTimeout !== null) clearTimeout(recoveryTimeout);
+      guestHealthCheckRef.current = null;
       webview.removeEventListener("did-attach", register);
       webview.removeEventListener("dom-ready", register);
-      webview.removeEventListener("render-process-gone", recoverGuest);
+      webview.removeEventListener("render-process-gone", onRenderProcessGone);
     };
   }, [clientSettingsHydrated, config, initialSrc, runtimeTabId, webviewGeneration]);
+
+  useEffect(() => {
+    const check = guestHealthCheckRef.current;
+    if (!clientSettingsHydrated || !config || check?.generation !== webviewGeneration) return;
+    if (!backgroundActivity && !presentation.visible && !pictureInPicture && !recordingActive)
+      return;
+    // Give a newly attached guest time to register, then check once per use.
+    // A retained dead guest may never emit another attachment or crash event.
+    const timeout = setTimeout(() => void check.run(), 1_000);
+    return () => clearTimeout(timeout);
+  }, [
+    clientSettingsHydrated,
+    config,
+    webviewGeneration,
+    backgroundActivity,
+    presentation.visible,
+    pictureInPicture,
+    recordingActive,
+  ]);
 
   const active = presentation.visible && presentation.rect !== null;
   const lastRect = presentation.rect;

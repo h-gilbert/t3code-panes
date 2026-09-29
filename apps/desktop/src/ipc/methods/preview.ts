@@ -470,11 +470,14 @@ export const automationStatus = DesktopIpc.makeIpcMethod({
 
 export const automationSnapshot = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_AUTOMATION_SNAPSHOT_CHANNEL,
-  payload: DesktopPreviewTabInputSchema,
+  payload: Schema.Struct({
+    ...DesktopPreviewTabInputSchema.fields,
+    includeImage: Schema.optional(Schema.Boolean),
+  }),
   result: PreviewAutomationSnapshot,
-  handler: Effect.fn("desktop.ipc.preview.automationSnapshot")(function* ({ tabId }) {
+  handler: Effect.fn("desktop.ipc.preview.automationSnapshot")(function* ({ tabId, includeImage }) {
     const manager = yield* PreviewManager.PreviewManager;
-    return yield* manager.automationSnapshot(tabId);
+    return yield* manager.automationSnapshot(tabId, includeImage);
   }),
 });
 

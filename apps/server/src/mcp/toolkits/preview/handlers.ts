@@ -220,9 +220,12 @@ const handlers = {
   preview_set_appearance: (input) =>
     invokeTargeted<PreviewAutomationSetColorSchemeResult>("setColorScheme", input),
   preview_snapshot: (input) => {
-    // Output selection and saving are MCP-only; the browser still produces a complete snapshot.
-    const { includeImage: _includeImage, save: _save, ...operationInput } = input ?? {};
-    return invokeTargeted<PreviewAutomationSnapshot>("snapshot", operationInput);
+    // Saving still needs pixels even when the inline image is omitted.
+    const { includeImage, save, ...operationInput } = input ?? {};
+    return invokeTargeted<PreviewAutomationSnapshot>("snapshot", {
+      ...operationInput,
+      includeImage: includeImage !== false || save === true,
+    });
   },
   preview_click: (input) => invokeTargeted<object>("click", input, input.timeoutMs),
   preview_type: (input) => invokeTargeted<object>("type", input, input.timeoutMs),

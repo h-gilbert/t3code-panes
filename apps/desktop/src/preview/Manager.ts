@@ -1798,6 +1798,25 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         focusedWebContentsId: webContents.getFocusedWebContents()?.id ?? null,
       });
     };
+    const guestDestroyed = () =>
+      runFork(
+        Effect.logWarning("Preview browser guest destroyed", {
+          tabId,
+          webContentsId: wc.id,
+        }).pipe(Effect.withSpan("PreviewManager.guestDestroyed")),
+      );
+    const renderProcessGone = (
+      _event: Electron.Event,
+      details: Electron.RenderProcessGoneDetails,
+    ) =>
+      runFork(
+        Effect.logWarning("Preview browser guest renderer exited", {
+          tabId,
+          webContentsId: wc.id,
+          reason: details.reason,
+          exitCode: details.exitCode,
+        }).pipe(Effect.withSpan("PreviewManager.guestRendererExited")),
+      );
     const focused = () => recordFocus("guest-focus");
     const blurred = () => recordFocus("guest-blur");
     const syncNavigation = () =>
@@ -2077,6 +2096,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       scope,
       attempt({ operation: "detachListeners", tabId, webContentsId: wc.id }, () => {
         cancelFaviconCapture();
+        wc.off("destroyed", guestDestroyed);
+        wc.off("render-process-gone", renderProcessGone);
         wc.off("focus", focused);
         wc.off("blur", blurred);
         wc.off("did-start-navigation", navigationStarted);
@@ -2100,6 +2121,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         // Only focused native editing shortcuts may reach the application menu.
         // Other preview input, including CDP keys, belongs to the page.
         wc.setIgnoreMenuShortcuts(true);
+        wc.on("destroyed", guestDestroyed);
+        wc.on("render-process-gone", renderProcessGone);
         wc.on("focus", focused);
         wc.on("blur", blurred);
         wc.on("did-start-navigation", navigationStarted);
@@ -3707,7 +3730,11 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
 
   const automationStatus = Effect.fn("PreviewManager.automationStatus")(function* (tabId: string) {
     const tab = (yield* SynchronizedRef.get(tabsRef)).get(tabId);
+    yield* Effect.annotateCurrentSpan({ tabId, webContentsId: tab?.webContentsId ?? null });
     if (!tab || tab.webContentsId == null) {
+      yield* Effect.annotateCurrentSpan({
+        unavailableReason: tab ? "unregistered" : "missing-tab",
+      });
       const navStatus = tab?.navStatus;
       return {
         available: false,
@@ -3719,7 +3746,13 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       };
     }
     const wc = webContents.fromId(tab.webContentsId);
-    return !wc || wc.isDestroyed()
+    const unavailable = !wc || wc.isDestroyed();
+    if (unavailable) {
+      yield* Effect.annotateCurrentSpan({
+        unavailableReason: wc ? "destroyed-guest" : "missing-guest",
+      });
+    }
+    return unavailable
       ? {
           available: false,
           visible: true,
@@ -3739,7 +3772,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   });
 
   const captureAutomationSnapshot = Effect.fn("PreviewManager.captureAutomationSnapshot")(
-    function* (tabId: string, wc: Electron.WebContents, send: SendCommand) {
+    function* (tabId: string, wc: Electron.WebContents, send: SendCommand, includeImage: boolean) {
       yield* Effect.all([send("Runtime.enable"), send("Accessibility.enable")], {
         concurrency: 2,
         discard: true,
@@ -3808,24 +3841,25 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       );
       const [accessibility, sourceImage, diagnostics, timelines] = yield* Effect.all([
         send("Accessibility.getFullAXTree"),
-        capturePageWithRetry(
-          {
-            operation: "automationSnapshot.capturePage",
-            tabId,
-            webContentsId: wc.id,
-          },
-          tabId,
-          wc,
-        ),
+        includeImage
+          ? capturePageWithRetry(
+              {
+                operation: "automationSnapshot.capturePage",
+                tabId,
+                webContentsId: wc.id,
+              },
+              tabId,
+              wc,
+            )
+          : Effect.succeed(null),
         Ref.get(diagnosticsRef),
         Ref.get(actionTimelineRef),
       ]);
-      const sourceSize = sourceImage.getSize();
       const image =
-        sourceSize.width > MAX_SCREENSHOT_WIDTH
+        sourceImage && sourceImage.getSize().width > MAX_SCREENSHOT_WIDTH
           ? sourceImage.resize({ width: MAX_SCREENSHOT_WIDTH })
           : sourceImage;
-      const size = image.getSize();
+      const size = image?.getSize();
       const browserDiagnostics = diagnostics.get(wc.id);
       return {
         ...page,
@@ -3833,22 +3867,27 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         consoleEntries: [...(browserDiagnostics?.consoleEntries ?? [])],
         networkEntries: [...(browserDiagnostics?.networkEntries ?? [])],
         actionTimeline: [...(timelines.get(tabId) ?? [])],
-        screenshot: {
-          mimeType: "image/png" as const,
-          data: image.toPNG().toString("base64"),
-          width: size.width,
-          height: size.height,
-        },
+        ...(image && size
+          ? {
+              screenshot: {
+                mimeType: "image/png" as const,
+                data: image.toPNG().toString("base64"),
+                width: size.width,
+                height: size.height,
+              },
+            }
+          : {}),
       };
     },
   );
 
   const automationSnapshot = Effect.fn("PreviewManager.automationSnapshot")(function* (
     tabId: string,
+    includeImage = true,
   ) {
     const wc = yield* requireWebContents(tabId);
     return yield* withControlSession(tabId, wc, "snapshot", (send) =>
-      captureAutomationSnapshot(tabId, wc, send),
+      captureAutomationSnapshot(tabId, wc, send, includeImage),
     );
   });
 
@@ -5066,6 +5105,14 @@ export class PreviewAutomationInvalidSelectorError extends Schema.TaggedError<Pr
   }
 
   override get message(): string {
+    const reason =
+      typeof this.cause === "object" && this.cause !== null && "message" in this.cause
+        ? String(this.cause.message)
+        : "";
+    const matches = /strict mode violation:[\s\S]*?resolved to (\d+) elements/.exec(reason);
+    if (matches) {
+      return `Preview automation ${this.operation} matched ${matches[1]} elements; use a more specific selector from preview_snapshot.`;
+    }
     const target = previewAutomationTargetLabel(this.selectorKind, this.selectorLength);
     return `Preview automation ${this.operation} rejected ${target} in tab ${this.tabId}`;
   }
@@ -5220,6 +5267,7 @@ export class PreviewManager extends Context.Service<
     ) => Effect.Effect<DesktopPreviewAutomationStatus, PreviewManagerError>;
     readonly automationSnapshot: (
       tabId: string,
+      includeImage?: boolean,
     ) => Effect.Effect<PreviewAutomationSnapshot, PreviewManagerError>;
     readonly automationClick: (
       tabId: string,

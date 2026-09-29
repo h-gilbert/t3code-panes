@@ -1092,19 +1092,25 @@ describe("resolveAssistantMessageCopyState", () => {
 });
 
 describe("deriveMessagesTimelineRows", () => {
+  const queuedMessage = (id: string, prompt: string) => ({
+    id,
+    prompt,
+    images: [],
+    files: [],
+    terminalContexts: [],
+    previewAnnotations: [],
+    reviewComments: [],
+    sendSettings: {
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+      runtimeMode: "full-access" as const,
+      interactionMode: "default" as const,
+      promptEffort: null,
+    },
+    queuedAfterToolActivityId: null,
+    createdAt: "2026-01-01T00:00:01Z",
+  });
+
   it("appends queued messages after the live rows, marking the oldest as next", () => {
-    const queuedMessage = (id: string, prompt: string) => ({
-      id,
-      prompt,
-      images: [],
-      files: [],
-      terminalContexts: [],
-      previewAnnotations: [],
-      reviewComments: [],
-      submissionIntent: "foreground" as const,
-      queuedAfterToolActivityId: null,
-      createdAt: "2026-01-01T00:00:01Z",
-    });
     const rows = deriveMessagesTimelineRows({
       timelineEntries: [],
       isWorking: true,

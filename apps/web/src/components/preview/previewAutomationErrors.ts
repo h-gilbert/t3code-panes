@@ -172,6 +172,44 @@ const targetNotEditableDiagnostics = (
   };
 };
 
+// Electron rejects invoke calls with a plain Error, dropping custom fields.
+// Recognize only our own bounded messages, never forward page HTML or raw causes.
+const invalidSelectorDiagnostics = (cause: unknown): { matchCount?: number } | null => {
+  if (typeof cause !== "object" || cause === null) return null;
+  const message = "message" in cause && typeof cause.message === "string" ? cause.message : "";
+  const matches =
+    /Preview automation \w+ matched (\d+) elements; use a more specific selector/.exec(message);
+  if (matches) {
+    const matchCount = Number(matches[1]);
+    return Number.isSafeInteger(matchCount) && matchCount >= 2 ? { matchCount } : {};
+  }
+  return ("_tag" in cause && cause._tag === "PreviewAutomationInvalidSelectorError") ||
+    /Preview automation \w+ rejected (locator|selector)/.test(message)
+    ? {}
+    : null;
+};
+
+export class PreviewAutomationInvalidSelectorHostError extends Schema.TaggedError<PreviewAutomationInvalidSelectorHostError>()(
+  "PreviewAutomationInvalidSelectorHostError",
+  {
+    requestId: TrimmedNonEmptyString,
+    operation: PreviewAutomationOperation,
+    environmentId: EnvironmentId,
+    threadId: ThreadId,
+    tabId: Schema.NullOr(PreviewTabId),
+    matchCount: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(2))),
+  },
+) {
+  get responseTag() {
+    return "PreviewAutomationInvalidSelectorError" as const;
+  }
+  override get message(): string {
+    return this.matchCount === undefined
+      ? "Invalid selector. Use a valid, unique selector from preview_snapshot."
+      : `Selector matched ${this.matchCount} elements. Use a more specific selector from preview_snapshot.`;
+  }
+}
+
 export class PreviewAutomationOperationError extends Schema.TaggedError<PreviewAutomationOperationError>()(
   "PreviewAutomationOperationError",
   {
@@ -187,6 +225,17 @@ export class PreviewAutomationOperationError extends Schema.TaggedError<PreviewA
     input: PreviewAutomationOperationContext & { readonly cause: unknown },
   ): PreviewAutomationHostError {
     if (isPreviewAutomationHostError(input.cause)) return input.cause;
+    const selector = invalidSelectorDiagnostics(input.cause);
+    if (selector) {
+      return new PreviewAutomationInvalidSelectorHostError({
+        requestId: input.requestId,
+        operation: input.operation,
+        environmentId: input.environmentId,
+        threadId: input.threadId,
+        tabId: input.tabId,
+        ...selector,
+      });
+    }
     const diagnostics = targetNotEditableDiagnostics(input.cause);
     return diagnostics
       ? new PreviewAutomationTargetNotEditableHostError({
@@ -210,6 +259,7 @@ export class PreviewAutomationOperationError extends Schema.TaggedError<PreviewA
 }
 
 export const PreviewAutomationHostError = Schema.Union([
+  PreviewAutomationInvalidSelectorHostError,
   PreviewAutomationRecordingTransferError,
   PreviewAutomationRecordingDesktopUpdateRequiredError,
   PreviewAutomationRecordingTooLargeError,

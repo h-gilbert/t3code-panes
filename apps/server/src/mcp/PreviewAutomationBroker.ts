@@ -354,7 +354,18 @@ const classifyResponseError = (
         ...remoteDiagnostics,
       });
     case "PreviewAutomationInvalidSelectorError": {
+      const detail = error.detail;
+      const matchCount =
+        typeof detail === "object" &&
+        detail !== null &&
+        "matchCount" in detail &&
+        typeof detail.matchCount === "number" &&
+        Number.isSafeInteger(detail.matchCount) &&
+        detail.matchCount >= 2
+          ? detail.matchCount
+          : undefined;
       return new PreviewAutomationInvalidSelectorError({
+        ...(matchCount === undefined ? {} : { matchCount }),
         ...context,
         ...remoteDiagnostics,
       });

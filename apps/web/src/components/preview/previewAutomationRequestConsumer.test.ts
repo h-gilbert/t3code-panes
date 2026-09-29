@@ -291,6 +291,25 @@ describe("previewAutomationRequestConsumer", () => {
     });
   });
 
+  it("preserves an ambiguous selector diagnosis after Electron drops the error type", () => {
+    const error = new Error(
+      "Error invoking remote method: PreviewAutomationInvalidSelectorError: Preview automation click matched 2 elements; use a more specific selector from preview_snapshot.",
+    );
+    expect(
+      serializePreviewAutomationError(error, {
+        requestId: "request-click",
+        operation: "click",
+        environmentId,
+        threadId,
+        tabId,
+      }),
+    ).toMatchObject({
+      _tag: "PreviewAutomationInvalidSelectorError",
+      detail: { matchCount: 2 },
+      message: "Selector matched 2 elements. Use a more specific selector from preview_snapshot.",
+    });
+  });
+
   it("maps desktop non-editable targets to the public typed response", () => {
     expect(
       serializePreviewAutomationError(

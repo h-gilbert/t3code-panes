@@ -273,7 +273,7 @@ it.effect.each([
           tabId: alternateTabId,
           threadId,
         });
-        expect(event.request.input).toEqual({});
+        expect(event.request.input).toEqual({ includeImage: requests <= 6 ? images : true });
         return broker.respond({
           clientId: "mcp-image-option-client",
           connectionId: event.connectionId,
@@ -282,7 +282,9 @@ it.effect.each([
           result: {
             ...page,
             title: `Snapshot ${requests}`,
-            screenshot: { ...screenshot, data: png },
+            ...((requests <= 6 ? images : true)
+              ? { screenshot: { ...screenshot, data: png } }
+              : {}),
           },
         });
       }).pipe(Effect.forkScoped);
@@ -298,7 +300,7 @@ it.effect.each([
             Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
             Effect.provideService(McpSchema.McpServerClient, client),
           );
-        const metadata = { ...page, title: `Snapshot ${call}`, screenshot };
+        const metadata = { ...page, title: `Snapshot ${call}`, ...(images ? { screenshot } : {}) };
         const { accessibilityTree: _tree, ...boundedMetadata } = metadata;
         expect(snapshot.isError).toBe(false);
         expect(snapshot.structuredContent).toEqual({
@@ -350,6 +352,20 @@ it.effect.each([
   ).pipe(Effect.provide(TestLayer)),
 );
 
+it.effect.each([{}, { save: true, includeImage: false }])(
+  "rejects missing pixels when the caller requested an image or saved file: %j",
+  (input) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { screenshot: _screenshot, ...textOnly } = snapshotResult;
+        yield* serveSnapshots("missing-screenshot-client", textOnly);
+        const result = yield* callSnapshot(input);
+        expect(result.isError).toBe(true);
+        expect(result.structuredContent).not.toHaveProperty("screenshotPath");
+      }),
+    ).pipe(Effect.provide(TestLayer)),
+);
+
 it.effect("rejects non-boolean snapshot image options before selecting a browser host", () =>
   Effect.gen(function* () {
     const server = yield* McpServer.McpServer;
@@ -384,7 +400,7 @@ it.effect("saves the snapshot PNG on request and reports its path", () =>
 
       expect(snapshot.isError).toBe(false);
       // The browser never receives the server-only `save` flag.
-      expect(inputs).toEqual([{}]);
+      expect(inputs).toEqual([{ includeImage: true }]);
       const structured = snapshot.structuredContent as { readonly screenshotPath?: string };
       const screenshotPath = structured.screenshotPath;
       expect(typeof screenshotPath).toBe("string");
@@ -401,6 +417,11 @@ it.effect("saves the snapshot PNG on request and reports its path", () =>
 
       // A save without the image skips the page dump.
       const pathOnly = yield* callSnapshot({ save: true, includeImage: false });
+      expect(inputs).toEqual([
+        { includeImage: true },
+        { includeImage: true },
+        { includeImage: true },
+      ]);
       const saved = pathOnly.structuredContent as { readonly screenshotPath: string };
       expect(saved).toEqual({ url: snapshotResult.url, screenshotPath: expect.any(String) });
       expect(Buffer.from(yield* fileSystem.readFile(saved.screenshotPath)).toString()).toBe("png");
