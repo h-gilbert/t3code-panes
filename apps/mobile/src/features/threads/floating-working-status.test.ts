@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { connectionFloatingStatus } from "./floating-working-status";
+import { backgroundFloatingStatus, connectionFloatingStatus } from "./floating-working-status";
 
 const status = (
   connectionState: Parameters<typeof connectionFloatingStatus>[0]["connectionState"],
@@ -62,5 +62,38 @@ describe("connectionFloatingStatus", () => {
     if (pill?.kind !== "connection") throw new Error("expected a connection pill");
     pill.onPress();
     expect(onReconnect).toHaveBeenCalledOnce();
+  });
+});
+
+describe("backgroundFloatingStatus", () => {
+  it.each([
+    ["working", 1, "1 agent working"],
+    ["working", 3, "3 agents working"],
+    ["working", 0, "Background work"],
+    ["monitoring", 2, "Monitoring"],
+  ] as const)(
+    "shows %s activity after the primary turn finishes",
+    (backgroundLiveness, liveAgentCount, label) => {
+      expect(
+        backgroundFloatingStatus({ backgroundLiveness, liveAgentCount, failed: false }),
+      ).toEqual({ kind: "background", label });
+    },
+  );
+  it.each([null, undefined])(
+    "clears the indicator when background work ends",
+    (backgroundLiveness) => {
+      expect(
+        backgroundFloatingStatus({ backgroundLiveness, liveAgentCount: 2, failed: false }),
+      ).toBeNull();
+    },
+  );
+  it("does not hide a failed session behind background activity", () => {
+    expect(
+      backgroundFloatingStatus({
+        backgroundLiveness: "monitoring",
+        liveAgentCount: 1,
+        failed: true,
+      }),
+    ).toBeNull();
   });
 });

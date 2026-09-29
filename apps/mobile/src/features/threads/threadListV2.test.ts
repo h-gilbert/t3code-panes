@@ -1,3 +1,4 @@
+import { resolveThreadStatus } from "./threadPresentation";
 import { planPinnedMove } from "@t3tools/client-runtime/state/thread-sort";
 import {
   createPendingThreadOrder,
@@ -1564,5 +1565,65 @@ describe("cross-section thread drops", () => {
         NOW,
       ),
     ).toEqual({ pin: false, unpin: false, unsettle: false, unsnooze: false });
+  });
+});
+
+describe("background thread status", () => {
+  it.each([
+    ["working", "working"],
+    ["monitoring", "monitoring"],
+  ] as const)("keeps %s visible after the main turn is idle", (backgroundLiveness, expected) => {
+    const thread = makeThread({
+      id: ThreadId.make("background"),
+      title: "Background",
+      backgroundLiveness,
+    });
+    expect(resolveThreadListV2Status(thread)).toBe(expected);
+    expect(resolveThreadListV2Status({ ...thread, backgroundLiveness: null })).toBe("ready");
+    expect(resolveThreadListV2Status({ ...thread, hasPendingApprovals: true })).toBe("approval");
+    expect(resolveThreadListV2Status({ ...thread, hasPendingUserInput: true })).toBe("input");
+  });
+  it("prioritizes a failed session over monitoring", () => {
+    const thread = makeThread({
+      id: ThreadId.make("failed"),
+      title: "Failed",
+      backgroundLiveness: "monitoring",
+    });
+    expect(
+      resolveThreadListV2Status({
+        ...thread,
+        session: {
+          threadId: thread.id,
+          status: "error",
+          providerName: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: "Provider failed",
+          updatedAt: NOW,
+        },
+      }),
+    ).toBe("failed");
+  });
+});
+
+describe("legacy thread background status", () => {
+  it.each([
+    ["working", "Working"],
+    ["monitoring", "Monitoring"],
+  ] as const)("keeps idle %s threads visible", (backgroundLiveness, label) => {
+    const thread = makeThread({
+      id: ThreadId.make("background"),
+      title: "Background",
+      backgroundLiveness,
+    });
+    expect(resolveThreadStatus(thread)).toMatchObject({ label, pulse: false });
+    expect(resolveThreadStatus({ ...thread, backgroundLiveness: null })).toBeNull();
+    expect(resolveThreadStatus({ ...thread, hasPendingApprovals: true })?.kind).toBe(
+      "pending-approval",
+    );
+    expect(resolveThreadStatus({ ...thread, hasPendingUserInput: true })?.kind).toBe(
+      "awaiting-input",
+    );
   });
 });

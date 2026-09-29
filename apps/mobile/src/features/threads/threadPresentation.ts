@@ -8,7 +8,8 @@ export type ThreadStatusKind =
   | "working"
   | "connecting"
   | "error"
-  | "plan-ready";
+  | "plan-ready"
+  | "monitoring";
 
 export interface ThreadStatusPresentation extends StatusTone {
   readonly kind: ThreadStatusKind;
@@ -114,5 +115,17 @@ export function resolveThreadStatus(
     };
   }
 
+  if (thread.backgroundLiveness != null) {
+    const monitoring = thread.backgroundLiveness === "monitoring";
+    return {
+      kind: monitoring ? "monitoring" : "working",
+      label: monitoring ? "Monitoring" : "Working",
+      pillClassName: "bg-primary/10",
+      textClassName: "text-adaptive-sky-600-400",
+      iconColor: "#0a84ff",
+      iconBackground: "rgba(10,132,255,0.22)",
+      pulse: false,
+    };
+  }
   return null;
 }

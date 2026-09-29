@@ -91,7 +91,11 @@ import {
   FLOATING_WORKING_CONTROL_COVERAGE,
   FloatingWorkingControl,
 } from "./floating-working-control";
-import { connectionFloatingStatus, type FloatingWorkingStatus } from "./floating-working-status";
+import {
+  backgroundFloatingStatus,
+  connectionFloatingStatus,
+  type FloatingWorkingStatus,
+} from "./floating-working-status";
 import {
   derivePendingUserInputMaxHeight,
   ESTIMATED_KEYBOARD_HEIGHT,
@@ -118,6 +122,7 @@ export interface ThreadDetailScreenProps {
   readonly onDismissFeedback: (id: MessageId) => void;
   readonly selectedThreadFeed: ReadonlyArray<ThreadFeedEntry>;
   readonly activeWorkStartedAt: string | null;
+  readonly liveAgentCount: number;
   readonly isCompacting: boolean;
   /**
    * The server has not created this thread yet. "preparing" runs while the
@@ -380,6 +385,15 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
     }
     if (props.activeWorkStartedAt !== null && contentPresentationKind === "ready") {
       return { kind: "working", startedAt: props.activeWorkStartedAt };
+    }
+    if (contentPresentationKind === "ready") {
+      return backgroundFloatingStatus({
+        backgroundLiveness: props.selectedThread.backgroundLiveness,
+        liveAgentCount: props.liveAgentCount,
+        failed:
+          props.selectedThread.session?.status === "error" ||
+          props.selectedThread.latestTurn?.state === "error",
+      });
     }
     return null;
   })();

@@ -188,6 +188,7 @@ const command = Effect.fn("nativeClient.command")(function* (
         T3CODE_MOBILE_SELF_HOSTED: "0",
         MOBILE_VERSION_POLICY: "appVersion",
         T3CODE_IOS_PERSONAL_TEAM: "0",
+        T3CODE_MOBILE_SELF_HOSTED: "0",
         CI: "1",
         EXPO_NO_GIT_STATUS: "1",
       },

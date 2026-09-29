@@ -1,3 +1,7 @@
+import {
+  deriveAgentPanelModel,
+  foldSubagentActivities,
+} from "@t3tools/client-runtime/state/subagentRuntime";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import {
   StackActions,
@@ -247,6 +251,20 @@ function ThreadRouteContent(
   } = useThreadSelection();
   const selectedThreadDetailState = props.selectedThreadDetailState;
   const selectedThreadDetail = Option.getOrNull(selectedThreadDetailState.data);
+  const sessionLive =
+    selectedThread?.session != null &&
+    selectedThread.session.status !== "error" &&
+    selectedThread.session.status !== "stopped";
+  const liveAgentCount = useMemo(
+    () =>
+      deriveAgentPanelModel({
+        agents: foldSubagentActivities(selectedThreadDetail?.activities ?? [], {
+          sessionLive,
+        }),
+      }).liveCount,
+    [selectedThreadDetail?.activities, sessionLive],
+  );
+
   // "Load earlier turns" header state for windowed (paginated) thread loads.
   const loadEarlierTurns = useMemo(() => {
     if (selectedThread === null || !threadHasOlderTurns(selectedThreadDetailState)) {
@@ -934,6 +952,7 @@ function ThreadRouteContent(
           feedbackSubmissions={composer.feedbackSubmissions}
           onDismissFeedback={composer.dismissFeedback}
           selectedThreadFeed={composer.selectedThreadFeed}
+          liveAgentCount={liveAgentCount}
           activeWorkStartedAt={composer.activeWorkStartedAt}
           isCompacting={composer.isCompacting}
           creationState={creationState}
