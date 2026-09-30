@@ -6,7 +6,10 @@ import {
   type StaticScreenProps,
 } from "@react-navigation/native";
 import { SymbolView } from "../../components/AppSymbol";
+import { canCreateProjectInEnvironment } from "@t3tools/client-runtime/operations/projects";
+import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
+import { isAtomCommandInterrupted, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { useEffect, useRef } from "react";
 import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -15,7 +18,10 @@ import { cn } from "../../lib/cn";
 import { AndroidScreenHeader } from "../../components/AndroidScreenHeader";
 import { AppText as Text } from "../../components/AppText";
 import { ProjectFavicon } from "../../components/ProjectFavicon";
-import { useProjects } from "../../state/entities";
+import { useProjects, useServerConfigs, waitForProject } from "../../state/entities";
+import { projectEnvironment } from "../../state/projects";
+import { useAtomCommand } from "../../state/use-atom-command";
+import { useRemoteConnectionStatus } from "../../state/use-remote-environment-registry";
 import type { WorkspaceState } from "../../state/workspaceModel";
 import { useWorkspaceState } from "../../state/workspace";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
@@ -112,6 +118,44 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
           project.id === incomingShare.destination?.projectId,
       ) ?? null)
     : null;
+  const serverConfigs = useServerConfigs();
+  const { connectedEnvironments } = useRemoteConnectionStatus();
+  const ensureScratch = useAtomCommand(projectEnvironment.ensureScratch, {
+    reportFailure: false,
+  });
+  // Threads without a project need a connected environment that offers them.
+  // The selected environment wins when it has one; otherwise the first that
+  // does, and the entry names that machine whenever there is a choice.
+  const scratchEnvironments = connectedEnvironments.filter(
+    (environment) =>
+      canCreateProjectInEnvironment(environment.connectionState) &&
+      serverConfigs.get(environment.environmentId)?.scratchWorkspaceRoot !== undefined,
+  );
+  const scratchEnvironment =
+    scratchEnvironments.find(
+      (environment) => environment.environmentId === selectedEnvironmentId,
+    ) ??
+    scratchEnvironments[0] ??
+    null;
+  const scratchWorkspaceRoot = scratchEnvironment
+    ? (serverConfigs.get(scratchEnvironment.environmentId)?.scratchWorkspaceRoot ?? null)
+    : null;
+  // Once the Scratch project exists it is an ordinary row in the list.
+  const scratchProjectExists = projects.some(
+    (project) =>
+      project.environmentId === scratchEnvironment?.environmentId &&
+      isScratchProject(project, scratchWorkspaceRoot),
+  );
+  const canStartScratch = scratchWorkspaceRoot !== null && reservedDestinationProject === null;
+  const scratchMachineLabel =
+    connectedEnvironments.length > 1 ? (scratchEnvironment?.environmentLabel ?? null) : null;
+  const startScratchLabel = scratchMachineLabel
+    ? `Start without a project on ${scratchMachineLabel}`
+    : "Start without a project";
+  const scratchRowSubtitle = scratchMachineLabel
+    ? `On ${scratchMachineLabel}`
+    : "Start a task without a project";
+  const scratchStartInFlightRef = useRef(false);
 
   async function selectProject(project: EnvironmentProject): Promise<void> {
     if (incomingShare?.destination && !reservedDestinationProject) {
@@ -143,6 +187,37 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
         incomingShareId: incomingShare?.id,
       }),
     );
+  }
+
+  async function startScratch(): Promise<void> {
+    if (!scratchEnvironment || scratchStartInFlightRef.current) return;
+    const environmentId = scratchEnvironment.environmentId;
+    scratchStartInFlightRef.current = true;
+    try {
+      const result = await ensureScratch({ environmentId, input: {} });
+      if (isAtomCommandInterrupted(result)) return;
+      if (result._tag === "Failure") {
+        const error = squashAtomCommandFailure(result);
+        Alert.alert(
+          "Could not start without a project",
+          error instanceof Error
+            ? error.message
+            : "The folder for threads without a project could not be created.",
+        );
+        return;
+      }
+      const project = await waitForProject({ environmentId, projectId: result.value.projectId });
+      if (project === null) {
+        Alert.alert(
+          "Could not start without a project",
+          "It has not reached this device yet. Pick No project from the list once it appears.",
+        );
+        return;
+      }
+      await selectProject(project);
+    } finally {
+      scratchStartInFlightRef.current = false;
+    }
   }
 
   useEffect(() => {
@@ -316,6 +391,12 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
             })}
           </View>
         )}
+        {canStartScratch && !scratchProjectExists ? (
+          <Pressable accessibilityRole="button" accessibilityLabel="No project" onPress={() => void startScratch()} className="rounded-[24px] bg-card px-4 py-3.5">
+            <Text className="text-base font-t3-bold text-foreground">No project</Text>
+            <Text className="text-xs text-foreground-muted">{scratchRowSubtitle}</Text>
+          </Pressable>
+        ) : null}
       </ScrollView>
     </View>
   );
