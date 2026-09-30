@@ -20,6 +20,27 @@ const EMPTY_PANES = Array.from(
   () => null,
 ) as unknown as WorkspacePanes;
 
+describe("hidden pane menu projects", () => {
+  it("hides a project and restores it", () => {
+    const { setPickerProjectHidden } = useWorkspacePaneStore.getState();
+    try {
+      setPickerProjectHidden("project-a", true);
+      setPickerProjectHidden("project-a", true);
+      setPickerProjectHidden("project-b", true);
+      expect(useWorkspacePaneStore.getState().hiddenPickerProjectKeys).toEqual([
+        "project-a",
+        "project-b",
+      ]);
+
+      setPickerProjectHidden("project-a", false);
+      expect(useWorkspacePaneStore.getState().hiddenPickerProjectKeys).toEqual(["project-b"]);
+    } finally {
+      setPickerProjectHidden("project-a", false);
+      setPickerProjectHidden("project-b", false);
+    }
+  });
+});
+
 describe("assignWorkspaceThread", () => {
   it("assigns a thread to the requested pane", () => {
     const threadRef = scopeThreadRef("environment-1" as EnvironmentId, ThreadId.make("thread-1"));

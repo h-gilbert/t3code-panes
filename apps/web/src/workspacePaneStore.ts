@@ -47,6 +47,8 @@ export const DEFAULT_PROJECT_WORKSPACE_LAYOUT: ProjectWorkspaceLayout = {
 
 export interface WorkspacePaneState {
   layoutsByProjectKey: Record<string, ProjectWorkspaceLayout>;
+  /** Projects the user removed from the pane project menu on this device. */
+  hiddenPickerProjectKeys: ReadonlyArray<string>;
   assignThread: (
     projectKey: string,
     threadRef: ScopedThreadRef,
@@ -69,6 +71,7 @@ export interface WorkspacePaneState {
   setPaneCount: (projectKey: string, paneCount: WorkspacePaneCount) => void;
   setLayoutMode: (projectKey: string, layoutMode: WorkspaceLayoutMode) => void;
   resetWorkspace: (projectKey: string) => void;
+  setPickerProjectHidden: (projectKey: string, hidden: boolean) => void;
 }
 
 export function migratePersistedWorkspacePaneState(
@@ -285,6 +288,7 @@ export const useWorkspacePaneStore = create<WorkspacePaneState>()(
   persist(
     (set) => ({
       layoutsByProjectKey: {},
+      hiddenPickerProjectKeys: [],
       assignThread: (projectKey, threadRef, paneIndex) =>
         set((state) =>
           updateProjectLayout(state, projectKey, (layout) => {
@@ -388,6 +392,16 @@ export const useWorkspacePaneStore = create<WorkspacePaneState>()(
           const { [projectKey]: _removed, ...remaining } = state.layoutsByProjectKey ?? {};
           return { layoutsByProjectKey: remaining };
         }),
+      setPickerProjectHidden: (projectKey, hidden) =>
+        set((state) => {
+          const isHidden = state.hiddenPickerProjectKeys.includes(projectKey);
+          if (isHidden === hidden) return state;
+          return {
+            hiddenPickerProjectKeys: hidden
+              ? [...state.hiddenPickerProjectKeys, projectKey]
+              : state.hiddenPickerProjectKeys.filter((key) => key !== projectKey),
+          };
+        }),
     }),
     {
       name: WORKSPACE_PANE_STORAGE_KEY,
@@ -395,8 +409,14 @@ export const useWorkspacePaneStore = create<WorkspacePaneState>()(
       storage: createJSONStorage(() =>
         resolveStorage(typeof localStorage === "undefined" ? null : localStorage),
       ),
-      partialize: ({ layoutsByProjectKey }) => ({ layoutsByProjectKey }),
-      migrate: migratePersistedWorkspacePaneState,
+      partialize: ({ layoutsByProjectKey, hiddenPickerProjectKeys }) => ({
+        layoutsByProjectKey,
+        hiddenPickerProjectKeys,
+      }),
+      migrate: (persistedState) => ({
+        ...migratePersistedWorkspacePaneState(persistedState),
+        hiddenPickerProjectKeys: [],
+      }),
     },
   ),
 );

@@ -9,6 +9,9 @@ in the top-left corner or the configured sidebar shortcut to open it when choosi
 The project name in each pane header is the project menu. A project represents a directory (or a
 logical group of the same repository across environments). The generated thread title appears next
 to the project name and updates everywhere when the thread is renamed or its title is regenerated.
+Hover a project in the menu and click its X (or press Delete) to hide it from the menu on this
+device. The project and its threads are kept. Choose it again from **Hidden projects**, or add its
+directory again, to bring it back.
 The sidebar shows threads from every project assigned to a visible pane. Focusing a pane chooses
 where the next thread opens, and the project picker in the sidebar changes that pane's project. Use
 the pane header to maximize it temporarily. The X removes the thread from that pane without stopping

@@ -46,6 +46,9 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "../components/ui/menu";
 import { SidebarInset } from "../components/ui/sidebar";
@@ -388,6 +391,8 @@ function WorkspacePane({
   const assignDraft = useWorkspacePaneStore((state) => state.assignDraft);
   const toggleMaximize = useWorkspacePaneStore((state) => state.toggleMaximize);
   const swapPanes = useWorkspacePaneStore((state) => state.swapPanes);
+  const hiddenPickerProjectKeys = useWorkspacePaneStore((state) => state.hiddenPickerProjectKeys);
+  const setPickerProjectHidden = useWorkspacePaneStore((state) => state.setPickerProjectHidden);
   const handleNewThread = useNewThreadHandler();
   const [pendingProjectRef, setPendingProjectRef] = useState<ScopedProjectRef | null>(null);
   const [settling, setSettling] = useState(false);
@@ -422,10 +427,13 @@ function WorkspacePane({
         return;
       }
       setPendingProjectRef(null);
+      // Choosing a hidden project, including re-adding its directory, puts it
+      // back in the pane project menu.
+      setPickerProjectHidden(project.projectKey, false);
       setPaneProject(workspaceKey, index, project.projectKey);
       openFreshDraft(projectRef);
     },
-    [index, openFreshDraft, projects, setPaneProject, workspaceKey],
+    [index, openFreshDraft, projects, setPaneProject, setPickerProjectHidden, workspaceKey],
   );
   const openProjectPicker = useCallback(
     () => openCommandPalette({ open: "add-local-project", onProjectSelected: selectProject }),
@@ -435,6 +443,13 @@ function WorkspacePane({
     () => projects.find((project) => project.projectKey === projectKey) ?? null,
     [projectKey, projects],
   );
+  const [menuProjects, hiddenMenuProjects] = useMemo(() => {
+    const hiddenKeys = new Set(hiddenPickerProjectKeys);
+    return [
+      projects.filter((project) => !hiddenKeys.has(project.projectKey)),
+      projects.filter((project) => hiddenKeys.has(project.projectKey)),
+    ];
+  }, [hiddenPickerProjectKeys, projects]);
   const pickerThreads = useMemo(
     () =>
       workspaceThreadPickerItemsForProject(availableThreads, selectedProject?.projectKey ?? null),
@@ -599,15 +614,21 @@ function WorkspacePane({
             <DropdownMenuContent align="start" className="w-72">
               <DropdownMenuGroup>
                 <DropdownMenuLabel>Project for this pane</DropdownMenuLabel>
-                {projects.map((project) => (
+                {menuProjects.map((project) => (
                   <DropdownMenuItem
                     key={project.projectKey}
-                    className={
-                      project.projectKey === projectKey ? "bg-foreground/[0.08]" : undefined
-                    }
+                    className={cn(
+                      "group",
+                      project.projectKey === projectKey && "bg-foreground/[0.08]",
+                    )}
                     onClick={() =>
                       selectProject(scopeProjectRef(project.environmentId, project.id))
                     }
+                    onKeyDown={(event) => {
+                      if (event.key !== "Delete" && event.key !== "Backspace") return;
+                      event.preventDefault();
+                      setPickerProjectHidden(project.projectKey, true);
+                    }}
                   >
                     <span className="min-w-0 flex-1">
                       <span className="block truncate">{project.displayName}</span>
@@ -615,10 +636,47 @@ function WorkspacePane({
                         {project.workspaceRoot}
                       </span>
                     </span>
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground group-data-highlighted:opacity-100 pointer-coarse:opacity-100"
+                      aria-label={`Hide ${project.displayName} from this list`}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setPickerProjectHidden(project.projectKey, true);
+                      }}
+                    >
+                      <XIcon className="size-3" aria-hidden />
+                    </button>
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuGroup>
               <DropdownMenuSeparator />
+              {hiddenMenuProjects.length > 0 ? (
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    Hidden projects ({hiddenMenuProjects.length})
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent className="w-72">
+                    {hiddenMenuProjects.map((project) => (
+                      <DropdownMenuItem
+                        key={project.projectKey}
+                        onClick={() =>
+                          selectProject(scopeProjectRef(project.environmentId, project.id))
+                        }
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate">{project.displayName}</span>
+                          <span className="block truncate text-[11px] text-muted-foreground">
+                            {project.workspaceRoot}
+                          </span>
+                        </span>
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              ) : null}
               {projectKey !== null ? (
                 <DropdownMenuItem onClick={() => setPaneProject(workspaceKey, index, null)}>
                   Clear project
