@@ -11,7 +11,8 @@ logical group of the same repository across environments). The generated thread 
 to the project name and updates everywhere when the thread is renamed or its title is regenerated.
 Hover a project in the menu and click its X (or press Delete) to hide it from the menu on this
 device. The project and its threads are kept. Choose it again from **Hidden projects**, or add its
-directory again, to bring it back.
+directory again, to bring it back. An empty pane lists your projects next to the selected project's
+threads. Click a project to start a new thread in it.
 The sidebar shows threads from every project assigned to a visible pane. Focusing a pane chooses
 where the next thread opens, and the project picker in the sidebar changes that pane's project. Use
 the pane header to maximize it temporarily. The X removes the thread from that pane without stopping
