@@ -38,7 +38,6 @@ import {
 import { ChatViewContent, shouldTypeToFocusComposer } from "../components/ChatView";
 import type { ChatComposerHandle } from "../components/chat/ChatComposer";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
-import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider";
 import { Button } from "../components/ui/button";
 import {
   DropdownMenu,
@@ -62,17 +61,18 @@ import { isModelPickerOpen } from "../modelPickerVisibility";
 import { resolveThreadRouteRenderState } from "../threadRoutes";
 import { resolveThreadSyncPhase } from "../threadSync";
 import {
-  useThreadDetail,
+  useEnvironmentBootstrapComplete,
+  useThreadDetailExists,
   useProjects,
   useServerConfigs,
   useThreadRefs,
   useThreadShell,
+  useThreadShellExists,
   useThreadShells,
   useThreadStatus,
+  useThreadTitle,
 } from "../state/entities";
-import { useEnvironmentQuery } from "../state/query";
 import { usePrimaryEnvironmentId } from "../state/environments";
-import { environmentShell } from "../state/shell";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { useClientSettings } from "../hooks/useSettings";
 import { useDesktopFullscreen } from "../hooks/useDesktopFullscreen";
@@ -102,10 +102,7 @@ import {
   resolveWorkspaceGridColumnCount,
   resolveWorkspaceGridLeadRowSpan,
 } from "../workspacePaneLayout";
-import {
-  resolveWorkspaceDraftThreadRef,
-  resolveWorkspacePaneThreadTitle,
-} from "../workspacePaneTitle";
+import { resolveWorkspaceDraftThreadRef } from "../workspacePaneTitle";
 import {
   buildWorkspaceThreadPickerItems,
   workspaceThreadPickerItemsForProject,
@@ -262,9 +259,7 @@ function EmptyWorkspacePane({
 }
 
 function WorkspacePaneThreadTitle({ threadRef }: { readonly threadRef: ScopedThreadRef }) {
-  const shell = useThreadShell(threadRef);
-  const detail = useThreadDetail(threadRef);
-  const title = resolveWorkspacePaneThreadTitle(detail, shell);
+  const title = useThreadTitle(threadRef);
   const displayTitle = title ?? "Loading thread…";
 
   return (
@@ -300,20 +295,20 @@ function WorkspaceThreadPane({
   readonly focused: boolean;
   readonly composerHandleRef: RefObject<ChatComposerHandle | null>;
 }) {
-  const shell = useEnvironmentQuery(environmentShell.stateAtom(threadRef.environmentId));
-  const serverThreadShell = useThreadShell(threadRef);
-  const serverThreadDetail = useThreadDetail(threadRef);
+  const bootstrapComplete = useEnvironmentBootstrapComplete(threadRef.environmentId);
+  const serverThreadShellExists = useThreadShellExists(threadRef);
+  const serverThreadDetailExists = useThreadDetailExists(threadRef);
   const serverThreadStatus = useThreadStatus(threadRef);
   const renderState = resolveThreadRouteRenderState({
-    bootstrapComplete: shell.data?.snapshot._tag === "Some",
-    serverThreadShellExists: serverThreadShell !== null,
-    serverThreadDetailExists: serverThreadDetail !== null,
+    bootstrapComplete,
+    serverThreadShellExists,
+    serverThreadDetailExists,
     serverThreadDetailDeleted: serverThreadStatus === "deleted",
     draftThreadExists: false,
   });
   const threadSyncPhase = resolveThreadSyncPhase({
-    detailExists: serverThreadDetail !== null,
-    shellExists: serverThreadShell !== null,
+    detailExists: serverThreadDetailExists,
+    shellExists: serverThreadShellExists,
     status: serverThreadStatus,
   });
 
@@ -325,7 +320,7 @@ function WorkspaceThreadPane({
     );
   }
 
-  if (renderState === "loading" && serverThreadShell === null) {
+  if (renderState === "loading" && !serverThreadShellExists) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center text-xs text-muted-foreground">
         Loading thread…
@@ -1061,51 +1056,48 @@ export function ProjectPaneWorkspace({
           </div>
         </header>
       ) : null}
-      <DiffWorkerPoolProvider>
-        <main
-          className={cn(
-            "grid min-h-0 min-w-0 flex-1 bg-border",
-            maximizedPaneIndex !== null ? "grid-cols-1 grid-rows-1" : "gap-px",
-          )}
-          style={
-            maximizedPaneIndex !== null
-              ? undefined
-              : layoutMode === "columns"
-                ? { gridTemplateColumns: `repeat(${paneCount}, minmax(0, 1fr))` }
-                : layoutMode === "rows"
-                  ? { gridTemplateRows: `repeat(${paneCount}, minmax(0, 1fr))` }
-                  : {
-                      gridTemplateColumns: `repeat(${resolveWorkspaceGridColumnCount(paneCount)}, minmax(0, 1fr))`,
-                      gridAutoRows: "minmax(0, 1fr)",
-                    }
-          }
-        >
-          {renderedPanes.map(({ paneTarget, index, key }) => {
-            if (maximizedPaneIndex !== null && maximizedPaneIndex !== index) return null;
-            return (
-              <WorkspacePane
-                key={key}
-                workspaceKey={workspaceKey}
-                index={index}
-                paneTarget={paneTarget}
-                projectKey={projectKeys[index] ?? null}
-                projects={projectGroups}
-                availableThreads={availableThreads}
-                focused={active && focusedPaneIndex === index}
-                maximized={maximizedPaneIndex === index}
-                rearrangeable={maximizedPaneIndex === null && paneCount > 1}
-                style={{
-                  order: index,
-                  gridRow:
-                    index === 0 && leadPaneRowSpan > 1 ? `span ${leadPaneRowSpan}` : undefined,
-                }}
-                composerHandleRef={paneComposerHandleRefs[index]!}
-                settleThread={settleThread}
-              />
-            );
-          })}
-        </main>
-      </DiffWorkerPoolProvider>
+      <main
+        className={cn(
+          "grid min-h-0 min-w-0 flex-1 bg-border",
+          maximizedPaneIndex !== null ? "grid-cols-1 grid-rows-1" : "gap-px",
+        )}
+        style={
+          maximizedPaneIndex !== null
+            ? undefined
+            : layoutMode === "columns"
+              ? { gridTemplateColumns: `repeat(${paneCount}, minmax(0, 1fr))` }
+              : layoutMode === "rows"
+                ? { gridTemplateRows: `repeat(${paneCount}, minmax(0, 1fr))` }
+                : {
+                    gridTemplateColumns: `repeat(${resolveWorkspaceGridColumnCount(paneCount)}, minmax(0, 1fr))`,
+                    gridAutoRows: "minmax(0, 1fr)",
+                  }
+        }
+      >
+        {renderedPanes.map(({ paneTarget, index, key }) => {
+          if (maximizedPaneIndex !== null && maximizedPaneIndex !== index) return null;
+          return (
+            <WorkspacePane
+              key={key}
+              workspaceKey={workspaceKey}
+              index={index}
+              paneTarget={paneTarget}
+              projectKey={projectKeys[index] ?? null}
+              projects={projectGroups}
+              availableThreads={availableThreads}
+              focused={active && focusedPaneIndex === index}
+              maximized={maximizedPaneIndex === index}
+              rearrangeable={maximizedPaneIndex === null && paneCount > 1}
+              style={{
+                order: index,
+                gridRow: index === 0 && leadPaneRowSpan > 1 ? `span ${leadPaneRowSpan}` : undefined,
+              }}
+              composerHandleRef={paneComposerHandleRefs[index]!}
+              settleThread={settleThread}
+            />
+          );
+        })}
+      </main>
     </SidebarInset>
   );
 }

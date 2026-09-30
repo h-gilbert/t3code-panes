@@ -286,7 +286,7 @@ function updateProjectLayout(
 
 export const useWorkspacePaneStore = create<WorkspacePaneState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       layoutsByProjectKey: {},
       hiddenPickerProjectKeys: [],
       assignThread: (projectKey, threadRef, paneIndex) =>
@@ -323,13 +323,18 @@ export const useWorkspacePaneStore = create<WorkspacePaneState>()(
             };
           }),
         ),
-      focusPane: (projectKey, focusedPaneIndex) =>
+      focusPane: (projectKey, focusedPaneIndex) => {
+        // Every click inside a pane reaches this action. Avoid notifying the
+        // workspace and serializing all saved layouts when focus stays put.
+        if (selectProjectWorkspaceLayout(get(), projectKey).focusedPaneIndex === focusedPaneIndex)
+          return;
         set((state) =>
           updateProjectLayout(state, projectKey, (layout) => ({
             ...layout,
             focusedPaneIndex,
           })),
-        ),
+        );
+      },
       clearPane: (projectKey, paneIndex) =>
         set((state) =>
           updateProjectLayout(state, projectKey, (layout) => {

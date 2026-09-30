@@ -134,7 +134,8 @@ export function DiffWorkerPoolProvider({ children }: { children?: ReactNode }) {
   const workerPoolSize = useMemo(() => {
     const cores =
       typeof navigator === "undefined" ? 4 : Math.max(1, navigator.hardwareConcurrency || 4);
-    return Math.max(2, Math.min(6, Math.floor(cores / 2)));
+    // Each worker loads its own highlighter; cap the pool for memory-heavy pane workspaces.
+    return Math.max(2, Math.min(3, Math.floor(cores / 2)));
   }, []);
   const workerPool = useSyncExternalStore(
     useCallback(

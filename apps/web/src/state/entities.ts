@@ -18,6 +18,7 @@ import { environmentServerConfigsAtom } from "./server";
 import {
   allEnvironmentProjectSnapshotsReadyAtom,
   allEnvironmentShellsBootstrappedAtom,
+  environmentShell,
 } from "./shell";
 import { environmentThreadDetails, environmentThreadShells } from "./threads";
 
@@ -106,6 +107,42 @@ export function useThreadDetail(ref: ScopedThreadRef | null): EnvironmentThread 
   return useAtomValue(
     ref === null ? EMPTY_THREAD_DETAIL_ATOM : environmentThreadDetails.detailAtom(ref),
   );
+}
+
+const threadExists = (thread: EnvironmentThreadShell | EnvironmentThread | null) => thread !== null;
+const threadTitle = (thread: EnvironmentThreadShell | EnvironmentThread | null) =>
+  thread?.title ?? null;
+const shellBootstrapped = (state: { snapshot: { _tag: string } }) => state.snapshot._tag === "Some";
+const EMPTY_BOOTSTRAPPED_ATOM = Atom.make(false);
+const environmentBootstrapCompleteAtom = Atom.family((environmentId: EnvironmentId) =>
+  environmentShell.stateValueAtom(environmentId).pipe(Atom.map(shellBootstrapped)),
+);
+
+/** Loading guards must not rerender every pane when another thread updates the shell. */
+export function useEnvironmentBootstrapComplete(environmentId: EnvironmentId | null): boolean {
+  return useAtomValue(
+    environmentId === null
+      ? EMPTY_BOOTSTRAPPED_ATOM
+      : environmentBootstrapCompleteAtom(environmentId),
+  );
+}
+
+export function useThreadShellExists(ref: ScopedThreadRef): boolean {
+  return useAtomValue(environmentThreadShells.threadShellAtom(ref), threadExists);
+}
+
+export function useThreadDetailExists(ref: ScopedThreadRef): boolean {
+  return useAtomValue(environmentThreadDetails.detailAtom(ref), threadExists);
+}
+
+/** Shell titles are authoritative; only archived/missing shells need a detail fallback. */
+export function useThreadTitle(ref: ScopedThreadRef): string | null {
+  const title = useAtomValue(environmentThreadShells.threadShellAtom(ref), threadTitle);
+  const fallback = useAtomValue(
+    title === null ? environmentThreadDetails.detailAtom(ref) : EMPTY_THREAD_DETAIL_ATOM,
+    threadTitle,
+  );
+  return title ?? fallback;
 }
 
 export function useThreadStatus(ref: ScopedThreadRef | null): EnvironmentThreadStatus {

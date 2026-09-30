@@ -260,6 +260,19 @@ describe("code-view worker lifecycle", () => {
     );
   });
 
+  it("caps workers on a high core count machine", async () => {
+    vi.stubGlobal("navigator", { hardwareConcurrency: 12 });
+    await act(async () => {
+      renderer = create(renderViews(1));
+    });
+    const pool = [...testState.pools.keys()][0]!;
+    await act(async () => testState.pools.get(pool));
+    expect(pool.getStats().totalWorkers).toBe(3);
+    expect(
+      renderer!.root.findByProps({ "data-code-file": "notes.txt" }).children.join(""),
+    ).toContain("Plain text is ready.");
+  });
+
   it("renders through Pierre's main-thread fallback when worker creation fails", async () => {
     testState.failWorkers = true;
     await act(async () => {

@@ -1,6 +1,6 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { type EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import type { DraftId } from "./composerDraftStore";
 import {
@@ -19,6 +19,37 @@ const EMPTY_PANES = Array.from(
   { length: WORKSPACE_PANE_COUNT },
   () => null,
 ) as unknown as WorkspacePanes;
+
+describe("pane focus", () => {
+  it("does not notify or persist when clicking the already focused pane", () => {
+    const workspaceKey = "focus-performance-test";
+    const storage = useWorkspacePaneStore.persist.getOptions().storage!;
+    const persist = vi.spyOn(storage, "setItem");
+    const notify = vi.fn();
+    const unsubscribe = useWorkspacePaneStore.subscribe(notify);
+    try {
+      useWorkspacePaneStore.getState().focusPane(workspaceKey, 0);
+      expect(notify).not.toHaveBeenCalled();
+      expect(persist).not.toHaveBeenCalled();
+
+      useWorkspacePaneStore.getState().focusPane(workspaceKey, 2);
+      expect(notify).toHaveBeenCalledTimes(1);
+      expect(persist).toHaveBeenCalledTimes(1);
+      expect(
+        selectProjectWorkspaceLayout(useWorkspacePaneStore.getState(), workspaceKey)
+          .focusedPaneIndex,
+      ).toBe(2);
+
+      useWorkspacePaneStore.getState().focusPane(workspaceKey, 2);
+      expect(notify).toHaveBeenCalledTimes(1);
+      expect(persist).toHaveBeenCalledTimes(1);
+    } finally {
+      unsubscribe();
+      persist.mockRestore();
+      useWorkspacePaneStore.getState().resetWorkspace(workspaceKey);
+    }
+  });
+});
 
 describe("hidden pane menu projects", () => {
   it("hides a project and restores it", () => {
