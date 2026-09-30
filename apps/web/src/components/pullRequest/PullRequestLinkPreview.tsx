@@ -8,6 +8,7 @@ import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
 import { useEnvironmentQuery } from "~/state/query";
 
 import { PreviewCard, PreviewCardPopup, PreviewCardTrigger } from "../ui/preview-card";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { PullRequestActorAvatar, resolvePullRequestState } from "./pullRequestPresentation";
 
 interface PullRequestLinkPreviewTarget {
@@ -70,6 +71,7 @@ export function PullRequestLinkPreview({
       })
     : link;
   const detail = detailQuery.data;
+  const showUrlTooltip = open && detailQuery.error !== null && detail === null;
   const state =
     detail === null
       ? null
@@ -83,8 +85,11 @@ export function PullRequestLinkPreview({
 
   return (
     <PreviewCard open={open} onOpenChange={setOpen}>
-      <PreviewCardTrigger render={trigger} delay={350} closeDelay={120} />
-      <PreviewCardPopup align="center" className="w-80 max-w-[calc(100vw-2rem)] p-3">
+      <Tooltip open={showUrlTooltip}>
+        <PreviewCardTrigger render={<TooltipTrigger render={trigger} />} delay={350} closeDelay={120} />
+        <TooltipPopup side="top">{originalUrl}</TooltipPopup>
+      </Tooltip>
+      {detail !== null ? <PreviewCardPopup align="center" className="w-80 max-w-[calc(100vw-2rem)] p-3">
         {detail === null ? (
           <p className="text-xs leading-relaxed text-muted-foreground wrap-anywhere">
             {detailQuery.isPending ? "Loading pull request details…" : originalUrl}
@@ -113,7 +118,7 @@ export function PullRequestLinkPreview({
             </div>
           </div>
         )}
-      </PreviewCardPopup>
+      </PreviewCardPopup> : null}
     </PreviewCard>
   );
 }
