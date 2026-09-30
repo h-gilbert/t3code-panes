@@ -144,7 +144,7 @@ export function ThreadPullRequestBadgeControl({
   number,
   url,
   status,
-  onOpenStack,
+  onOpenList,
   onOpenPullRequest,
 }: {
   variant: "underline" | "ghost";
@@ -152,7 +152,7 @@ export function ThreadPullRequestBadgeControl({
   number?: number | undefined;
   url?: string | undefined;
   status: PrStatusIndicator | null;
-  onOpenStack: () => void;
+  onOpenList: () => void;
   onOpenPullRequest: (event: MouseEvent<HTMLAnchorElement>) => void;
 }) {
   const isStack = badge?.kind === "stack";
@@ -186,7 +186,7 @@ export function ThreadPullRequestBadgeControl({
     <Tooltip>
       <TooltipTrigger
         render={
-          isStack ? (
+          isStack || linkedCount !== null ? (
             <InlineButton
               className={className}
               aria-label={label}
@@ -194,7 +194,7 @@ export function ThreadPullRequestBadgeControl({
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
-                onOpenStack();
+                onOpenList();
               }}
             />
           ) : (
