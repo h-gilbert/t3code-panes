@@ -872,6 +872,9 @@ interface ComposerPromptEditorProps {
   skills: ReadonlyArray<ServerProviderSkill>;
   disabled: boolean;
   placeholder: string;
+  ariaLabel?: string | undefined;
+  suggestionListId?: string | undefined;
+  activeSuggestionId?: string | undefined;
   containerClassName?: string;
   className?: string;
   placeholderClassName?: string;
@@ -1627,6 +1630,9 @@ function ComposerPromptEditorInner({
   skills,
   disabled,
   placeholder,
+  ariaLabel,
+  suggestionListId,
+  activeSuggestionId,
   containerClassName,
   className,
   placeholderClassName,
@@ -1999,6 +2005,13 @@ function ComposerPromptEditorInner({
                   className,
                 )}
                 data-testid="composer-editor"
+                aria-label={ariaLabel}
+                aria-multiline="true"
+                aria-readonly={disabled || undefined}
+                aria-autocomplete={!disabled && suggestionListId ? "list" : undefined}
+                aria-haspopup={!disabled && suggestionListId ? "listbox" : undefined}
+                aria-controls={!disabled && activeSuggestionId ? suggestionListId : undefined}
+                aria-activedescendant={!disabled ? activeSuggestionId : undefined}
                 aria-placeholder={placeholder}
                 placeholder={<span />}
                 onKeyDown={(event) => {
@@ -2086,6 +2099,9 @@ export function ComposerPromptEditor({
   skills,
   disabled,
   placeholder,
+  ariaLabel,
+  suggestionListId,
+  activeSuggestionId,
   containerClassName,
   className,
   placeholderClassName,
@@ -2133,6 +2149,9 @@ export function ComposerPromptEditor({
           skills={skills}
           disabled={disabled}
           placeholder={placeholder}
+          ariaLabel={ariaLabel}
+          suggestionListId={suggestionListId}
+          activeSuggestionId={activeSuggestionId}
           {...(containerClassName ? { containerClassName } : {})}
           onChange={onChange}
           {...(onVisibleSelectionChange ? { onVisibleSelectionChange } : {})}
