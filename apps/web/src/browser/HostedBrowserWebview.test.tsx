@@ -21,11 +21,38 @@ const mocks = vi.hoisted(() => ({
   activeRecordings: new Set<string>(),
   resize: vi.fn(async () => ({ _tag: "Success", value: { tabId: "server-tab" } })),
   updateSnapshot: vi.fn(),
+  claimTab: vi.fn<DesktopPreviewBridge["claimTab"]>(),
+  ownership: (() => {
+    let hostedElsewhere = false;
+    const listeners = new Set<() => void>();
+    return {
+      get: () => hostedElsewhere,
+      set: (next: boolean) => {
+        hostedElsewhere = next;
+        for (const listener of listeners) listener();
+      },
+      subscribe: (listener: () => void) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    };
+  })(),
 }));
 
 vi.mock("~/state/use-atom-command", () => ({ useAtomCommand: () => mocks.resize }));
 vi.mock("~/state/preview", () => ({ previewEnvironment: { resize: {} } }));
-vi.mock("~/previewStateStore", () => ({ updatePreviewServerSnapshot: mocks.updateSnapshot }));
+vi.mock("~/previewStateStore", async () => {
+  const { useSyncExternalStore } = await import("react");
+  return {
+    updatePreviewServerSnapshot: mocks.updateSnapshot,
+    useThreadPreviewState: () => {
+      const hostedElsewhere = useSyncExternalStore(mocks.ownership.subscribe, mocks.ownership.get);
+      return {
+        desktopByTabId: { "server-tab": { hasWebContents: !hostedElsewhere, hostedElsewhere } },
+      };
+    },
+  };
+});
 vi.mock("~/localApi", () => ({
   ensureLocalApi: () => ({ persistence: mocks }),
 }));
@@ -35,6 +62,7 @@ vi.mock("~/components/preview/previewBridge", () => ({
     createTab: mocks.createTab,
     closeTab: mocks.closeTab,
     registerWebview: mocks.registerWebview,
+    claimTab: mocks.claimTab,
     getPreviewConfig: mocks.getPreviewConfig,
     automation: { status: mocks.status },
   },
@@ -86,6 +114,8 @@ beforeEach(() => {
     loading: false,
   });
   mocks.registerWebview.mockReset().mockResolvedValue(undefined);
+  mocks.claimTab.mockReset().mockResolvedValue(true);
+  mocks.ownership.set(false);
   mocks.getPreviewConfig.mockReset().mockResolvedValue({
     partition: "persist:t3-preview-work",
     webPreferences: "contextIsolation=yes",
@@ -305,6 +335,32 @@ describe("HostedBrowserWebview recovery", () => {
     await advance(10_000);
     expect(guests).toHaveLength(2);
     expect(await mocks.status(runtimeTabId)).toMatchObject({ available: true });
+  });
+
+  it("leaves a tab to the window that owns it and takes it back with a fresh guest", async () => {
+    mocks.ownership.set(true);
+    vi.stubGlobal("document", { hasFocus: () => true });
+    vi.stubGlobal("addEventListener", vi.fn());
+    vi.stubGlobal("removeEventListener", vi.fn());
+    const { guests, guestAttributes, runtimeTabId } = await mountTab();
+    expect(guests).toHaveLength(0);
+    expect(mocks.createTab).toHaveBeenCalledOnce();
+
+    // Showing the tab in the focused window moves it here.
+    const owner = Symbol();
+    await act(() => {
+      useBrowserSurfaceStore.getState().claim(runtimeTabId, owner, false);
+      useBrowserSurfaceStore
+        .getState()
+        .present(runtimeTabId, owner, { x: 0, y: 0, width: 800, height: 600 }, true, 0, 30);
+    });
+    expect(mocks.claimTab).toHaveBeenCalledExactlyOnceWith(runtimeTabId);
+
+    await act(() => mocks.ownership.set(false));
+    await advance(0);
+    expect(guests).toHaveLength(1);
+    expect(guestAttributes[0]).toMatchObject({ src: "https://example.com/current" });
+    expect(mocks.registerWebview).toHaveBeenLastCalledWith(runtimeTabId, 41);
   });
 
   it("repairs missing registration without replacing the live page", async () => {

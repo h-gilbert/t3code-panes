@@ -21,6 +21,8 @@ import {
   DesktopPreviewClearDataInputSchema,
   DesktopPreviewImportCookiesInputSchema,
   DesktopPreviewCreateTabInputSchema,
+  DesktopPreviewAutomationRelayInputSchema,
+  DesktopPreviewAutomationRelayResponseInputSchema,
   DesktopPreviewTabInputSchema,
   DesktopBrowserAutofillInputSchema,
   DesktopBrowserAutofillResultSchema,
@@ -34,7 +36,9 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import * as NodeCrypto from "node:crypto";
 import * as NodeURL from "node:url";
+import { webContents } from "electron";
 
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as BrowserImport from "../../preview/BrowserImport/BrowserImport.ts";
@@ -63,13 +67,12 @@ export const createTab = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_CREATE_TAB_CHANNEL,
   payload: DesktopPreviewCreateTabInputSchema,
   result: Schema.Void,
-  handler: Effect.fn("desktop.ipc.preview.createTab")(function* ({
-    tabId,
-    zoomFactor,
-    colorScheme,
-  }) {
+  handler: Effect.fn("desktop.ipc.preview.createTab")(function* (
+    { tabId, zoomFactor, colorScheme },
+    event,
+  ) {
     const manager = yield* PreviewManager.PreviewManager;
-    yield* manager.createTab(tabId, { zoomFactor, colorScheme });
+    yield* manager.createTab(tabId, { zoomFactor, colorScheme }, event?.sender.id);
   }),
 });
 
@@ -77,10 +80,122 @@ export const closeTab = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_CLOSE_TAB_CHANNEL,
   payload: DesktopPreviewTabInputSchema,
   result: Schema.Void,
-  handler: Effect.fn("desktop.ipc.preview.closeTab")(function* ({ tabId }) {
+  handler: Effect.fn("desktop.ipc.preview.closeTab")(function* ({ tabId }, event) {
     const manager = yield* PreviewManager.PreviewManager;
-    yield* manager.closeTab(tabId);
+    yield* manager.closeTab(tabId, event?.sender.id);
   }),
+});
+
+export const getHostWebContentsId = DesktopIpc.makeSyncIpcMethod({
+  channel: IpcChannels.PREVIEW_HOST_ID_CHANNEL,
+  result: Schema.Number,
+  handler: (event) => Effect.succeed(event.sender.id),
+});
+
+export class PreviewAutomationRelayError extends Schema.TaggedError<PreviewAutomationRelayError>()(
+  "PreviewAutomationRelayError",
+  { hostWebContentsId: Schema.Number, reason: Schema.String },
+) {
+  override get message(): string {
+    return `Could not reach the window that owns this browser tab: ${this.reason}`;
+  }
+}
+
+export const claimTab = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_CLAIM_TAB_CHANNEL,
+  payload: DesktopPreviewTabInputSchema,
+  result: Schema.Boolean,
+  handler: Effect.fn("desktop.ipc.preview.claimTab")(function* ({ tabId }, event) {
+    if (!event) return false;
+    const manager = yield* PreviewManager.PreviewManager;
+    return yield* manager.claimTab(tabId, event.sender.id);
+  }),
+});
+
+const pendingAutomationRelays = new Map<
+  string,
+  { readonly hostWebContentsId: number; readonly resolve: (response: unknown) => void }
+>();
+
+/** Allows for the owner's own host wait and IPC after the request's budget. */
+const AUTOMATION_RELAY_GRACE_MS = 5_000;
+
+export const relayAutomation = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_AUTOMATION_RELAY_CHANNEL,
+  payload: DesktopPreviewAutomationRelayInputSchema,
+  result: Schema.Unknown,
+  handler: Effect.fn("desktop.ipc.preview.relayAutomation")(function* (
+    { tabId, environmentId, timeoutMs, request },
+    event,
+  ) {
+    const manager = yield* PreviewManager.PreviewManager;
+    const hostWebContentsId = yield* manager.getTabHostWebContentsId(tabId);
+    const target = hostWebContentsId === null ? undefined : webContents.fromId(hostWebContentsId);
+    if (
+      hostWebContentsId === null ||
+      !target ||
+      target.isDestroyed() ||
+      target.id === event?.sender.id
+    ) {
+      return yield* new PreviewAutomationRelayError({
+        hostWebContentsId: hostWebContentsId ?? -1,
+        reason: "no other window owns the tab",
+      });
+    }
+    const relayId = NodeCrypto.randomUUID();
+    const relayTimeoutMs = timeoutMs + AUTOMATION_RELAY_GRACE_MS;
+    return yield* Effect.callback<unknown, PreviewAutomationRelayError>((resume) => {
+      const cleanup = () => {
+        target.off("destroyed", onDestroyed);
+        pendingAutomationRelays.delete(relayId);
+      };
+      const onDestroyed = () => {
+        cleanup();
+        resume(
+          Effect.fail(
+            new PreviewAutomationRelayError({ hostWebContentsId, reason: "the window closed" }),
+          ),
+        );
+      };
+      pendingAutomationRelays.set(relayId, {
+        hostWebContentsId,
+        resolve: (response) => {
+          cleanup();
+          resume(Effect.succeed(response));
+        },
+      });
+      target.once("destroyed", onDestroyed);
+      target.send(IpcChannels.PREVIEW_AUTOMATION_RELAY_REQUEST_CHANNEL, {
+        relayId,
+        environmentId,
+        request,
+      });
+      return Effect.sync(cleanup);
+    }).pipe(
+      Effect.timeoutOrElse({
+        duration: relayTimeoutMs,
+        orElse: () =>
+          Effect.fail(
+            new PreviewAutomationRelayError({
+              hostWebContentsId,
+              reason: `no response within ${relayTimeoutMs}ms`,
+            }),
+          ),
+      }),
+    );
+  }),
+});
+
+export const respondToAutomationRelay = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_AUTOMATION_RELAY_RESPONSE_CHANNEL,
+  payload: DesktopPreviewAutomationRelayResponseInputSchema,
+  result: Schema.Void,
+  handler: ({ relayId, response }, event) =>
+    Effect.sync(() => {
+      const pending = pendingAutomationRelays.get(relayId);
+      // Only the window the request was sent to may answer it.
+      if (pending && pending.hostWebContentsId === event?.sender.id) pending.resolve(response);
+    }),
 });
 
 export const registerWebview = DesktopIpc.makeIpcMethod({
@@ -554,6 +669,7 @@ export const saveRecording = DesktopIpc.makeIpcMethod({
 export const methods = [
   createTab,
   closeTab,
+  claimTab,
   registerWebview,
   navigate,
   goBack,

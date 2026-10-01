@@ -9,6 +9,7 @@ import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import {
   PreviewAutomationOperationError,
   type PreviewAutomationOperationContext,
+  RelayedPreviewAutomationError,
   serializePreviewAutomationHostError,
 } from "./previewAutomationErrors";
 
@@ -18,6 +19,7 @@ export function serializePreviewAutomationError(
   error: unknown,
   context: PreviewAutomationOperationContext,
 ): NonNullable<PreviewAutomationResponse["error"]> {
+  if (error instanceof RelayedPreviewAutomationError) return error.serialized;
   return serializePreviewAutomationHostError(
     PreviewAutomationOperationError.fromCause({ ...context, cause: error }),
   );

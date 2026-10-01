@@ -710,6 +710,12 @@ export const DesktopPreviewFaviconSchema: Schema.Codec<DesktopPreviewFavicon> = 
 export interface DesktopPreviewTabState {
   tabId: string;
   webContentsId: number | null;
+  /**
+   * Renderer webContents of the app window that owns this tab's guest. Other
+   * windows leave the tab alone until they claim it. Compare with
+   * {@link DesktopPreviewBridge.getHostWebContentsId}.
+   */
+  hostWebContentsId: number | null;
   navStatus: DesktopPreviewNavStatus;
   canGoBack: boolean;
   canGoForward: boolean;
@@ -1203,6 +1209,27 @@ export const DesktopPreviewTabInputSchema = Schema.Struct({
  * a flash on every tab open. Both fields are optional so an older renderer
  * still gets the historical defaults.
  */
+/** Runs a preview automation request in the window that owns its tab. */
+export const DesktopPreviewAutomationRelayInputSchema = Schema.Struct({
+  tabId: DesktopPreviewTabIdSchema,
+  environmentId: Schema.String,
+  timeoutMs: Schema.Int.check(Schema.isGreaterThan(0)),
+  request: Schema.Unknown,
+});
+export type DesktopPreviewAutomationRelayInput =
+  typeof DesktopPreviewAutomationRelayInputSchema.Type;
+
+export const DesktopPreviewAutomationRelayResponseInputSchema = Schema.Struct({
+  relayId: Schema.String,
+  response: Schema.Unknown,
+});
+
+export interface DesktopPreviewAutomationRelayRequest {
+  readonly relayId: string;
+  readonly environmentId: string;
+  readonly request: unknown;
+}
+
 export const DesktopPreviewCreateTabInputSchema = Schema.Struct({
   tabId: DesktopPreviewTabIdSchema,
   zoomFactor: Schema.optional(Schema.Number.check(Schema.isGreaterThan(0))),
@@ -1441,6 +1468,19 @@ export interface DesktopPreviewBridge {
   createTab: (tabId: string, defaults?: DesktopPreviewTabDefaults) => Promise<void>;
   closeTab: (tabId: string) => Promise<void>;
   registerWebview: (tabId: string, webContentsId: number) => Promise<void>;
+  /** This window's renderer webContents id, for comparing with tab ownership. */
+  getHostWebContentsId: () => number;
+  /**
+   * Move a tab's guest into this window. Resolves false when the tab must stay
+   * where it is, such as while it is recording.
+   */
+  claimTab: (tabId: string) => Promise<boolean>;
+  /** Forward an automation request to the window that owns its tab. */
+  relayAutomation: (input: DesktopPreviewAutomationRelayInput) => Promise<unknown>;
+  onAutomationRelay: (
+    listener: (relay: DesktopPreviewAutomationRelayRequest) => void,
+  ) => () => void;
+  respondToAutomationRelay: (relayId: string, response: unknown) => Promise<void>;
   navigate: (tabId: string, url: string) => Promise<void>;
   goBack: (tabId: string) => Promise<void>;
   goForward: (tabId: string) => Promise<void>;

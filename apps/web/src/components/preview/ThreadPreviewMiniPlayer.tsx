@@ -434,7 +434,8 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
         <div className="absolute inset-0 z-[29] bg-muted" />
         <BrowserSurfaceSlot
           tabId={runtimeTabId}
-          visible={Boolean(desktopOverlay?.hasWebContents)}
+          // Presenting a tab another window owns is what moves it here.
+          visible={Boolean(desktopOverlay?.hasWebContents || desktopOverlay?.hostedElsewhere)}
           cornerRadius={0}
           fitSourceContent={compact}
           fillContainer={!compact}
@@ -453,7 +454,9 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
         <div className="pointer-events-none absolute inset-0 z-[31] ring-1 ring-inset ring-border/80" />
         {!desktopOverlay?.hasWebContents ? (
           <div className="pointer-events-none absolute inset-0 z-[32] flex items-center justify-center bg-muted text-xs text-muted-foreground">
-            Reconnecting preview…
+            {desktopOverlay?.hostedElsewhere
+              ? "Showing in another window…"
+              : "Reconnecting preview…"}
           </div>
         ) : null}
       </div>

@@ -51,11 +51,19 @@ and the full chat view's worktree controls.
 - Keep explicit viewport controls and native guest layering, hidden-preview
   performance protections, host recovery, and navigation focus protection.
   Preserve local paste and context-menu work when integrating desktop changes.
+- Every workspace window can host the browser. A webview tag cannot move between
+  windows, so each tab belongs to one window in the desktop process. Other windows
+  show no guest for it. Showing the tab in the focused window claims it, which reloads
+  the page there; a recording tab stays put. Agent requests for a tab another window
+  owns are relayed to that window. Do not reintroduce a single "main window" that
+  rejects guests from other windows; that left previews stuck reconnecting.
 
 The opening default lives in `apps/web/src/previewMiniPlayerStore.ts`, the header
 and fullscreen presentation in `components/preview/ThreadPreviewMiniPlayer.tsx`
 under that same `src` directory, and routing in `browser/browserTargetResolver.ts`.
-Desktop session and login behavior lives in `apps/desktop/src/preview/`.
+Desktop session and login behavior lives in `apps/desktop/src/preview/`, including
+tab ownership in `Manager.ts`; the cross-window request relay is
+`components/preview/previewAutomationRelay.ts`.
 
 Run the affected tests, starting with `previewMiniPlayerStore.test.ts`,
 `ThreadPreviewMiniPlayer.test.ts`, `browserTargetResolver.test.ts`, and

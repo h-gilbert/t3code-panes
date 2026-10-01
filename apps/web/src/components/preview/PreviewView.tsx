@@ -907,6 +907,11 @@ export function PreviewView({
             onOpenUrl={(next) => void handleOpenServerUrl(next)}
           />
         ) : null}
+        {desktopOverlay?.hostedElsewhere && !showEmptyState && !isUnreachable ? (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-muted text-xs text-muted-foreground">
+            Showing in another window…
+          </div>
+        ) : null}
         {snapshot && desktopOverlay ? (
           <ZoomIndicator zoomFactor={desktopOverlay.zoomFactor} />
         ) : null}

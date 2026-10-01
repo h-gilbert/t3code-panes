@@ -291,3 +291,13 @@ export function serializePreviewAutomationHostError(
     ...(Object.keys(detail).length === 0 ? {} : { detail }),
   };
 }
+
+/**
+ * A failure the window that owns the tab already serialized. Passed through
+ * unchanged so the agent sees the owner's error, not a relay wrapper.
+ */
+export class RelayedPreviewAutomationError extends Error {
+  constructor(readonly serialized: NonNullable<PreviewAutomationResponse["error"]>) {
+    super(serialized.message);
+  }
+}

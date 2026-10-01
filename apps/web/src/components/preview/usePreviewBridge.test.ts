@@ -13,6 +13,7 @@ function state(navStatus: DesktopPreviewTabState["navStatus"]): DesktopPreviewTa
   return {
     tabId: "tab-1",
     webContentsId: 1,
+    hostWebContentsId: 7,
     navStatus,
     canGoBack: false,
     canGoForward: false,
@@ -46,5 +47,21 @@ describe("projectDesktopState", () => {
       ).favicon,
     ).toBeNull();
     expect(projectDesktopState(state({ kind: "Idle" })).favicon).toBeNull();
+  });
+
+  it("hides a guest that another window owns", () => {
+    const success = state({ kind: "Success", url: "https://example.com/", title: "" });
+    expect(projectDesktopState(success, 7)).toMatchObject({
+      hasWebContents: true,
+      hostedElsewhere: false,
+    });
+    expect(projectDesktopState(success, 8)).toMatchObject({
+      hasWebContents: false,
+      hostedElsewhere: true,
+    });
+    expect(projectDesktopState({ ...success, hostWebContentsId: null }, 8)).toMatchObject({
+      hasWebContents: true,
+      hostedElsewhere: false,
+    });
   });
 });

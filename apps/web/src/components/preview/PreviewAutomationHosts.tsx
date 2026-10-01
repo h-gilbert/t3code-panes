@@ -71,6 +71,7 @@ import {
   PreviewAutomationRecordingNotActiveError,
   PreviewAutomationTargetUnavailableError,
   PreviewAutomationViewportTimeoutError,
+  RelayedPreviewAutomationError,
 } from "./previewAutomationErrors";
 import {
   explicitlySuppressesPreviewMiniPlayer,
@@ -84,6 +85,11 @@ import {
   waitForNavigationReadiness,
 } from "./previewNavigationReadiness";
 import { createPreviewAutomationRequestConsumerAtom } from "./previewAutomationRequestConsumer";
+import {
+  listenForPreviewAutomationRelays,
+  registerPreviewAutomationRelayHandler,
+  relayPreviewAutomation,
+} from "./previewAutomationRelay";
 import { createPreviewAutomationClientId } from "./previewAutomationClientId";
 import {
   needsPreviewAutomationSessionSync,
@@ -276,6 +282,7 @@ const raisePreviewAutomationHostError = (
 
 export function PreviewAutomationHosts() {
   const { environments } = useEnvironments();
+  useEffect(() => (isElectron ? listenForPreviewAutomationRelays() : undefined), []);
   if (!isElectron || !previewBridge?.automation) return null;
   return (
     <>
@@ -335,7 +342,10 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
   const presentationSuppressedRuntimeTabsRef = useRef(new Map<string, Set<string>>());
 
   const handleRequest = useCallback(
-    async (request: PreviewAutomationRequest): Promise<unknown> => {
+    async (
+      request: PreviewAutomationRequest,
+      options?: { readonly relayed?: boolean },
+    ): Promise<unknown> => {
       // Session sync and tab creation consume the same budget as overlay registration.
       const hostDeadlineMs = Date.now() + resolveHostWaitBudgetMs(request.timeoutMs);
       const threadRef: ScopedThreadRef = {
@@ -361,6 +371,23 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           state = readThreadPreviewState(threadRef);
         }
         tabId = request.tabId ?? state.snapshot?.tabId ?? null;
+        // Another window owns this tab's guest, so only it can drive the page.
+        // Opening a separate tab stays here.
+        const opensNewTab =
+          request.operation === "open" &&
+          (request.input as PreviewAutomationOpenInput).reuseExistingTab === false;
+        if (
+          !options?.relayed &&
+          !opensNewTab &&
+          tabId &&
+          state.desktopByTabId[tabId]?.hostedElsewhere
+        ) {
+          return await relayPreviewAutomation({
+            runtimeTabId: previewRuntimeTabId(threadRef, state.serverEpoch, tabId),
+            environmentId,
+            request: { ...request, tabId },
+          });
+        }
         const unavailableTarget = {
           requestId: request.requestId,
           operation: request.operation,
@@ -810,6 +837,7 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           }
         }
       } catch (cause) {
+        if (cause instanceof RelayedPreviewAutomationError) throw cause;
         throw PreviewAutomationOperationError.fromCause({
           requestId: request.requestId,
           operation: request.operation,
@@ -823,6 +851,13 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
       }
     },
     [closePreview, environmentId, listPreviews, open, registry, resize],
+  );
+  useEffect(
+    () =>
+      registerPreviewAutomationRelayHandler(environmentId, (request) =>
+        handleRequest(request, { relayed: true }),
+      ),
+    [environmentId, handleRequest],
   );
   const [requestHandlerAtom] = useState(() => Atom.make({ handle: handleRequest }));
   const setRequestHandler = useAtomSet(requestHandlerAtom);

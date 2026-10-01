@@ -232,7 +232,7 @@ function makeTestLayer(input: {
   readonly copiedTexts?: string[];
   readonly onPopupTemplate?: (input: ElectronMenu.ElectronMenuTemplateInput) => Effect.Effect<void>;
   readonly previewZoomReapplies?: number[];
-  readonly previewMainWindowAssignments?: Electron.BrowserWindow[];
+  readonly previewHostWindows?: Electron.BrowserWindow[];
   readonly workspaceWindows?: ReadonlyArray<DesktopWindowSession.DesktopWorkspaceWindowState>;
   readonly workspaceWindowUpdates?: DesktopWindowSession.DesktopWorkspaceWindowState[];
   readonly workspaceWindowRemovals?: string[];
@@ -355,9 +355,9 @@ function makeTestLayer(input: {
         electronWindowLayer,
         Layer.mock(PreviewManager.PreviewManager)({
           getBrowserSession: () => Effect.succeed({} as Electron.Session),
-          setMainWindow: (window) =>
+          addHostWindow: (window) =>
             Effect.sync(() => {
-              input.previewMainWindowAssignments?.push(window);
+              input.previewHostWindows?.push(window);
             }),
           isBrowserPartition: (partition) => partition.startsWith("persist:t3code-preview-"),
           getBrowserPartition: () => Effect.succeed("persist:t3code-preview-test"),
@@ -464,7 +464,7 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
           Layer.succeed(ElectronWindow.ElectronWindow, electronWindowShape),
           Layer.mock(PreviewManager.PreviewManager)({
             getBrowserSession: () => Effect.succeed({} as Electron.Session),
-            setMainWindow: () => Effect.void,
+            addHostWindow: () => Effect.void,
             isBrowserPartition: (partition) => partition.startsWith("persist:t3code-preview-"),
             getBrowserPartition: () => Effect.succeed("persist:t3code-preview-test"),
           }),
@@ -1102,13 +1102,13 @@ describe("DesktopWindow", () => {
       const createCount = yield* Ref.make(0);
       const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
       const createdWindowOptions: Electron.BrowserWindowConstructorOptions[] = [];
-      const previewMainWindowAssignments: Electron.BrowserWindow[] = [];
+      const previewHostWindows: Electron.BrowserWindow[] = [];
       const layer = makeTestLayer({
         window: fakeWindow.window,
         createCount,
         mainWindow,
         createdWindowOptions,
-        previewMainWindowAssignments,
+        previewHostWindows,
         desktopSettings: {
           ...DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS,
           mainWindowBounds: { x: 120, y: 80, width: 1320, height: 880 },
@@ -1144,9 +1144,9 @@ describe("DesktopWindow", () => {
           String(fakeWindow.loadURL.mock.calls[1]?.[0]),
           /^t3code-dev:\/\/app\/#\/workspace\?workspace=[0-9a-f-]+$/,
         );
-        // Secondary windows never take over preview hosting from the main
-        // window. Both windows track bounds for session restoration.
-        assert.equal(previewMainWindowAssignments.length, 1);
+        // Every workspace window can host previews, and both track bounds
+        // for session restoration.
+        assert.equal(previewHostWindows.length, 2);
         const resizeRegistrations = fakeWindow.on.mock.calls.filter(
           ([eventName]) => eventName === "resize",
         );

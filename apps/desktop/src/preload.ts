@@ -2,6 +2,7 @@ import type {
   DesktopBridge,
   DesktopPreviewPointerEvent,
   DesktopPreviewRecordingFrame,
+  DesktopPreviewAutomationRelayRequest,
   DesktopPreviewTabState,
   DesktopSnapShotEvent,
 } from "@t3tools/contracts";
@@ -37,6 +38,7 @@ observeRendererFocus(window, (evidence) =>
 
 // oxlint-disable-next-line t3code/no-global-process-runtime -- Electron exposes the client platform in its sandboxed preload process.
 const clientPlatform = process.platform;
+let previewHostWebContentsId: number | undefined;
 
 if (clientPlatform === "darwin") {
   // Native window buttons do not scale with Chromium zoom. Keep their reserved
@@ -291,6 +293,32 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     closeTab: (tabId) => ipcRenderer.invoke(IpcChannels.PREVIEW_CLOSE_TAB_CHANNEL, { tabId }),
     registerWebview: (tabId, webContentsId) =>
       ipcRenderer.invoke(IpcChannels.PREVIEW_REGISTER_WEBVIEW_CHANNEL, { tabId, webContentsId }),
+    getHostWebContentsId: () => {
+      previewHostWebContentsId ??= Number(
+        ipcRenderer.sendSync(IpcChannels.PREVIEW_HOST_ID_CHANNEL),
+      );
+      return previewHostWebContentsId;
+    },
+    claimTab: (tabId) => ipcRenderer.invoke(IpcChannels.PREVIEW_CLAIM_TAB_CHANNEL, { tabId }),
+    relayAutomation: (input) =>
+      ipcRenderer.invoke(IpcChannels.PREVIEW_AUTOMATION_RELAY_CHANNEL, input),
+    onAutomationRelay: (listener) => {
+      const wrappedListener = (_event: Electron.IpcRendererEvent, relay: unknown) => {
+        if (typeof relay !== "object" || relay === null) return;
+        listener(relay as DesktopPreviewAutomationRelayRequest);
+      };
+      ipcRenderer.on(IpcChannels.PREVIEW_AUTOMATION_RELAY_REQUEST_CHANNEL, wrappedListener);
+      return () =>
+        ipcRenderer.removeListener(
+          IpcChannels.PREVIEW_AUTOMATION_RELAY_REQUEST_CHANNEL,
+          wrappedListener,
+        );
+    },
+    respondToAutomationRelay: (relayId, response) =>
+      ipcRenderer.invoke(IpcChannels.PREVIEW_AUTOMATION_RELAY_RESPONSE_CHANNEL, {
+        relayId,
+        response,
+      }),
     navigate: (tabId, url) =>
       ipcRenderer.invoke(IpcChannels.PREVIEW_NAVIGATE_CHANNEL, { tabId, url }),
     goBack: (tabId) => ipcRenderer.invoke(IpcChannels.PREVIEW_GO_BACK_CHANNEL, { tabId }),

@@ -616,12 +616,9 @@ export const make = Effect.gen(function* () {
     window.once("closed", () => {
       focusIpc.off(FOCUS_DIAGNOSTICS_CHANNEL, rendererFocusEvidence);
     });
-    if (input.isMainWindow) {
-      // Only the main window hosts previews. Registering secondary workspace
-      // windows here would reassign PiP/recording ownership to whichever
-      // window opened last.
-      yield* previewManager.setMainWindow(window);
-    }
+    // Every workspace window can host previews; each tab belongs to the
+    // window that created or last claimed it.
+    yield* previewManager.addHostWindow(window);
     window.webContents.on("will-attach-webview", (event, webPreferences, params) => {
       if (
         typeof params.partition !== "string" ||

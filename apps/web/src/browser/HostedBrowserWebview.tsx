@@ -31,7 +31,7 @@ import {
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { previewEnvironment } from "~/state/preview";
-import { updatePreviewServerSnapshot } from "~/previewStateStore";
+import { updatePreviewServerSnapshot, useThreadPreviewState } from "~/previewStateStore";
 import { subscribeBrowserViewportChange } from "./browserViewportActions";
 
 interface ElectronWebview extends HTMLElement {
@@ -103,6 +103,8 @@ export function HostedBrowserWebview(props: {
   );
   const recordingActive = useActiveBrowserRecordingTabIds().has(runtimeTabId);
   usePreviewBridge({ threadRef, tabId, runtimeTabId });
+  const hostedElsewhere =
+    useThreadPreviewState(threadRef).desktopByTabId[tabId]?.hostedElsewhere ?? false;
 
   useEffect(() => {
     if (!clientSettingsHydrated) return;
@@ -148,6 +150,16 @@ export function HostedBrowserWebview(props: {
   const [webviewGeneration, setWebviewGeneration] = useState(0);
   const [recoverySrc, setRecoverySrc] = useState(initialSrc);
   const latestUrlRef = useRef(initialUrl);
+  // A tab that comes back from another window gets a fresh guest at its
+  // current URL; the old window's page state does not travel with it.
+  const [wasHostedElsewhere, setWasHostedElsewhere] = useState(hostedElsewhere);
+  if (wasHostedElsewhere !== hostedElsewhere) {
+    setWasHostedElsewhere(hostedElsewhere);
+    if (!hostedElsewhere) {
+      setRecoverySrc(initialUrl ?? initialSrc);
+      setWebviewGeneration((generation) => generation + 1);
+    }
+  }
 
   useEffect(() => {
     latestUrlRef.current = initialUrl;
@@ -233,9 +245,37 @@ export function HostedBrowserWebview(props: {
     };
   }, [clientSettingsHydrated, config, initialSrc, runtimeTabId, webviewGeneration]);
 
+  // A returning tab starts with a fresh crash budget, like a new guest.
+  useEffect(() => {
+    if (!hostedElsewhere) crashRecoveryRef.current = INITIAL_WEBVIEW_CRASH_RECOVERY_STATE;
+  }, [hostedElsewhere]);
+
+  // Showing a tab owned by another window, in the window the user is using,
+  // moves the tab here.
+  const presented = presentation.visible;
+  useEffect(() => {
+    const bridge = previewBridge;
+    if (!hostedElsewhere || !presented || !bridge) return;
+    const claim = () => {
+      if (!document.hasFocus()) return;
+      void bridge.claimTab(runtimeTabId).catch(() => {
+        // The tab may have closed meanwhile; the next state change settles it.
+      });
+    };
+    claim();
+    window.addEventListener("focus", claim);
+    return () => window.removeEventListener("focus", claim);
+  }, [hostedElsewhere, presented, runtimeTabId]);
+
   useEffect(() => {
     const check = guestHealthCheckRef.current;
-    if (!clientSettingsHydrated || !config || check?.generation !== webviewGeneration) return;
+    if (
+      !clientSettingsHydrated ||
+      !config ||
+      hostedElsewhere ||
+      check?.generation !== webviewGeneration
+    )
+      return;
     if (!backgroundActivity && !presentation.visible && !pictureInPicture && !recordingActive)
       return;
     // Give a newly attached guest time to register, then check once per use.
@@ -245,6 +285,7 @@ export function HostedBrowserWebview(props: {
   }, [
     clientSettingsHydrated,
     config,
+    hostedElsewhere,
     webviewGeneration,
     backgroundActivity,
     presentation.visible,
@@ -339,7 +380,7 @@ export function HostedBrowserWebview(props: {
     wrapper.scrollTo({ left: 0, top: 0 });
   }, [runtimeTabId, viewport._tag, viewportHeight, viewportWidth]);
 
-  if (!clientSettingsHydrated || !config) return null;
+  if (!clientSettingsHydrated || !config || hostedElsewhere) return null;
 
   const renderingActive = active || backgroundActivity || pictureInPicture || recordingActive;
   const wrapperStyle = resolveHostedBrowserWebviewWrapperStyle({

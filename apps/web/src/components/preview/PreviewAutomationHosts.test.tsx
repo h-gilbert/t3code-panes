@@ -57,7 +57,9 @@ vi.mock("~/state/use-atom-command", () => ({
 vi.mock("~/state/use-atom-query-runner", () => ({
   useAtomQueryRunner: () => mocks.list,
 }));
-vi.mock("./previewBridge", () => ({ previewBridge: { automation: {} } }));
+vi.mock("./previewBridge", () => ({
+  previewBridge: { automation: {}, onAutomationRelay: () => () => undefined },
+}));
 
 const environmentId = EnvironmentId.make("automation-environment");
 const threadId = ThreadId.make("automation-thread");

@@ -70,6 +70,12 @@ export const SSH_PASSWORD_PROMPT_CANCELLED_RESULT = "ssh-password-prompt-cancell
 export const PREVIEW_CREATE_TAB_CHANNEL = "desktop:preview-create-tab";
 export const PREVIEW_CLOSE_TAB_CHANNEL = "desktop:preview-close-tab";
 export const PREVIEW_REGISTER_WEBVIEW_CHANNEL = "desktop:preview-register-webview";
+export const PREVIEW_HOST_ID_CHANNEL = "desktop:preview-host-id";
+export const PREVIEW_CLAIM_TAB_CHANNEL = "desktop:preview-claim-tab";
+export const PREVIEW_AUTOMATION_RELAY_CHANNEL = "desktop:preview-automation-relay";
+export const PREVIEW_AUTOMATION_RELAY_REQUEST_CHANNEL = "desktop:preview-automation-relay-request";
+export const PREVIEW_AUTOMATION_RELAY_RESPONSE_CHANNEL =
+  "desktop:preview-automation-relay-response";
 export const PREVIEW_NAVIGATE_CHANNEL = "desktop:preview-navigate";
 export const PREVIEW_GO_BACK_CHANNEL = "desktop:preview-go-back";
 export const PREVIEW_GO_FORWARD_CHANNEL = "desktop:preview-go-forward";

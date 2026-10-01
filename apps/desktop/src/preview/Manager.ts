@@ -102,6 +102,8 @@ export type PreviewNavStatus =
 export interface PreviewTabState {
   tabId: string;
   webContentsId: number | null;
+  /** Renderer webContents of the app window that owns this tab's guest. */
+  hostWebContentsId: number | null;
   navStatus: PreviewNavStatus;
   canGoBack: boolean;
   canGoForward: boolean;
@@ -656,7 +658,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   );
 
   const annotationThemeRef = yield* Ref.make(DEFAULT_ANNOTATION_THEME);
-  const mainWindowRef = yield* Ref.make<Option.Option<BrowserWindow>>(Option.none());
+  // Every app window can host previews. Each tab belongs to one of them.
+  const hostWindows = new Set<BrowserWindow>();
   const tabsRef = yield* SynchronizedRef.make<ReadonlyMap<string, PreviewTabState>>(new Map());
   const attachedRef = yield* Ref.make<ReadonlyMap<number, ManagedListeners>>(new Map());
   const listenersRef = yield* Ref.make<ReadonlySet<Listener>>(new Set());
@@ -717,9 +720,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   // (electron#44618) and now always rejects with NotAllowedError.
   let pendingRecording: PendingRecording | null = null;
   const displayMediaHandlerSessions = new WeakSet<Session>();
+  // Synchronous so a window closing mid-start is seen before capture arms.
   let frameCaptureWindowOpen = true;
-  let currentMainWindow: BrowserWindow | undefined;
-  let mainWindowCleanupFiber: Fiber.Fiber<void, never> | undefined;
   const tabLifecycleLocks = new Map<
     string,
     { readonly semaphore: Semaphore.Semaphore; users: number }
@@ -823,9 +825,11 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     );
   });
   const setFrameCaptureBackgroundThrottling = Effect.fnUntraced(function* (enabled: boolean) {
-    const mainWindow = yield* Ref.get(mainWindowRef);
-    if (Option.isNone(mainWindow)) return;
-    yield* setWindowBackgroundThrottling(mainWindow.value, enabled);
+    yield* Effect.forEach(
+      Array.from(hostWindows),
+      (window) => setWindowBackgroundThrottling(window, enabled),
+      { discard: true },
+    );
   });
   const setFrameCaptureWebContentsBackgroundThrottling = Effect.fnUntraced(function* (
     wc: Electron.WebContents,
@@ -934,15 +938,6 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       ),
       Effect.uninterruptible,
     );
-  });
-
-  const stopAllRecordings = Effect.fn("PreviewManager.stopAllRecordings")(function* () {
-    pendingRecording = null;
-    const sessions = yield* SynchronizedRef.get(frameCaptureSessionsRef);
-    yield* Effect.forEach(sessions.keys(), (tabId) => stopFrameCapture(tabId, "recording"), {
-      concurrency: "unbounded",
-      discard: true,
-    });
   });
 
   const deliverEvent = (
@@ -2160,51 +2155,100 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     yield* install().pipe(Effect.onError(() => Scope.close(scope, Exit.void).pipe(Effect.ignore)));
   });
 
-  const setMainWindow = Effect.fn("PreviewManager.setMainWindow")(function* (
+  /** Tabs owned by a closed window lose their guest, so end what depended on it. */
+  const releaseHostWindow = Effect.fn("PreviewManager.releaseHostWindow")(function* (
+    hostWebContentsId: number,
+  ) {
+    const tabs = yield* SynchronizedRef.get(tabsRef);
+    const ownedTabIds = Array.from(tabs.values())
+      .filter((tab) => tab.hostWebContentsId === hostWebContentsId)
+      .map((tab) => tab.tabId);
+    yield* Effect.forEach(
+      ownedTabIds,
+      (tabId) =>
+        Effect.all(
+          [
+            closePictureInPicture(tabId),
+            Effect.suspend(() => {
+              clearPendingRecording(tabId);
+              return stopFrameCapture(tabId, "recording");
+            }),
+          ],
+          { discard: true },
+        ).pipe(Effect.ignore),
+      { concurrency: "unbounded", discard: true },
+    );
+    const updatedAt = yield* currentIso;
+    const released = yield* SynchronizedRef.modify(tabsRef, (current) => {
+      const next = new Map(current);
+      const changed: Array<PreviewTabState> = [];
+      for (const tabId of ownedTabIds) {
+        const tab = current.get(tabId);
+        if (tab?.hostWebContentsId !== hostWebContentsId) continue;
+        const { favicon: _favicon, ...tabWithoutFavicon } = tab;
+        const state: PreviewTabState = {
+          ...tabWithoutFavicon,
+          webContentsId: null,
+          hostWebContentsId: null,
+          updatedAt,
+        };
+        next.set(tabId, state);
+        changed.push(state);
+      }
+      return [changed, changed.length === 0 ? current : next] as const;
+    });
+    // Another window showing the tab now sees it unowned and attaches a guest.
+    yield* Effect.forEach(released, (state) => emitIfCurrent(state.tabId, state), {
+      discard: true,
+    });
+  });
+
+  /** Registers an app window whose renderer may host preview guests. */
+  const addHostWindow = Effect.fn("PreviewManager.addHostWindow")(function* (
     window: BrowserWindow,
   ) {
-    if (mainWindowCleanupFiber) {
-      yield* Fiber.join(mainWindowCleanupFiber);
-      mainWindowCleanupFiber = undefined;
-    }
+    if (window.isDestroyed() || hostWindows.has(window)) return;
+    const hostWebContentsId = window.webContents.id;
     yield* SynchronizedRef.modifyEffect(frameCaptureSessionsRef, (sessions) =>
       Effect.gen(function* () {
         if (sessions.size > 0) {
           yield* setWindowBackgroundThrottling(window, false);
         }
-        yield* Ref.set(mainWindowRef, Option.some(window));
-        currentMainWindow = window;
+        hostWindows.add(window);
         frameCaptureWindowOpen = true;
         window.once("closed", () => {
-          if (currentMainWindow !== window) return;
-          currentMainWindow = undefined;
-          frameCaptureWindowOpen = false;
-          mainWindowCleanupFiber = runFork(
-            Effect.all(
-              [
-                Ref.update(mainWindowRef, (current) =>
-                  Option.isSome(current) && current.value === window ? Option.none() : current,
-                ),
-                closeAllPictureInPicture(),
-                stopAllRecordings(),
-              ],
-              {
-                concurrency: "unbounded",
-                discard: true,
-              },
-            ).pipe(Effect.ignore),
-          );
+          hostWindows.delete(window);
+          frameCaptureWindowOpen = hostWindows.size > 0;
+          runFork(releaseHostWindow(hostWebContentsId).pipe(Effect.ignore));
         });
         return [undefined, sessions] as const;
       }),
     ).pipe(Effect.uninterruptible);
   });
 
+  const isLiveHost = (hostWebContentsId: number | null) =>
+    Effect.sync(
+      () =>
+        hostWebContentsId !== null &&
+        Array.from(hostWindows).some(
+          (window) => !window.isDestroyed() && window.webContents.id === hostWebContentsId,
+        ),
+    );
+
   const createTabUnlocked = Effect.fn("PreviewManager.createTabUnlocked")(function* (
     tabId: string,
     defaults?: DesktopPreviewTabDefaults,
+    hostWebContentsId?: number,
   ) {
     const updatedAt = yield* currentIso;
+    const existingTab = (yield* SynchronizedRef.get(tabsRef)).get(tabId);
+    // The first window to create a tab owns it. A tab whose owner closed is
+    // adopted by the next window that asks for it.
+    const adopt =
+      hostWebContentsId !== undefined &&
+      existingTab !== undefined &&
+      existingTab.hostWebContentsId !== hostWebContentsId &&
+      !(yield* isLiveHost(existingTab.hostWebContentsId));
     const result = yield* SynchronizedRef.modify(
       tabsRef,
       (
@@ -2214,10 +2258,26 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         ReadonlyMap<string, PreviewTabState>,
       ] => {
         const existing = tabs.get(tabId);
-        if (existing) return [{ state: existing, created: false }, tabs] as const;
+        if (existing) {
+          if (!adopt || existing.hostWebContentsId !== existingTab?.hostWebContentsId) {
+            return [{ state: existing, created: false }, tabs] as const;
+          }
+          const adopted: PreviewTabState = {
+            ...existing,
+            hostWebContentsId: hostWebContentsId ?? null,
+            updatedAt,
+          };
+          return [
+            { state: adopted, created: false },
+            replaceMap(tabs, (copy) => {
+              copy.set(tabId, adopted);
+            }),
+          ] as const;
+        }
         const initial: PreviewTabState = {
           tabId,
           webContentsId: null,
+          hostWebContentsId: hostWebContentsId ?? null,
           navStatus: { kind: "Idle" },
           canGoBack: false,
           canGoForward: false,
@@ -2247,12 +2307,29 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   const createTab = Effect.fn("PreviewManager.createTab")(function* (
     tabId: string,
     defaults?: DesktopPreviewTabDefaults,
+    hostWebContentsId?: number,
   ) {
-    return yield* withTabLifecycleLock(tabId, createTabUnlocked(tabId, defaults));
+    return yield* withTabLifecycleLock(
+      tabId,
+      createTabUnlocked(tabId, defaults, hostWebContentsId),
+    );
   });
 
-  const closeTabUnlocked = Effect.fn("PreviewManager.closeTabUnlocked")(function* (tabId: string) {
-    if (!(yield* SynchronizedRef.get(tabsRef)).has(tabId)) return;
+  const closeTabUnlocked = Effect.fn("PreviewManager.closeTabUnlocked")(function* (
+    tabId: string,
+    hostWebContentsId?: number,
+  ) {
+    const existing = (yield* SynchronizedRef.get(tabsRef)).get(tabId);
+    if (!existing) return;
+    // A window that does not own the tab only drops its own interest in it.
+    if (
+      hostWebContentsId !== undefined &&
+      existing.hostWebContentsId !== null &&
+      existing.hostWebContentsId !== hostWebContentsId &&
+      (yield* isLiveHost(existing.hostWebContentsId))
+    ) {
+      return;
+    }
     clearPendingRecording(tabId);
     focusDiagnostics.delete(tabId);
     yield* Effect.all(
@@ -2314,13 +2391,16 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     yield* emit(tabId, closed);
   });
 
-  const closeTab = Effect.fn("PreviewManager.closeTab")(function* (tabId: string) {
+  const closeTab = Effect.fn("PreviewManager.closeTab")(function* (
+    tabId: string,
+    hostWebContentsId?: number,
+  ) {
     const claimed = yield* Ref.modify(closingTabIdsRef, (closingTabIds) => {
       if (closingTabIds.has(tabId)) return [false, closingTabIds] as const;
       return [true, new Set([...closingTabIds, tabId])] as const;
     });
     if (!claimed) return;
-    return yield* withTabLifecycleLock(tabId, closeTabUnlocked(tabId)).pipe(
+    return yield* withTabLifecycleLock(tabId, closeTabUnlocked(tabId, hostWebContentsId)).pipe(
       Effect.ensuring(
         Ref.update(closingTabIdsRef, (closingTabIds) => {
           if (!closingTabIds.has(tabId)) return closingTabIds;
@@ -2350,16 +2430,22 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       return yield* new PreviewWebContentsNotFoundError({ tabId, webContentsId });
     }
     const hostWebContents = wc.hostWebContents;
-    const mainWindow = yield* Ref.get(mainWindowRef);
-    const liveMainWindow =
-      Option.isSome(mainWindow) && !mainWindow.value.isDestroyed() ? mainWindow.value : null;
-    if (liveMainWindow && hostWebContents !== liveMainWindow.webContents) {
-      return yield* new PreviewWebContentsNotFoundError({ tabId, webContentsId });
+    const hostWebContentsId = hostWebContents?.id ?? null;
+    if (
+      tab.hostWebContentsId !== null &&
+      hostWebContentsId !== tab.hostWebContentsId &&
+      (yield* isLiveHost(tab.hostWebContentsId))
+    ) {
+      return yield* new PreviewTabHostedElsewhereError({
+        tabId,
+        webContentsId,
+        hostWebContentsId: tab.hostWebContentsId,
+      });
     }
-    if (!liveMainWindow && hostWebContents) {
-      const replacementWindow = BrowserWindow.fromWebContents(hostWebContents);
-      if (replacementWindow && !replacementWindow.isDestroyed()) {
-        yield* setMainWindow(replacementWindow);
+    if (hostWebContents) {
+      const hostWindow = BrowserWindow.fromWebContents(hostWebContents);
+      if (hostWindow && !hostWindow.isDestroyed()) {
+        yield* addHostWindow(hostWindow);
       }
     }
     const attached = yield* Ref.get(attachedRef);
@@ -2439,6 +2525,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         const next: PreviewTabState = {
           ...currentWithoutFavicon,
           webContentsId,
+          hostWebContentsId: hostWebContentsId ?? current.hostWebContentsId,
           navStatus: pendingUrl === null ? computeNavStatus(wc) : current.navStatus,
           canGoBack: wc.navigationHistory.canGoBack(),
           canGoForward: wc.navigationHistory.canGoForward(),
@@ -2509,6 +2596,62 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     );
   });
 
+  /**
+   * Moves a tab to the requesting window. The previous owner drops its guest
+   * and the new owner attaches a fresh one at the tab's URL. A tab that is
+   * recording stays put so the capture is not cut short.
+   */
+  const claimTab = Effect.fn("PreviewManager.claimTab")(function* (
+    tabId: string,
+    hostWebContentsId: number,
+  ) {
+    return yield* withTabLifecycleLock(
+      tabId,
+      Effect.gen(function* () {
+        const tab = (yield* SynchronizedRef.get(tabsRef)).get(tabId);
+        if (!tab || (yield* Ref.get(closingTabIdsRef)).has(tabId)) {
+          return yield* new PreviewTabNotFoundError({ tabId });
+        }
+        if (tab.hostWebContentsId === hostWebContentsId) return true;
+        const capture = (yield* SynchronizedRef.get(frameCaptureSessionsRef)).get(tabId);
+        if (capture?.consumers.has("recording") || pendingRecording?.tabId === tabId) {
+          return false;
+        }
+        yield* closePictureInPicture(tabId).pipe(Effect.ignore);
+        if (tab.webContentsId !== null) {
+          yield* Effect.all(
+            [
+              detachControlSession(tab.webContentsId),
+              detachListeners(tab.webContentsId),
+              cancelPickElement(tabId),
+            ],
+            { concurrency: 3, discard: true },
+          );
+        }
+        const updatedAt = yield* currentIso;
+        const claimed = yield* SynchronizedRef.modify(tabsRef, (tabs) => {
+          const current = tabs.get(tabId);
+          if (!current) return [Option.none<PreviewTabState>(), tabs] as const;
+          const { favicon: _favicon, ...currentWithoutFavicon } = current;
+          const next: PreviewTabState = {
+            ...currentWithoutFavicon,
+            webContentsId: null,
+            hostWebContentsId,
+            updatedAt,
+          };
+          return [
+            Option.some(next),
+            replaceMap(tabs, (copy) => {
+              copy.set(tabId, next);
+            }),
+          ] as const;
+        });
+        if (Option.isSome(claimed)) yield* emitIfCurrent(tabId, claimed.value);
+        return true;
+      }),
+    );
+  });
+
   const navigate = Effect.fn("PreviewManager.navigate")(function* (tabId: string, rawUrl: string) {
     const url = yield* attempt({ operation: "navigate.normalizeUrl", tabId }, () =>
       normalizePreviewUrl(rawUrl),
@@ -2519,6 +2662,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       const next: PreviewTabState = {
         tabId,
         webContentsId: current?.webContentsId ?? null,
+        hostWebContentsId: current?.hostWebContentsId ?? null,
         navStatus: {
           kind: "Loading",
           url,
@@ -3304,16 +3448,6 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   ) {
     yield* pictureInPictureMutationSemaphore.withPermit(closePictureInPictureUnlocked(tabId));
   });
-
-  const closeAllPictureInPicture = Effect.fn("PreviewManager.closeAllPictureInPicture")(
-    function* () {
-      const sessions = yield* SynchronizedRef.get(pictureInPictureSessionsRef);
-      yield* Effect.forEach(sessions.keys(), closePictureInPicture, {
-        concurrency: "unbounded",
-        discard: true,
-      });
-    },
-  );
 
   const openPictureInPicture = Effect.fn("PreviewManager.openPictureInPicture")(function* (
     tabId: string,
@@ -4812,7 +4946,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
 
   const destroy = Effect.fn("PreviewManager.destroy")(function* () {
     const tabs = yield* SynchronizedRef.get(tabsRef);
-    yield* Effect.forEach(tabs.keys(), closeTab, { discard: true });
+    yield* Effect.forEach(tabs.keys(), (tabId) => closeTab(tabId), { discard: true });
     yield* Effect.all(
       [
         Ref.set(listenersRef, new Set()),
@@ -4838,6 +4972,11 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     automationWaitFor,
     cancelPickElement,
     captureScreenshot,
+    claimTab,
+    getTabHostWebContentsId: (tabId: string) =>
+      SynchronizedRef.get(tabsRef).pipe(
+        Effect.map((tabs) => tabs.get(tabId)?.hostWebContentsId ?? null),
+      ),
     closeTab,
     copyArtifactToClipboard,
     createTab,
@@ -4857,7 +4996,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     setAnnotationTheme,
     setAudioMuted,
     setColorScheme,
-    setMainWindow,
+    addHostWindow,
     startRecording,
     closePictureInPicture,
     stopRecording,
@@ -4903,7 +5042,16 @@ export class PreviewMainWindowClosedError extends Schema.TaggedError<PreviewMain
   { tabId: Schema.String },
 ) {
   override get message(): string {
-    return `Cannot start preview frame capture while the main window is closed: ${this.tabId}`;
+    return `Cannot start preview frame capture while no app window is open: ${this.tabId}`;
+  }
+}
+
+export class PreviewTabHostedElsewhereError extends Schema.TaggedError<PreviewTabHostedElsewhereError>()(
+  "PreviewTabHostedElsewhereError",
+  { tabId: Schema.String, webContentsId: Schema.Number, hostWebContentsId: Schema.Number },
+) {
+  override get message(): string {
+    return `Preview tab ${this.tabId} is hosted by another window (${this.hostWebContentsId}); refusing guest ${this.webContentsId}`;
   }
 }
 
@@ -5165,6 +5313,7 @@ export const PreviewManagerError = Schema.Union([
   PreviewWebContentsNotFoundError,
   PreviewWebviewNotInitializedError,
   PreviewMainWindowClosedError,
+  PreviewTabHostedElsewhereError,
   PreviewRecordingArmConflictError,
   PreviewRecordingCaptureUnavailableError,
   PreviewOperationError,
@@ -5194,7 +5343,7 @@ const isPreviewAutomationInvalidSelectorError = Schema.is(PreviewAutomationInval
 export class PreviewManager extends Context.Service<
   PreviewManager,
   {
-    readonly setMainWindow: (window: BrowserWindow) => Effect.Effect<void, PreviewManagerError>;
+    readonly addHostWindow: (window: BrowserWindow) => Effect.Effect<void, PreviewManagerError>;
     readonly getBrowserSession: (
       scope?: string,
       persistent?: boolean,
@@ -5204,8 +5353,17 @@ export class PreviewManager extends Context.Service<
     readonly createTab: (
       tabId: string,
       defaults?: DesktopPreviewTabDefaults,
+      hostWebContentsId?: number,
     ) => Effect.Effect<PreviewTabState, PreviewManagerError>;
-    readonly closeTab: (tabId: string) => Effect.Effect<void, PreviewManagerError>;
+    readonly closeTab: (
+      tabId: string,
+      hostWebContentsId?: number,
+    ) => Effect.Effect<void, PreviewManagerError>;
+    readonly claimTab: (
+      tabId: string,
+      hostWebContentsId: number,
+    ) => Effect.Effect<boolean, PreviewManagerError>;
+    readonly getTabHostWebContentsId: (tabId: string) => Effect.Effect<number | null>;
     readonly registerWebview: (
       tabId: string,
       webContentsId: number,
@@ -5337,7 +5495,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
   );
 
   return PreviewManager.of({
-    setMainWindow: operations.setMainWindow,
+    addHostWindow: operations.addHostWindow,
     getBrowserSession: Effect.fn("PreviewManager.getBrowserSession")(
       function* (scope, persistent, namespace) {
         return yield* browserSession
@@ -5352,6 +5510,8 @@ export const make = Effect.gen(function* PreviewManagerMake() {
     isBrowserPartition: browserSession.isPartition,
     createTab: operations.createTab,
     closeTab: operations.closeTab,
+    claimTab: operations.claimTab,
+    getTabHostWebContentsId: operations.getTabHostWebContentsId,
     registerWebview: operations.registerWebview,
     navigate: operations.navigate,
     goBack: operations.goBack,
