@@ -282,7 +282,11 @@ import {
   deriveLogicalProjectKeyFromSettings,
   selectProjectGroupingSettings,
 } from "../logicalProject";
-import { getAutomaticRemoteProjectDestination } from "../remoteProjectProvisioning";
+import {
+  getAutomaticRemoteProjectDestination,
+  getRemoteProjectDraftContext,
+  resolvePaneEnvironmentMode,
+} from "../remoteProjectProvisioning";
 import { buildPhysicalToLogicalProjectKeyMap } from "../sidebarProjectGrouping";
 import { buildDraftThreadRouteParams, buildThreadRouteParams } from "../threadRoutes";
 import {
@@ -3950,6 +3954,11 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
 
       if (target.projectId !== null) {
         setDraftThreadContext(draftId, {
+          ...getRemoteProjectDraftContext({
+            embeddedPane,
+            requestedMode:
+              draftThread?.envMode ?? activeProjectSettings.settings.defaultThreadEnvMode,
+          }),
           projectRef: scopeProjectRef(target.environmentId, target.projectId),
           environmentSelection: "manual",
           loadBalancedEnvironmentId: null,
@@ -4033,8 +4042,11 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
 
         setDraftThreadContext(draftId, {
           projectRef: scopeProjectRef(nextEnvironmentId, projectId),
-          envMode: "worktree",
-          startFromOrigin: true,
+          ...getRemoteProjectDraftContext({
+            embeddedPane,
+            requestedMode:
+              draftThread?.envMode ?? activeProjectSettings.settings.defaultThreadEnvMode,
+          }),
         });
         toastManager.add({
           type: "success",
@@ -4047,6 +4059,9 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
     },
     [
       activeProject,
+      activeProjectSettings.settings.defaultThreadEnvMode,
+      draftThread?.envMode,
+      embeddedPane,
       cloneRepository,
       composerEnvironmentOptions,
       createProject,
@@ -5998,7 +6013,12 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
         activeProjectSettings.settings.newWorktreesStartFromOrigin)
       : false;
   const sendEnvMode = resolveSendEnvMode({
-    requestedEnvMode: envMode,
+    requestedEnvMode: resolvePaneEnvironmentMode({
+      embeddedPane,
+      requestedMode: envMode,
+      branch: activeThreadBranch,
+      worktreePath: activeWorktreePath,
+    }),
     isGitRepo,
   });
   const localCheckoutBranchMismatch = useMemo(

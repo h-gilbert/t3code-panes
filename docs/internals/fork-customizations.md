@@ -14,6 +14,12 @@ default in Settings, so do not reintroduce a hard-coded new-thread model. The sh
 Codex fallback model is Sol, and the provider prefers GPT-6 Sol over Astra and
 older Sol when available.
 
+Workspace panes hide the Git toolbar. Switching a draft to another environment
+must clear its old branch and worktree context and use that environment's current
+checkout. Restored pane drafts with an incomplete worktree selection can send in
+the current checkout too. Preserve explicit branch selections, existing worktrees,
+and the full chat view's worktree controls.
+
 ## Collaborative browser
 
 - Agent browser automation defaults to background work. Preserve Playwright availability
