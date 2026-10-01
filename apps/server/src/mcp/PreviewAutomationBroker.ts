@@ -40,6 +40,9 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 
+/** How long past a request's timeout an evicting caller waits for the host's own reply. */
+export const PREVIEW_AUTOMATION_RESPONSE_GRACE_MS = 5_000;
+
 export interface PreviewAutomationInvokeInput {
   readonly scope: McpInvocationContext.McpInvocationScope;
   readonly operation: PreviewAutomationOperation;
@@ -779,13 +782,21 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
         }
         return yield* new PreviewAutomationRequestQueueClosedError(requestContext);
       }
-      const result = yield* Deferred.await(deferred).pipe(Effect.timeoutOption(timeoutMs));
+      // The host enforces timeoutMs itself and reports its own timeout. Evicting
+      // at the same instant races that reply, so wait past it before deciding
+      // the host is unreachable.
+      const evictsOnTimeout = input.disconnectOnTimeout !== false;
+      const result = yield* Deferred.await(deferred).pipe(
+        Effect.timeoutOption(
+          evictsOnTimeout ? timeoutMs + PREVIEW_AUTOMATION_RESPONSE_GRACE_MS : timeoutMs,
+        ),
+      );
       return yield* Option.match(result, {
         onNone: () =>
           Effect.gen(function* () {
             // An unanswered request invalidates this connection. Do not replay
             // actions: the client may have applied them before becoming unreachable.
-            if (input.disconnectOnTimeout !== false) {
+            if (evictsOnTimeout) {
               yield* disconnect(connection.clientId, connection.queue, true);
             }
             return yield* new PreviewAutomationTimeoutError(requestContext);
