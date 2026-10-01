@@ -130,6 +130,14 @@ The most common defect in this repo is a change that works on the path you teste
   runbook. Installation requires a safe normal quit first and never stops processes. Preparing a
   build does not authorize installing it. Verify server connection and pane restoration afterward.
 
+### Releasing the fork everywhere
+
+- When the developer asks to "release" or ship a change to all their machines, follow
+  [`docs/operations/fork-releases.md`](docs/operations/fork-releases.md): commit and push within
+  the authorized scope, run `vp run release:panes`, then the app's update button updates the Mac
+  and its servers. Publishing a release is outward-facing; get the developer's go-ahead first.
+  Clicking the update restarts machines; leave that to the developer unless told otherwise.
+
 ### Updating the private iOS app
 
 - Follow [local iPhone updates](docs/operations/local-ios-updates.md) and use

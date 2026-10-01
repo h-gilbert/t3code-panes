@@ -262,6 +262,15 @@ describe("desktop update UI helpers", () => {
     ).toContain("Install update 1.1.1 and restart T3 Code?");
   });
 
+  it("names the servers that update before the app restarts", () => {
+    expect(
+      getDesktopUpdateInstallConfirmationMessage(
+        { availableVersion: "1.1.0", downloadedVersion: "1.1.1" },
+        ["Fred"],
+      ),
+    ).toContain("Install update 1.1.1 on this computer and on Fred, then restart T3 Code?");
+  });
+
   it("falls back to generic install confirmation copy when no version is available", () => {
     expect(
       getDesktopUpdateInstallConfirmationMessage({

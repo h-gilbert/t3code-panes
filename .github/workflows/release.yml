@@ -6,6 +6,8 @@ on:
       - "v*.*.*"
       - "!v*-nightly.*"
       - "!v*-preview.*"
+      # Fork releases are published by release-panes.yml, not the upstream pipeline.
+      - "!v*-panes.*"
   workflow_dispatch:
     inputs:
       channel:

@@ -1,4 +1,4 @@
-import { isPublishedT3Version } from "@t3tools/shared/releaseVersion";
+import { isSelfUpdatableT3Version } from "@t3tools/shared/releaseVersion";
 import {
   DesktopUpdateChannelSchema,
   type DesktopRuntimeInfo,
@@ -254,7 +254,7 @@ function getAutoUpdateDisabledReason(args: {
   disabledByEnv: boolean;
   hasUpdateFeedConfig: boolean;
 }): string | null {
-  if (!isPublishedT3Version(args.appVersion)) {
+  if (!isSelfUpdatableT3Version(args.appVersion)) {
     return "This custom build uses local updates so its custom features are preserved.";
   }
   if (!args.hasUpdateFeedConfig) {

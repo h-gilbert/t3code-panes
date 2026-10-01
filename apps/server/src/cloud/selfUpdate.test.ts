@@ -425,6 +425,23 @@ it.layer(NodeServices.layer)("server self update", (it) => {
   );
 });
 
+it("advertises self-updates for fork releases but not local fork builds", () => {
+  expect(
+    ServerSelfUpdate.resolveServerSelfUpdateCapability({
+      version: "0.0.44-panes.1790900000000",
+      desktopManaged: false,
+      launcherManaged: true,
+    }),
+  ).toBe("boot-service");
+  expect(
+    ServerSelfUpdate.resolveServerSelfUpdateCapability({
+      version: "0.0.44-panes.1790747399448.b7183457",
+      desktopManaged: false,
+      launcherManaged: true,
+    }),
+  ).toBeNull();
+});
+
 it("does not advertise stock self-updates for a custom server build", () => {
   expect(
     ServerSelfUpdate.resolveServerSelfUpdateCapability({

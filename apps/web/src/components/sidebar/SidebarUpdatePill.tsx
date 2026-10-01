@@ -20,6 +20,7 @@ import {
   shouldToastDesktopUpdateActionResult,
 } from "../desktopUpdate.logic";
 import { showDesktopUpdateDownloadedToast } from "../desktopUpdate.toast";
+import { useDesktopUpdateServers } from "../useDesktopUpdateServers";
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { Popover, PopoverCreateHandle, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { SidebarMenuItem } from "../ui/sidebar";
@@ -115,6 +116,7 @@ export function SidebarUpdatePill() {
 function SidebarUpdateControl() {
   const state = useDesktopUpdateState();
   const [isActionPending, setIsActionPending] = useState(false);
+  const desktopUpdateServers = useDesktopUpdateServers(state);
   const [checkAnimationKey, setCheckAnimationKey] = useState(0);
   const [isCheckAnimationLatched, setIsCheckAnimationLatched] = useState(false);
   const [releaseNotesPopoverHandle] = useState(() => PopoverCreateHandle());
@@ -215,7 +217,7 @@ function SidebarUpdateControl() {
       let confirmed = false;
       try {
         confirmed = await ensureLocalApi().dialogs.confirm(
-          getDesktopUpdateInstallConfirmationMessage(state),
+          getDesktopUpdateInstallConfirmationMessage(state, desktopUpdateServers.serverLabels),
         );
       } catch (error) {
         setIsActionPending(false);
@@ -229,6 +231,11 @@ function SidebarUpdateControl() {
         return;
       }
       if (!confirmed) {
+        setIsActionPending(false);
+        return;
+      }
+      // Servers move to the new version before this app restarts.
+      if (!(await desktopUpdateServers.updateServersFirst())) {
         setIsActionPending(false);
         return;
       }
@@ -286,7 +293,7 @@ function SidebarUpdateControl() {
         );
       })
       .finally(() => setIsActionPending(false));
-  }, [action, isInteractionDisabled, prefersReducedMotion, state]);
+  }, [action, desktopUpdateServers, isInteractionDisabled, prefersReducedMotion, state]);
 
   const handleCheckAnimationIteration = useCallback(() => {
     setIsCheckAnimationLatched(

@@ -83,7 +83,9 @@ Self-hosted mobile builds retain direct pairing and APNs registration, private s
 and no managed Clerk, relay or OTA configuration. Live Activities remain removed. Personal and
 self-hosted iOS builds do not include the share extension.
 
-Custom desktop artifacts use a local version suffix and omit stock update feeds. Desktop and server
-update handlers reject stock self-updates for custom versions. Use the
-[local promotion runbook](../operations/local-desktop-promotion.md) for installed app updates.
-SSH launch still resolves published server packages when the desktop version is unpublished.
+Fork releases (`<core>-panes.<13-digit timestamp>`) update the desktop and managed servers from
+this fork's GitHub releases, never from stock ones, and a fork server refuses a stock target. Other
+custom versions, including local promotion builds and the default `-panes.1`, omit update feeds
+and reject self-updates. See [Fork Releases](../operations/fork-releases.md) and the
+[local promotion runbook](../operations/local-desktop-promotion.md). SSH launch still resolves
+published server packages when the desktop version is unpublished.

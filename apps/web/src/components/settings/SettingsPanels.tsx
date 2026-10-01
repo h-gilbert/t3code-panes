@@ -55,6 +55,7 @@ import {
   isDesktopUpdateButtonDisabled,
   resolveDesktopUpdateButtonAction,
 } from "../../components/desktopUpdate.logic";
+import { useDesktopUpdateServers } from "../useDesktopUpdateServers";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
 import {
@@ -269,6 +270,7 @@ function AboutVersionTitle() {
 
 function AboutVersionSection() {
   const updateState = useDesktopUpdateState();
+  const desktopUpdateServers = useDesktopUpdateServers(updateState);
   const [isChangingUpdateChannel, setIsChangingUpdateChannel] = useState(false);
   const [isUpdateActionPending, setIsUpdateActionPending] = useState(false);
 
@@ -333,6 +335,7 @@ function AboutVersionSection() {
         confirmed = await ensureLocalApi().dialogs.confirm(
           getDesktopUpdateInstallConfirmationMessage(
             updateState ?? { availableVersion: null, downloadedVersion: null },
+            desktopUpdateServers.serverLabels,
           ),
         );
       } catch (error) {
@@ -347,6 +350,11 @@ function AboutVersionSection() {
         return;
       }
       if (!confirmed) {
+        setIsUpdateActionPending(false);
+        return;
+      }
+      // Servers move to the new version before this app restarts.
+      if (!(await desktopUpdateServers.updateServersFirst())) {
         setIsUpdateActionPending(false);
         return;
       }
@@ -389,7 +397,7 @@ function AboutVersionSection() {
           }),
         );
       });
-  }, [isUpdateActionPending, updateState]);
+  }, [desktopUpdateServers, isUpdateActionPending, updateState]);
 
   const action = updateState ? resolveDesktopUpdateButtonAction(updateState) : "none";
   const buttonTooltip = updateState ? getDesktopUpdateButtonTooltip(updateState) : null;

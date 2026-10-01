@@ -4,15 +4,25 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
+import { useAtomValue } from "@effect/atom-react";
+import { Atom } from "effect/unstable/reactivity";
 import { CircleArrowUpIcon } from "lucide-react";
-import { type ComponentProps, useRef, useState } from "react";
+import { type ComponentProps, useMemo, useRef, useState } from "react";
 
 import { requestConfirmDialog } from "~/confirmDialog";
+import { isDesktopLocalConnectionTarget } from "~/connection/desktopLocal";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useEnvironmentSettings } from "~/hooks/useSettings";
 import { serverEnvironment } from "~/state/server";
 import { useAtomCommand } from "~/state/use-atom-command";
-import { manualServerUpdateCommand } from "~/versionSkew";
+import { useEnvironments } from "~/state/environments";
+import {
+  manualServerUpdateCommand,
+  resolveServerConfigVersionMismatch,
+  resolveServerSelfUpdateCapability,
+  supportsDesktopAppUpdate,
+  supportsServerUpdateThreadContinuation,
+} from "~/versionSkew";
 import { Button } from "./ui/button";
 import { toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
@@ -91,6 +101,94 @@ function useServerUpdate() {
   };
 }
 
+/**
+ * Saved machines that can be updated remotely to `clientVersion` (this app's
+ * version by default): switched on, connected, behind it, remotely updatable,
+ * and not already mid-update.
+ */
+export function useSavedServerUpdateTargets(clientVersion?: string): ServerUpdateTarget[] {
+  const { environments } = useEnvironments();
+  const savedEnvironments = useMemo(
+    () =>
+      environments.filter(
+        (environment) => environment.entry.target._tag !== "PrimaryConnectionTarget",
+      ),
+    [environments],
+  );
+  const statesAtom = useMemo(
+    () =>
+      Atom.make((get) =>
+        savedEnvironments.map((environment) => ({
+          environment,
+          updateStatus: get(serverEnvironment.updateStateAtom(environment.environmentId)).status,
+        })),
+      ),
+    [savedEnvironments],
+  );
+  const states = useAtomValue(statesAtom);
+  return useMemo(
+    () =>
+      states.flatMap(({ environment, updateStatus }): ServerUpdateTarget[] => {
+        const mismatch = resolveServerConfigVersionMismatch(
+          environment.serverConfig,
+          clientVersion,
+        );
+        const selfUpdate = resolveServerSelfUpdateCapability(environment.serverConfig);
+        const desktopAppUpdate = supportsDesktopAppUpdate(environment.serverConfig);
+        if (
+          !mismatch ||
+          updateStatus === "running" ||
+          !environment.entry.enabled ||
+          environment.connection.phase !== "connected" ||
+          isDesktopLocalConnectionTarget(environment.entry.target) ||
+          // Manual-update machines only offer a copy command on their row.
+          selfUpdate === null ||
+          (selfUpdate === "desktop-managed" && !desktopAppUpdate)
+        ) {
+          return [];
+        }
+        return [
+          {
+            environmentId: environment.environmentId,
+            serverLabel: environment.label,
+            selfUpdate,
+            desktopAppUpdate,
+            threadContinuation: supportsServerUpdateThreadContinuation(environment.serverConfig),
+            continueThreadsAfterServerUpdate:
+              environment.serverConfig?.settings.continueThreadsAfterServerUpdate ?? false,
+            targetVersion: mismatch.clientVersion,
+          },
+        ];
+      }),
+    [clientVersion, states],
+  );
+}
+
+/**
+ * Updates machines independently and waits for all of them. Resolves false
+ * when the user declines relaunching another machine's desktop app.
+ */
+export function useUpdateServers() {
+  const update = useServerUpdate();
+  return async (targets: ReadonlyArray<ServerUpdateTarget>): Promise<boolean> => {
+    const available = targets.filter(
+      (target) => !pendingUpdateEnvironmentIds.has(target.environmentId),
+    );
+    const desktopTargets = available.filter((target) => target.selfUpdate === "desktop-managed");
+    if (desktopTargets.length > 0) {
+      const confirmed =
+        (await requestConfirmDialog(
+          `Update the T3 Code desktop apps on ${desktopTargets.map((target) => target.serverLabel).join(", ")}? They will close and relaunch on those machines.`,
+        )) ?? true;
+      if (!confirmed) return false;
+    }
+    await Promise.all(
+      available.map((target) => update(target, `${target.serverLabel} update failed`)),
+    );
+    return true;
+  };
+}
+
 /** Updates eligible machines independently; manual paths remain in the machine list. */
 export function ServerUpdatesAction({
   targets,
@@ -101,7 +199,7 @@ export function ServerUpdatesAction({
 }: UpdateButtonProps & {
   readonly targets: ReadonlyArray<ServerUpdateTarget>;
 }) {
-  const update = useServerUpdate();
+  const updateServers = useUpdateServers();
   const pending = useRef(false);
   const [isPending, setIsPending] = useState(false);
   const eligible = targets.filter(
@@ -114,20 +212,7 @@ export function ServerUpdatesAction({
     pending.current = true;
     setIsPending(true);
     try {
-      const available = eligible.filter(
-        (target) => !pendingUpdateEnvironmentIds.has(target.environmentId),
-      );
-      const desktopTargets = available.filter((target) => target.selfUpdate === "desktop-managed");
-      if (desktopTargets.length > 0) {
-        const confirmed =
-          (await requestConfirmDialog(
-            `Update the T3 Code desktop apps on ${desktopTargets.map((target) => target.serverLabel).join(", ")}? They will close and relaunch on those machines.`,
-          )) ?? true;
-        if (!confirmed) return;
-      }
-      await Promise.all(
-        available.map((target) => update(target, `${target.serverLabel} update failed`)),
-      );
+      await updateServers(eligible);
     } finally {
       pending.current = false;
       setIsPending(false);

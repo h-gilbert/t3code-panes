@@ -35,6 +35,9 @@ describe("cliRelease", () => {
     expect(cliReleaseDownloadBaseUrl("1.2.3")).toBe(
       "https://github.com/pingdotgg/t3code/releases/download/v1.2.3",
     );
+    expect(cliReleaseDownloadBaseUrl("0.0.44-panes.1790900000000")).toBe(
+      "https://github.com/h-gilbert/t3code-panes/releases/download/v0.0.44-panes.1790900000000",
+    );
     expect(cliReleaseDownloadBaseUrl("1.2.3", "https://mirror.example/t3/")).toBe(
       "https://mirror.example/t3/v1.2.3",
     );

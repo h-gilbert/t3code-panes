@@ -134,6 +134,9 @@ vp run promote:desktop status
 vp run promote:desktop install --app '/absolute/path/to/installed/T3 Code.app'
 ```
 
+To ship the integration to every machine instead, commit and push it, then follow
+[Fork Releases](fork-releases.md) (`vp run release:panes`) within the authorized scope.
+
 Preparation does not commit or publish source. Install the prepared candidate without rebuilding it
 from a different checkout. Keep the old bundle and state backups and verify the actual installed
 version, server connection and pane restoration. Use the runbook's schema-aware rollback if needed;

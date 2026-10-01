@@ -99,8 +99,13 @@ export function getDesktopUpdateButtonTooltip(state: DesktopUpdateState): string
 
 export function getDesktopUpdateInstallConfirmationMessage(
   state: Pick<DesktopUpdateState, "availableVersion" | "downloadedVersion">,
+  serverLabels: ReadonlyArray<string> = [],
 ): string {
   const version = state.downloadedVersion ?? state.availableVersion;
+  if (serverLabels.length > 0) {
+    const servers = serverLabels.join(", ");
+    return `Install update${version ? ` ${version}` : ""} on this computer and on ${servers}, then restart T3 Code?\n\n${servers} ${serverLabels.length === 1 ? "updates" : "update"} first and reconnects. Any running tasks will be interrupted. Make sure you're ready before continuing.`;
+  }
   return `Install update${version ? ` ${version}` : ""} and restart T3 Code?\n\nAny running tasks will be interrupted. Make sure you're ready before continuing.`;
 }
 

@@ -70,6 +70,18 @@ describe("DesktopUpdates", () => {
     }),
   );
 
+  it.effect("lets fork releases update from their own feed", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness({ appVersion: "0.0.44-panes.1790900000000" });
+      yield* Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        assert.isTrue(Option.isNone(yield* updates.disabledReason));
+        assert.strictEqual((yield* updates.getState).enabled, true);
+      }).pipe(Effect.provide(harness.layer), Effect.scoped);
+    }),
+  );
+
   it.effect("configures the updater and runs startup checks on the test clock", () => {
     const harness = makeHarness();
 

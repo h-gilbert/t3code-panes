@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { isPublishedT3Version } from "@t3tools/shared/releaseVersion";
+import { isSelfUpdatableT3Version } from "@t3tools/shared/releaseVersion";
 // @effect-diagnostics nodeBuiltinImport:off - Node's typed junction API avoids Windows symlink privileges while keeping the probe isolated.
 
 import * as NodeFSP from "node:fs/promises";
@@ -2669,7 +2669,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     ],
   };
   const updateChannel = resolveDesktopUpdateChannel(version);
-  if (isPublishedT3Version(version)) {
+  if (isSelfUpdatableT3Version(version)) {
     const publishConfig = yield* resolveGitHubPublishConfig(updateChannel);
     if (publishConfig) {
       buildConfig.publish = [publishConfig];

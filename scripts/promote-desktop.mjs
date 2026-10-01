@@ -126,7 +126,7 @@ export function assertRollbackCompatible(before, current) {
   }
 }
 
-function bundleInfo(app) {
+export function bundleInfo(app) {
   if (
     !NodePath.isAbsolute(app) ||
     !app.endsWith(".app") ||

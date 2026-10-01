@@ -1,4 +1,4 @@
-import { isPublishedT3Version } from "@t3tools/shared/releaseVersion";
+import { isForkReleaseVersion, isSelfUpdatableT3Version } from "@t3tools/shared/releaseVersion";
 import packageJson from "../../package.json" with { type: "json" };
 import {
   ServerSelfUpdateError,
@@ -44,7 +44,7 @@ export function resolveServerSelfUpdateCapability(input: {
   readonly desktopManaged: boolean;
   readonly launcherManaged: boolean;
 }): ServerSelfUpdateCapability | null {
-  if (!isPublishedT3Version(input.version ?? packageJson.version)) return null;
+  if (!isSelfUpdatableT3Version(input.version ?? packageJson.version)) return null;
   if (input.desktopManaged) return "desktop-managed" as const;
   return input.launcherManaged ? ("boot-service" as const) : null;
 }
@@ -200,7 +200,7 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
   const update: ServerSelfUpdate["Service"]["update"] = Effect.fn(
     "cloud.server_self_update.update",
   )(function* (input, reportProgress = () => Effect.void, onHandoffAccepted = () => Effect.void) {
-    if (!isPublishedT3Version(packageJson.version)) {
+    if (!isSelfUpdatableT3Version(packageJson.version)) {
       return yield* failWith(
         "This custom build requires a local update to preserve its custom features.",
       );
@@ -225,6 +225,13 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
     const targetVersion = input.targetVersion.trim();
     if (!isExactServiceVersion(targetVersion)) {
       return yield* failWith(`'${targetVersion}' is not an exact t3 version.`);
+    }
+    // A fork server only moves between fork releases; a stock release would
+    // silently drop its custom behavior.
+    if (isForkReleaseVersion(packageJson.version) !== isForkReleaseVersion(targetVersion)) {
+      return yield* failWith(
+        `This server runs a ${isForkReleaseVersion(packageJson.version) ? "fork" : "stock"} release and cannot update to t3@${targetVersion}.`,
+      );
     }
     if (yield* Ref.getAndSet(inFlight, true)) {
       return yield* failWith("A server update is already in progress.");

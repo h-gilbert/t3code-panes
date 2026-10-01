@@ -1,3 +1,5 @@
+import { FORK_RELEASE_REPOSITORY, isForkReleaseVersion } from "./releaseVersion.ts";
+
 /**
  * Naming shared by the release workflow, the runtime installers, and
  * install scripts for the per-platform CLI archives attached to GitHub
@@ -55,13 +57,14 @@ export function cliArchiveFileName(version: string, platformKey: CliArchivePlatf
 }
 
 const CLI_RELEASE_DEFAULT_BASE_URL = `https://github.com/${CLI_RELEASE_REPOSITORY}/releases/download`;
+const FORK_RELEASE_DEFAULT_BASE_URL = `https://github.com/${FORK_RELEASE_REPOSITORY}/releases/download`;
 
-/** Directory that `releases/download/<tag>/<asset>` lives under. */
-export function cliReleaseDownloadBaseUrl(
-  version: string,
-  baseUrl: string | undefined = CLI_RELEASE_DEFAULT_BASE_URL,
-): string {
-  return `${(baseUrl?.trim() || CLI_RELEASE_DEFAULT_BASE_URL).replace(/\/+$/, "")}/v${version}`;
+/** Directory that `releases/download/<tag>/<asset>` lives under. Fork releases come from the fork. */
+export function cliReleaseDownloadBaseUrl(version: string, baseUrl?: string | undefined): string {
+  const defaultBaseUrl = isForkReleaseVersion(version)
+    ? FORK_RELEASE_DEFAULT_BASE_URL
+    : CLI_RELEASE_DEFAULT_BASE_URL;
+  return `${(baseUrl?.trim() || defaultBaseUrl).replace(/\/+$/, "")}/v${version}`;
 }
 
 /**

@@ -105,6 +105,24 @@ describe("versionSkew", () => {
     expect(resolveVersionMismatch("0.0.34-nightly.20260824.1126")).toBeNull();
   });
 
+  it("warns when a fork server is on an older fork release than the client", () => {
+    branding.APP_VERSION = "0.0.44-panes.1790900000000";
+
+    expect(resolveVersionMismatch("0.0.44-panes.1790800000000")).toEqual({
+      clientVersion: "0.0.44-panes.1790900000000",
+      serverVersion: "0.0.44-panes.1790800000000",
+      hint: MISMATCH_HINT,
+    });
+    expect(resolveVersionMismatch("0.0.44-panes.1790900000001")).toBeNull();
+  });
+
+  it("checks a server against an explicit target version", () => {
+    expect(
+      resolveVersionMismatch("0.0.44-panes.1790800000000", "0.0.44-panes.1790900000000")
+        ?.clientVersion,
+    ).toBe("0.0.44-panes.1790900000000");
+  });
+
   it("treats a nightly server built past the client as ahead, not skew", () => {
     expect(resolveVersionMismatch("0.0.35-nightly.20260818.1124")).toBeNull();
   });

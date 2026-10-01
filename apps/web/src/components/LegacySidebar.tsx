@@ -137,6 +137,7 @@ import {
   shouldToastDesktopUpdateActionResult,
 } from "./desktopUpdate.logic";
 import { showDesktopUpdateDownloadedToast } from "./desktopUpdate.toast";
+import { useDesktopUpdateServers } from "./useDesktopUpdateServers";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert";
 import { Button } from "./ui/button";
 import {
@@ -3179,6 +3180,7 @@ export default function LegacySidebar() {
   const suppressProjectClickAfterDragRef = useRef(false);
   const suppressProjectClickForContextMenuRef = useRef(false);
   const desktopUpdateState = useDesktopUpdateState();
+  const desktopUpdateServers = useDesktopUpdateServers(desktopUpdateState);
   const [desktopUpdateActionPending, setDesktopUpdateActionPending] = useState(false);
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
@@ -3704,7 +3706,10 @@ export default function LegacySidebar() {
       let confirmed = false;
       try {
         confirmed = await ensureLocalApi().dialogs.confirm(
-          getDesktopUpdateInstallConfirmationMessage(desktopUpdateState),
+          getDesktopUpdateInstallConfirmationMessage(
+            desktopUpdateState,
+            desktopUpdateServers.serverLabels,
+          ),
         );
       } catch (error) {
         setDesktopUpdateActionPending(false);
@@ -3718,6 +3723,11 @@ export default function LegacySidebar() {
         return;
       }
       if (!confirmed) {
+        setDesktopUpdateActionPending(false);
+        return;
+      }
+      // Servers move to the new version before this app restarts.
+      if (!(await desktopUpdateServers.updateServersFirst())) {
         setDesktopUpdateActionPending(false);
         return;
       }
@@ -3748,6 +3758,7 @@ export default function LegacySidebar() {
     }
   }, [
     desktopUpdateActionPending,
+    desktopUpdateServers,
     desktopUpdateButtonAction,
     desktopUpdateButtonDisabled,
     desktopUpdateState,

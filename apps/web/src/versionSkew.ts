@@ -46,7 +46,8 @@ function versionCore(version: string): string {
  * The skew a user can act on: the connected server runs an older T3 Code than
  * this client, so the server is the side that needs updating.
  *
- * Two nightly builds compare their full versions, including the date and run.
+ * Two nightly builds, or two fork releases, compare their full versions,
+ * including the date and run or release timestamp.
  * Other combinations compare their core `major.minor.patch` only, so a stable
  * build and a nightly build with the same core do not cause an update warning.
  * A server ahead of the client does not need an update. Versions that do not
@@ -54,8 +55,9 @@ function versionCore(version: string): string {
  */
 export function resolveVersionMismatch(
   serverVersion: string | null | undefined,
+  clientVersion: string = APP_VERSION,
 ): VersionMismatch | null {
-  const normalizedClientVersion = normalizeVersion(APP_VERSION);
+  const normalizedClientVersion = normalizeVersion(clientVersion);
   const normalizedServerVersion = normalizeVersion(serverVersion);
   if (!normalizedClientVersion || !normalizedServerVersion) {
     return null;
@@ -63,14 +65,15 @@ export function resolveVersionMismatch(
 
   const clientCore = versionCore(normalizedClientVersion);
   const serverCore = versionCore(normalizedServerVersion);
-  const compareNightlyBuilds =
-    parseSemver(normalizedClientVersion)?.prerelease[0] === "nightly" &&
-    parseSemver(normalizedServerVersion)?.prerelease[0] === "nightly";
+  const clientTrain = parseSemver(normalizedClientVersion)?.prerelease[0];
+  const compareFullVersions =
+    (clientTrain === "nightly" || clientTrain === "panes") &&
+    parseSemver(normalizedServerVersion)?.prerelease[0] === clientTrain;
   const serverIsBehind =
     parseSemver(clientCore) && parseSemver(serverCore)
       ? compareSemverVersions(
-          compareNightlyBuilds ? normalizedServerVersion : serverCore,
-          compareNightlyBuilds ? normalizedClientVersion : clientCore,
+          compareFullVersions ? normalizedServerVersion : serverCore,
+          compareFullVersions ? normalizedClientVersion : clientCore,
         ) < 0
       : normalizedServerVersion !== normalizedClientVersion;
   if (!serverIsBehind) {
@@ -86,8 +89,9 @@ export function resolveVersionMismatch(
 
 export function resolveServerConfigVersionMismatch(
   serverConfig: Pick<ServerConfig, "environment"> | null | undefined,
+  clientVersion?: string,
 ): VersionMismatch | null {
-  return resolveVersionMismatch(serverConfig?.environment.serverVersion);
+  return resolveVersionMismatch(serverConfig?.environment.serverVersion, clientVersion);
 }
 
 /** The update path the connected server offers, or null when it only
