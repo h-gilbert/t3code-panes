@@ -1,7 +1,7 @@
 # Local macOS Desktop Promotion
 
-> For maintainers updating the developer's installed T3 Code app from a tested checkout. This is
-> not the public release process; see [Release Checklist](release.md) for published releases.
+> For maintainers performing an explicitly requested one-off local install from a tested checkout.
+> To publish this fork for the Mac and its servers, use [Fork Releases](fork-releases.md).
 
 ## Goal
 
@@ -11,9 +11,9 @@ open pane layout, and work running on this or another environment.
 
 ## Vocabulary and authority
 
-A request to “update the running release,” “update my release version,” or similar authorizes a
-local application-bundle replacement. It does not authorize a commit, push, tag, pull request,
-GitHub Release, or update-channel publication.
+A request for a one-off local installation authorizes a local application-bundle replacement.
+It does not authorize a commit, push, tag, pull request, GitHub Release, or update-channel
+publication. Requests to release or ship this fork use [Fork Releases](fork-releases.md).
 
 The installed app normally uses the developer's live T3 home. Never start a diagnostic server
 directly against `~/.t3/userdata`, edit that database, or copy development state over it. The app
@@ -178,7 +178,8 @@ further replacements until its recorded app, staged bundle and backup are reconc
 those paths blindly. A surviving `lock/owner.json` records the PID and time; confirm that the owning
 process has stopped before removing the lock directory. Backups are not pruned automatically.
 
-Local builds must keep a custom version suffix such as `0.0.38-panes.1`. The artifact builder uses
-a `panes.1` suffix when no version is supplied and omits upstream update feeds for custom versions.
-Desktop and server update handlers reject stock updates for these versions. Promote subsequent
-custom builds through this runbook. SSH can still launch published versions on other environments.
+One-off local builds use a custom version suffix such as `0.0.44-panes.<timestamp>.<digest>`.
+The artifact builder defaults to `-panes.1`. These versions omit update feeds and reject
+self-updates. Published fork releases use `-panes.<13-digit timestamp>` and update the Mac
+and managed servers from the fork's release feed. Use [Fork Releases](fork-releases.md) to
+prepare that signed release; local promotion can install its candidate once to join the feed.

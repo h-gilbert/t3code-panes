@@ -1,6 +1,7 @@
 # Release Checklist
 
-> For maintainers. Using T3 Code? See [docs/user](../user/).
+> This is the upstream stable/nightly release workflow. To publish this fork for the Mac and
+> its servers, use [Fork Releases](fork-releases.md). Using T3 Code? See [docs/user](../user/).
 
 This document covers the unified release workflow for stable and nightly desktop releases.
 

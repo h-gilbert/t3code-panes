@@ -104,4 +104,5 @@ through the diff panel.
   failure, and completion of turns submitted from iOS. Web/desktop completions stay quiet, with no Live Activities or Dynamic Island integration. Follow
   `docs/operations/local-ios-updates.md` and its existing policy checks.
 - Updating source does not authorize replacing or restarting the installed app.
-  Follow `docs/operations/local-desktop-promotion.md` for a requested promotion.
+  Follow `docs/operations/fork-releases.md` for an authorized release and
+  `docs/operations/local-desktop-promotion.md` for a requested one-off local install.

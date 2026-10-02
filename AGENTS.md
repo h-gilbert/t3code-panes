@@ -109,12 +109,13 @@ The most common defect in this repo is a change that works on the path you teste
   the current fork diff and tests; a clean merge is not proof of compatibility. Hand-adapt overlaps,
   never resolve them by broadly replacing custom files with upstream versions.
 - Pin the upstream release and commit, verify affected upstream and custom behavior, and report
-  intentional omissions or gaps. Follow the local promotion runbook only within the installation
-  scope already authorized by the developer. Checking upstream is not itself an install request.
+  intentional omissions or gaps. Publish through the fork release workflow when releasing is
+  authorized; use local promotion only for a requested one-off local install. Checking upstream
+  is not itself an install or release request.
 
 ### Promoting dev changes to the installed macOS app
 
-- When the developer asks to update their installed/running release from this checkout, follow
+- When the developer explicitly asks for a one-off local install from this checkout, follow
   [`docs/operations/local-desktop-promotion.md`](docs/operations/local-desktop-promotion.md). This
   is a local promotion, not a GitHub release and not permission to commit, push, tag, or publish.
 - Iterate and verify in `dev:desktop` first. Package only once after the developer is satisfied; do
@@ -134,7 +135,8 @@ The most common defect in this repo is a change that works on the path you teste
 
 - When the developer asks to "release" or ship a change to all their machines, follow
   [`docs/operations/fork-releases.md`](docs/operations/fork-releases.md): commit and push within
-  the authorized scope, run `vp run release:panes`, then the app's update button updates the Mac
+  the authorized scope, fast-forward or integrate those commits onto pushed `main`, run
+  `vp run release:panes`, then the app's update button updates the Mac
   and its servers. Publishing a release is outward-facing; get the developer's go-ahead first.
   Clicking the update restarts machines; leave that to the developer unless told otherwise.
 

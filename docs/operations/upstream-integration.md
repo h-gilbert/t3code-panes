@@ -2,8 +2,10 @@
 
 Use this workflow when asked to check for or integrate changes from the original T3 Code project.
 The objective is current upstream functionality while retaining the developer's custom behavior.
-Read [fork compatibility](../internals/fork-compatibility.md) before choosing an integration strategy,
-then use [local desktop promotion](local-desktop-promotion.md) for installation.
+Read [fork compatibility](../internals/fork-compatibility.md) before choosing an integration strategy.
+When releasing is authorized, use [Fork Releases](fork-releases.md) to ship the integration to
+the Mac and its servers. Use [local desktop promotion](local-desktop-promotion.md) only for an
+explicitly requested one-off local install.
 
 ## Scope and authority
 
@@ -119,13 +121,23 @@ until the intended behavior is understood; do not change expectations merely to 
 Update the compatibility document when a lasting custom constraint changes or a new one is added.
 Keep it about intended behavior and compatibility traps rather than a list of copied commits.
 
-## Hand off to local promotion
+## Release or install the integration
 
 Report the upstream release and SHA, what was imported, what needed manual adaptation, intentional
 omissions, validation results and remaining gaps. Do not describe the fork as fully compatible if
 required checks failed or relevant behavior remains unverified.
 
-When the developer is satisfied, follow the promotion runbook exactly:
+When the developer authorizes a release, commit and push the integration onto `main`, then
+follow [Fork Releases](fork-releases.md):
+
+```sh
+vp run release:panes
+```
+
+The command publishes the signed macOS app and Linux server together. Installing the update
+restarts machines; leave the app's update button to the developer unless instructed otherwise.
+
+For an explicitly requested one-off local install, follow the promotion runbook:
 
 ```sh
 vp run promote:desktop prepare
@@ -133,9 +145,6 @@ vp run promote:desktop status
 # After a safe normal quit, and within the authorized installation scope:
 vp run promote:desktop install --app '/absolute/path/to/installed/T3 Code.app'
 ```
-
-To ship the integration to every machine instead, commit and push it, then follow
-[Fork Releases](fork-releases.md) (`vp run release:panes`) within the authorized scope.
 
 Preparation does not commit or publish source. Install the prepared candidate without rebuilding it
 from a different checkout. Keep the old bundle and state backups and verify the actual installed
