@@ -9,7 +9,10 @@ import { SymbolView } from "../../components/AppSymbol";
 import { canCreateProjectInEnvironment } from "@t3tools/client-runtime/operations/projects";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
-import { isAtomCommandInterrupted, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
 import { useEffect, useRef } from "react";
 import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -110,6 +113,16 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
     : null;
   const screenTitle = incomingShare ? "Start a task" : "Choose project";
   const projectEmptyState = deriveProjectEmptyState(catalogState);
+  const serverConfigs = useServerConfigs();
+  // Scratch projects are reached through the No project row, never as rows
+  // of their own.
+  const listScopes = projectScopes.filter(
+    (scope) =>
+      !scope.projects.every((project) =>
+        isScratchProject(project, serverConfigs.get(project.environmentId)?.scratchWorkspaceRoot),
+      ),
+  );
+  const visibleScopes = listScopes;
   const resumedDestinationKeyRef = useRef<string | null>(null);
   const reservedDestinationProject = incomingShare?.destination
     ? (projects.find(
@@ -118,14 +131,13 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
           project.id === incomingShare.destination?.projectId,
       ) ?? null)
     : null;
-  const serverConfigs = useServerConfigs();
   const { connectedEnvironments } = useRemoteConnectionStatus();
   const ensureScratch = useAtomCommand(projectEnvironment.ensureScratch, {
     reportFailure: false,
   });
   // Threads without a project need a connected environment that offers them.
-  // The selected environment wins when it has one; otherwise the first that
-  // does, and the entry names that machine whenever there is a choice.
+  // The row starts on the selected environment when it has one, otherwise the
+  // first that does; the draft page's machine picker moves it from there.
   const scratchEnvironments = connectedEnvironments.filter(
     (environment) =>
       canCreateProjectInEnvironment(environment.connectionState) &&
@@ -137,24 +149,7 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
     ) ??
     scratchEnvironments[0] ??
     null;
-  const scratchWorkspaceRoot = scratchEnvironment
-    ? (serverConfigs.get(scratchEnvironment.environmentId)?.scratchWorkspaceRoot ?? null)
-    : null;
-  // Once the Scratch project exists it is an ordinary row in the list.
-  const scratchProjectExists = projects.some(
-    (project) =>
-      project.environmentId === scratchEnvironment?.environmentId &&
-      isScratchProject(project, scratchWorkspaceRoot),
-  );
-  const canStartScratch = scratchWorkspaceRoot !== null && reservedDestinationProject === null;
-  const scratchMachineLabel =
-    connectedEnvironments.length > 1 ? (scratchEnvironment?.environmentLabel ?? null) : null;
-  const startScratchLabel = scratchMachineLabel
-    ? `Start without a project on ${scratchMachineLabel}`
-    : "Start without a project";
-  const scratchRowSubtitle = scratchMachineLabel
-    ? `On ${scratchMachineLabel}`
-    : "Start a task without a project";
+  const canStartScratch = scratchEnvironment !== null && reservedDestinationProject === null;
   const scratchStartInFlightRef = useRef(false);
 
   async function selectProject(project: EnvironmentProject): Promise<void> {
@@ -312,7 +307,18 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
           paddingTop: 8,
         }}
       >
-        {projectScopes.length === 0 ? (
+        {canStartScratch ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="No project"
+            onPress={() => void startScratch()}
+            className="rounded-[24px] bg-card px-4 py-3.5"
+          >
+            <Text className="text-base font-t3-bold text-foreground">No project</Text>
+            <Text className="text-xs text-foreground-muted">Start a task without a project</Text>
+          </Pressable>
+        ) : null}
+        {visibleScopes.length === 0 ? (
           <View collapsable={false} className="items-center gap-3 rounded-[24px] bg-card px-6 py-8">
             {projectEmptyState.loading ? (
               <ActivityIndicator colorClassName={"accent-icon-muted"} />
@@ -345,7 +351,7 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
           </View>
         ) : (
           <View collapsable={false} className="overflow-hidden rounded-[24px] bg-card">
-            {projectScopes.map((scope, scopeIndex) => {
+            {visibleScopes.map((scope, scopeIndex) => {
               const hasMultipleProjects = scope.projects.length > 1;
               const selectionTarget = getProjectScopeSelectionTarget(scope, selectedEnvironmentId);
               return (
@@ -391,12 +397,6 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
             })}
           </View>
         )}
-        {canStartScratch && !scratchProjectExists ? (
-          <Pressable accessibilityRole="button" accessibilityLabel="No project" onPress={() => void startScratch()} className="rounded-[24px] bg-card px-4 py-3.5">
-            <Text className="text-base font-t3-bold text-foreground">No project</Text>
-            <Text className="text-xs text-foreground-muted">{scratchRowSubtitle}</Text>
-          </Pressable>
-        ) : null}
       </ScrollView>
     </View>
   );

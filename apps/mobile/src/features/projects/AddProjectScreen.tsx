@@ -1,3 +1,4 @@
+import { Platform } from "react-native";
 import {
   addProjectRemoteSourceLabel,
   addProjectRemoteSourcePathHint,
@@ -1025,7 +1026,7 @@ export function AddProjectNewScreen(props: { readonly environmentId?: string | s
   };
 
   return (
-    <AddProjectShell title="New project">
+    <AddProjectShell>
       {error ? <ErrorBanner message={error} /> : null}
       {environment ? (
         <>
