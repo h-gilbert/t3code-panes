@@ -46,6 +46,12 @@ and the full chat view's worktree controls.
 - Localhost URLs on remote environments resolve to that environment's private
   host, preserving port, path, query, and fragment. Local environments remain
   local. Unsupported public relay port routing must report an error.
+- Agent HTML file uploads and browser downloads must not open native file dialogs.
+  From an agent's latest action until a person next uses the tab, HTML file pickers wait for
+  `preview_upload` and downloads wait for
+  `preview_download` (`apps/desktop/src/preview/FileTransfer.ts`). Pickers a person opens
+  still get an Open dialog, and their downloads still ask where to save. Files cross
+  machines over HTTP, never the WebSocket.
 - Keep persistent browser sessions, named profiles, ephemeral sessions, and
   keychain-backed saved logins with the existing autofill/script isolation.
 - Keep explicit viewport controls and native guest layering, hidden-preview

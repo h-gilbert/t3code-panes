@@ -246,6 +246,34 @@ describe("previewAutomationRequestConsumer", () => {
     });
   });
 
+  it("forwards a desktop file transfer reason instead of a generic failure", () => {
+    // Electron rejects IPC with the desktop error's message; the reason rides in it.
+    const ipcError = new Error(
+      "Error invoking remote method 'desktop:preview-automation-upload': PreviewFileTransferError: Preview file transfer [no-file-chooser] failed in tab tab-1",
+    );
+    expect(
+      serializePreviewAutomationError(ipcError, {
+        requestId: "request-1",
+        operation: "upload",
+        environmentId,
+        threadId,
+        tabId,
+      }),
+    ).toMatchObject({
+      _tag: "PreviewAutomationFileActionError",
+      detail: { reason: "no-file-chooser" },
+    });
+    expect(
+      serializePreviewAutomationError(new Error("Preview file transfer [made-up] failed"), {
+        requestId: "request-1",
+        operation: "upload",
+        environmentId,
+        threadId,
+        tabId,
+      })._tag,
+    ).toBe("PreviewAutomationExecutionError");
+  });
+
   it("reports a missing recording even when no preview tab remains", () => {
     const error = new PreviewAutomationRecordingNotActiveError({
       requestId: "request-recording-stop",

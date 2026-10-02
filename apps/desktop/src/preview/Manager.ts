@@ -6,10 +6,15 @@
  * here). Single layer-scoped browser session partition.
  */
 import * as NodeCrypto from "node:crypto";
-import { DESKTOP_PREVIEW_RECORDING_CAPTURE_TRIGGER } from "@t3tools/contracts";
+import {
+  DESKTOP_PREVIEW_RECORDING_CAPTURE_TRIGGER,
+  PROVIDER_SEND_TURN_MAX_FILE_BYTES,
+} from "@t3tools/contracts";
 import type {
   DesktopPreviewAnnotationTheme,
   DesktopPreviewAutomationStatus,
+  DesktopPreviewAutomationUploadInput,
+  DesktopPreviewDownloadedFile,
   DesktopPreviewColorScheme,
   DesktopPreviewFavicon,
   DesktopPreviewPointerEvent,
@@ -24,6 +29,7 @@ import type {
   PreviewAutomationActionEvent,
   PreviewAutomationConsoleEntry,
   PreviewAutomationEvaluateInput,
+  PreviewAutomationInputResult,
   PreviewAutomationPressInput,
   PreviewAutomationNetworkEntry,
   PreviewAutomationScrollInput,
@@ -32,6 +38,7 @@ import type {
   PreviewAutomationWaitForInput,
 } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { safeFileNameSegment } from "@t3tools/shared/fileNameSegment";
 import { normalizePreviewUrl } from "@t3tools/shared/preview";
 import {
   BrowserWindow,
@@ -39,6 +46,7 @@ import {
   ClipboardItem,
   type Session,
   clipboard,
+  dialog,
   nativeImage,
   shell,
   webContents,
@@ -86,6 +94,15 @@ import {
   previewAutomationEditingCommandExpression,
 } from "./PreviewKeyboard.ts";
 import { captureFavicon, safeHttpOrigin, selectFaviconCandidates } from "./FaviconCapture.ts";
+import {
+  AGENT_DOWNLOAD_RETENTION,
+  type AgentDownload,
+  fileChooserDialogOptions,
+  isAgentDrivenTab,
+  type PendingFileChooser,
+  PreviewFileTransferError,
+  tabTransferSegment,
+} from "./FileTransfer.ts";
 
 export type PreviewNavStatus =
   | { kind: "Idle" }
@@ -156,6 +173,9 @@ const DIAGNOSTIC_BUFFER_LIMIT = 200;
 const MAX_ARTIFACT_SITE_SLUG_LENGTH = 80;
 const AGENT_CURSOR_MOVE_MS = 160;
 const AGENT_CURSOR_CLICK_LEAD_MS = 40;
+const FILE_CHOOSER_WAIT_MS = 2_000;
+const DOWNLOAD_START_WAIT_MS = 2_000;
+const PASSIVE_CONTROL_ACTIONS: ReadonlySet<string> = new Set(["snapshot", "waitFor"]);
 const requestRecordingCaptureExpression = (tabId: string): string =>
   `globalThis[${JSON.stringify(DESKTOP_PREVIEW_RECORDING_CAPTURE_TRIGGER)}]?.(${JSON.stringify(tabId)}) === true`;
 const encodeUnknownJson = Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
@@ -676,6 +696,44 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     ReadonlyMap<string, ReadonlyArray<ExpectedAgentInput>>
   >(new Map());
   const controlEpochRef = yield* Ref.make<ReadonlyMap<string, number>>(new Map());
+  // The control epoch at each tab's latest agent action. While it still
+  // matches `controlEpochRef`, file pickers and downloads belong to the agent;
+  // see FileTransfer.ts. Read synchronously from Electron's download callback.
+  const agentEpochRef = yield* Ref.make<ReadonlyMap<string, number>>(new Map());
+  const isAgentDriven = (tabId: string) =>
+    isAgentDrivenTab(
+      Ref.getUnsafe(agentEpochRef).get(tabId),
+      Ref.getUnsafe(controlEpochRef).get(tabId),
+    );
+  const pendingFileChoosers = new Map<string, PendingFileChooser>();
+  const agentDownloads = new Map<string, ReadonlyArray<AgentDownload>>();
+  const navigationDownloadWaiters = new Map<string, Set<() => void>>();
+  const downloadSessions = new WeakSet<Session>();
+  // Uploaded files must outlive the call, since pages read a chosen file
+  // whenever they submit it, so each tab's transfers live until it closes.
+  // An agent action prepares the tab's directory before the agent can own a
+  // download, because Electron's download callback cannot wait to create it.
+  const transfersDirectory = path.join(resolvedArtifactDirectory, "transfers");
+  const tabTransferDirectory = (tabId: string) =>
+    path.join(transfersDirectory, tabTransferSegment(tabId));
+  const preparedTransferTabs = new Set<string>();
+  const prepareTabTransfers = (tabId: string) =>
+    preparedTransferTabs.has(tabId)
+      ? Effect.void
+      : fileSystem.makeDirectory(tabTransferDirectory(tabId), { recursive: true }).pipe(
+          Effect.andThen(Effect.sync(() => preparedTransferTabs.add(tabId))),
+          Effect.mapError(
+            (cause) =>
+              new PreviewOperationError({
+                operation: "prepareTabTransfers",
+                tabId,
+                cause,
+              }),
+          ),
+        );
+  yield* Effect.addFinalizer(() =>
+    fileSystem.remove(transfersDirectory, { recursive: true, force: true }).pipe(Effect.ignore),
+  );
   const actionTimelineRef = yield* Ref.make<
     ReadonlyMap<string, ReadonlyArray<PreviewAutomationActionEvent>>
   >(new Map());
@@ -1275,6 +1333,118 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     );
   });
 
+  /**
+   * Interception swallows every picker in a controlled guest. An agent-driven
+   * tab keeps the picker for `preview_upload`; anyone else gets an open dialog
+   * standing in for Chromium's own.
+   */
+  const handleFileChooser = Effect.fn("PreviewManager.handleFileChooser")(
+    function* (
+      wc: Electron.WebContents,
+      wcDebugger: Electron.Debugger,
+      params: Record<string, unknown>,
+    ) {
+      const tabId = yield* tabIdForWebContents(wc.id);
+      const backendNodeId = params["backendNodeId"];
+      if (!tabId || typeof backendNodeId !== "number") return;
+      const chooser = { backendNodeId, multiple: params["mode"] === "selectMultiple" };
+      if (isAgentDriven(tabId)) {
+        pendingFileChoosers.set(tabId, chooser);
+        return;
+      }
+      const context = { operation: "chooseFilesForHuman", tabId, webContentsId: wc.id };
+      const resolved = (yield* attemptPromise(context, () =>
+        wcDebugger.sendCommand("DOM.resolveNode", { backendNodeId }),
+      )) as { object?: { objectId?: string } };
+      const objectId = resolved.object?.objectId;
+      const attributes = objectId
+        ? ((yield* attemptPromise(context, () =>
+            wcDebugger.sendCommand("Runtime.callFunctionOn", {
+              objectId,
+              functionDeclaration:
+                "function () { return { accept: this.accept || '', directory: this.webkitdirectory === true }; }",
+              returnByValue: true,
+            }),
+          ).pipe(
+            Effect.ensuring(
+              attemptPromise(context, () =>
+                wcDebugger.sendCommand("Runtime.releaseObject", { objectId }),
+              ).pipe(Effect.ignore),
+            ),
+          )) as { result?: { value?: { accept?: string; directory?: boolean } } })
+        : undefined;
+      const options = fileChooserDialogOptions({
+        multiple: chooser.multiple,
+        accept: attributes?.result?.value?.accept ?? "",
+        directory: attributes?.result?.value?.directory ?? false,
+      });
+      const owner = BrowserWindow.fromWebContents(wc.hostWebContents ?? wc);
+      const selection = yield* attemptPromise(context, () =>
+        owner && !owner.isDestroyed()
+          ? dialog.showOpenDialog(owner, options)
+          : dialog.showOpenDialog(options),
+      );
+      if (selection.canceled || selection.filePaths.length === 0) return;
+      yield* attemptPromise(context, () =>
+        wcDebugger.sendCommand("DOM.setFileInputFiles", {
+          files: selection.filePaths,
+          backendNodeId,
+        }),
+      );
+    },
+    (effect) => Effect.ignore(effect),
+  );
+
+  /**
+   * Agent downloads save into the tab's transfer directory instead of asking
+   * where to save. This runs inside Electron's synchronous `will-download`
+   * callback, which must choose the path before it returns.
+   */
+  const installAgentDownloads = (browserSession: Session) => {
+    if (downloadSessions.has(browserSession)) return;
+    downloadSessions.add(browserSession);
+    browserSession.on("will-download", (_event, item, source) => {
+      const tab = Array.from(SynchronizedRef.getUnsafe(tabsRef).values()).find(
+        (candidate) => candidate.webContentsId === source?.id,
+      );
+      // Without a save path Electron asks the user, which is the fallback.
+      if (!tab || !isAgentDriven(tab.tabId) || !preparedTransferTabs.has(tab.tabId)) return;
+      const tabId = tab.tabId;
+      const id = NodeCrypto.randomUUID();
+      const fileName = safeFileNameSegment(item.getFilename(), "download");
+      const downloadPath = path.join(tabTransferDirectory(tabId), `download-${id}`);
+      item.setSavePath(downloadPath);
+      agentDownloads.set(
+        tabId,
+        [
+          ...(agentDownloads.get(tabId) ?? []),
+          {
+            id,
+            url: item.getURL(),
+            fileName,
+            mimeType: item.getMimeType() || "application/octet-stream",
+            path: downloadPath,
+            totalBytes: item.getTotalBytes(),
+            state: "progressing" as const,
+          },
+        ].slice(-AGENT_DOWNLOAD_RETENTION),
+      );
+      for (const notify of navigationDownloadWaiters.get(tabId) ?? []) notify();
+      item.once("done", (_doneEvent, state) => {
+        const downloads = agentDownloads.get(tabId);
+        if (!downloads) return;
+        agentDownloads.set(
+          tabId,
+          downloads.map((download) =>
+            download.id === id
+              ? { ...download, state, totalBytes: item.getReceivedBytes() }
+              : download,
+          ),
+        );
+      });
+    });
+  };
+
   const ensureControlSession = Effect.fn("PreviewManager.ensureControlSession")(function* (
     wc: Electron.WebContents,
   ) {
@@ -1351,9 +1521,28 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
                 }
               }
             }
+            if (method === "Page.fileChooserOpened") {
+              yield* handleFileChooser(wc, wcDebugger, params);
+              return;
+            }
             yield* captureDiagnosticMessage(wc.id, method, params);
           });
           const onMessage: BrowserControlSession["onMessage"] = (_event, method, params) => {
+            if (method === "Page.fileChooserOpened") {
+              const tab = Array.from(SynchronizedRef.getUnsafe(tabsRef).values()).find(
+                (candidate) => candidate.webContentsId === wc.id,
+              );
+              const backendNodeId = params["backendNodeId"];
+              if (tab && isAgentDriven(tab.tabId) && typeof backendNodeId === "number") {
+                // Record the receipt before the input command resolves. Forking
+                // this update can let click/press return before seeing the picker.
+                pendingFileChoosers.set(tab.tabId, {
+                  backendNodeId,
+                  multiple: params["mode"] === "selectMultiple",
+                });
+                return;
+              }
+            }
             runFork(handleDebuggerMessage(method, params));
           };
           yield* Scope.addFinalizer(
@@ -1395,14 +1584,25 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
               wcDebugger.attach("1.3");
             });
             yield* Effect.all(
-              ["Runtime.enable", "Accessibility.enable", "Network.enable", "Log.enable"].map(
-                (method) =>
-                  attemptPromise(
-                    { operation: `initializeDebugger.${method}`, webContentsId: wc.id },
-                    () => wcDebugger.sendCommand(method),
-                  ),
+              [
+                "Runtime.enable",
+                "Accessibility.enable",
+                "Network.enable",
+                "Log.enable",
+                "Page.enable",
+              ].map((method) =>
+                attemptPromise(
+                  { operation: `initializeDebugger.${method}`, webContentsId: wc.id },
+                  () => wcDebugger.sendCommand(method),
+                ),
               ),
               { concurrency: "unbounded", discard: true },
+            );
+            // No native file dialog opens while the agent drives this guest.
+            // Pickers arrive as Page.fileChooserOpened; see handleFileChooser.
+            yield* attemptPromise(
+              { operation: "initializeDebugger.interceptFileChooser", webContentsId: wc.id },
+              () => wcDebugger.sendCommand("Page.setInterceptFileChooserDialog", { enabled: true }),
             );
             return [
               control,
@@ -1478,6 +1678,16 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     };
     yield* pushAction(tabId, actionEvent);
     const epoch = (yield* Ref.get(controlEpochRef)).get(tabId) ?? 0;
+    // Reading a page does not take it over: a person's download must not be
+    // claimed because an agent happened to snapshot the tab meanwhile.
+    if (!PASSIVE_CONTROL_ACTIONS.has(action)) {
+      yield* Ref.update(agentEpochRef, (epochs) =>
+        replaceMap(epochs, (copy) => {
+          copy.set(tabId, epoch);
+        }),
+      );
+      yield* prepareTabTransfers(tabId);
+    }
     const control = yield* ensureControlSession(wc);
     const execute = Effect.fn("PreviewManager.executeControlAction")(function* () {
       yield* update(tabId, { controller: "agent" });
@@ -2145,6 +2355,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         wc.on("did-create-window", windowCreated);
         wc.on("before-input-event", beforeInput);
         wc.on("context-menu", contextMenu);
+        installAgentDownloads(wc.session);
       });
       yield* Ref.update(attachedRef, (attached) =>
         replaceMap(attached, (copy) => {
@@ -2332,6 +2543,13 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     }
     clearPendingRecording(tabId);
     focusDiagnostics.delete(tabId);
+    pendingFileChoosers.delete(tabId);
+    agentDownloads.delete(tabId);
+    if (preparedTransferTabs.delete(tabId)) {
+      yield* fileSystem
+        .remove(tabTransferDirectory(tabId), { recursive: true, force: true })
+        .pipe(Effect.ignore);
+    }
     yield* Effect.all(
       [
         cancelPickElement(tabId),
@@ -2652,7 +2870,25 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     );
   });
 
-  const navigate = Effect.fn("PreviewManager.navigate")(function* (tabId: string, rawUrl: string) {
+  const navigate = Effect.fn("PreviewManager.navigate")(function* (
+    tabId: string,
+    rawUrl: string,
+    agentDriven = false,
+  ) {
+    const previousNavStatus = (yield* SynchronizedRef.get(tabsRef)).get(tabId)?.navStatus;
+    const previousDownloads = new Set(agentDownloads.get(tabId)?.map((download) => download.id));
+    if (agentDriven) {
+      const epoch = (yield* Ref.get(controlEpochRef)).get(tabId) ?? 0;
+      yield* Ref.update(agentEpochRef, (epochs) =>
+        replaceMap(epochs, (copy) => copy.set(tabId, epoch)),
+      );
+      yield* prepareTabTransfers(tabId);
+    } else {
+      yield* Ref.update(controlEpochRef, (epochs) =>
+        replaceMap(epochs, (copy) => copy.set(tabId, (epochs.get(tabId) ?? 0) + 1)),
+      );
+    }
+    pendingFileChoosers.delete(tabId);
     const url = yield* attempt({ operation: "navigate.normalizeUrl", tabId }, () =>
       normalizePreviewUrl(rawUrl),
     );
@@ -2745,9 +2981,43 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       );
       return;
     }
+    // Chromium rejects loadURL when the response becomes a download. Its
+    // download event can arrive after the navigation promise rejects.
+    const startedDownload = () =>
+      agentDriven &&
+      (agentDownloads.get(tabId)?.some((download) => !previousDownloads.has(download.id)) ?? false);
+    const downloadStarted = yield* Deferred.make<void>();
+    const notifyDownload = () => runFork(Deferred.succeed(downloadStarted, undefined));
+    const waiters = navigationDownloadWaiters.get(tabId) ?? new Set<() => void>();
+    if (agentDriven) {
+      waiters.add(notifyDownload);
+      navigationDownloadWaiters.set(tabId, waiters);
+    }
     yield* attemptPromise({ operation: "navigate.loadURL", tabId, webContentsId: wc.id }, () =>
       wc.loadURL(url),
+    ).pipe(
+      Effect.catchTag("PreviewOperationError", (error) =>
+        Effect.gen(function* () {
+          if (!agentDriven) return yield* error;
+          if (!startedDownload()) {
+            yield* Deferred.await(downloadStarted).pipe(
+              Effect.timeoutOption(DOWNLOAD_START_WAIT_MS),
+            );
+          }
+          if (!startedDownload()) return yield* error;
+        }),
+      ),
+      Effect.ensuring(
+        Effect.sync(() => {
+          waiters.delete(notifyDownload);
+          if (waiters.size === 0) navigationDownloadWaiters.delete(tabId);
+        }),
+      ),
     );
+    if (startedDownload()) {
+      if (previousNavStatus) yield* update(tabId, { navStatus: previousNavStatus });
+      return true;
+    }
   });
 
   const withWebContents = Effect.fn("PreviewManager.withWebContents")(function* (
@@ -4236,10 +4506,20 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     input: PreviewAutomationClickInput,
   ) {
     const wc = yield* requireWebContents(tabId);
+    pendingFileChoosers.delete(tabId);
     yield* withControlSession(tabId, wc, "click", (send) =>
-      performAutomationClick(tabId, wc, input, send),
+      performAutomationClick(tabId, wc, input, send).pipe(
+        Effect.andThen(send("Runtime.evaluate", { expression: "void 0", returnByValue: true })),
+      ),
     );
+    return fileChooserResult(tabId);
   });
+
+  /** Reports a picker the action opened, which now waits for `preview_upload`. */
+  const fileChooserResult = (tabId: string): PreviewAutomationInputResult => {
+    const chooser = pendingFileChoosers.get(tabId);
+    return chooser ? { fileChooser: { multiple: chooser.multiple } } : {};
+  };
 
   const typeIntoAutomationTarget = Effect.fn("PreviewManager.typeIntoAutomationTarget")(function* (
     tabId: string,
@@ -4698,9 +4978,13 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     input: PreviewAutomationPressInput,
   ) {
     const wc = yield* requireWebContents(tabId);
+    pendingFileChoosers.delete(tabId);
     yield* withControlSession(tabId, wc, "press", (send, sendCleanup, checkControl) =>
-      performAutomationPress(tabId, wc, input, send, sendCleanup, checkControl),
+      performAutomationPress(tabId, wc, input, send, sendCleanup, checkControl).pipe(
+        Effect.andThen(send("Runtime.evaluate", { expression: "void 0", returnByValue: true })),
+      ),
     );
+    return fileChooserResult(tabId);
   });
 
   const performAutomationScroll = Effect.fn("PreviewManager.performAutomationScroll")(function* (
@@ -4899,6 +5183,175 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     );
   });
 
+  /** Chromium reports a picker shortly after the click that opened it. */
+  const awaitFileChooser = Effect.fn("PreviewManager.awaitFileChooser")(function* (tabId: string) {
+    const deadline = (yield* currentMillis) + FILE_CHOOSER_WAIT_MS;
+    while (!pendingFileChoosers.has(tabId) && (yield* currentMillis) < deadline) {
+      yield* Effect.sleep(50);
+    }
+    return pendingFileChoosers.get(tabId);
+  });
+
+  const performAutomationUpload = Effect.fn("PreviewManager.performAutomationUpload")(function* (
+    tabId: string,
+    wc: Electron.WebContents,
+    input: DesktopPreviewAutomationUploadInput["input"],
+    filePaths: ReadonlyArray<string>,
+    send: SendCommand,
+    sendCleanup: SendCommand,
+  ) {
+    const fail = (reason: PreviewFileTransferError["reason"]) =>
+      new PreviewFileTransferError({ tabId, reason });
+    const setFiles = (
+      target: { readonly objectId: string } | { readonly backendNodeId: number },
+      multiple: boolean,
+    ) =>
+      filePaths.length > 1 && !multiple
+        ? Effect.fail(fail("single-file"))
+        : send("DOM.setFileInputFiles", { files: [...filePaths], ...target });
+    // A picker stays pending until files reach it, so a rejected attempt can be retried.
+    const chooseForPicker = (chooser: PendingFileChooser | undefined) =>
+      chooser
+        ? setFiles({ backendNodeId: chooser.backendNodeId }, chooser.multiple).pipe(
+            // The input went away with a navigation or re-render.
+            Effect.catchTag("PreviewOperationError", () => Effect.fail(fail("no-file-chooser"))),
+            Effect.tap(() => Effect.sync(() => pendingFileChoosers.delete(tabId))),
+          )
+        : Effect.fail(fail("no-file-chooser"));
+    const locator = automationLocator(input);
+    if (!locator) return yield* chooseForPicker(pendingFileChoosers.get(tabId));
+    yield* send("Runtime.enable");
+    yield* ensurePlaywrightInjected(tabId, send);
+    const locatorJson = yield* encodeJson(
+      { operation: "automationUpload.encodeLocator", tabId },
+      locator,
+    );
+    // A DOM node comes back as a remote object; anything else means the target
+    // is a control that opens a picker when clicked.
+    const located = (yield* send("Runtime.evaluate", {
+      expression: `(() => {
+          const injected = globalThis.__t3PlaywrightInjected;
+          const element = injected.querySelector(injected.parseSelector(${locatorJson}), document, true);
+          if (!element) return null;
+          const control = element instanceof HTMLLabelElement ? element.control : element;
+          return control instanceof HTMLInputElement && control.type === "file"
+            ? control
+            : { notFileInput: true };
+        })()`,
+      returnByValue: false,
+    })) as {
+      result?: { objectId?: string; subtype?: string };
+      exceptionDetails?: unknown;
+    };
+    if (located.exceptionDetails) {
+      return yield* new PreviewAutomationInvalidSelectorError({
+        operation: "upload",
+        tabId,
+        ...automationSelectorDiagnostics(input),
+        reasonLength: 0,
+        cause: located.exceptionDetails,
+      });
+    }
+    const objectId = located.result?.objectId;
+    if (located.result?.subtype === "null" || !objectId) {
+      return yield* new PreviewAutomationTargetNotFoundError({
+        operation: "upload",
+        tabId,
+        ...automationSelectorDiagnostics(input),
+      });
+    }
+    const releaseTarget = sendCleanup("Runtime.releaseObject", { objectId }).pipe(Effect.ignore);
+    if (located.result?.subtype !== "node") {
+      yield* releaseTarget;
+      pendingFileChoosers.delete(tabId);
+      yield* performAutomationClick(
+        tabId,
+        wc,
+        input.locator === undefined ? { selector: input.selector! } : { locator: input.locator },
+        send,
+      );
+      const chooser = yield* awaitFileChooser(tabId);
+      if (!chooser) return yield* fail("not-file-input");
+      return yield* chooseForPicker(chooser);
+    }
+    yield* Effect.gen(function* () {
+      const multiple = (yield* send("Runtime.callFunctionOn", {
+        objectId,
+        functionDeclaration: "function () { return this.multiple === true; }",
+        returnByValue: true,
+      })) as { result?: { value?: boolean } };
+      yield* setFiles({ objectId }, multiple.result?.value === true);
+    }).pipe(Effect.ensuring(releaseTarget));
+  });
+
+  const automationUpload = Effect.fn("PreviewManager.automationUpload")(function* (
+    tabId: string,
+    input: DesktopPreviewAutomationUploadInput["input"],
+  ) {
+    const wc = yield* requireWebContents(tabId);
+    const context = { operation: "automationUpload.writeFiles", tabId };
+    const directory = path.join(tabTransferDirectory(tabId), "uploads", NodeCrypto.randomUUID());
+    // One directory per file keeps duplicate names apart.
+    const filePaths = yield* Effect.forEach(input.files, (file, index) =>
+      Effect.gen(function* () {
+        const fileDirectory = path.join(directory, String(index));
+        const filePath = path.join(fileDirectory, safeFileNameSegment(file.name));
+        yield* fileSystem.makeDirectory(fileDirectory, { recursive: true });
+        yield* fileSystem.writeFile(filePath, file.data);
+        return filePath;
+      }).pipe(Effect.mapError((cause) => new PreviewOperationError({ ...context, cause }))),
+    );
+    yield* withControlSession(tabId, wc, "upload", (send, sendCleanup) =>
+      performAutomationUpload(tabId, wc, input, filePaths, send, sendCleanup),
+    );
+    return filePaths.map((filePath) => path.basename(filePath));
+  });
+
+  /** Hands over the oldest agent download once it finishes, then forgets it. */
+  const automationDownload = Effect.fn("PreviewManager.automationDownload")(function* (
+    tabId: string,
+    timeoutMs = 15_000,
+  ) {
+    yield* requireWebContents(tabId);
+    const deadline = (yield* currentMillis) + timeoutMs;
+    let finished = agentDownloads.get(tabId)?.[0];
+    while (finished === undefined || finished.state === "progressing") {
+      if ((yield* currentMillis) >= deadline) {
+        return yield* finished
+          ? new PreviewAutomationTimeoutError({ tabId, timeoutMs })
+          : new PreviewFileTransferError({ tabId, reason: "no-download" });
+      }
+      yield* Effect.sleep(100);
+      finished = agentDownloads.get(tabId)?.[0];
+    }
+    agentDownloads.set(
+      tabId,
+      (agentDownloads.get(tabId) ?? []).filter((candidate) => candidate.id !== finished.id),
+    );
+    const removeDownload = fileSystem.remove(finished.path, { force: true }).pipe(Effect.ignore);
+    if (finished.state !== "completed") {
+      yield* removeDownload;
+      return yield* new PreviewFileTransferError({ tabId, reason: "download-failed" });
+    }
+    if (finished.totalBytes > PROVIDER_SEND_TURN_MAX_FILE_BYTES) {
+      yield* removeDownload;
+      return yield* new PreviewFileTransferError({ tabId, reason: "download-too-large" });
+    }
+    const data = yield* fileSystem.readFile(finished.path).pipe(
+      Effect.mapError(
+        (cause) =>
+          new PreviewOperationError({ operation: "automationDownload.read", tabId, cause }),
+      ),
+      Effect.ensuring(removeDownload),
+    );
+    return {
+      fileName: finished.fileName,
+      mimeType: finished.mimeType,
+      url: finished.url,
+      data,
+    } satisfies DesktopPreviewDownloadedFile;
+  });
+
   const revealArtifact = Effect.fn("PreviewManager.revealArtifact")(function* (
     artifactPath: string,
   ) {
@@ -4970,6 +5423,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     automationStatus,
     automationType,
     automationWaitFor,
+    automationUpload,
+    automationDownload,
     cancelPickElement,
     captureScreenshot,
     claimTab,
@@ -5309,6 +5764,7 @@ export class PreviewAutomationControlInterruptedError extends Schema.TaggedError
 }
 
 export const PreviewManagerError = Schema.Union([
+  PreviewFileTransferError,
   PreviewTabNotFoundError,
   PreviewWebContentsNotFoundError,
   PreviewWebviewNotInitializedError,
@@ -5368,7 +5824,11 @@ export class PreviewManager extends Context.Service<
       tabId: string,
       webContentsId: number,
     ) => Effect.Effect<void, PreviewManagerError>;
-    readonly navigate: (tabId: string, url: string) => Effect.Effect<void, PreviewManagerError>;
+    readonly navigate: (
+      tabId: string,
+      url: string,
+      agentDriven?: boolean,
+    ) => Effect.Effect<void | boolean, PreviewManagerError>;
     readonly goBack: (tabId: string) => Effect.Effect<void, PreviewManagerError>;
     readonly goForward: (tabId: string) => Effect.Effect<void, PreviewManagerError>;
     readonly refresh: (tabId: string) => Effect.Effect<void, PreviewManagerError>;
@@ -5430,7 +5890,7 @@ export class PreviewManager extends Context.Service<
     readonly automationClick: (
       tabId: string,
       input: PreviewAutomationClickInput,
-    ) => Effect.Effect<void, PreviewManagerError>;
+    ) => Effect.Effect<PreviewAutomationInputResult, PreviewManagerError>;
     readonly automationType: (
       tabId: string,
       input: PreviewAutomationTypeInput,
@@ -5438,7 +5898,7 @@ export class PreviewManager extends Context.Service<
     readonly automationPress: (
       tabId: string,
       input: PreviewAutomationPressInput,
-    ) => Effect.Effect<void, PreviewManagerError>;
+    ) => Effect.Effect<PreviewAutomationInputResult, PreviewManagerError>;
     readonly automationScroll: (
       tabId: string,
       input: PreviewAutomationScrollInput,
@@ -5474,6 +5934,14 @@ export class PreviewManager extends Context.Service<
       tabId: string,
       input: PreviewAutomationWaitForInput,
     ) => Effect.Effect<void, PreviewManagerError>;
+    readonly automationUpload: (
+      tabId: string,
+      input: DesktopPreviewAutomationUploadInput["input"],
+    ) => Effect.Effect<ReadonlyArray<string>, PreviewManagerError>;
+    readonly automationDownload: (
+      tabId: string,
+      timeoutMs?: number,
+    ) => Effect.Effect<DesktopPreviewDownloadedFile, PreviewManagerError>;
     readonly subscribeStateChanges: (listener: Listener) => Effect.Effect<void, never, Scope.Scope>;
     readonly subscribePointerEvents: (
       listener: PointerEventListener,
@@ -5624,6 +6092,8 @@ export const make = Effect.gen(function* PreviewManagerMake() {
         : ({ filled: false, reason: "no-fields", origin } as const);
     }),
     automationWaitFor: operations.automationWaitFor,
+    automationUpload: operations.automationUpload,
+    automationDownload: operations.automationDownload,
     subscribeStateChanges: operations.subscribeStateChanges,
     subscribePointerEvents: operations.subscribePointerEvents,
     subscribeRecordingFrames: operations.subscribeRecordingFrames,

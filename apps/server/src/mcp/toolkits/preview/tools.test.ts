@@ -58,13 +58,7 @@ it("exports provider-compatible object schemas with described parameters", () =>
 });
 
 it("exports exact object result schemas for preview actions", () => {
-  const actionNames = [
-    "preview_click",
-    "preview_type",
-    "preview_press",
-    "preview_scroll",
-    "preview_wait_for",
-  ] as const;
+  const actionNames = ["preview_type", "preview_scroll", "preview_wait_for"] as const;
   for (const name of actionNames) {
     expect(Tool.getJsonSchemaFromSchema(PreviewToolkit.tools[name].successSchema)).toEqual({
       type: "object",
@@ -72,6 +66,17 @@ it("exports exact object result schemas for preview actions", () => {
       additionalProperties: false,
       description: "The preview action completed successfully.",
     });
+  }
+});
+
+it("reports a file picker opened by a click or key press", () => {
+  for (const name of ["preview_click", "preview_press"] as const) {
+    const schema = Tool.getJsonSchemaFromSchema(PreviewToolkit.tools[name].successSchema) as {
+      readonly properties?: Record<string, unknown>;
+      readonly additionalProperties?: boolean;
+    };
+    expect(Object.keys(schema.properties ?? {}).toSorted()).toEqual(["fileChooser", "toolIcon"]);
+    expect(schema.additionalProperties).toBe(false);
   }
 });
 

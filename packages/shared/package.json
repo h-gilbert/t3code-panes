@@ -334,6 +334,10 @@
     "./cliRelease": {
       "types": "./src/cliRelease.ts",
       "import": "./src/cliRelease.ts"
+    },
+    "./fileNameSegment": {
+      "types": "./src/fileNameSegment.ts",
+      "import": "./src/fileNameSegment.ts"
     }
   },
   "scripts": {

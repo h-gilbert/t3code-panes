@@ -67,6 +67,7 @@ import {
   PreviewAutomationEvaluateInput,
   PreviewAutomationHost,
   PreviewAutomationHostFocus,
+  type PreviewAutomationInputResult,
   PreviewAutomationPressInput,
   PreviewAutomationResponse,
   PreviewAutomationScrollInput,
@@ -1249,6 +1250,7 @@ export const DesktopPreviewRegisterWebviewInputSchema = Schema.Struct({
 export const DesktopPreviewNavigateInputSchema = Schema.Struct({
   tabId: DesktopPreviewTabIdSchema,
   url: Schema.String,
+  agentDriven: Schema.optional(Schema.Boolean),
 });
 
 export const DesktopPreviewConfigInputSchema = Schema.Struct({
@@ -1320,6 +1322,35 @@ export const DesktopPreviewAutomationWaitForInputSchema = Schema.Struct({
   tabId: DesktopPreviewTabIdSchema,
   input: PreviewAutomationWaitForInput,
 });
+
+export const DesktopPreviewAutomationUploadInputSchema = Schema.Struct({
+  tabId: DesktopPreviewTabIdSchema,
+  input: Schema.Struct({
+    selector: Schema.optional(Schema.String),
+    locator: Schema.optional(Schema.String),
+    files: Schema.Array(
+      Schema.Struct({
+        name: Schema.String.check(Schema.isTrimmed()).check(Schema.isNonEmpty()),
+        data: Schema.Uint8Array,
+      }),
+    ),
+  }),
+});
+export type DesktopPreviewAutomationUploadInput =
+  typeof DesktopPreviewAutomationUploadInputSchema.Type;
+
+export const DesktopPreviewAutomationDownloadInputSchema = Schema.Struct({
+  tabId: DesktopPreviewTabIdSchema,
+  timeoutMs: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
+});
+
+export const DesktopPreviewDownloadedFileSchema = Schema.Struct({
+  fileName: Schema.String,
+  mimeType: Schema.String,
+  url: Schema.String,
+  data: Schema.Uint8Array,
+});
+export type DesktopPreviewDownloadedFile = typeof DesktopPreviewDownloadedFileSchema.Type;
 
 /**
  * A System Settings pane the app can deep-link to. The identifier crosses IPC
@@ -1481,7 +1512,7 @@ export interface DesktopPreviewBridge {
     listener: (relay: DesktopPreviewAutomationRelayRequest) => void,
   ) => () => void;
   respondToAutomationRelay: (relayId: string, response: unknown) => Promise<void>;
-  navigate: (tabId: string, url: string) => Promise<void>;
+  navigate: (tabId: string, url: string, agentDriven?: boolean) => Promise<void | boolean>;
   goBack: (tabId: string) => Promise<void>;
   goForward: (tabId: string) => Promise<void>;
   refresh: (tabId: string) => Promise<void>;
@@ -1572,12 +1603,25 @@ export interface DesktopPreviewBridge {
   automation: {
     status: (tabId: string) => Promise<DesktopPreviewAutomationStatus>;
     snapshot: (tabId: string, includeImage?: boolean) => Promise<PreviewAutomationSnapshot>;
-    click: (tabId: string, input: PreviewAutomationClickInput) => Promise<void>;
+    click: (
+      tabId: string,
+      input: PreviewAutomationClickInput,
+    ) => Promise<PreviewAutomationInputResult | void>;
     type: (tabId: string, input: PreviewAutomationTypeInput) => Promise<void>;
-    press: (tabId: string, input: PreviewAutomationPressInput) => Promise<void>;
+    press: (
+      tabId: string,
+      input: PreviewAutomationPressInput,
+    ) => Promise<PreviewAutomationInputResult | void>;
     scroll: (tabId: string, input: PreviewAutomationScrollInput) => Promise<void>;
     evaluate: (tabId: string, input: PreviewAutomationEvaluateInput) => Promise<unknown>;
     waitFor: (tabId: string, input: PreviewAutomationWaitForInput) => Promise<void>;
+    /** Chooses files for a page file picker; returns the names the page received. */
+    upload?: (
+      tabId: string,
+      input: DesktopPreviewAutomationUploadInput["input"],
+    ) => Promise<ReadonlyArray<string>>;
+    /** Hands over the oldest agent download not yet received, once it finishes. */
+    download?: (tabId: string, timeoutMs?: number) => Promise<DesktopPreviewDownloadedFile>;
   };
   onStateChange: (listener: (tabId: string, state: DesktopPreviewTabState) => void) => () => void;
   onPointerEvent: (listener: (event: DesktopPreviewPointerEvent) => void) => () => void;

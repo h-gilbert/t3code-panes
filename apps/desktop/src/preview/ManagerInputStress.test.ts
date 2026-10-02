@@ -66,7 +66,9 @@ const layer = PreviewManager.layer.pipe(
       path: { join: (...parts: ReadonlyArray<string>) => parts.join("/") },
     } as DesktopEnvironment.DesktopEnvironment["Service"]),
   ),
-  Layer.provideMerge(FileSystem.layerNoop({})),
+  Layer.provideMerge(
+    FileSystem.layerNoop({ makeDirectory: () => Effect.void, remove: () => Effect.void }),
+  ),
   Layer.provideMerge(Path.layer),
   Layer.provideMerge(Layer.succeed(HostProcessPlatform, "darwin")),
 );
@@ -150,6 +152,7 @@ const makeGuest = (
       off: vi.fn(),
     },
     send: webviewSend,
+    session: { on: vi.fn() },
     navigationHistory: { canGoBack: () => false, canGoForward: () => false },
     setIgnoreMenuShortcuts: vi.fn(),
     setWindowOpenHandler: vi.fn(),

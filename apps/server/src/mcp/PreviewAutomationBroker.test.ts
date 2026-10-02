@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import {
+  PREVIEW_AUTOMATION_OPERATIONS,
   EnvironmentId,
   PreviewAutomationBusyError,
   PreviewAutomationClientDisconnectedError,
@@ -534,6 +535,42 @@ it.effect.each([
       expect(error.cause).toBe(remoteError);
       expect(error.message).toContain("remains on the desktop");
       expect(error.message).not.toContain("remote recording details");
+    }),
+  ),
+);
+
+it.effect.each([
+  ["no-file-chooser", "PreviewAutomationFileActionError"],
+  ["untrusted-reason", "PreviewAutomationExecutionError"],
+] as const)("classifies a remote file transfer failure with reason %s", ([reason, tag]) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* makeBroker;
+      const requests = requestsFrom(
+        yield* broker.connect(makeHost({ supportedOperations: PREVIEW_AUTOMATION_OPERATIONS })),
+      );
+      yield* Stream.runForEach(requests, (request) =>
+        broker.respond({
+          clientId: "client-1",
+          connectionId: request.connectionId,
+          requestId: request.requestId,
+          ok: false,
+          error: {
+            _tag: "PreviewAutomationFileActionError",
+            message: "remote file details",
+            detail: { reason },
+          },
+        }),
+      ).pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+      const error = yield* broker
+        .invoke<void>({ scope, operation: "upload", input: { files: [] } })
+        .pipe(Effect.flip);
+      expect(error._tag).toBe(tag);
+      expect(error.message).not.toContain("remote file details");
+      if (tag === "PreviewAutomationFileActionError") {
+        expect(error.message).toContain("No file picker is waiting");
+      }
     }),
   ),
 );

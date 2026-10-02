@@ -5,8 +5,11 @@ import {
   PreviewAutomationClickInput,
   PreviewAutomationCloseInput,
   PreviewAutomationCloseResult,
+  PreviewAutomationDownloadArtifact,
+  PreviewAutomationDownloadInput,
   PreviewAutomationError,
   PreviewAutomationEvaluateInput,
+  PreviewAutomationInputResult,
   PreviewAutomationNavigateInput,
   PreviewAutomationOpenInput,
   PreviewAutomationPressInput,
@@ -21,12 +24,16 @@ import {
   PreviewAutomationStatus,
   PreviewAutomationTabTargetInput,
   PreviewAutomationTypeInput,
+  PreviewAutomationUploadInput,
+  PreviewAutomationUploadResult,
   PreviewAutomationWaitForInput,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import { Tool, Toolkit } from "effect/unstable/ai";
 
+import * as ServerSecretStore from "../../../auth/ServerSecretStore.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 import * as ServerConfig from "../../../config.ts";
@@ -40,6 +47,14 @@ const presentationFields = { toolIcon: Schema.optional(ToolActivityIcon) };
 
 const PreviewActionResult = Schema.Struct(presentationFields).annotate({
   description: "The preview action completed successfully.",
+});
+
+const PreviewInputActionResult = Schema.Struct({
+  ...presentationFields,
+  ...PreviewAutomationInputResult.fields,
+}).annotate({
+  description:
+    "The preview action completed. fileChooser is set when it opened a file picker, which waits for preview_upload without a target.",
 });
 
 /** Drives the real browser and can destroy page state. */
@@ -148,9 +163,9 @@ export const PreviewSnapshotTool = readonlyBrowserTool(
 const PreviewClickTool = browserTool(
   Tool.make("preview_click", {
     description:
-      "Click exactly one target in the tab selected by tabId, or this agent session's current tab when omitted. Prefer a Playwright locator; selector accepts legacy CSS; x and y must be supplied together.",
+      "Click exactly one target in the tab selected by tabId, or this agent session's current tab when omitted. Prefer a Playwright locator; selector accepts legacy CSS; x and y must be supplied together. A file picker the click opens is held without a native dialog and reported as fileChooser; a file the click downloads is held for preview_download without a Save dialog.",
     parameters: PreviewAutomationClickInput,
-    success: PreviewActionResult,
+    success: PreviewInputActionResult,
     failure: PreviewAutomationError,
     dependencies,
   }).annotate(Tool.Title, "Click preview page"),
@@ -172,7 +187,7 @@ const PreviewPressTool = browserTool(
     description:
       "Press one keyboard key in the tab selected by tabId, or this agent session's current tab when omitted. Examples: {key:'Enter'}, {key:'Escape'}, or {key:'a',modifiers:['Meta']}.",
     parameters: PreviewAutomationPressInput,
-    success: PreviewActionResult,
+    success: PreviewInputActionResult,
     failure: PreviewAutomationError,
     dependencies,
   }).annotate(Tool.Title, "Press key in preview page"),
@@ -245,6 +260,34 @@ const PreviewRecordingStopTool = safeBrowserTool(
   }).annotate(Tool.Title, "Stop browser recording"),
 );
 
+const PreviewUploadTool = browserTool(
+  Tool.make("preview_upload", {
+    description:
+      "Choose files for a page's file picker in the tab selected by tabId, or this agent session's current tab when omitted. No native file dialog opens. Pass absolute paths from this agent's environment; they are copied to the browser even when it runs on another machine. Target an <input type=file>, its label, or the button that opens the picker with locator or selector, or omit the target to answer the picker your last click or key press opened.",
+    parameters: PreviewAutomationUploadInput,
+    success: Schema.Struct({ ...PreviewAutomationUploadResult.fields, ...presentationFields }),
+    failure: PreviewAutomationError,
+    dependencies: [
+      ...dependencies,
+      FileSystem.FileSystem,
+      Path.Path,
+      ServerConfig.ServerConfig,
+      ServerSecretStore.ServerSecretStore,
+    ],
+  }).annotate(Tool.Title, "Upload files to preview page"),
+);
+
+const PreviewDownloadTool = safeBrowserTool(
+  Tool.make("preview_download", {
+    description:
+      "Receive a file your actions downloaded in the tab selected by tabId, or this agent session's current tab when omitted. Downloads started by your clicks or key presses never show a Save dialog; they wait in the browser until you call this. Returns the oldest download not yet received, waiting up to timeoutMs for one to start and finish, and copies it (up to 50 MiB) into this agent's environment. Returns its environment-local path.",
+    parameters: PreviewAutomationDownloadInput,
+    success: Schema.Struct({ ...PreviewAutomationDownloadArtifact.fields, ...presentationFields }),
+    failure: PreviewAutomationError,
+    dependencies: [...dependencies, FileSystem.FileSystem, Path.Path, ServerConfig.ServerConfig],
+  }).annotate(Tool.Title, "Receive browser download"),
+);
+
 export const PreviewAutofillTool = browserTool(
   Tool.make("preview_autofill", {
     description:
@@ -282,6 +325,8 @@ export const PreviewToolkit = Toolkit.make(
   PreviewWaitForTool,
   PreviewRecordingStartTool,
   PreviewRecordingStopTool,
+  PreviewUploadTool,
+  PreviewDownloadTool,
   PreviewAutofillTool,
   PreviewCloseTool,
 );
@@ -300,6 +345,8 @@ export const PreviewStandardToolkit = Toolkit.make(
   PreviewWaitForTool,
   PreviewRecordingStartTool,
   PreviewRecordingStopTool,
+  PreviewUploadTool,
+  PreviewDownloadTool,
   PreviewAutofillTool,
   PreviewCloseTool,
 );

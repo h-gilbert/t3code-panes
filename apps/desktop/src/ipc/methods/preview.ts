@@ -2,6 +2,10 @@ import {
   DesktopPreviewAnnotationThemeInputSchema,
   DesktopPreviewArtifactInputSchema,
   DesktopPreviewAutomationClickInputSchema,
+  DesktopPreviewAutomationDownloadInputSchema,
+  DesktopPreviewAutomationUploadInputSchema,
+  DesktopPreviewDownloadedFileSchema,
+  PreviewAutomationInputResult,
   DesktopPreviewAutomationEvaluateInputSchema,
   DesktopPreviewAutomationPressInputSchema,
   DesktopPreviewAutomationScrollInputSchema,
@@ -211,10 +215,11 @@ export const registerWebview = DesktopIpc.makeIpcMethod({
 export const navigate = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_NAVIGATE_CHANNEL,
   payload: DesktopPreviewNavigateInputSchema,
-  result: Schema.Void,
-  handler: Effect.fn("desktop.ipc.preview.navigate")(function* ({ tabId, url }) {
+  // Void encodes any value as undefined, so retain the download receipt first.
+  result: Schema.Union([Schema.Boolean, Schema.Void]),
+  handler: Effect.fn("desktop.ipc.preview.navigate")(function* ({ tabId, url, agentDriven }) {
     const manager = yield* PreviewManager.PreviewManager;
-    yield* manager.navigate(tabId, url);
+    return yield* manager.navigate(tabId, url, agentDriven);
   }),
 });
 
@@ -599,10 +604,10 @@ export const automationSnapshot = DesktopIpc.makeIpcMethod({
 export const automationClick = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_AUTOMATION_CLICK_CHANNEL,
   payload: DesktopPreviewAutomationClickInputSchema,
-  result: Schema.Void,
+  result: PreviewAutomationInputResult,
   handler: Effect.fn("desktop.ipc.preview.automationClick")(function* ({ tabId, input }) {
     const manager = yield* PreviewManager.PreviewManager;
-    yield* manager.automationClick(tabId, input);
+    return yield* manager.automationClick(tabId, input);
   }),
 });
 
@@ -619,10 +624,10 @@ export const automationType = DesktopIpc.makeIpcMethod({
 export const automationPress = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_AUTOMATION_PRESS_CHANNEL,
   payload: DesktopPreviewAutomationPressInputSchema,
-  result: Schema.Void,
+  result: PreviewAutomationInputResult,
   handler: Effect.fn("desktop.ipc.preview.automationPress")(function* ({ tabId, input }) {
     const manager = yield* PreviewManager.PreviewManager;
-    yield* manager.automationPress(tabId, input);
+    return yield* manager.automationPress(tabId, input);
   }),
 });
 
@@ -653,6 +658,26 @@ export const automationWaitFor = DesktopIpc.makeIpcMethod({
   handler: Effect.fn("desktop.ipc.preview.automationWaitFor")(function* ({ tabId, input }) {
     const manager = yield* PreviewManager.PreviewManager;
     yield* manager.automationWaitFor(tabId, input);
+  }),
+});
+
+export const automationUpload = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_AUTOMATION_UPLOAD_CHANNEL,
+  payload: DesktopPreviewAutomationUploadInputSchema,
+  result: Schema.Array(Schema.String),
+  handler: Effect.fn("desktop.ipc.preview.automationUpload")(function* ({ tabId, input }) {
+    const manager = yield* PreviewManager.PreviewManager;
+    return yield* manager.automationUpload(tabId, input);
+  }),
+});
+
+export const automationDownload = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_AUTOMATION_DOWNLOAD_CHANNEL,
+  payload: DesktopPreviewAutomationDownloadInputSchema,
+  result: DesktopPreviewDownloadedFileSchema,
+  handler: Effect.fn("desktop.ipc.preview.automationDownload")(function* ({ tabId, timeoutMs }) {
+    const manager = yield* PreviewManager.PreviewManager;
+    return yield* manager.automationDownload(tabId, timeoutMs);
   }),
 });
 
@@ -705,6 +730,8 @@ export const methods = [
   automationScroll,
   automationEvaluate,
   automationWaitFor,
+  automationUpload,
+  automationDownload,
   startRecording,
   stopRecording,
   saveRecording,

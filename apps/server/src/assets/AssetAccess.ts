@@ -396,6 +396,40 @@ const finalizeWorkspaceFileAsset = Effect.fn("AssetAccess.finalizeWorkspaceFileA
   },
 );
 
+const signAssetUrl = Effect.fn("AssetAccess.signAssetUrl")(function* (
+  claims: AssetClaims,
+  fileName: string,
+) {
+  const secretStore = yield* ServerSecretStore.ServerSecretStore;
+  const signingSecret = yield* secretStore.getOrCreateRandom(SIGNING_SECRET_NAME, 32);
+  const encodedPayload = base64UrlEncode(encodeAssetClaims(claims));
+  const token = `${encodedPayload}.${signPayload(encodedPayload, signingSecret)}`;
+  return `${ASSET_ROUTE_PREFIX}/${token}/${encodeURIComponent(fileName)}`;
+});
+
+/**
+ * Signs a download URL for an attachment the server itself staged, such as a
+ * file an agent hands to the collaborative browser. Callers own the attachment
+ * id, so this skips the client-facing resource checks in `issueAssetUrl`.
+ */
+export const issueStagedAttachmentUrl = Effect.fn("AssetAccess.issueStagedAttachmentUrl")(
+  function* (input: { readonly attachmentId: string; readonly fileName: string }) {
+    const expiresAt = (yield* Clock.currentTimeMillis) + ASSET_TOKEN_TTL_MS;
+    return yield* signAssetUrl(
+      {
+        version: 1,
+        kind: "attachment",
+        attachmentId: input.attachmentId,
+        download: true,
+        fileName: input.fileName,
+        mimeType: "application/octet-stream",
+        expiresAt,
+      },
+      input.fileName,
+    );
+  },
+);
+
 export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (input: {
   readonly resource: AssetResource;
   readonly workspaceRoot?: string;
@@ -659,16 +693,6 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
     }
   }
 
-  const secretStore = yield* ServerSecretStore.ServerSecretStore;
-  const signingSecret = yield* secretStore.getOrCreateRandom(SIGNING_SECRET_NAME, 32).pipe(
-    Effect.mapError(
-      (cause) =>
-        new AssetSigningKeyLoadError({
-          resource: input.resource,
-          cause,
-        }),
-    ),
-  );
   if (claims.kind === "project-favicon" || claims.kind === "project-favicon-external") {
     const issuedAt = yield* Clock.currentTimeMillis;
     expiresAt =
@@ -676,10 +700,11 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
       PROJECT_FAVICON_TOKEN_BUCKET_MS;
     claims = { ...claims, expiresAt };
   }
-  const encodedPayload = base64UrlEncode(encodeAssetClaims(claims));
-  const token = `${encodedPayload}.${signPayload(encodedPayload, signingSecret)}`;
+  const relativeUrl = yield* signAssetUrl(claims, fileName).pipe(
+    Effect.mapError((cause) => new AssetSigningKeyLoadError({ resource: input.resource, cause })),
+  );
   return {
-    relativeUrl: `${ASSET_ROUTE_PREFIX}/${token}/${encodeURIComponent(fileName)}`,
+    relativeUrl,
     expiresAt,
     ...(sourcePath !== undefined ? { sourcePath } : {}),
     ...(imageDimensions !== null ? { imageDimensions } : {}),

@@ -47,6 +47,8 @@ export const PREVIEW_AUTOMATION_OPERATIONS = [
   "setColorScheme",
   "close",
   "autofill",
+  "upload",
+  "download",
 ] as const;
 
 export const PreviewAutomationOperation = Schema.Literals(PREVIEW_AUTOMATION_OPERATIONS);
@@ -557,6 +559,95 @@ export const PreviewAutomationWaitForInput = Schema.Struct({
   });
 export type PreviewAutomationWaitForInput = typeof PreviewAutomationWaitForInput.Type;
 
+/**
+ * Returned by click and key press. `fileChooser` reports a file picker the
+ * action opened; it waits, without a native dialog, for `preview_upload`.
+ */
+export const PreviewAutomationInputResult = Schema.Struct({
+  fileChooser: Schema.optional(Schema.Struct({ multiple: Schema.Boolean })),
+});
+export type PreviewAutomationInputResult = typeof PreviewAutomationInputResult.Type;
+
+export const PREVIEW_FILE_TRANSFER_MAX_FILES = 10;
+export const PREVIEW_FILE_TRANSFER_TIMEOUT_MS = 120_000;
+
+const AbsoluteEnvironmentPath = TrimmedNonEmptyString.check(Schema.isMaxLength(4096)).annotate({
+  description: "Absolute path to a file in this agent's environment.",
+});
+
+export const PreviewAutomationUploadInput = Schema.Struct({
+  ...PreviewAutomationTabTargetFields,
+  paths: Schema.Array(AbsoluteEnvironmentPath)
+    .check(Schema.isMinLength(1))
+    .check(Schema.isMaxLength(PREVIEW_FILE_TRANSFER_MAX_FILES))
+    .annotate({
+      description: `Absolute paths of the files to choose, read from this agent's environment. At most ${PREVIEW_FILE_TRANSFER_MAX_FILES} files of up to 50 MiB each.`,
+    }),
+  selector: Schema.optional(LegacySelector).annotate({
+    description: "Legacy CSS selector for the file input or upload control. Prefer locator.",
+  }),
+  locator: Schema.optional(Locator).annotate({
+    description:
+      "Playwright selector for an <input type=file>, its label, or the button that opens a file picker. Omit to answer the picker your last action opened.",
+  }),
+})
+  .check(
+    Schema.makeFilter(
+      (input) =>
+        !(input.selector !== undefined && input.locator !== undefined) ||
+        "Provide at most one of selector or locator.",
+    ),
+  )
+  .annotate({
+    description:
+      "Chooses files for a page's file picker without showing a native dialog. Target the file input or the control that opens the picker; omit the target to answer a picker an earlier action already opened.",
+  });
+export type PreviewAutomationUploadInput = typeof PreviewAutomationUploadInput.Type;
+
+/** One file the server staged for the desktop host to fetch. */
+export const PreviewAutomationUploadFile = Schema.Struct({
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(255)),
+  /** Signed, relative asset URL on the environment's HTTP origin. */
+  url: TrimmedNonEmptyString.check(Schema.isMaxLength(4096)),
+  sizeBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
+export type PreviewAutomationUploadFile = typeof PreviewAutomationUploadFile.Type;
+
+/** What the server sends the host for `upload`: paths are replaced by fetchable files. */
+export const PreviewAutomationUploadRequestInput = Schema.Struct({
+  selector: Schema.optional(LegacySelector),
+  locator: Schema.optional(Locator),
+  files: Schema.Array(PreviewAutomationUploadFile),
+});
+export type PreviewAutomationUploadRequestInput = typeof PreviewAutomationUploadRequestInput.Type;
+
+export const PreviewAutomationUploadResult = Schema.Struct({
+  tabId: PreviewTabId,
+  fileNames: Schema.Array(Schema.String),
+});
+export type PreviewAutomationUploadResult = typeof PreviewAutomationUploadResult.Type;
+
+export const PreviewAutomationDownloadInput = Schema.Struct({
+  ...PreviewAutomationTabTargetFields,
+  timeoutMs: OptionalTimeoutMs,
+}).annotate({
+  description:
+    "Receives the oldest file your actions downloaded in the tab that has not been received yet, waiting for one to start and finish.",
+});
+export type PreviewAutomationDownloadInput = typeof PreviewAutomationDownloadInput.Type;
+
+export const PreviewAutomationDownloadArtifact = Schema.Struct({
+  tabId: PreviewTabId,
+  fileName: Schema.String,
+  /** Environment-local path of the received file. */
+  path: Schema.String,
+  mimeType: Schema.String,
+  sizeBytes: Schema.Int,
+  /** The URL the page downloaded from. */
+  url: Schema.String,
+});
+export type PreviewAutomationDownloadArtifact = typeof PreviewAutomationDownloadArtifact.Type;
+
 export const PreviewAutomationElement = Schema.Struct({
   tag: Schema.String,
   role: Schema.NullOr(Schema.String),
@@ -1012,7 +1103,75 @@ export class PreviewAutomationRecordingDeadlineExpiredError extends Schema.Tagge
   }
 }
 
+export const PreviewAutomationFileActionReason = Schema.Literals([
+  "no-file-chooser",
+  "not-file-input",
+  "single-file",
+  "no-download",
+  "download-failed",
+  "download-too-large",
+]);
+export type PreviewAutomationFileActionReason = typeof PreviewAutomationFileActionReason.Type;
+
+/** Agents read this message, so each reason names the next step. */
+export class PreviewAutomationFileActionError extends Schema.TaggedError<PreviewAutomationFileActionError>()(
+  "PreviewAutomationFileActionError",
+  {
+    threadId: ThreadId,
+    reason: PreviewAutomationFileActionReason,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    switch (this.reason) {
+      case "no-file-chooser":
+        return "No file picker is waiting in this tab. Pass the locator of the file input or of the control that opens the picker.";
+      case "not-file-input":
+        return "The target is not a file input, and clicking it did not open a file picker. Target the <input type=file>, its label, or the upload button from preview_snapshot.";
+      case "single-file":
+        return "This file picker accepts one file. Pass a single path.";
+      case "no-download":
+        return "No download from your actions arrived in this tab before the timeout. Trigger it with preview_click or preview_navigate, then call preview_download again.";
+      case "download-failed":
+        return "The browser cancelled or interrupted the download. Trigger it again.";
+      case "download-too-large":
+        return "The download is larger than the 50 MiB transfer limit, so it was discarded.";
+    }
+  }
+}
+
+export class PreviewAutomationFileUnreadableError extends Schema.TaggedError<PreviewAutomationFileUnreadableError>()(
+  "PreviewAutomationFileUnreadableError",
+  { path: Schema.String, cause: Schema.optional(Schema.Defect()) },
+) {
+  override get message(): string {
+    return `${this.path} is not a readable file in this environment. Pass absolute paths to existing files.`;
+  }
+}
+
+export class PreviewAutomationFileTooLargeError extends Schema.TaggedError<PreviewAutomationFileTooLargeError>()(
+  "PreviewAutomationFileTooLargeError",
+  { fileName: Schema.String, maximumBytes: Schema.Int },
+) {
+  override get message(): string {
+    return `${this.fileName} is larger than the ${this.maximumBytes}-byte browser transfer limit.`;
+  }
+}
+
+export class PreviewAutomationFileTransferError extends Schema.TaggedError<PreviewAutomationFileTransferError>()(
+  "PreviewAutomationFileTransferError",
+  { threadId: ThreadId, cause: Schema.optional(Schema.Defect()) },
+) {
+  override get message(): string {
+    return "The file could not be transferred between the browser and this agent's environment.";
+  }
+}
+
 export const PreviewAutomationError = Schema.Union([
+  PreviewAutomationFileActionError,
+  PreviewAutomationFileUnreadableError,
+  PreviewAutomationFileTooLargeError,
+  PreviewAutomationFileTransferError,
   PreviewAutomationRecordingTransferError,
   PreviewAutomationRecordingDesktopUpdateRequiredError,
   PreviewAutomationRecordingTooLargeError,

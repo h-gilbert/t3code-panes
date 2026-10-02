@@ -1,5 +1,8 @@
 import {
   EnvironmentId,
+  PreviewAutomationFileActionReason,
+  PreviewAutomationFileTooLargeError,
+  PreviewAutomationFileTransferError,
   type PreviewAutomationHost,
   PreviewAutomationOperation,
   PreviewAutomationRecordingTransferError,
@@ -189,6 +192,36 @@ const invalidSelectorDiagnostics = (cause: unknown): { matchCount?: number } | n
     : null;
 };
 
+/** Desktop file-transfer failures carry their reason in the IPC error message. */
+const FILE_ACTION_MESSAGE_PATTERN = /Preview file transfer \[([a-z-]+)\]/;
+const isFileActionReason = Schema.is(PreviewAutomationFileActionReason);
+
+const fileActionReason = (cause: unknown): PreviewAutomationFileActionReason | null => {
+  if (typeof cause !== "object" || cause === null) return null;
+  const message = "message" in cause && typeof cause.message === "string" ? cause.message : "";
+  const reason = FILE_ACTION_MESSAGE_PATTERN.exec(message)?.[1];
+  return isFileActionReason(reason) ? reason : null;
+};
+
+export class PreviewAutomationFileActionHostError extends Schema.TaggedError<PreviewAutomationFileActionHostError>()(
+  "PreviewAutomationFileActionHostError",
+  {
+    requestId: TrimmedNonEmptyString,
+    operation: PreviewAutomationOperation,
+    environmentId: EnvironmentId,
+    threadId: ThreadId,
+    tabId: Schema.NullOr(PreviewTabId),
+    reason: PreviewAutomationFileActionReason,
+  },
+) {
+  get responseTag() {
+    return "PreviewAutomationFileActionError" as const;
+  }
+  override get message(): string {
+    return `Preview automation ${this.operation} could not complete its file transfer (${this.reason}).`;
+  }
+}
+
 export class PreviewAutomationInvalidSelectorHostError extends Schema.TaggedError<PreviewAutomationInvalidSelectorHostError>()(
   "PreviewAutomationInvalidSelectorHostError",
   {
@@ -236,6 +269,17 @@ export class PreviewAutomationOperationError extends Schema.TaggedError<PreviewA
         ...selector,
       });
     }
+    const reason = fileActionReason(input.cause);
+    if (reason) {
+      return new PreviewAutomationFileActionHostError({
+        requestId: input.requestId,
+        operation: input.operation,
+        environmentId: input.environmentId,
+        threadId: input.threadId,
+        tabId: input.tabId,
+        reason,
+      });
+    }
     const diagnostics = targetNotEditableDiagnostics(input.cause);
     return diagnostics
       ? new PreviewAutomationTargetNotEditableHostError({
@@ -260,6 +304,9 @@ export class PreviewAutomationOperationError extends Schema.TaggedError<PreviewA
 
 export const PreviewAutomationHostError = Schema.Union([
   PreviewAutomationInvalidSelectorHostError,
+  PreviewAutomationFileActionHostError,
+  PreviewAutomationFileTooLargeError,
+  PreviewAutomationFileTransferError,
   PreviewAutomationRecordingTransferError,
   PreviewAutomationRecordingDesktopUpdateRequiredError,
   PreviewAutomationRecordingTooLargeError,

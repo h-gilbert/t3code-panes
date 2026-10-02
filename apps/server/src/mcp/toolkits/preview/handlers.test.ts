@@ -10,8 +10,17 @@ import {
   createPendingAttachmentId,
   parseThreadSegmentFromAttachmentId,
 } from "../../../attachmentStore.ts";
+import { resolveAsset } from "../../../assets/AssetAccess.ts";
+import * as NativeAppIconResolver from "../../../assets/NativeAppIconResolver.ts";
+import * as ServerSecretStore from "../../../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../../../config.ts";
-import { claimPreviewRecording, normalizePreviewOpenInput } from "./handlers.ts";
+import * as WorkspacePaths from "../../../workspace/WorkspacePaths.ts";
+import {
+  claimPreviewDownload,
+  claimPreviewRecording,
+  normalizePreviewOpenInput,
+  stageUploadFile,
+} from "./handlers.ts";
 
 describe("normalizePreviewOpenInput", () => {
   it("leaves an unstated visibility for the client preference to decide", () => {
@@ -151,5 +160,100 @@ describe("claimPreviewRecording", () => {
         ),
       ),
     ),
+  );
+});
+
+const transferLayer = (prefix: string) => {
+  const configLayer = ServerConfig.layerTest(process.cwd(), { prefix });
+  return Layer.mergeAll(
+    configLayer,
+    WorkspacePaths.layer,
+    NativeAppIconResolver.layer.pipe(Layer.provide(configLayer)),
+    ServerSecretStore.layer.pipe(Layer.provide(configLayer)),
+  ).pipe(Layer.provideMerge(NodeServices.layer));
+};
+
+describe("stageUploadFile", () => {
+  it.effect("serves a staged copy at its signed URL until the upload finishes", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      yield* fileSystem.makeDirectory(config.attachmentsDir, { recursive: true });
+      const sourceDirectory = yield* fileSystem.makeTempDirectoryScoped();
+      const source = path.join(sourceDirectory, "report.pdf");
+      yield* fileSystem.writeFileString(source, "pdf!");
+
+      yield* Effect.gen(function* () {
+        const staged = yield* stageUploadFile(source);
+        expect(staged).toMatchObject({ name: "report.pdf", sizeBytes: 4 });
+        const [, , , token, fileName] = staged.url.split("/");
+        const resolved = yield* resolveAsset(token!, fileName!);
+        expect(resolved?.kind).toBe("file");
+        expect(yield* fileSystem.readFileString(resolved!.path)).toBe("pdf!");
+      }).pipe(Effect.scoped);
+
+      expect(yield* fileSystem.readDirectory(config.attachmentsDir)).toEqual([]);
+      expect(yield* fileSystem.readFileString(source)).toBe("pdf!");
+    }).pipe(Effect.scoped, Effect.provide(transferLayer("t3-preview-upload-"))),
+  );
+
+  it.effect("refuses relative paths and directories", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const directory = yield* fileSystem.makeTempDirectoryScoped();
+      for (const filePath of ["report.pdf", directory]) {
+        const result = yield* stageUploadFile(filePath).pipe(Effect.scoped, Effect.result);
+        expect(result._tag).toBe("Failure");
+        if (result._tag !== "Failure") return;
+        expect(result.failure._tag).toBe("PreviewAutomationFileUnreadableError");
+      }
+    }).pipe(Effect.scoped, Effect.provide(transferLayer("t3-preview-upload-"))),
+  );
+});
+
+describe("claimPreviewDownload", () => {
+  it.effect("moves a complete download under a safe name and rejects a partial one", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      yield* fileSystem.makeDirectory(config.attachmentsDir, { recursive: true });
+      const upload = (contents: string) =>
+        Effect.gen(function* () {
+          const uploadedAttachmentId = createPendingAttachmentId(".csv");
+          const pendingPath = path.join(config.attachmentsDir, `${uploadedAttachmentId}.csv`);
+          yield* fileSystem.writeFileString(pendingPath, contents);
+          return { uploadedAttachmentId, pendingPath };
+        });
+      const response = {
+        tabId: "tab-1",
+        fileName: "../../outside/export.csv",
+        mimeType: "text/csv",
+        sizeBytes: 6,
+        url: "https://example.com/export.csv",
+      };
+
+      const complete = yield* upload("a,b\n1,");
+      const claimed = yield* claimPreviewDownload(ThreadId.make("thread-1"), {
+        ...response,
+        uploadedAttachmentId: complete.uploadedAttachmentId,
+      });
+      expect(claimed.fileName).toBe("export.csv");
+      expect(path.dirname(path.dirname(claimed.path))).toBe(
+        path.join(config.browserArtifactsDir, "downloads"),
+      );
+      expect(yield* fileSystem.readFileString(claimed.path)).toBe("a,b\n1,");
+      expect(yield* fileSystem.exists(complete.pendingPath)).toBe(false);
+
+      const partial = yield* upload("a,b");
+      const result = yield* claimPreviewDownload(ThreadId.make("thread-1"), {
+        ...response,
+        uploadedAttachmentId: partial.uploadedAttachmentId,
+      }).pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+      if (result._tag !== "Failure") return;
+      expect(result.failure._tag).toBe("PreviewAutomationFileTransferError");
+    }).pipe(Effect.provide(transferLayer("t3-preview-download-"))),
   );
 });

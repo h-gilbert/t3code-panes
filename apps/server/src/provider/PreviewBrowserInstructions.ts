@@ -35,5 +35,7 @@ When a page shows a login form, call \`preview_autofill\` — it types the user'
 
 Call autofill before using JavaScript evaluation on a login page. A document that has run agent JavaScript cannot receive a saved login, and JavaScript evaluation is disabled after a password is filled. A full navigation resets either restriction. Continue with snapshots, clicks, typing, key presses, and waits to submit or complete the login. These restrictions do not affect normal browser control.
 
+Your browser actions never open native file dialogs. To give a page files, call \`preview_upload\` with absolute paths from your environment and the file input or upload control as the target; if a click already reported \`fileChooser\`, call it without a target. To get a file the page downloads, trigger the download and call \`preview_download\`, which returns its path in your environment. Do not use JavaScript evaluation to build files or fetch downloads.
+
 Do not switch to global browser skills, Chrome, Node REPL browser automation, standalone Playwright, or agent-browser merely because the preview is initially closed or a first call fails. Use an alternative browser system only when the T3 preview tools are absent, the user explicitly requests another browser, the task needs capabilities the preview tools do not provide such as request mocking, or \`preview_open\` returns an explicit unsupported/unavailable error. A failed T3 preview tool call should be inspected and retried with corrected arguments when the error is actionable.
 `;

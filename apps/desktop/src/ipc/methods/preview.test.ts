@@ -139,6 +139,24 @@ describe("preview IPC methods", () => {
     ),
   );
 
+  effectIt.effect("preserves a captured navigation download receipt through IPC encoding", () =>
+    Effect.gen(function* () {
+      const navigate = vi.fn(() => Effect.succeed(true));
+      const manager = PreviewManager.PreviewManager.of({
+        navigate,
+      } as unknown as PreviewManager.PreviewManager["Service"]);
+      const downloaded = yield* PreviewIpc.navigate
+        .handler({
+          tabId: "tab-1",
+          url: "https://example.com/report.csv",
+          agentDriven: true,
+        })
+        .pipe(Effect.provideService(PreviewManager.PreviewManager, manager));
+      expect(downloaded).toBe(true);
+      expect(navigate).toHaveBeenCalledWith("tab-1", "https://example.com/report.csv", true);
+    }),
+  );
+
   effectIt.effect("returns automation status for long runtime tab ids", () =>
     Effect.gen(function* () {
       const tabId =

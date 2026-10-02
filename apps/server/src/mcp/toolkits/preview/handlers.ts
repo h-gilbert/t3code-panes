@@ -1,13 +1,25 @@
+import * as NodeCrypto from "node:crypto";
+import { safeFileNameSegment } from "@t3tools/shared/fileNameSegment";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import {
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
+  PREVIEW_FILE_TRANSFER_TIMEOUT_MS,
   PREVIEW_RECORDING_STOP_TIMEOUT_MS,
+  PreviewAutomationFileTooLargeError,
+  PreviewAutomationFileTransferError,
+  PreviewAutomationFileUnreadableError,
   PreviewAutomationRecordingTransferError,
   PreviewAutomationRecordingDesktopUpdateRequiredError,
   type PreviewAutomationAutofillResult,
   type PreviewAutomationCloseResult,
+  type PreviewAutomationDownloadInput,
+  type PreviewAutomationInputResult,
+  type PreviewAutomationUploadFile,
+  type PreviewAutomationUploadInput,
+  type PreviewAutomationUploadResult,
   type ToolActivityIcon,
   type PreviewAutomationOperation,
   type PreviewAutomationOpenInput,
@@ -18,15 +30,18 @@ import {
   type PreviewAutomationSetColorSchemeResult,
   type PreviewAutomationSnapshot,
   type PreviewAutomationStatus,
-  type PreviewTabId,
+  PreviewTabId,
 } from "@t3tools/contracts";
 
 import {
+  attachmentFileExtension,
+  createPendingAttachmentId,
   parseAttachmentUuid,
   parseAttachmentFileExtension,
   PENDING_ATTACHMENT_THREAD_SEGMENT,
   toSafeThreadAttachmentSegment,
 } from "../../../attachmentStore.ts";
+import { issueStagedAttachmentUrl } from "../../../assets/AssetAccess.ts";
 import { resolveAttachmentRelativePath } from "../../../attachmentPaths.ts";
 import * as ServerConfig from "../../../config.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
@@ -190,6 +205,115 @@ export const claimPreviewRecording = Effect.fn("PreviewToolkit.claimRecording")(
 });
 
 /**
+ * Copies one agent file into a pending attachment the desktop host can fetch
+ * over HTTP, so bytes never ride the WebSocket. The copy is removed when the
+ * enclosing scope closes; a crash leaves it for the stale-pending sweep.
+ */
+export const stageUploadFile = Effect.fn("PreviewToolkit.stageUploadFile")(function* (
+  filePath: string,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const config = yield* ServerConfig.ServerConfig;
+  const unreadable = (cause?: unknown) =>
+    new PreviewAutomationFileUnreadableError({ path: filePath, cause });
+  if (!path.isAbsolute(filePath)) return yield* unreadable();
+  const stat = yield* fileSystem.stat(filePath).pipe(Effect.mapError(unreadable));
+  if (stat.type !== "File") return yield* unreadable();
+  const name = path.basename(filePath);
+  const sizeBytes = Number(stat.size);
+  if (sizeBytes > PROVIDER_SEND_TURN_MAX_FILE_BYTES) {
+    return yield* new PreviewAutomationFileTooLargeError({
+      fileName: name,
+      maximumBytes: PROVIDER_SEND_TURN_MAX_FILE_BYTES,
+    });
+  }
+  const extension = attachmentFileExtension(name);
+  const attachmentId = createPendingAttachmentId(extension);
+  const stagedPath = resolveAttachmentRelativePath({
+    attachmentsDir: config.attachmentsDir,
+    relativePath: `${attachmentId}${extension}`,
+  });
+  if (!stagedPath) return yield* unreadable();
+  yield* Effect.acquireRelease(
+    fileSystem.copyFile(filePath, stagedPath).pipe(Effect.mapError(unreadable)),
+    () => fileSystem.remove(stagedPath).pipe(Effect.ignore),
+  );
+  const url = yield* issueStagedAttachmentUrl({ attachmentId, fileName: name }).pipe(
+    Effect.mapError(unreadable),
+  );
+  return { name, url, sizeBytes } satisfies PreviewAutomationUploadFile;
+});
+
+const uploadFiles = Effect.fn("PreviewToolkit.uploadFiles")(function* (
+  input: PreviewAutomationUploadInput,
+) {
+  const { tabId, paths, ...target } = input;
+  const files = yield* Effect.forEach(paths, stageUploadFile);
+  return yield* invokeTargeted<PreviewAutomationUploadResult>(
+    "upload",
+    { ...(tabId === undefined ? {} : { tabId }), ...target, files },
+    PREVIEW_FILE_TRANSFER_TIMEOUT_MS,
+  );
+}, Effect.scoped);
+
+const UploadedDownload = Schema.Struct({
+  tabId: PreviewTabId,
+  fileName: Schema.String,
+  mimeType: Schema.String,
+  sizeBytes: Schema.Int,
+  url: Schema.String,
+  uploadedAttachmentId: Schema.String,
+});
+const decodeUploadedDownload = Schema.decodeUnknownEffect(UploadedDownload);
+
+/** Moves an uploaded download out of pending attachments into the browser artifacts dir. */
+export const claimPreviewDownload = Effect.fn("PreviewToolkit.claimDownload")(function* (
+  threadId: ThreadId,
+  response: unknown,
+) {
+  const transferError = (cause?: unknown) =>
+    new PreviewAutomationFileTransferError({ threadId, cause });
+  const download = yield* decodeUploadedDownload(response).pipe(Effect.mapError(transferError));
+  const config = yield* ServerConfig.ServerConfig;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const extension = parseAttachmentFileExtension(download.uploadedAttachmentId);
+  const uuid = parseAttachmentUuid(download.uploadedAttachmentId);
+  if (
+    !uuid ||
+    !extension ||
+    download.uploadedAttachmentId !== `${PENDING_ATTACHMENT_THREAD_SEGMENT}-${uuid}-${extension}`
+  ) {
+    return yield* transferError();
+  }
+  const pendingPath = resolveAttachmentRelativePath({
+    attachmentsDir: config.attachmentsDir,
+    relativePath: `${download.uploadedAttachmentId}.${extension}`,
+  });
+  if (!pendingPath) return yield* transferError();
+  const fileName = safeFileNameSegment(download.fileName, "download");
+  const directory = path.join(config.browserArtifactsDir, "downloads", NodeCrypto.randomUUID());
+  const finalPath = path.join(directory, fileName);
+  yield* Effect.gen(function* () {
+    const stat = yield* fileSystem.stat(pendingPath);
+    if (stat.type !== "File" || Number(stat.size) !== download.sizeBytes) {
+      return yield* transferError();
+    }
+    yield* fileSystem.makeDirectory(directory, { recursive: true });
+    yield* fileSystem.rename(pendingPath, finalPath);
+  }).pipe(Effect.mapError(transferError));
+  return {
+    tabId: download.tabId,
+    fileName,
+    path: finalPath,
+    mimeType: download.mimeType,
+    sizeBytes: download.sizeBytes,
+    url: download.url,
+  };
+});
+
+/**
  * `available` answers "is this tab automation-capable", which agents read as "may
  * I drive it". Only the broker knows whether a competing session has the tab, so
  * the pre-flight read every agent is told to make carries the hold too.
@@ -227,9 +351,10 @@ const handlers = {
       includeImage: includeImage !== false || save === true,
     });
   },
-  preview_click: (input) => invokeTargeted<object>("click", input, input.timeoutMs),
+  preview_click: (input) =>
+    invokeTargeted<PreviewAutomationInputResult>("click", input, input.timeoutMs),
   preview_type: (input) => invokeTargeted<object>("type", input, input.timeoutMs),
-  preview_press: (input) => invokeTargeted<object>("press", input),
+  preview_press: (input) => invokeTargeted<PreviewAutomationInputResult>("press", input),
   preview_scroll: (input) => invokeTargeted<object>("scroll", input),
   preview_evaluate: ({ tabId, ...input }) =>
     invoke<unknown>("evaluate", input, undefined, tabId).pipe(
@@ -252,6 +377,20 @@ const handlers = {
         tabId,
       );
       const artifact = yield* claimPreviewRecording(scope.threadId, response.result);
+      return { ...artifact, ...(response.toolIcon ? { toolIcon: response.toolIcon } : {}) };
+    }),
+  preview_upload: (input) => uploadFiles(input),
+  preview_download: (input: PreviewAutomationDownloadInput) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext.requireMcpCapability("preview");
+      const { tabId, ...operationInput } = input;
+      const response = yield* invoke<unknown>(
+        "download",
+        operationInput,
+        (input.timeoutMs ?? 15_000) + PREVIEW_FILE_TRANSFER_TIMEOUT_MS,
+        tabId,
+      );
+      const artifact = yield* claimPreviewDownload(scope.threadId, response.result);
       return { ...artifact, ...(response.toolIcon ? { toolIcon: response.toolIcon } : {}) };
     }),
   preview_close: (input) => invokeTargeted<PreviewAutomationCloseResult>("close", input ?? {}),

@@ -188,7 +188,9 @@ const {
   mkdir,
   menuBuildFromTemplate,
   menuPopup,
+  readFile,
   showItemInFolder,
+  showOpenDialog,
   webviewSend,
   writeFile,
   writeClipboard,
@@ -205,7 +207,9 @@ const {
   mkdir: vi.fn((_path: string) => undefined),
   menuBuildFromTemplate: vi.fn(),
   menuPopup: vi.fn(),
+  readFile: vi.fn((_path: string) => new Uint8Array()),
   showItemInFolder: vi.fn(),
+  showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] as Array<string> })),
   webviewSend: vi.fn(),
   writeFile: vi.fn((_path: string, _data: Uint8Array) => undefined),
   writeClipboard: vi.fn(async () => undefined),
@@ -224,6 +228,7 @@ vi.mock("electron", () => ({
   clipboard: {
     write: writeClipboard,
   },
+  dialog: { showOpenDialog },
   nativeImage: {
     createFromPath,
   },
@@ -262,6 +267,7 @@ const environmentLayer = Layer.succeed(
 );
 
 const fileSystemLayer = FileSystem.layerNoop({
+  remove: () => Effect.void,
   makeDirectory: (path) =>
     Effect.sync(() => {
       mkdir(path);
@@ -270,6 +276,7 @@ const fileSystemLayer = FileSystem.layerNoop({
     Effect.sync(() => {
       writeFile(path, data);
     }),
+  readFile: (path) => Effect.sync(() => readFile(path)),
 });
 
 // Manager only forwards to the credential store; its own behaviour is
@@ -372,6 +379,7 @@ const makeTestPreviewWebContents = (
     on: vi.fn(),
     off: vi.fn(),
     ipc: { on: vi.fn(), off: vi.fn() },
+    session: { on: vi.fn() },
     send: webviewSend,
     navigationHistory: { canGoBack: () => false, canGoForward: () => false },
     setIgnoreMenuShortcuts: vi.fn(),
@@ -483,7 +491,7 @@ const makeFaviconWebContents = (options?: {
     off,
     ipc: { on: vi.fn(), off: vi.fn() },
     send: webviewSend,
-    session: { fetch },
+    session: { fetch, on: vi.fn() },
     navigationHistory: { canGoBack: () => false, canGoForward: () => false },
     setIgnoreMenuShortcuts: vi.fn(),
     setWindowOpenHandler: vi.fn(),
@@ -574,6 +582,8 @@ describe("PreviewManager", () => {
     getFocusedWebContents.mockReturnValue(null);
     mkdir.mockClear();
     writeFile.mockClear();
+    readFile.mockClear();
+    showOpenDialog.mockClear();
     showItemInFolder.mockClear();
     clipboardItemConstructor.mockClear();
     writeClipboard.mockClear();
@@ -1211,6 +1221,7 @@ describe("PreviewManager", () => {
           }),
           off: vi.fn(),
           ipc: { on: vi.fn(), off: vi.fn() },
+          session: { on: vi.fn() },
           send: webviewSend,
           navigationHistory: { canGoBack: () => false, canGoForward: () => false },
           setIgnoreMenuShortcuts: vi.fn(),
@@ -1313,6 +1324,7 @@ describe("PreviewManager", () => {
           on: vi.fn(),
           off: vi.fn(),
           ipc: { on: vi.fn(), off: vi.fn() },
+          session: { on: vi.fn() },
           send: webviewSend,
           navigationHistory: { canGoBack: () => false, canGoForward: () => false },
           setIgnoreMenuShortcuts: vi.fn(),
@@ -1818,6 +1830,7 @@ describe("PreviewManager", () => {
           }),
           off: vi.fn(),
           ipc: { on: vi.fn(), off: vi.fn() },
+          session: { on: vi.fn() },
           send: webviewSend,
           navigationHistory: { canGoBack: () => false, canGoForward: () => false },
           setIgnoreMenuShortcuts: vi.fn(),
@@ -1883,6 +1896,7 @@ describe("PreviewManager", () => {
           on: vi.fn(),
           off: vi.fn(),
           ipc: { on: vi.fn(), off: vi.fn() },
+          session: { on: vi.fn() },
           send: webviewSend,
           navigationHistory: { canGoBack: () => false, canGoForward: () => false },
           setIgnoreMenuShortcuts: vi.fn(),
@@ -1924,6 +1938,7 @@ describe("PreviewManager", () => {
           on: vi.fn(),
           off: vi.fn(),
           ipc: { on: vi.fn(), off: vi.fn() },
+          session: { on: vi.fn() },
           send: webviewSend,
           navigationHistory: { canGoBack: () => false, canGoForward: () => false },
           setIgnoreMenuShortcuts: vi.fn(),
@@ -1971,6 +1986,7 @@ describe("PreviewManager", () => {
           on: vi.fn(),
           off: vi.fn(),
           ipc: { on: vi.fn(), off: vi.fn() },
+          session: { on: vi.fn() },
           send: webviewSend,
           navigationHistory: { canGoBack: () => false, canGoForward: () => false },
           setIgnoreMenuShortcuts: vi.fn(),
@@ -2027,6 +2043,7 @@ describe("PreviewManager", () => {
               on: vi.fn(),
               off: vi.fn(),
               ipc: { on: vi.fn(), off: vi.fn() },
+              session: { on: vi.fn() },
               send: webviewSend,
               navigationHistory: { canGoBack: () => false, canGoForward: () => false },
               setIgnoreMenuShortcuts: vi.fn(),
@@ -2125,6 +2142,7 @@ describe("PreviewManager", () => {
           listeners.delete(event);
         }),
         ipc: { on: vi.fn(), off: vi.fn() },
+        session: { on: vi.fn() },
         send: webviewSend,
         navigationHistory: { canGoBack: () => false, canGoForward: () => false },
         setIgnoreMenuShortcuts: vi.fn(),
@@ -2461,6 +2479,7 @@ describe("PreviewManager", () => {
           }),
           off: vi.fn(),
           ipc: { on: vi.fn(), off: vi.fn() },
+          session: { on: vi.fn() },
           send: webviewSend,
           navigationHistory: { canGoBack: () => false, canGoForward: () => false },
           setIgnoreMenuShortcuts: vi.fn(),
@@ -2554,6 +2573,7 @@ describe("PreviewManager", () => {
           }),
           off: vi.fn(),
           ipc: { on: vi.fn(), off: vi.fn() },
+          session: { on: vi.fn() },
           send: webviewSend,
           navigationHistory: { canGoBack: () => false, canGoForward: () => false },
           setIgnoreMenuShortcuts: vi.fn(),
@@ -3123,6 +3143,7 @@ describe("PreviewManager", () => {
             on: vi.fn(),
             off: vi.fn(),
             ipc: { on: vi.fn(), off: vi.fn() },
+            session: { on: vi.fn() },
             send: webviewSend,
             navigationHistory: { canGoBack: () => false, canGoForward: () => false },
             setIgnoreMenuShortcuts: vi.fn(),
@@ -3426,6 +3447,7 @@ describe("PreviewManager", () => {
           on: vi.fn(),
           off: vi.fn(),
           ipc: { on: vi.fn(), off: vi.fn() },
+          session: { on: vi.fn() },
           send: webviewSend,
           navigationHistory: { canGoBack: () => false, canGoForward: () => false },
           setIgnoreMenuShortcuts: vi.fn(),
@@ -3932,6 +3954,7 @@ describe("PreviewManager", () => {
             });
           }),
           off: vi.fn(),
+          session: { on: vi.fn() },
           ipc: { on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
           send: webviewSend,
           navigationHistory: { canGoBack: () => false, canGoForward: () => false },
@@ -3994,6 +4017,7 @@ describe("PreviewManager", () => {
           off: vi.fn(),
           // A wedged compositor leaves `capturePage` pending forever.
           capturePage: vi.fn(() => new Promise(() => {})),
+          session: { on: vi.fn() },
           ipc: {
             on: vi.fn((channel: string, listener: typeof onPicked) => {
               if (channel === "preview:element-picked") onPicked = listener;
@@ -4071,6 +4095,7 @@ describe("PreviewManager", () => {
           once: vi.fn(),
           off: vi.fn(),
           capturePage: vi.fn(() => new Promise(() => {})),
+          session: { on: vi.fn() },
           ipc: {
             on: vi.fn((channel: string, listener: typeof onPicked) => {
               if (channel === "preview:element-picked") onPicked = listener;
@@ -4153,6 +4178,7 @@ describe("PreviewManager", () => {
           isCurrentlyAudible: () => false,
           on: vi.fn(),
           off: vi.fn(),
+          session: { on: vi.fn() },
           ipc: {
             on: vi.fn((channel: string, listener: typeof mouseNavigate) => {
               if (channel === "preview:mouse-navigate") mouseNavigate = listener;
@@ -4302,6 +4328,7 @@ describe("PreviewManager", () => {
       off: vi.fn((event: string) => {
         if (event === "focus") hooks.onFocusListener?.(undefined);
       }),
+      session: { on: vi.fn() },
       ipc: {
         on: vi.fn((channel: string, listener: (_event: unknown, _signal: unknown) => void) => {
           if (channel === "preview:human-input") hooks.onHumanInput?.(listener);
@@ -4394,6 +4421,308 @@ describe("PreviewManager", () => {
       }),
     ),
   );
+
+  describe("file pickers and downloads", () => {
+    /** Lets forked debugger and human-input handlers run. */
+    const settle = Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
+    const viewport = { result: { value: { width: 800, height: 600 } } };
+
+    const makeGuest = (
+      sendCommand: (_method: string, _params?: Record<string, unknown>) => Promise<unknown>,
+    ) => {
+      let humanInput: ((_event: unknown, _signal: unknown) => void) | undefined;
+      let willDownload: ((_event: unknown, _item: unknown, _source: unknown) => void) | undefined;
+      let debuggerMessage:
+        | ((_event: unknown, _method: string, _params: unknown) => void)
+        | undefined;
+      const guest = makeAutomationWebContents(42, sendCommand, {
+        onHumanInput: (listener) => {
+          humanInput = listener;
+        },
+      }) as unknown as {
+        session: { on: ReturnType<typeof vi.fn> };
+        debugger: { on: ReturnType<typeof vi.fn> };
+      };
+      guest.session.on = vi.fn((event: string, listener: typeof willDownload) => {
+        if (event === "will-download") willDownload = listener;
+      });
+      guest.debugger.on = vi.fn((event: string, listener: typeof debuggerMessage) => {
+        if (event === "message") debuggerMessage = listener;
+      });
+      return {
+        guest: guest as unknown as Electron.WebContents,
+        humanClick: () => humanInput?.({}, { kind: "pointer", x: 5, y: 5, button: 0 }),
+        openFileChooser: (mode: "selectSingle" | "selectMultiple") =>
+          debuggerMessage?.({}, "Page.fileChooserOpened", { backendNodeId: 77, mode }),
+        startDownload: (name: string) => {
+          let finish: ((_event: unknown, _state: string) => void) | undefined;
+          const item = {
+            getFilename: () => name,
+            getURL: () => `https://example.com/${name}`,
+            getMimeType: () => "text/csv",
+            getTotalBytes: () => 3,
+            getReceivedBytes: () => 3,
+            setSavePath: vi.fn(),
+            once: vi.fn((_event: string, listener: typeof finish) => {
+              finish = listener;
+            }),
+          };
+          willDownload?.({}, item, { id: 42 });
+          return { item, finish: (state: string) => finish?.({}, state) };
+        },
+      };
+    };
+
+    const openAgentTab = (manager: PreviewManager.PreviewManager["Service"], guest: unknown) =>
+      Effect.gen(function* () {
+        fromId.mockReturnValue(guest as Electron.WebContents);
+        yield* manager.createTab("tab_1");
+        yield* manager.registerWebview("tab_1", 42);
+        const click = yield* manager
+          .automationClick("tab_1", { x: 10, y: 10 })
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* TestClock.adjust(200);
+        return yield* Fiber.join(click);
+      });
+
+    effectIt.effect(
+      "keeps an agent's download from showing a Save dialog and hands it over once",
+      () =>
+        withManager((manager) =>
+          Effect.gen(function* () {
+            const browser = makeGuest(async (method) =>
+              method === "Runtime.evaluate" ? viewport : undefined,
+            );
+            yield* openAgentTab(manager, browser.guest);
+            const download = browser.startDownload("report.csv");
+            const savePath = download.item.setSavePath.mock.calls[0]?.[0] as string;
+            expect(savePath).toMatch(
+              /^\/tmp\/t3\/dev\/browser-artifacts\/transfers\/tab_1\/download-/,
+            );
+            download.finish("completed");
+            readFile.mockReturnValueOnce(new TextEncoder().encode("a,b"));
+
+            const received = yield* manager.automationDownload("tab_1");
+            expect(received).toMatchObject({
+              fileName: "report.csv",
+              mimeType: "text/csv",
+              url: "https://example.com/report.csv",
+            });
+            expect(new TextDecoder().decode(received.data)).toBe("a,b");
+            expect(readFile).toHaveBeenCalledWith(savePath);
+
+            const nothingLeft = yield* manager
+              .automationDownload("tab_1", 100)
+              .pipe(Effect.result, Effect.forkChild({ startImmediately: true }));
+            yield* TestClock.adjust(200);
+            expect(yield* Fiber.join(nothingLeft)).toMatchObject({
+              failure: { _tag: "PreviewFileTransferError", reason: "no-download" },
+            });
+          }),
+        ),
+    );
+
+    effectIt.effect(
+      "captures a direct agent navigation download without waiting for a page load",
+      () =>
+        withManager((manager) =>
+          Effect.gen(function* () {
+            const browser = makeGuest(async () => undefined);
+            const download = vi.fn(() => browser.startDownload("report.csv"));
+            Object.assign(browser.guest, {
+              loadURL: vi.fn(async () => {
+                download();
+                throw new Error("ERR_ABORTED (-3)");
+              }),
+            });
+            fromId.mockReturnValue(browser.guest);
+            yield* manager.createTab("tab_1");
+            yield* manager.registerWebview("tab_1", 42);
+
+            expect(yield* manager.navigate("tab_1", "https://example.com/report.csv", true)).toBe(
+              true,
+            );
+            const transfer = download.mock.results[0]?.value;
+            expect(transfer?.item.setSavePath).toHaveBeenCalledOnce();
+            transfer?.finish("completed");
+            readFile.mockReturnValueOnce(new TextEncoder().encode("a,b"));
+            const received = yield* manager.automationDownload("tab_1");
+            expect(received.fileName).toBe("report.csv");
+            expect(new TextDecoder().decode(received.data)).toBe("a,b");
+          }),
+        ),
+    );
+
+    effectIt.effect("preserves a direct human navigation's Save dialog", () =>
+      withManager((manager) =>
+        Effect.gen(function* () {
+          const browser = makeGuest(async () => undefined);
+          const download = vi.fn(() => browser.startDownload("report.csv"));
+          Object.assign(browser.guest, {
+            loadURL: vi.fn(async () => {
+              download();
+            }),
+          });
+          fromId.mockReturnValue(browser.guest);
+          yield* manager.createTab("tab_1");
+          yield* manager.registerWebview("tab_1", 42);
+          yield* manager.navigate("tab_1", "https://example.com/agent.csv", true);
+          download.mockClear();
+          yield* manager.navigate("tab_1", "https://example.com/report.csv");
+          expect(download.mock.results[0]?.value?.item.setSavePath).not.toHaveBeenCalled();
+        }),
+      ),
+    );
+
+    effectIt.effect("leaves a download to the Save dialog once a person uses the tab", () =>
+      withManager((manager) =>
+        Effect.gen(function* () {
+          const browser = makeGuest(async (method) =>
+            method === "Runtime.evaluate" ? viewport : undefined,
+          );
+          yield* openAgentTab(manager, browser.guest);
+          browser.humanClick();
+          yield* settle;
+          const download = browser.startDownload("report.csv");
+          expect(download.item.setSavePath).not.toHaveBeenCalled();
+        }),
+      ),
+    );
+
+    effectIt.effect(
+      "reports a picker emitted after the input response, before the renderer barrier completes",
+      () =>
+        withManager((manager) =>
+          Effect.gen(function* () {
+            const browser = makeGuest(async (method, params) => {
+              if (method === "Runtime.evaluate" && params?.["expression"] === "void 0") {
+                browser.openFileChooser("selectSingle");
+              }
+              return method === "Runtime.evaluate" ? viewport : undefined;
+            });
+            const result = yield* openAgentTab(manager, browser.guest);
+            expect(result).toEqual({ fileChooser: { multiple: false } });
+          }),
+        ),
+    );
+
+    effectIt.effect("holds a picker the agent opened and answers it with uploaded files", () =>
+      withManager((manager) =>
+        Effect.gen(function* () {
+          const sendCommand = vi.fn(async (method: string) =>
+            method === "Runtime.evaluate" ? viewport : undefined,
+          );
+          const browser = makeGuest(sendCommand);
+          yield* openAgentTab(manager, browser.guest);
+          browser.openFileChooser("selectSingle");
+          yield* settle;
+          expect(showOpenDialog).not.toHaveBeenCalled();
+
+          const tooMany = yield* manager
+            .automationUpload("tab_1", {
+              files: [
+                { name: "a.txt", data: new Uint8Array([1]) },
+                { name: "b.txt", data: new Uint8Array([2]) },
+              ],
+            })
+            .pipe(Effect.result);
+          expect(tooMany).toMatchObject({ failure: { reason: "single-file" } });
+
+          // The rejected attempt leaves the picker waiting for a corrected one.
+          const names = yield* manager.automationUpload("tab_1", {
+            files: [{ name: "../notes.txt", data: new Uint8Array([1]) }],
+          });
+          expect(names).toEqual(["notes.txt"]);
+          const [writtenPath] = writeFile.mock.calls.at(-1)!;
+          expect(writtenPath).toMatch(/\/transfers\/tab_1\/uploads\/[^/]+\/0\/notes\.txt$/);
+          expect(sendCommand).toHaveBeenCalledWith("DOM.setFileInputFiles", {
+            files: [writtenPath],
+            backendNodeId: 77,
+          });
+
+          const none = yield* manager
+            .automationUpload("tab_1", { files: [{ name: "a.txt", data: new Uint8Array([1]) }] })
+            .pipe(Effect.result);
+          expect(none).toMatchObject({ failure: { reason: "no-file-chooser" } });
+        }),
+      ),
+    );
+
+    effectIt.effect("sets files directly on a targeted file input", () =>
+      withManager((manager) =>
+        Effect.gen(function* () {
+          const sendCommand = vi.fn(async (method: string, params?: Record<string, unknown>) => {
+            if (method === "Runtime.evaluate") {
+              if (params?.["returnByValue"] === false) {
+                return { result: { objectId: "file-input", subtype: "node" } };
+              }
+              return String(params?.["expression"]).includes("__t3PlaywrightInjected)")
+                ? { result: { value: true } }
+                : viewport;
+            }
+            if (method === "Runtime.callFunctionOn") return { result: { value: true } };
+            return undefined;
+          });
+          const browser = makeGuest(sendCommand);
+          fromId.mockReturnValue(browser.guest);
+          yield* manager.createTab("tab_1");
+          yield* manager.registerWebview("tab_1", 42);
+          const names = yield* manager.automationUpload("tab_1", {
+            locator: "input[type=file]",
+            files: [
+              { name: "a.txt", data: new Uint8Array([1]) },
+              { name: "a.txt", data: new Uint8Array([2]) },
+            ],
+          });
+          expect(names).toEqual(["a.txt", "a.txt"]);
+          const setFiles = sendCommand.mock.calls.find(
+            ([method]) => method === "DOM.setFileInputFiles",
+          );
+          const setFilesParams = setFiles?.[1] as
+            | { readonly objectId?: string; readonly files?: Array<string> }
+            | undefined;
+          expect(setFilesParams?.objectId).toBe("file-input");
+          expect(new Set(setFilesParams?.files).size).toBe(2);
+        }),
+      ),
+    );
+
+    effectIt.effect("shows an open dialog for a picker a person opens", () =>
+      withManager((manager) =>
+        Effect.gen(function* () {
+          const sendCommand = vi.fn(async (method: string) => {
+            if (method === "Runtime.evaluate") return viewport;
+            if (method === "DOM.resolveNode") return { object: { objectId: "picker" } };
+            if (method === "Runtime.callFunctionOn") {
+              return { result: { value: { accept: ".csv", directory: false } } };
+            }
+            return undefined;
+          });
+          showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: ["/Users/me/a.csv"] });
+          const browser = makeGuest(sendCommand);
+          yield* openAgentTab(manager, browser.guest);
+          browser.humanClick();
+          yield* settle;
+          browser.openFileChooser("selectMultiple");
+          yield* settle;
+          yield* settle;
+
+          expect(showOpenDialog).toHaveBeenCalledWith({
+            properties: ["openFile", "multiSelections"],
+            filters: [{ name: "Accepted files", extensions: ["csv"] }],
+          });
+          expect(sendCommand).toHaveBeenCalledWith("DOM.setFileInputFiles", {
+            files: ["/Users/me/a.csv"],
+            backendNodeId: 77,
+          });
+          const upload = yield* manager
+            .automationUpload("tab_1", { files: [{ name: "a.txt", data: new Uint8Array([1]) }] })
+            .pipe(Effect.result);
+          expect(upload).toMatchObject({ failure: { reason: "no-file-chooser" } });
+        }),
+      ),
+    );
+  });
 
   effectIt.effect("never restores agent click focus to another agent's tab", () =>
     withManager((manager) =>
@@ -4575,6 +4904,7 @@ describe("PreviewManager", () => {
           isCurrentlyAudible: () => false,
           on: vi.fn(),
           off: vi.fn(),
+          session: { on: vi.fn() },
           ipc: {
             on: vi.fn((channel: string, listener: typeof humanInput) => {
               if (channel === "preview:human-input") humanInput = listener;
@@ -4766,6 +5096,7 @@ describe("PreviewManager", () => {
           isCurrentlyAudible: () => false,
           on: vi.fn(),
           off: vi.fn(),
+          session: { on: vi.fn() },
           ipc: {
             on: vi.fn((channel: string, listener: typeof humanInput) => {
               if (channel === "preview:human-input") humanInput = listener;
@@ -4837,6 +5168,7 @@ describe("PreviewManager", () => {
           on: vi.fn(),
           off: vi.fn(),
           ipc: { on: vi.fn(), off: vi.fn() },
+          session: { on: vi.fn() },
           send: webviewSend,
           navigationHistory: { canGoBack: () => false, canGoForward: () => false },
           setIgnoreMenuShortcuts: vi.fn(),
@@ -4919,6 +5251,7 @@ describe("PreviewManager", () => {
               }),
               off: vi.fn(),
               ipc: { on: vi.fn(), off: vi.fn() },
+              session: { on: vi.fn() },
               send: webviewSend,
               navigationHistory: { canGoBack: () => false, canGoForward: () => false },
               setIgnoreMenuShortcuts: vi.fn(),

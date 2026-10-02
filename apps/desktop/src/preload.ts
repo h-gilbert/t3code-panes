@@ -319,8 +319,8 @@ contextBridge.exposeInMainWorld("desktopBridge", {
         relayId,
         response,
       }),
-    navigate: (tabId, url) =>
-      ipcRenderer.invoke(IpcChannels.PREVIEW_NAVIGATE_CHANNEL, { tabId, url }),
+    navigate: (tabId, url, agentDriven) =>
+      ipcRenderer.invoke(IpcChannels.PREVIEW_NAVIGATE_CHANNEL, { tabId, url, agentDriven }),
     goBack: (tabId) => ipcRenderer.invoke(IpcChannels.PREVIEW_GO_BACK_CHANNEL, { tabId }),
     goForward: (tabId) => ipcRenderer.invoke(IpcChannels.PREVIEW_GO_FORWARD_CHANNEL, { tabId }),
     refresh: (tabId) => ipcRenderer.invoke(IpcChannels.PREVIEW_REFRESH_CHANNEL, { tabId }),
@@ -422,6 +422,15 @@ contextBridge.exposeInMainWorld("desktopBridge", {
         ipcRenderer.invoke(IpcChannels.PREVIEW_AUTOMATION_EVALUATE_CHANNEL, { tabId, input }),
       waitFor: (tabId, input) =>
         ipcRenderer.invoke(IpcChannels.PREVIEW_AUTOMATION_WAIT_FOR_CHANNEL, { tabId, input }),
+      upload: (tabId, input) =>
+        preserveRendererFocus(document, tabId, () =>
+          ipcRenderer.invoke(IpcChannels.PREVIEW_AUTOMATION_UPLOAD_CHANNEL, { tabId, input }),
+        ),
+      download: (tabId, timeoutMs) =>
+        ipcRenderer.invoke(IpcChannels.PREVIEW_AUTOMATION_DOWNLOAD_CHANNEL, {
+          tabId,
+          ...(timeoutMs === undefined ? {} : { timeoutMs }),
+        }),
     },
     onStateChange: (listener) => {
       const wrappedListener = (

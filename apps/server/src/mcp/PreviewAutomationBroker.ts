@@ -11,6 +11,11 @@ import {
   PreviewAutomationRecordingTransferError,
   PreviewAutomationRecordingDesktopUpdateRequiredError,
   PreviewAutomationRecordingTooLargeError,
+  PreviewAutomationFileActionError,
+  PreviewAutomationFileActionReason,
+  PreviewAutomationFileTooLargeError,
+  PreviewAutomationFileTransferError,
+  PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   PreviewAutomationRecordingDeadlineExpiredError,
   PreviewAutomationRequestQueueClosedError,
   PreviewAutomationResultTooLargeError,
@@ -251,6 +256,8 @@ const PREVIEW_AUTOMATION_EXCLUSIVE_OPERATIONS: ReadonlySet<PreviewAutomationOper
   "autofill",
   "recordingStart",
   "recordingStop",
+  "upload",
+  "download",
 ]);
 
 /**
@@ -300,6 +307,8 @@ function remoteDetailKind(detail: unknown): RemoteDetailKind {
   }
 }
 
+const isFileActionReason = Schema.is(PreviewAutomationFileActionReason);
+
 const classifyResponseError = (
   context: PreviewAutomationRequestErrorContext,
   error: NonNullable<PreviewAutomationResponse["error"]>,
@@ -323,6 +332,36 @@ const classifyResponseError = (
       });
     case "PreviewAutomationRecordingDeadlineExpiredError":
       return new PreviewAutomationRecordingDeadlineExpiredError({
+        threadId: context.threadId,
+        cause: error,
+      });
+    case "PreviewAutomationFileActionError": {
+      const reason =
+        typeof error.detail === "object" && error.detail !== null && "reason" in error.detail
+          ? error.detail.reason
+          : undefined;
+      if (isFileActionReason(reason)) {
+        return new PreviewAutomationFileActionError({
+          threadId: context.threadId,
+          reason,
+          cause: error,
+        });
+      }
+      return new PreviewAutomationExecutionError({ ...context, ...remoteDiagnostics });
+    }
+    case "PreviewAutomationFileTooLargeError": {
+      const detail =
+        typeof error.detail === "object" && error.detail !== null ? error.detail : undefined;
+      return new PreviewAutomationFileTooLargeError({
+        fileName:
+          detail && "fileName" in detail && typeof detail.fileName === "string"
+            ? detail.fileName
+            : "The file",
+        maximumBytes: PROVIDER_SEND_TURN_MAX_FILE_BYTES,
+      });
+    }
+    case "PreviewAutomationFileTransferError":
+      return new PreviewAutomationFileTransferError({
         threadId: context.threadId,
         cause: error,
       });

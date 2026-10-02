@@ -14,6 +14,8 @@ import {
   type PreviewAutomationResizeResult,
   type PreviewAutomationSetColorSchemeInput,
   type PreviewAutomationSetColorSchemeResult,
+  type PreviewAutomationUploadRequestInput,
+  type PreviewAutomationUploadResult,
   type PreviewAutomationHost as PreviewAutomationHostState,
   type PreviewAutomationRequest,
   type PreviewAutomationStatus,
@@ -45,7 +47,11 @@ import {
   stopBrowserRecordingForUpload,
 } from "~/browser/browserRecording";
 import { resolveBrowserRecordingStopTarget } from "~/browser/browserRecordingScope";
-import { uploadBrowserRecording } from "~/browser/browserRecordingUpload";
+import {
+  fetchStagedUploadFile,
+  uploadBrowserDownload,
+  uploadBrowserRecording,
+} from "~/browser/browserRecordingUpload";
 import {
   acquireBrowserSurfaceActivity,
   useBrowserSurfaceStore,
@@ -571,7 +577,12 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
             }
             if (reusedExistingTab && resolvedInputUrl && previewBridge) {
               assertPreviewRuntimeCurrent(threadRef, activeTabId, activeRuntimeTabId, request);
-              await previewBridge.navigate(activeRuntimeTabId, resolvedInputUrl);
+              const downloaded = await previewBridge.navigate(
+                activeRuntimeTabId,
+                resolvedInputUrl,
+                true,
+              );
+              if (downloaded === true) return await currentStatus(threadRef, activeTabId);
               await waitForNavigationReadiness(
                 threadRef,
                 request.requestId,
@@ -594,7 +605,12 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
                 url: input.url!,
               },
             );
-            await ready.bridge.navigate(ready.runtimeTabId, resolution.resolvedUrl);
+            const downloaded = await ready.bridge.navigate(
+              ready.runtimeTabId,
+              resolution.resolvedUrl,
+              true,
+            );
+            if (downloaded === true) return await currentStatus(threadRef, ready.tabId);
             await waitForNavigationReadiness(
               threadRef,
               request.requestId,
@@ -796,6 +812,46 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
             return {
               ...artifact,
               tabId: stopTabId,
+            };
+          }
+          case "upload": {
+            const ready = await requireReadyTab();
+            const upload = ready.bridge.automation.upload;
+            if (!upload) throw new Error("Update the desktop app to upload files.");
+            const input = request.input as PreviewAutomationUploadRequestInput;
+            // Staged files are fetched over HTTP so their bytes never ride the WebSocket.
+            const files = await Promise.all(
+              input.files.map(async (file) => ({
+                name: file.name,
+                data: await fetchStagedUploadFile(environmentId, file.url, hostDeadlineMs),
+              })),
+            );
+            const fileNames = await upload(ready.runtimeTabId, {
+              ...(input.locator === undefined ? {} : { locator: input.locator }),
+              ...(input.selector === undefined ? {} : { selector: input.selector }),
+              files,
+            });
+            return { tabId: ready.tabId, fileNames } satisfies PreviewAutomationUploadResult;
+          }
+          case "download": {
+            const ready = await requireReadyTab();
+            const download = ready.bridge.automation.download;
+            if (!download) throw new Error("Update the desktop app to receive downloads.");
+            const input = request.input as { readonly timeoutMs?: number };
+            const file = await download(ready.runtimeTabId, input.timeoutMs);
+            const uploadedAttachmentId = await uploadBrowserDownload(
+              threadRef,
+              { name: file.fileName, mimeType: file.mimeType },
+              new Blob([new Uint8Array(file.data)], { type: file.mimeType }),
+              hostDeadlineMs,
+            );
+            return {
+              tabId: ready.tabId,
+              fileName: file.fileName,
+              mimeType: file.mimeType,
+              sizeBytes: file.data.byteLength,
+              url: file.url,
+              uploadedAttachmentId,
             };
           }
           case "autofill": {

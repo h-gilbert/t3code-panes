@@ -808,7 +808,7 @@ it.effect("registers annotated tools and preserves authenticated request context
       expect(clickTool?.tool.outputSchema).toMatchObject({
         type: "object",
         additionalProperties: false,
-        description: "The preview action completed successfully.",
+        properties: { fileChooser: expect.any(Object) },
       });
 
       const navigateTool = server.tools.find(({ tool }) => tool.name === "preview_navigate");
