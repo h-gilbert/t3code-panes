@@ -113,7 +113,11 @@ export function SidebarUpdatePill() {
   return isElectron ? <SidebarUpdateControl /> : null;
 }
 
-function SidebarUpdateControl() {
+export function WorkspaceUpdatePill() {
+  return isElectron ? <SidebarUpdateControl overlay /> : null;
+}
+
+function SidebarUpdateControl({ overlay = false }: { readonly overlay?: boolean }) {
   const state = useDesktopUpdateState();
   const [isActionPending, setIsActionPending] = useState(false);
   const desktopUpdateServers = useDesktopUpdateServers(state);
@@ -304,13 +308,25 @@ function SidebarUpdateControl() {
     );
   }, [prefersReducedMotion, state?.status]);
 
+  if (overlay && !showUpdateDetails) return null;
+
+  const Container = overlay ? "div" : SidebarMenuItem;
+  const overlayLabel = isDownloading
+    ? `Downloading update${state?.downloadPercent == null ? "" : ` ${Math.floor(state.downloadPercent)}%`}`
+    : state?.status === "error"
+      ? "Retry update"
+      : action === "install"
+        ? "Restart to update"
+        : "Download update";
+
   const updateButton = (
     <button
       type="button"
       aria-label={tooltip}
       aria-disabled={isInteractionDisabled || undefined}
       className={cn(
-        "inline-flex size-8 items-center justify-center rounded-full outline-hidden ring-ring transition-colors focus-visible:ring-2",
+        "inline-flex items-center justify-center rounded-full outline-hidden ring-ring transition-colors focus-visible:ring-2",
+        overlay ? "h-9 gap-2 px-3 text-xs font-medium" : "size-8",
         isInteractionDisabled ? "cursor-not-allowed" : "cursor-pointer",
         showUpdateIconState
           ? cn(
@@ -351,11 +367,19 @@ function SidebarUpdateControl() {
         onCheckAnimationIteration={handleCheckAnimationIteration}
         status={iconStatus}
       />
+      {overlay ? <span>{overlayLabel}</span> : null}
     </button>
   );
 
   return (
-    <SidebarMenuItem className="ml-auto shrink-0">
+    <Container
+      className={cn(
+        "shrink-0",
+        overlay
+          ? "pointer-events-auto rounded-full border border-border bg-background shadow-lg [-webkit-app-region:no-drag]"
+          : "ml-auto",
+      )}
+    >
       <Popover
         handle={releaseNotesPopoverHandle}
         onOpenChange={(open, details) => {
@@ -389,7 +413,7 @@ function SidebarUpdateControl() {
           {!showReleaseNotesPopover ? (
             <TooltipPopup
               align="center"
-              side="top"
+              side={overlay ? "bottom" : "top"}
               variant={showUpdateDetails ? "glass" : "default"}
             >
               {tooltip}
@@ -411,7 +435,7 @@ function SidebarUpdateControl() {
               }
             }}
             ref={releaseNotesPopupRef}
-            side="top"
+            side={overlay ? "bottom" : "top"}
             tooltipStyle
           >
             <SidebarUpdateReleaseNotes
@@ -422,6 +446,6 @@ function SidebarUpdateControl() {
           </PopoverPopup>
         ) : null}
       </Popover>
-    </SidebarMenuItem>
+    </Container>
   );
 }

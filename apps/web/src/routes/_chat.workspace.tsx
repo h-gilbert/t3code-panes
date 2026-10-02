@@ -36,6 +36,7 @@ import {
 } from "react";
 
 import { ChatViewContent, shouldTypeToFocusComposer } from "../components/ChatView";
+import { WorkspaceUpdatePill } from "../components/sidebar/SidebarUpdatePill";
 import type { ChatComposerHandle } from "../components/chat/ChatComposer";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { Button } from "../components/ui/button";
@@ -984,6 +985,18 @@ export function ProjectPaneWorkspace({
 
   return (
     <SidebarInset className="flex h-svh min-h-0 flex-col overflow-hidden overscroll-y-none bg-background text-foreground md:h-dvh">
+      {active ? (
+        <div
+          className={cn(
+            "pointer-events-none absolute inset-x-0 z-50 flex justify-center",
+            isMacosDesktop && !isWindowFullscreen
+              ? "top-[calc(var(--workspace-topbar-height)+0.75rem)]"
+              : "top-3",
+          )}
+        >
+          <WorkspaceUpdatePill />
+        </div>
+      ) : null}
       {isMacosDesktop && !isWindowFullscreen ? (
         <header className="drag-region flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center gap-2 border-b border-border bg-background pr-3 pl-[var(--workspace-titlebar-content-left)]">
           <div className="min-w-0 flex-1" aria-hidden />
