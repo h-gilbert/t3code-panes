@@ -137,6 +137,28 @@ describe("extractAgentNotificationDeepLink", () => {
     ).toBe("/threads/env/thread");
   });
 
+  it("reads top-level APNs keys that Expo leaves out of content data", () => {
+    const response = {
+      notification: {
+        request: {
+          identifier: "notification-1",
+          content: { data: null },
+          trigger: {
+            type: "push",
+            payload: {
+              aps: { alert: { title: "Needs input", body: "Thread" } },
+              environmentId: "env 1",
+              threadId: "thread/2",
+              deepLink: "/threads/env%201/thread%2F2",
+            },
+          },
+        },
+      },
+    };
+
+    expect(extractAgentNotificationDeepLink(response)).toBe("/threads/env%201/thread%2F2");
+  });
+
   it("ignores malformed or external links", () => {
     expect(
       extractAgentNotificationDeepLink(responseWithData({ deepLink: "https://example.com" })),
