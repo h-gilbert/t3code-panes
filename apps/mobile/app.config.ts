@@ -179,7 +179,7 @@ const config: ExpoConfig = {
   // Keep the established t3code:// alias in private builds so existing links
   // continue to route back into the containing app.
   scheme: isSelfHostedBuild ? [appScheme, "t3code"] : appScheme,
-  version: "1.3.1",
+  version: "1.4.0",
   runtimeVersion: {
     // Development manifests resolve on every launch, so avoid fingerprint's
     // expensive native-project calculation there. Preview and production stay
@@ -349,6 +349,13 @@ const config: ExpoConfig = {
     [
       "expo-build-properties",
       {
+        android: {
+          // Keep the supported floor explicit and covered by native notification tests.
+          minSdkVersion: 24,
+          // kotlinx-io uses Kotlin 2.3's return-value checker annotation, while
+          // SDK 58 builds with Kotlin 2.2. It has no runtime behavior.
+          extraProguardRules: "-dontwarn kotlin.MustUseReturnValues",
+        },
         ios: {
           deploymentTarget: "18.0",
           // AppCheckCore 11.3+ includes Swift and needs module maps for these Objective-C dependencies.
