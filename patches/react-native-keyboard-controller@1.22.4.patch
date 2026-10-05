@@ -227,6 +227,42 @@ index 54a1c57..19b44fc 100644
  }
  //# sourceMappingURL=index.js.map
 \ No newline at end of file
+diff --git a/lib/commonjs/components/ScrollViewWithBottomPadding/index.js b/lib/commonjs/components/ScrollViewWithBottomPadding/index.js
+index 568c618..1305fac 100644
+--- a/lib/commonjs/components/ScrollViewWithBottomPadding/index.js
++++ b/lib/commonjs/components/ScrollViewWithBottomPadding/index.js
+@@ -27,6 +27,7 @@ const ScrollViewWithBottomPadding = /*#__PURE__*/(0, _react.forwardRef)(({
+   children,
+   ...rest
+ }, ref) => {
++  const initialContentOffset = rest.contentOffset;
+   const prevContentOffsetY = (0, _reactNativeReanimated.useSharedValue)(null);
+   const insets = (0, _reactNativeReanimated.useDerivedValue)(() => {
+     const dynamicTop = inverted ? bottomPadding.value : 0;
+@@ -77,10 +78,10 @@ const ScrollViewWithBottomPadding = /*#__PURE__*/(0, _react.forwardRef)(({
+     if (contentOffsetY) {
+       const curr = contentOffsetY.value;
+       if (prevContentOffsetY.value === null) {
+-        // Swallow the initial evaluation: emitting `contentOffset {x:0,y:0}`
+-        // in the first animatedProps run overrides the wrapped ScrollView's
+-        // own `contentOffset` prop on Fabric (e.g. a list's initial scroll
+-        // offset), making the list mount scrolled to the top natively.
++        // Reanimated 4.7 classifies settled props by their initial keys.
++        // Preserve the wrapped ScrollView's initial offset so later keyboard
++        // targets remain native props instead of being treated as styles.
++        result.contentOffset = initialContentOffset;
+         // eslint-disable-next-line react-compiler/react-compiler
+         prevContentOffsetY.value = curr;
+       } else if (curr !== prevContentOffsetY.value) {
+@@ -92,7 +93,7 @@ const ScrollViewWithBottomPadding = /*#__PURE__*/(0, _react.forwardRef)(({
+       }
+     }
+     return result;
+-  }, [scrollIndicatorInsets === null || scrollIndicatorInsets === void 0 ? void 0 : scrollIndicatorInsets.bottom, scrollIndicatorInsets === null || scrollIndicatorInsets === void 0 ? void 0 : scrollIndicatorInsets.top, scrollIndicatorInsets === null || scrollIndicatorInsets === void 0 ? void 0 : scrollIndicatorInsets.right, scrollIndicatorInsets === null || scrollIndicatorInsets === void 0 ? void 0 : scrollIndicatorInsets.left, inverted, contentOffsetY]);
++  }, [scrollIndicatorInsets === null || scrollIndicatorInsets === void 0 ? void 0 : scrollIndicatorInsets.bottom, scrollIndicatorInsets === null || scrollIndicatorInsets === void 0 ? void 0 : scrollIndicatorInsets.top, scrollIndicatorInsets === null || scrollIndicatorInsets === void 0 ? void 0 : scrollIndicatorInsets.right, scrollIndicatorInsets === null || scrollIndicatorInsets === void 0 ? void 0 : scrollIndicatorInsets.left, inverted, contentOffsetY, initialContentOffset]);
+   return /*#__PURE__*/_react.default.createElement(ReanimatedClippingScrollView, {
+     animatedProps: animatedProps,
+     applyWorkaroundForContentInsetHitTestBug: applyWorkaroundForContentInsetHitTestBug,
 diff --git a/lib/module/components/KeyboardChatScrollView/index.js b/lib/module/components/KeyboardChatScrollView/index.js
 index d085394..a57c2f9 100644
 --- a/lib/module/components/KeyboardChatScrollView/index.js
@@ -466,6 +502,42 @@ index 5885415..6e694fa 100644
  export { useExtraContentPadding };
  //# sourceMappingURL=index.js.map
 \ No newline at end of file
+diff --git a/lib/module/components/ScrollViewWithBottomPadding/index.js b/lib/module/components/ScrollViewWithBottomPadding/index.js
+index a710401..a86f2e8 100644
+--- a/lib/module/components/ScrollViewWithBottomPadding/index.js
++++ b/lib/module/components/ScrollViewWithBottomPadding/index.js
+@@ -19,6 +19,7 @@ const ScrollViewWithBottomPadding = /*#__PURE__*/forwardRef(({
+   children,
+   ...rest
+ }, ref) => {
++  const initialContentOffset = rest.contentOffset;
+   const prevContentOffsetY = useSharedValue(null);
+   const insets = useDerivedValue(() => {
+     const dynamicTop = inverted ? bottomPadding.value : 0;
+@@ -69,10 +70,10 @@ const ScrollViewWithBottomPadding = /*#__PURE__*/forwardRef(({
+     if (contentOffsetY) {
+       const curr = contentOffsetY.value;
+       if (prevContentOffsetY.value === null) {
+-        // Swallow the initial evaluation: emitting `contentOffset {x:0,y:0}`
+-        // in the first animatedProps run overrides the wrapped ScrollView's
+-        // own `contentOffset` prop on Fabric (e.g. a list's initial scroll
+-        // offset), making the list mount scrolled to the top natively.
++        // Reanimated 4.7 classifies settled props by their initial keys.
++        // Preserve the wrapped ScrollView's initial offset so later keyboard
++        // targets remain native props instead of being treated as styles.
++        result.contentOffset = initialContentOffset;
+         // eslint-disable-next-line react-compiler/react-compiler
+         prevContentOffsetY.value = curr;
+       } else if (curr !== prevContentOffsetY.value) {
+@@ -84,7 +85,7 @@ const ScrollViewWithBottomPadding = /*#__PURE__*/forwardRef(({
+       }
+     }
+     return result;
+-  }, [scrollIndicatorInsets === null || scrollIndicatorInsets === void 0 ? void 0 : scrollIndicatorInsets.bottom, scrollIndicatorInsets === null || scrollIndicatorInsets === void 0 ? void 0 : scrollIndicatorInsets.top, scrollIndicatorInsets === null || scrollIndicatorInsets === void 0 ? void 0 : scrollIndicatorInsets.right, scrollIndicatorInsets === null || scrollIndicatorInsets === void 0 ? void 0 : scrollIndicatorInsets.left, inverted, contentOffsetY]);
++  }, [scrollIndicatorInsets === null || scrollIndicatorInsets === void 0 ? void 0 : scrollIndicatorInsets.bottom, scrollIndicatorInsets === null || scrollIndicatorInsets === void 0 ? void 0 : scrollIndicatorInsets.top, scrollIndicatorInsets === null || scrollIndicatorInsets === void 0 ? void 0 : scrollIndicatorInsets.right, scrollIndicatorInsets === null || scrollIndicatorInsets === void 0 ? void 0 : scrollIndicatorInsets.left, inverted, contentOffsetY, initialContentOffset]);
+   return /*#__PURE__*/React.createElement(ReanimatedClippingScrollView, {
+     animatedProps: animatedProps,
+     applyWorkaroundForContentInsetHitTestBug: applyWorkaroundForContentInsetHitTestBug,
 diff --git a/lib/typescript/components/KeyboardChatScrollView/types.d.ts b/lib/typescript/components/KeyboardChatScrollView/types.d.ts
 index eba1514..6597d80 100644
 --- a/lib/typescript/components/KeyboardChatScrollView/types.d.ts
@@ -883,3 +955,38 @@ index c9c93f3..76a201d 100644
    );
  }
  
+diff --git a/src/components/ScrollViewWithBottomPadding/index.tsx b/src/components/ScrollViewWithBottomPadding/index.tsx
+index 637f79a..755f80c 100644
+--- a/src/components/ScrollViewWithBottomPadding/index.tsx
++++ b/src/components/ScrollViewWithBottomPadding/index.tsx
+@@ -74,6 +74,7 @@ const ScrollViewWithBottomPadding = forwardRef<
+     },
+     ref,
+   ) => {
++    const initialContentOffset = rest.contentOffset;
+     const prevContentOffsetY = useSharedValue<number | null>(null);
+ 
+     const insets = useDerivedValue(() => {
+@@ -149,10 +150,10 @@ const ScrollViewWithBottomPadding = forwardRef<
+         const curr = contentOffsetY.value;
+ 
+         if (prevContentOffsetY.value === null) {
+-          // Swallow the initial evaluation: emitting `contentOffset {x:0,y:0}`
+-          // in the first animatedProps run overrides the wrapped ScrollView's
+-          // own `contentOffset` prop on Fabric (e.g. a list's initial scroll
+-          // offset), making the list mount scrolled to the top natively.
++          // Reanimated 4.7 classifies settled props by their initial keys.
++          // Preserve the wrapped ScrollView's initial offset so later keyboard
++          // targets remain native props instead of being treated as styles.
++          result.contentOffset = initialContentOffset;
+           // eslint-disable-next-line react-compiler/react-compiler
+           prevContentOffsetY.value = curr;
+         } else if (curr !== prevContentOffsetY.value) {
+@@ -169,6 +170,7 @@ const ScrollViewWithBottomPadding = forwardRef<
+       scrollIndicatorInsets?.left,
+       inverted,
+       contentOffsetY,
++      initialContentOffset,
+     ]);
+ 
+     return (
