@@ -70,6 +70,7 @@ import {
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   Image,
   Platform,
   type LayoutChangeEvent,
@@ -1989,6 +1990,44 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   // momentum; scroll events only break follow inside that session, so MVCP
   // compensations and programmatic scrolls never strand a follower.
   const userScrollSessionRef = useRef(false);
+  const listRef = props.listRef;
+  // Reassert the live edge after navigation or foregrounding restores the
+  // native scroll view. Readers who opted out of follow keep their position.
+  useFocusEffect(
+    useCallback(() => {
+      let frame: number | null = null;
+      const repinFollowingEnd = () => {
+        if (frame !== null) {
+          cancelAnimationFrame(frame);
+        }
+        frame = requestAnimationFrame(() => {
+          frame = null;
+          const list = listRef.current;
+          if (!list || !endFollowEnabledRef.current || userScrollSessionRef.current) {
+            return;
+          }
+          const state = list.getState();
+          // Short threads rest at UIKit's adjusted top inset. Writing an
+          // offset during screen attachment can race that inset application.
+          if (state.contentLength >= state.scrollLength && state.scrollLength > 0) {
+            void list.scrollToEnd({ animated: false });
+          }
+        });
+      };
+      repinFollowingEnd();
+      const subscription = AppState.addEventListener("change", (state) => {
+        if (state === "active") {
+          repinFollowingEnd();
+        }
+      });
+      return () => {
+        subscription.remove();
+        if (frame !== null) {
+          cancelAnimationFrame(frame);
+        }
+      };
+    }, [listRef]),
+  );
   const setEndFollow = useCallback(
     (enabled: boolean) => {
       if (endFollowEnabledRef.current === enabled) {
@@ -2909,6 +2948,12 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             // targets land one safe-area short of the true resting offset.
             adjustedInsetCompensation={usesNativeAutomaticInsets ? insets.bottom : 0}
             freeze={props.freeze}
+            // The follow latch owns opting out. A large row measurement or
+            // incoming message can move the end beyond LegendList's default
+            // threshold while the reader is still following.
+            maintainScrollAtEndThreshold={
+              endFollowEnabled && !disclosureToggleSettling ? Number.POSITIVE_INFINITY : 0
+            }
             // Follow the measured end immediately. Animating toward an estimated
             // end races row measurement when a pending message is acknowledged.
             maintainScrollAtEnd={
