@@ -78,6 +78,7 @@ import {
 import { useLocation, useParams, useRouter } from "@tanstack/react-router";
 
 import { useRightPanelStore } from "../rightPanelStore";
+import { useSidebarOrderedThreads } from "../hooks/useSidebarOrderedThreads";
 import {
   isAtomCommandInterrupted,
   settlePromise,
@@ -2896,21 +2897,12 @@ export default function Sidebar() {
     return routeThread === undefined ? EMPTY_THREADS : [routeThread];
   }, [routeThreadKey, workingShelfExpanded, workingThreads]);
 
-  const orderedThreads = useMemo(
-    () => [
-      ...pinnedThreads,
-      ...visibleActiveThreads,
-      ...visibleWorkingThreads,
-      ...visibleSnoozedThreads,
-      ...renderedSettledThreads,
-    ],
-    [
-      pinnedThreads,
-      activeThreads,
-      visibleWorkingThreads,
-      visibleSnoozedThreads,
-      renderedSettledThreads,
-    ],
+  const orderedThreads = useSidebarOrderedThreads(
+    pinnedThreads,
+    visibleActiveThreads,
+    visibleWorkingThreads,
+    visibleSnoozedThreads,
+    renderedSettledThreads,
   );
   const orderedThreadKeys = useMemo(
     () =>
@@ -5034,7 +5026,9 @@ export default function Sidebar() {
                       ];
                       for (const item of sidebarListItems) {
                         if (item.kind === "thread") {
-                          items.push(renderThreadRow(threadByKey.get(item.key)!, item.section));
+                          const thread = threadByKey.get(item.key);
+                          if (thread !== undefined)
+                            items.push(renderThreadRow(thread, item.section));
                           continue;
                         }
                         switch (item.marker) {
