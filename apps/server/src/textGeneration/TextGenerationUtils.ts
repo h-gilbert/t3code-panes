@@ -7,9 +7,12 @@ const decodeJsonThreadTitle = Schema.decodeOption(
   Schema.fromJsonString(Schema.Struct({ title: Schema.String })),
 );
 
-/** Convert an Effect Schema to a flat JSON Schema object, inlining `$defs` when present. */
+/** Convert generated output to a closed JSON Schema, attaching `$defs` when present. */
 export function toJsonSchemaObject(schema: Schema.Top): unknown {
-  const document = Schema.toJsonSchemaDocument(Schema.toType(schema));
+  // Codex structured output rejects object schemas that allow excess properties.
+  const document = Schema.toJsonSchemaDocument(Schema.toType(schema), {
+    onExcessProperty: "error",
+  });
   if (document.definitions && Object.keys(document.definitions).length > 0) {
     return { ...document.schema, $defs: document.definitions };
   }

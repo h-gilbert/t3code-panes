@@ -153,6 +153,7 @@ describe("buildThreadTitlePrompt", () => {
   it("requires each generated field in the strict response schema", () => {
     const { outputSchema } = buildThreadTitlePrompt({ message: "Fix this" });
     expect(toJsonSchemaObject(outputSchema)).toMatchObject({
+      additionalProperties: false,
       required: ["title", "needsRefinement"],
       properties: { title: { type: "string" }, needsRefinement: { type: "boolean" } },
     });
