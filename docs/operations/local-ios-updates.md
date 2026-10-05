@@ -1,7 +1,7 @@
 # Local iPhone updates
 
 The private iPhone app is built from a separate worktree at `.t3/ios/source`.
-This allows updating mobile from `upstream/main` without merging the desktop
+This allows updating mobile to a pinned stable upstream release without merging the desktop
 panes fork or restarting its server. Keep the existing bundle identifier
 `nz.co.hamishgilbert.t3code` and Apple team `XJN9V8FD45` so installing an update
 preserves the app's data and keychain access. The target is Hamish's iPhone 15 Pro.
@@ -14,10 +14,12 @@ From the panes checkout:
 python3 scripts/ios-local.py status --fetch
 ```
 
-This fetches upstream, reads the phone's app inventory, compares the installed
-version with the last verified install, checks local mobile source changes,
+This resolves the latest published stable upstream release and its commit, reads the phone's
+app inventory, compares the installed version with the last verified install, checks local mobile source changes,
 and lists upstream commits affecting mobile or its shared dependencies. Without
-`--fetch`, it uses the last fetched upstream ref. The phone must be reachable
+`--fetch`, it uses the target recorded by the last update in `.t3/ios/upstream-target.json`.
+If no target is recorded, it resolves the latest stable release and requires its tag to have been fetched.
+The phone must be reachable
 and paired with this Mac. A matching version relies on using this build ledger;
 an app installed independently with the same version cannot be distinguished.
 
@@ -36,13 +38,24 @@ relative to the upstream revision. Generated native files are build outputs.
 ## Prepare an update
 
 Run `python3 scripts/ios-local.py update` from the panes checkout. It requires
-a clean iOS worktree, fetches upstream, merges it into the private iOS branch,
+a clean iOS worktree, fetches the latest stable release tag, records its resolved commit,
+merges that commit into the private iOS branch,
 and checks the private source policy. The private changes are local commits,
 so normal upstream merges retain them. Resolve conflicts in the iOS worktree
 and run `python3 scripts/ios-local.py check` after regenerating the native project.
 Do not reset the branch to upstream or replace it with a fresh upstream tree.
 Preserve the current signed app and installation record until its replacement
 is verified. None of these commands push commits or update the panes server.
+
+When updating all clients together, use the same stable tag selected for the panes integration:
+
+```bash
+python3 scripts/ios-local.py update --upstream-tag vX.Y.Z
+```
+
+The helper rejects branch names, raw SHAs and nightly tags. Do not merge `upstream/main`
+to work around a failed stable integration. Keep the target record, source revision and
+build fingerprint together so the ledger identifies what was actually installed.
 
 The original private changes are `abfab6a77` and `929c7e398`, plus the Live Activity
 removal adapted from `911eb17e8`. Only their mobile
@@ -57,7 +70,7 @@ From `.t3/ios/source`, install its pinned dependencies with
 Then, from its `apps/mobile` directory:
 
 ```bash
-APP_VARIANT=production EXPO_NO_GIT_STATUS=1 node_modules/.bin/expo prebuild --clean --platform ios --no-install
+APP_VARIANT=production EXPO_NO_GIT_STATUS=1 ../../node_modules/.bin/vp exec expo prebuild --clean --platform ios --no-install
 cd ios
 pod install
 ```
@@ -70,7 +83,9 @@ the phone connects to. A newer mobile build does not update those servers.
 
 ## Build and install
 
-From the panes checkout, confirm no actual `xcodebuild` is running, then:
+Confirm Xcode's license and first-launch setup are complete. Accept a new license in
+Terminal when Xcode requests it. From the panes checkout, confirm no actual `xcodebuild`
+is running, then:
 
 ```bash
 python3 scripts/ios-local.py build

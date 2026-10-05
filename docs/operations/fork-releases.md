@@ -39,6 +39,30 @@ version, then restarts this app. The confirmation names those servers. Settings 
 A fork release only updates to another fork release. Local promotion builds
 (`-panes.<timestamp>.<digest>`) and the artifact builder's default `-panes.1` never self-update.
 
+### Update Fred independently
+
+When a server update is authorized separately from the Mac restart, use Fred's installed
+managed CLI. Confirm no turns are active immediately before restarting, and preserve a consistent
+read-only SQLite snapshot and its service state first. Do not stop processes by name or start a
+diagnostic server against live state.
+
+Read the current version from `~/.t3/runtime/service-state.json` on Fred, then run:
+
+```sh
+ssh fred '/home/fred/.t3/runtime/versions/<current-version>/t3 update <published-fork-version> --base-dir /home/fred/.t3 --yes'
+```
+
+Use the full version, such as `0.0.45-panes.1791172705900`. An unqualified update can choose the
+stock feed. The managed updater downloads and verifies the release, updates its launcher and
+restarts `t3code.service`. Keep the service's network override and existing T3 home.
+Verify `systemctl --user is-active t3code.service`, the active version in service state, the actual
+running executable recorded by `userdata/server-runtime.json`, remote HTTP reachability and
+retained projects and conversations. Do not infer the running version from the unit's original
+`ExecStart` path alone.
+
+The private iPhone app has its own source, build and installation ledger. A panes release does
+not update it; follow [local iPhone updates](local-ios-updates.md).
+
 ## One-time setup
 
 1. The repository must be public: the desktop and server updaters download release assets

@@ -7,6 +7,45 @@ When releasing is authorized, use [Fork Releases](fork-releases.md) to ship the 
 the Mac and its servers. Use [local desktop promotion](local-desktop-promotion.md) only for an
 explicitly requested one-off local install.
 
+## Updating the Mac, Fred and private iPhone together
+
+Use this sequence for an authorized update across the developer's machines. The detailed
+integration rules below still apply.
+
+1. Read this runbook, [fork compatibility](../internals/fork-compatibility.md),
+   [the sync runbook](../fork/upstream-sync.md) and
+   [custom behavior requirements](../internals/fork-customizations.md). Read relevant earlier
+   Claude and Codex update threads through read-only history access. Inspect current worktrees
+   and changes before choosing the integration base.
+2. Resolve the latest published stable upstream release to a tag and commit. Pin both. Use an
+   isolated integration worktree, review upstream changes against the current fork, and preserve
+   custom behavior through overlapping changes. Unreleased architecture changes on `main`
+   belong to a separate decision.
+3. Run focused regressions, package-level typechecks and changed-file lint. Check migrations on
+   a consistent disposable snapshot of existing state. With interactive testing authorized,
+   verify the integrated development desktop and one iOS Simulator against disposable state.
+   Use the existing Simulator and shared native build lock. Preserve production state and work.
+4. Follow [local iPhone updates](local-ios-updates.md) to merge that same stable tag into the
+   existing private iOS branch, retaining its commits and notification policy. Its source and
+   version are separate from the panes checkout. Install pinned dependencies, regenerate native
+   outputs and run the private checks before starting a detached signed build. Preserve the
+   existing phone bundle identity and saved data.
+5. When publication is authorized, commit and push the verified panes integration onto clean
+   `main`, then run `vp run release:panes` once. Wait for both signed Mac and checksummed Linux
+   artifacts to be published. A prepared Mac candidate or draft release is not an installed update.
+6. Agree on the restart boundary for each environment. The developer normally uses the Mac's
+   update button. If they choose to install the Mac update themselves, leave it ready and continue
+   the independently authorized server and phone work. For an authorized Fred restart, confirm
+   no active turns remain, preserve a consistent state snapshot, then use its managed updater
+   with the exact published fork version. See [fork releases](fork-releases.md).
+7. Install the signed iPhone build with the ledger helper while the phone is unlocked. Verify its
+   inventory matches the recorded version and build. Verify Fred's running executable, managed
+   service, remote listener and retained history. After the Mac installs, verify its actual version,
+   connections and pane restoration. Report each machine separately when one remains pending.
+
+Update operating instructions after the procedure succeeds. Record durable constraints and
+commands, rather than copying an update's scratch checklist into the repository.
+
 ## Scope and authority
 
 A request to check for updates authorizes discovery and comparison. A request to implement upstream
