@@ -1,3 +1,8 @@
+import * as Clock from "effect/Clock";
+import * as DateTime from "effect/DateTime";
+import * as TestClock from "effect/testing/TestClock";
+import * as GitHubGraphQlBudget from "./githubGraphQlBudget.ts";
+import * as SourceControlRateLimit from "./SourceControlRateLimit.ts";
 import { assert, it, afterEach, describe, expect, vi } from "@effect/vitest";
 import * as Cache from "effect/Cache";
 import * as Effect from "effect/Effect";
@@ -403,7 +408,7 @@ describe("GitHubCli.layer", () => {
       const error = yield* gh.execute({ cwd: "/repo", args: ["pr", "list"] }).pipe(Effect.flip);
       assert.strictEqual(error._tag, "GitHubCliRateLimitError");
       expect(mockRun).not.toHaveBeenCalled();
-    }).pipe(Effect.provide(layer.pipe(Layer.provide(GitHubGraphQlBudget.layer)))),
+    }).pipe(Effect.provide(layer.pipe(Layer.provideMerge(GitHubGraphQlBudget.layer)))),
   );
 
   it.effect("keeps quota snapshots separate for verified credentials on the same host", () =>

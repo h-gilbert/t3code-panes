@@ -293,9 +293,9 @@ export const installedBinary = Effect.fn("installedBinary")(function* (
 const main = Command.make(
   "mobile-native-client",
   {
-    mode: Argument.choice("mode", ["check", "ensure"]),
-    platform: Argument.choice("platform", ["ios", "android"]),
-    device: Argument.string("device"),
+    mode: Argument.Literals("mode", ["check", "ensure"]),
+    platform: Argument.Literals("platform", ["ios", "android"]),
+    device: Argument.String("device"),
   },
   Effect.fn("nativeClient.main")(function* ({ mode, platform, device }) {
     yield* validateDevice(platform, device);

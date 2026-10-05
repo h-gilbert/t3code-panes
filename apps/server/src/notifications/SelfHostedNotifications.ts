@@ -10,6 +10,7 @@ import {
   type RelayDeviceRegistrationRequest as RelayDeviceRegistrationRequestType,
 } from "@t3tools/contracts/relay";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import type * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -474,7 +475,10 @@ export const make = Effect.gen(function* () {
       nowMs: now.epochMilliseconds,
     });
     const deliveries: Array<
-      Effect.Effect<{ readonly kind: "device" | "activity"; readonly result: ApnsResult }>
+      Effect.Effect<
+        { readonly kind: "device" | "activity"; readonly result: ApnsResult },
+        Cause.UnknownError
+      >
     > = [];
     if (notification && registration.device.pushToken) {
       deliveries.push(

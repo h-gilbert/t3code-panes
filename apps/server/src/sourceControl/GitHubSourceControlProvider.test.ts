@@ -51,6 +51,7 @@ it.effect("uses the enterprise quota for a current-repository default branch rea
     assert.strictEqual(branch, "main");
   }).pipe(
     Effect.provide(GitHubCli.layer),
+    Effect.provide(GitHubGraphQlBudget.layer),
     Effect.provideService(VcsProcess.VcsProcess, {
       run: () => Effect.succeed(processResult("main")),
     }),

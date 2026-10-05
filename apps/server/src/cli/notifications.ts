@@ -51,15 +51,15 @@ const runWithNotificationSecrets = <A, E>(
     );
   });
 
-const teamIdFlag = Flag.string("team-id").pipe(Flag.withDescription("Apple Developer Team ID."));
-const keyIdFlag = Flag.string("key-id").pipe(Flag.withDescription("APNs signing key ID."));
-const bundleIdFlag = Flag.string("bundle-id").pipe(
+const teamIdFlag = Flag.String("team-id").pipe(Flag.withDescription("Apple Developer Team ID."));
+const keyIdFlag = Flag.String("key-id").pipe(Flag.withDescription("APNs signing key ID."));
+const bundleIdFlag = Flag.String("bundle-id").pipe(
   Flag.withDescription("iOS app bundle identifier used for APNs."),
 );
-const privateKeyFileFlag = Flag.string("private-key-file").pipe(
+const privateKeyFileFlag = Flag.String("private-key-file").pipe(
   Flag.withDescription("Path to the downloaded APNs .p8 private key."),
 );
-const environmentFlag = Flag.choice("environment", ["sandbox", "production"] as const).pipe(
+const environmentFlag = Flag.Literals("environment", ["sandbox", "production"] as const).pipe(
   Flag.withDescription("APNs environment used by this installed build."),
   Flag.withDefault("sandbox"),
 );

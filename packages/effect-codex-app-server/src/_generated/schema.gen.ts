@@ -44244,7 +44244,7 @@ export type ServerNotification__Thread = {
   readonly parentThreadId?: string | null;
   readonly path?: string | null;
   readonly preview: string;
-  readonly projectId: string | null;
+  readonly projectId?: string | null;
   readonly reasoningEffort?: ServerNotification__ReasoningEffort | null;
   readonly recencyAt?: number | null;
   readonly section?: ServerNotification__ThreadSection | null;
@@ -44357,12 +44357,14 @@ export const ServerNotification__Thread = Schema.Struct({
   preview: Schema.String.annotate({
     description: "Usually the first user message in the thread, if available.",
   }),
-  projectId: Schema.Union([
-    Schema.String.annotate({
-      description: "Canonical project assignment owned by app-server, if any.",
-    }),
-    Schema.Null,
-  ]),
+  projectId: Schema.optionalKey(
+    Schema.Union([
+      Schema.String.annotate({
+        description: "Canonical project assignment owned by app-server, if any.",
+      }),
+      Schema.Null,
+    ]),
+  ),
   reasoningEffort: Schema.optionalKey(
     Schema.Union([ServerNotification__ReasoningEffort, Schema.Null]).annotate({
       description:
@@ -44536,7 +44538,7 @@ export type V2ThreadForkResponse__Thread = {
   readonly parentThreadId?: string | null;
   readonly path?: string | null;
   readonly preview: string;
-  readonly projectId: string | null;
+  readonly projectId?: string | null;
   readonly reasoningEffort?: V2ThreadForkResponse__ReasoningEffort | null;
   readonly recencyAt?: number | null;
   readonly section?: V2ThreadForkResponse__ThreadSection | null;
@@ -44650,12 +44652,14 @@ export const V2ThreadForkResponse__Thread = Schema.Struct({
   preview: Schema.String.annotate({
     description: "Usually the first user message in the thread, if available.",
   }),
-  projectId: Schema.Union([
-    Schema.String.annotate({
-      description: "Canonical project assignment owned by app-server, if any.",
-    }),
-    Schema.Null,
-  ]),
+  projectId: Schema.optionalKey(
+    Schema.Union([
+      Schema.String.annotate({
+        description: "Canonical project assignment owned by app-server, if any.",
+      }),
+      Schema.Null,
+    ]),
+  ),
   reasoningEffort: Schema.optionalKey(
     Schema.Union([V2ThreadForkResponse__ReasoningEffort, Schema.Null]).annotate({
       description:
@@ -44729,7 +44733,7 @@ export type V2ThreadListResponse__Thread = {
   readonly parentThreadId?: string | null;
   readonly path?: string | null;
   readonly preview: string;
-  readonly projectId: string | null;
+  readonly projectId?: string | null;
   readonly reasoningEffort?: V2ThreadListResponse__ReasoningEffort | null;
   readonly recencyAt?: number | null;
   readonly section?: V2ThreadListResponse__ThreadSection | null;
@@ -44843,12 +44847,14 @@ export const V2ThreadListResponse__Thread = Schema.Struct({
   preview: Schema.String.annotate({
     description: "Usually the first user message in the thread, if available.",
   }),
-  projectId: Schema.Union([
-    Schema.String.annotate({
-      description: "Canonical project assignment owned by app-server, if any.",
-    }),
-    Schema.Null,
-  ]),
+  projectId: Schema.optionalKey(
+    Schema.Union([
+      Schema.String.annotate({
+        description: "Canonical project assignment owned by app-server, if any.",
+      }),
+      Schema.Null,
+    ]),
+  ),
   reasoningEffort: Schema.optionalKey(
     Schema.Union([V2ThreadListResponse__ReasoningEffort, Schema.Null]).annotate({
       description:
@@ -44922,7 +44928,7 @@ export type V2ThreadMetadataUpdateResponse__Thread = {
   readonly parentThreadId?: string | null;
   readonly path?: string | null;
   readonly preview: string;
-  readonly projectId: string | null;
+  readonly projectId?: string | null;
   readonly reasoningEffort?: V2ThreadMetadataUpdateResponse__ReasoningEffort | null;
   readonly recencyAt?: number | null;
   readonly section?: V2ThreadMetadataUpdateResponse__ThreadSection | null;
@@ -45036,12 +45042,14 @@ export const V2ThreadMetadataUpdateResponse__Thread = Schema.Struct({
   preview: Schema.String.annotate({
     description: "Usually the first user message in the thread, if available.",
   }),
-  projectId: Schema.Union([
-    Schema.String.annotate({
-      description: "Canonical project assignment owned by app-server, if any.",
-    }),
-    Schema.Null,
-  ]),
+  projectId: Schema.optionalKey(
+    Schema.Union([
+      Schema.String.annotate({
+        description: "Canonical project assignment owned by app-server, if any.",
+      }),
+      Schema.Null,
+    ]),
+  ),
   reasoningEffort: Schema.optionalKey(
     Schema.Union([V2ThreadMetadataUpdateResponse__ReasoningEffort, Schema.Null]).annotate({
       description:
@@ -45117,7 +45125,7 @@ export type V2ThreadReadResponse__Thread = {
   readonly parentThreadId?: string | null;
   readonly path?: string | null;
   readonly preview: string;
-  readonly projectId: string | null;
+  readonly projectId?: string | null;
   readonly reasoningEffort?: V2ThreadReadResponse__ReasoningEffort | null;
   readonly recencyAt?: number | null;
   readonly section?: V2ThreadReadResponse__ThreadSection | null;
@@ -45231,12 +45239,14 @@ export const V2ThreadReadResponse__Thread = Schema.Struct({
   preview: Schema.String.annotate({
     description: "Usually the first user message in the thread, if available.",
   }),
-  projectId: Schema.Union([
-    Schema.String.annotate({
-      description: "Canonical project assignment owned by app-server, if any.",
-    }),
-    Schema.Null,
-  ]),
+  projectId: Schema.optionalKey(
+    Schema.Union([
+      Schema.String.annotate({
+        description: "Canonical project assignment owned by app-server, if any.",
+      }),
+      Schema.Null,
+    ]),
+  ),
   reasoningEffort: Schema.optionalKey(
     Schema.Union([V2ThreadReadResponse__ReasoningEffort, Schema.Null]).annotate({
       description:
@@ -45310,7 +45320,7 @@ export type V2ThreadResumeResponse__Thread = {
   readonly parentThreadId?: string | null;
   readonly path?: string | null;
   readonly preview: string;
-  readonly projectId: string | null;
+  readonly projectId?: string | null;
   readonly reasoningEffort?: V2ThreadResumeResponse__ReasoningEffort | null;
   readonly recencyAt?: number | null;
   readonly section?: V2ThreadResumeResponse__ThreadSection | null;
@@ -45424,12 +45434,14 @@ export const V2ThreadResumeResponse__Thread = Schema.Struct({
   preview: Schema.String.annotate({
     description: "Usually the first user message in the thread, if available.",
   }),
-  projectId: Schema.Union([
-    Schema.String.annotate({
-      description: "Canonical project assignment owned by app-server, if any.",
-    }),
-    Schema.Null,
-  ]),
+  projectId: Schema.optionalKey(
+    Schema.Union([
+      Schema.String.annotate({
+        description: "Canonical project assignment owned by app-server, if any.",
+      }),
+      Schema.Null,
+    ]),
+  ),
   reasoningEffort: Schema.optionalKey(
     Schema.Union([V2ThreadResumeResponse__ReasoningEffort, Schema.Null]).annotate({
       description:
@@ -45504,7 +45516,7 @@ export type V2ThreadRevertResponse__Thread = {
   readonly parentThreadId?: string | null;
   readonly path?: string | null;
   readonly preview: string;
-  readonly projectId: string | null;
+  readonly projectId?: string | null;
   readonly reasoningEffort?: V2ThreadRevertResponse__ReasoningEffort | null;
   readonly recencyAt?: number | null;
   readonly section?: V2ThreadRevertResponse__ThreadSection | null;
@@ -45618,12 +45630,14 @@ export const V2ThreadRevertResponse__Thread = Schema.Struct({
   preview: Schema.String.annotate({
     description: "Usually the first user message in the thread, if available.",
   }),
-  projectId: Schema.Union([
-    Schema.String.annotate({
-      description: "Canonical project assignment owned by app-server, if any.",
-    }),
-    Schema.Null,
-  ]),
+  projectId: Schema.optionalKey(
+    Schema.Union([
+      Schema.String.annotate({
+        description: "Canonical project assignment owned by app-server, if any.",
+      }),
+      Schema.Null,
+    ]),
+  ),
   reasoningEffort: Schema.optionalKey(
     Schema.Union([V2ThreadRevertResponse__ReasoningEffort, Schema.Null]).annotate({
       description:
@@ -45698,7 +45712,7 @@ export type V2ThreadStartedNotification__Thread = {
   readonly parentThreadId?: string | null;
   readonly path?: string | null;
   readonly preview: string;
-  readonly projectId: string | null;
+  readonly projectId?: string | null;
   readonly reasoningEffort?: V2ThreadStartedNotification__ReasoningEffort | null;
   readonly recencyAt?: number | null;
   readonly section?: V2ThreadStartedNotification__ThreadSection | null;
@@ -45812,12 +45826,14 @@ export const V2ThreadStartedNotification__Thread = Schema.Struct({
   preview: Schema.String.annotate({
     description: "Usually the first user message in the thread, if available.",
   }),
-  projectId: Schema.Union([
-    Schema.String.annotate({
-      description: "Canonical project assignment owned by app-server, if any.",
-    }),
-    Schema.Null,
-  ]),
+  projectId: Schema.optionalKey(
+    Schema.Union([
+      Schema.String.annotate({
+        description: "Canonical project assignment owned by app-server, if any.",
+      }),
+      Schema.Null,
+    ]),
+  ),
   reasoningEffort: Schema.optionalKey(
     Schema.Union([V2ThreadStartedNotification__ReasoningEffort, Schema.Null]).annotate({
       description:
@@ -45893,7 +45909,7 @@ export type V2ThreadStartResponse__Thread = {
   readonly parentThreadId?: string | null;
   readonly path?: string | null;
   readonly preview: string;
-  readonly projectId: string | null;
+  readonly projectId?: string | null;
   readonly reasoningEffort?: V2ThreadStartResponse__ReasoningEffort | null;
   readonly recencyAt?: number | null;
   readonly section?: V2ThreadStartResponse__ThreadSection | null;
@@ -46007,12 +46023,14 @@ export const V2ThreadStartResponse__Thread = Schema.Struct({
   preview: Schema.String.annotate({
     description: "Usually the first user message in the thread, if available.",
   }),
-  projectId: Schema.Union([
-    Schema.String.annotate({
-      description: "Canonical project assignment owned by app-server, if any.",
-    }),
-    Schema.Null,
-  ]),
+  projectId: Schema.optionalKey(
+    Schema.Union([
+      Schema.String.annotate({
+        description: "Canonical project assignment owned by app-server, if any.",
+      }),
+      Schema.Null,
+    ]),
+  ),
   reasoningEffort: Schema.optionalKey(
     Schema.Union([V2ThreadStartResponse__ReasoningEffort, Schema.Null]).annotate({
       description:
@@ -46086,7 +46104,7 @@ export type V2ThreadUnarchiveResponse__Thread = {
   readonly parentThreadId?: string | null;
   readonly path?: string | null;
   readonly preview: string;
-  readonly projectId: string | null;
+  readonly projectId?: string | null;
   readonly reasoningEffort?: V2ThreadUnarchiveResponse__ReasoningEffort | null;
   readonly recencyAt?: number | null;
   readonly section?: V2ThreadUnarchiveResponse__ThreadSection | null;
@@ -46200,12 +46218,14 @@ export const V2ThreadUnarchiveResponse__Thread = Schema.Struct({
   preview: Schema.String.annotate({
     description: "Usually the first user message in the thread, if available.",
   }),
-  projectId: Schema.Union([
-    Schema.String.annotate({
-      description: "Canonical project assignment owned by app-server, if any.",
-    }),
-    Schema.Null,
-  ]),
+  projectId: Schema.optionalKey(
+    Schema.Union([
+      Schema.String.annotate({
+        description: "Canonical project assignment owned by app-server, if any.",
+      }),
+      Schema.Null,
+    ]),
+  ),
   reasoningEffort: Schema.optionalKey(
     Schema.Union([V2ThreadUnarchiveResponse__ReasoningEffort, Schema.Null]).annotate({
       description:
@@ -46696,6 +46716,11 @@ export const V2ItemGuardianApprovalReviewStartedNotification__GuardianApprovalRe
   ).annotate({
     identifier: "V2ItemGuardianApprovalReviewStartedNotification__GuardianApprovalReviewAction",
   });
+
+export type V2ThreadReadResponse = { readonly thread: V2ThreadReadResponse__Thread };
+export const V2ThreadReadResponse = Schema.Struct({
+  thread: V2ThreadReadResponse__Thread,
+}).annotate({ title: "ThreadReadResponse", identifier: "V2ThreadReadResponse" });
 
 export type ServerNotification__ItemGuardianApprovalReviewStartedNotification = {
   readonly action: ServerNotification__GuardianApprovalReviewAction;
@@ -55254,11 +55279,6 @@ export const V2ThreadReadParams = Schema.Struct({
   threadId: Schema.String,
 }).annotate({ title: "ThreadReadParams" });
 
-export type V2ThreadReadResponse = { readonly thread: V2ThreadReadResponse__Thread };
-export const V2ThreadReadResponse = Schema.Struct({
-  thread: V2ThreadReadResponse__Thread,
-}).annotate({ title: "ThreadReadResponse" });
-
 export type V2ThreadReadResponse__AgentMessageDelivery = "async";
 export const V2ThreadReadResponse__AgentMessageDelivery = Schema.Literal("async");
 
@@ -56080,6 +56100,17 @@ export const V2ThreadRevertResponse__ThreadExtra = Schema.Record(
   Schema.String,
   Schema.Json.annotate({ expected: "JSON value" }),
 ).annotate({ description: "Extra app-server data for a thread." });
+
+export type V2ThreadRollbackParams = { readonly threadId: string; readonly numTurns: number };
+export const V2ThreadRollbackParams = Schema.Struct({
+  threadId: Schema.String,
+  numTurns: Schema.Number.check(Schema.isInt().annotate({ expected: "an integer" })).check(
+    Schema.isGreaterThanOrEqualTo(0).annotate({ expected: "a value greater than or equal to 0" }),
+  ),
+});
+
+export type V2ThreadRollbackResponse = V2ThreadReadResponse;
+export const V2ThreadRollbackResponse = V2ThreadReadResponse;
 
 export type V2ThreadSectionCreateParams = {
   readonly appearance?: V2ThreadSectionCreateParams__ThreadSectionAppearance | null;

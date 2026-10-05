@@ -71,6 +71,15 @@ class GeneratorError extends Schema.TaggedError<GeneratorError>()("GeneratorErro
 }
 
 const ManualSchemas: Record<string, Schema.Json> = {
+  // Older Codex servers still expose count-based rollback. Keep its typed fallback
+  // alongside paginated history and thread/revert on current servers.
+  V2ThreadRollbackParams: {
+    type: "object",
+    properties: { threadId: { type: "string" }, numTurns: { type: "integer", minimum: 0 } },
+    required: ["threadId", "numTurns"],
+    additionalProperties: false,
+  },
+  V2ThreadRollbackResponse: { $ref: "#/components/schemas/V2ThreadReadResponse" },
   GetAuthStatusParams: {
     type: "object",
     title: "GetAuthStatusParams",
@@ -783,9 +792,20 @@ const generateFiles = Effect.fn("generateFiles")(function* () {
     );
 
     for (const [definitionName, definitionSchema] of Object.entries(parsed.definitions ?? {})) {
-      const compatibleDefinitionSchema =
+      let compatibleDefinitionSchema =
         Codex0150DefinitionSchemas[definitionName] ??
         applyCodex0151DefinitionCompatibility(file.exportName, definitionName, definitionSchema);
+      // Codex before 0.159 omits projectId; the same client still connects to it.
+      if (
+        definitionName === "Thread" &&
+        isJsonSchemaNode(compatibleDefinitionSchema) &&
+        Array.isArray(compatibleDefinitionSchema.required)
+      ) {
+        compatibleDefinitionSchema = {
+          ...compatibleDefinitionSchema,
+          required: compatibleDefinitionSchema.required.filter((field) => field !== "projectId"),
+        };
+      }
       aggregateSchemas[localDefinitionNames.get(definitionName)!] = stripNullDefaults(
         normalizeNullableTypes(
           rewriteExternalRefs(
@@ -855,7 +875,10 @@ const generateFiles = Effect.fn("generateFiles")(function* () {
     `https://raw.githubusercontent.com/openai/codex/${UPSTREAM_REF}/codex-rs/app-server-protocol/schema/typescript/ServerNotification.ts`,
   );
 
-  const clientRequestEntries = parseRequestEntries(clientRequestRaw);
+  const clientRequestEntries = [
+    ...parseRequestEntries(clientRequestRaw),
+    { method: "thread/rollback", paramsType: "ThreadRollbackParams" },
+  ];
   const clientNotificationEntries = parseNotificationEntries(clientNotificationRaw);
   const serverRequestEntries = parseRequestEntries(serverRequestRaw);
   const serverNotificationEntries = parseNotificationEntries(serverNotificationRaw);

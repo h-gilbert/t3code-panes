@@ -134,10 +134,14 @@ function makeWebSocketTransferRecorder(): WebSocketTransferRecorder {
 
   return {
     connect: (url, protocols, cookie) => {
-      const nextSocket = new NodeSocket.NodeWS.WebSocket(url, protocols, {
-        headers: { cookie },
-        perMessageDeflate: true,
-      }) as NodeWebSocketWithTransport;
+      const nextSocket = new NodeSocket.NodeWS.WebSocket(
+        url,
+        protocols as string | string[] | undefined,
+        {
+          headers: { cookie },
+          perMessageDeflate: true,
+        },
+      ) as NodeWebSocketWithTransport;
       socket = nextSocket;
       nextSocket.once("open", () => {
         transport = nextSocket._socket ?? null;
@@ -182,7 +186,7 @@ function countingWsRpcProtocolLayer(input: {
   readonly recorder: WebSocketTransferRecorder;
 }) {
   const webSocketConstructorLayer = Layer.succeed(Socket.WebSocketConstructor, (url, protocols) =>
-    input.recorder.connect(url, protocols, input.cookie),
+    input.recorder.connect(url, protocols as string | string[] | undefined, input.cookie),
   );
   return RpcClient.layerProtocolSocket().pipe(
     Layer.provide(

@@ -22,6 +22,8 @@ import {
 import { normalizeGitRemoteUrl } from "@t3tools/shared/git";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
 
+import * as GitHubGraphQlBudget from "./githubGraphQlBudget.ts";
+import * as SourceControlRateLimit from "./SourceControlRateLimit.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import {
   decodeGitHubPullRequestEntries,
@@ -29,6 +31,11 @@ import {
   decodeGitHubPullRequestListJson,
   type NormalizedGitHubPullRequestRecord,
 } from "./gitHubPullRequests.ts";
+
+export const AllowGitHubReserve = Context.Reference<boolean>(
+  "t3/sourceControl/AllowGitHubReserve",
+  { defaultValue: () => false },
+);
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -39,7 +46,7 @@ export const PinnedGitHubCredential = Context.Reference<{
   readonly credentialFingerprint: string;
 } | null>("t3/sourceControl/PinnedGitHubCredential", { defaultValue: () => null });
 
-function targetsVerifiedHost(args: ReadonlyArray<string>, host: string): boolean {
+function commandHosts(args: ReadonlyArray<string>): Array<string | null> {
   const hosts: Array<string | null> = [];
   const repositoryHost = (repository: string | undefined) => {
     if (repository === undefined) return null;
@@ -63,6 +70,11 @@ function targetsVerifiedHost(args: ReadonlyArray<string>, host: string): boolean
     else if (arg.startsWith("-R")) hosts.push(repositoryHost(arg.slice(2)));
     else if (/^https?:\/\//i.test(arg)) hosts.push(repositoryHost(arg));
   }
+  return hosts;
+}
+
+function targetsVerifiedHost(args: ReadonlyArray<string>, host: string): boolean {
+  const hosts = commandHosts(args);
   return hosts.length > 0 && hosts.every((target) => target === host);
 }
 
@@ -100,7 +112,7 @@ export class GitHubCliAuthenticationError extends Schema.TaggedError<GitHubCliAu
 
 export class GitHubCliRateLimitError extends Schema.TaggedError<GitHubCliRateLimitError>()(
   "GitHubCliRateLimitError",
-  gitHubCliFailureFields,
+  { ...gitHubCliFailureFields, retryAt: Schema.optionalKey(Schema.Finite) },
 ) {
   get detail(): string {
     return "GitHub API rate limit exceeded. Run `gh api rate_limit` to inspect the quota and reset time.";
@@ -283,6 +295,8 @@ export class GitHubCli extends Context.Service<
       readonly stdin?: string;
       readonly env?: NodeJS.ProcessEnv;
       readonly maxOutputBytes?: number;
+      readonly rateLimitHost?: string;
+      readonly allowReserve?: boolean;
     }) => Effect.Effect<VcsProcess.VcsProcessOutput, GitHubCliError>;
 
     readonly listOpenPullRequests: (input: {
@@ -331,6 +345,7 @@ export class GitHubCli extends Context.Service<
 
     readonly getDefaultBranch: (input: {
       readonly cwd: string;
+      readonly rateLimitHost?: string;
     }) => Effect.Effect<string | null, GitHubCliError>;
 
     readonly checkoutPullRequest: (input: {
@@ -543,8 +558,10 @@ export function selectGitHubBaseRepository(input: {
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const process = yield* VcsProcess.VcsProcess;
+  const budget = yield* GitHubGraphQlBudget.GitHubGraphQlBudget;
+  const limits = yield* SourceControlRateLimit.SourceControlRateLimit;
 
-  const execute: GitHubCli["Service"]["execute"] = Effect.fn("GitHubCli.execute")(
+  const executeRaw: GitHubCli["Service"]["execute"] = Effect.fn("GitHubCli.executeRaw")(
     function* (input) {
       const credential = yield* PinnedGitHubCredential;
       if (credential !== null && !targetsVerifiedHost(input.args, credential.host)) {
@@ -1007,6 +1024,7 @@ export const make = Effect.gen(function* () {
     getDefaultBranch: (input) =>
       execute({
         cwd: input.cwd,
+        ...(input.rateLimitHost === undefined ? {} : { rateLimitHost: input.rateLimitHost }),
         args: ["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"],
       }).pipe(
         Effect.map((value) => {
@@ -1022,4 +1040,7 @@ export const make = Effect.gen(function* () {
   });
 });
 
-export const layer = Layer.effect(GitHubCli, make);
+export const layer = Layer.effect(GitHubCli, make).pipe(
+  Layer.provide(GitHubGraphQlBudget.layer),
+  Layer.provide(SourceControlRateLimit.layer),
+);

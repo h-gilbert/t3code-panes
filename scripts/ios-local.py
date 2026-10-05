@@ -85,13 +85,32 @@ def check_artifact_policy(artifact):
         raise RuntimeError('Built app contains the Live Activity SDK.')
 
 
-def update():
+def stable_target(fetch=False, tag=None):
+    record_path = STATE / 'upstream-target.json'
+    if not fetch and tag is None and record_path.is_file():
+        return json.loads(record_path.read_text())
+    if tag is None:
+        release = json.loads(run('gh', 'api', 'repos/pingdotgg/t3code/releases/latest'))
+        if release.get('draft') or release.get('prerelease'):
+            raise RuntimeError('The upstream release is not stable.')
+        tag = release['tag_name']
+    if not re.fullmatch(r'v\d+\.\d+\.\d+', tag):
+        raise RuntimeError('iOS updates require a stable release tag, never upstream/main or a nightly.')
+    ref = 'refs/upstream-tags/' + tag
+    if fetch:
+        run('git', 'fetch', 'upstream', 'refs/tags/' + tag + ':' + ref)
+    revision = run('git', 'rev-parse', ref + '^{commit}')
+    return {'tag': tag, 'revision': revision}
+
+
+def update(tag=None):
     if run('git', 'status', '--porcelain'):
         raise RuntimeError('Commit the private iOS changes before updating; they must survive the merge.')
-    run('git', 'fetch', 'upstream', 'main')
-    subprocess.run(['git', 'merge', '--no-edit', 'upstream/main'], cwd=SOURCE, check=True)
+    target = stable_target(fetch=True, tag=tag)
+    save(STATE / 'upstream-target.json', target)
+    subprocess.run(['git', 'merge', '--no-edit', target['revision']], cwd=SOURCE, check=True)
     check_source_policy()
-    print('Upstream merged; private iOS policy passed. Install dependencies and regenerate iOS before building.')
+    print('Stable release merged; private iOS policy passed. Install dependencies and regenerate iOS before building.')
 
 
 def run(*args, cwd=SOURCE):
@@ -136,10 +155,9 @@ def installed_app():
 
 
 def status(fetch):
-    if fetch:
-        run('git', 'fetch', 'upstream', 'main')
+    target = stable_target(fetch=fetch)
     print('Source:', SOURCE)
-    print('Upstream:', run('git', 'log', '-1', '--format=%h %s', 'upstream/main'))
+    print('Stable upstream:', target['tag'], target['revision'])
     builds = list((STATE / 'builds').glob('*/record.json'))
     if builds:
         latest = max(builds, key=lambda path: int(path.parent.name))
@@ -161,7 +179,7 @@ def status(fetch):
     print('Phone version matches record:', matches)
     if not matches:
         print('Installed source is unknown; the phone no longer matches the recorded build.')
-    changes = run('git', 'log', '--oneline', record['sourceRevision'] + '..upstream/main',
+    changes = run('git', 'log', '--oneline', record['sourceRevision'] + '..' + target['revision'],
                   '--', *INPUTS)
     print('Upstream changes affecting mobile inputs:\n' + (changes or 'None.'))
 
@@ -177,7 +195,7 @@ def build():
     directory = STATE / 'builds' / number
     directory.mkdir(parents=True)
     record = {'sourceRevision': run('git', 'rev-parse', 'HEAD'),
-              'upstreamRevision': run('git', 'merge-base', 'HEAD', 'upstream/main'),
+              'upstreamRevision': stable_target()['revision'],
               'sourceFingerprint': fingerprint(), 'buildNumber': number,
               'device': DEVICE, 'bundleIdentifier': BUNDLE, 'startedAt': now(),
               'source': str(SOURCE), 'status': 'building'}
@@ -273,11 +291,12 @@ if __name__ == '__main__':
     parser.add_argument('command', choices=['status', 'update', 'check', 'build', '_build', 'install'])
     parser.add_argument('number', nargs='?')
     parser.add_argument('--fetch', action='store_true')
+    parser.add_argument('--upstream-tag', help='Pin an explicit stable upstream release tag.')
     args = parser.parse_args()
     if args.command == 'status':
         status(args.fetch)
     elif args.command == 'update':
-        update()
+        update(args.upstream_tag)
     elif args.command == 'check':
         check_source_policy()
         check_native_policy(SOURCE / 'apps/mobile/ios')

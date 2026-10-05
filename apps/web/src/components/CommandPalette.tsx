@@ -51,6 +51,7 @@ import * as Option from "effect/Option";
 import {
   ArrowLeftIcon,
   CheckIcon,
+  ChevronRightIcon,
   CornerLeftUpIcon,
   FileSearchIcon,
   FolderGit2Icon,

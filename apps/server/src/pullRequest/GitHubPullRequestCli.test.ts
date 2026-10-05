@@ -1,3 +1,4 @@
+import * as SourceControlRateLimit from "../sourceControl/SourceControlRateLimit.ts";
 import { afterEach, assert, expect, it, vi } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
@@ -202,6 +203,8 @@ it.effect(
       let activeToken = "broad-credential";
       const commands: VcsProcess.VcsProcessInput[] = [];
       const github = yield* GitHubCli.make.pipe(
+        Effect.provide(GitHubGraphQlBudget.layer),
+        Effect.provide(SourceControlRateLimit.layer),
         Effect.provideService(VcsProcess.VcsProcess, {
           run: (input) =>
             Effect.sync(() => {

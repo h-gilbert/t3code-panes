@@ -335,6 +335,28 @@ it.layer(NodeServices.layer)("checkGrokProviderStatus", (it) => {
     }),
   );
 
+  it.effect("rejects broken Grok versions before launching models or an agent", () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-grok-old-" });
+          const binaryPath = writeFakeCli({
+            directory,
+            name: "grok",
+            source:
+              'if (process.argv[2] === "--version") process.stdout.write("grok 1.0.12\\n"); else throw new Error("broken CLI must not be launched");',
+          });
+          return yield* checkGrokProviderStatus(decodeGrokSettings({ enabled: true, binaryPath }));
+        }),
+      );
+      expect(snapshot.installed).toBe(true);
+      expect(snapshot.status).toBe("error");
+      expect(snapshot.version).toBe("1.0.12");
+      expect(snapshot.message).toContain("Update Grok");
+    }),
+  );
+
   // A stand-in for the Grok CLI: `--version` and `models` print canned text,
   // and `agent stdio` execs the mock ACP agent so `initialize` returns model metadata.
   const writeFakeGrokCli = (input: { readonly modelsOutput: string; readonly acp: boolean }) =>

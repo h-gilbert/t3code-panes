@@ -147,5 +147,27 @@ class PrivateSourcePolicyTests(unittest.TestCase):
             ios.check_source_policy(self.source)
 
 
+
+
+
+class StableUpdateTests(unittest.TestCase):
+    def test_unreleased_refs_are_rejected_before_fetch_or_merge(self):
+        for tag in ['main', 'upstream/main', 'v0.0.46-nightly', 'deadbeef']:
+            with self.subTest(tag=tag), patch.object(ios, 'run') as run:
+                with self.assertRaises(RuntimeError):
+                    ios.stable_target(fetch=True, tag=tag)
+                run.assert_not_called()
+
+    def test_release_discovery_rejects_prereleases(self):
+        with patch.object(ios, 'run', return_value=json.dumps({'tag_name': 'v0.0.46', 'prerelease': True})):
+            with self.assertRaises(RuntimeError):
+                ios.stable_target(fetch=True)
+
+    def test_update_merges_the_pinned_commit_and_preserves_private_branch(self):
+        with patch.object(ios, 'run', return_value=''), patch.object(ios, 'stable_target', return_value={'tag': 'v0.0.45', 'revision': 'stable-sha'}), patch.object(ios, 'save'), patch.object(ios.subprocess, 'run') as merge, patch.object(ios, 'check_source_policy') as policy:
+            ios.update('v0.0.45')
+            merge.assert_called_once_with(['git', 'merge', '--no-edit', 'stable-sha'], cwd=ios.SOURCE, check=True)
+            policy.assert_called_once_with()
+
 if __name__ == '__main__':
     unittest.main()

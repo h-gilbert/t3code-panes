@@ -1,3 +1,4 @@
+import { compareSemverVersions } from "@t3tools/shared/semver";
 import {
   type CustomModelSetting,
   type GrokSettings,
@@ -418,6 +419,22 @@ export const checkGrokProviderStatus = Effect.fn("checkGrokProviderStatus")(func
         status: "error",
         auth: { status: "unknown" },
         message: "Grok CLI is installed but failed to run.",
+      },
+    });
+  }
+
+  if (version !== null && compareSemverVersions(version, "1.0.13") < 0) {
+    return buildServerProvider({
+      presentation: GROK_PRESENTATION,
+      enabled: grokSettings.enabled,
+      checkedAt,
+      models: fallbackModels,
+      probe: {
+        installed: true,
+        version,
+        status: "error",
+        auth: { status: "unknown" },
+        message: "Grok CLI versions older than 1.0.13 cannot run agents. Update Grok to continue.",
       },
     });
   }

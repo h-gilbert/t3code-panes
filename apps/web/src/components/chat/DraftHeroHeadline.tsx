@@ -343,7 +343,6 @@ export function DraftHeroHeadline({
         <TooltipTrigger
           render={
             <InlineButton
-              tone="muted"
               className="pointer-events-auto"
               onClick={() =>
                 void startScratch().then((started) => {
@@ -365,7 +364,10 @@ export function DraftHeroHeadline({
     <div className="mx-auto flex w-full max-w-5xl flex-col items-center">
       <h1
         aria-label={headingLabel}
-        className={cn("w-full text-center font-normal text-foreground tracking-tight", compact ? "text-lg" : "text-2xl sm:text-3xl")}
+        className={cn(
+          "w-full text-center font-normal text-foreground tracking-tight",
+          compact ? "text-lg" : "text-2xl sm:text-3xl",
+        )}
       >
         {isScratchDraft ? (
           <>What should we work on?</>
