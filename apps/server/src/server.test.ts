@@ -7871,6 +7871,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 remoteUrl: input.remoteUrl ?? "",
                 cloneUrl: input.remoteUrl ?? "",
                 repository: null,
+                hasContents: false,
               }),
             cloneRepository: (input) =>
               Deferred.await(cloneGate).pipe(

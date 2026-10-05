@@ -126,7 +126,7 @@ export const hashBundle = Effect.fn("hashBundle")(function* (root: string) {
           entries.push(`directory:${key}`);
           yield* visit(key);
         } else {
-          const chunks = yield* fs.stream(absolute, { chunkSize: FileSystem.Size(65536) }).pipe(
+          const chunks = yield* fs.stream(absolute, { chunkSize: 65536 }).pipe(
             Stream.mapEffect((chunk) => digest(chunk)),
             Stream.runCollect,
           );
@@ -188,7 +188,6 @@ const command = Effect.fn("nativeClient.command")(function* (
         T3CODE_MOBILE_SELF_HOSTED: "0",
         MOBILE_VERSION_POLICY: "appVersion",
         T3CODE_IOS_PERSONAL_TEAM: "0",
-        T3CODE_MOBILE_SELF_HOSTED: "0",
         CI: "1",
         EXPO_NO_GIT_STATUS: "1",
       },

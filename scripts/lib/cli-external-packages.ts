@@ -33,6 +33,7 @@ export const CLI_RUNTIME_EXTERNAL_PREFIXES = [
   "ffi-rs",
   "@yuuang/",
   "@ff-labs/",
+  "@napi-rs/keyring",
   "@clerk/electron-passkeys",
   "@msgpackr-extract/",
   "msgpackr-extract",

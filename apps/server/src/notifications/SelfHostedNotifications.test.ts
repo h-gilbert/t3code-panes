@@ -11,6 +11,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   makeApnsProviderToken,
   makeEnvironmentAggregate,
+  makeNotificationPayload,
   notificationForTransition,
 } from "./SelfHostedNotifications.ts";
 
@@ -125,6 +126,20 @@ describe("iOS-origin completion notifications", () => {
   it("alerts for a completed iOS turn and suppresses all other origins", () => {
     expect(transition("completed", true)?.row.phase).toBe("completed");
     expect(transition("completed", false)).toBeNull();
+  });
+
+  it("groups ordinary pushes by environment and thread while preserving tap routing", () => {
+    const notification = transition("completed", true)!;
+    expect(makeNotificationPayload(notification)).toEqual({
+      aps: {
+        alert: { title: notification.title, body: notification.body },
+        sound: "default",
+        "thread-id": "environment-1:thread-1",
+      },
+      environmentId: "environment-1",
+      threadId: "thread-1",
+      deepLink: "/environment-1/thread-1",
+    });
   });
 
   it.each(["waiting_for_approval", "waiting_for_input", "failed"] as const)(

@@ -266,6 +266,21 @@ export function notificationForTransition(input: {
   return row ? { title: row.threadTitle, body: `${row.status}: ${row.projectTitle}`, row } : null;
 }
 
+export function makeNotificationPayload(
+  notification: NonNullable<ReturnType<typeof notificationForTransition>>,
+) {
+  return {
+    aps: {
+      alert: { title: notification.title, body: notification.body },
+      sound: "default",
+      "thread-id": `${notification.row.environmentId}:${notification.row.threadId}`,
+    },
+    environmentId: notification.row.environmentId,
+    threadId: notification.row.threadId,
+    deepLink: notification.row.deepLink,
+  };
+}
+
 function base64UrlJson(value: unknown): string {
   return Encoding.encodeBase64Url(encodeUnknownJson(value));
 }
@@ -489,15 +504,7 @@ export const make = Effect.gen(function* () {
             pushType: "alert",
             priority: "10",
             nowSeconds: Math.floor(now.epochMilliseconds / 1_000),
-            payload: {
-              aps: {
-                alert: { title: notification.title, body: notification.body },
-                sound: "default",
-              },
-              environmentId: notification.row.environmentId,
-              threadId: notification.row.threadId,
-              deepLink: notification.row.deepLink,
-            },
+            payload: makeNotificationPayload(notification),
           }).then((result) => ({ kind: "device" as const, result })),
         ),
       );
