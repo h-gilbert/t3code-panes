@@ -5052,6 +5052,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         />
       ) : null}
       <ProviderModelPicker
+        environmentId={environmentId}
         isComposerOwned
         compact={composerControlsCompact}
         iconOnly={compactLayout && isComposerModelPickerIconOnly}

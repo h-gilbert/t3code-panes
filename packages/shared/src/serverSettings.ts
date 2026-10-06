@@ -345,6 +345,9 @@ export function applyServerSettingsPatch(
           ),
         }
       : {}),
+    ...(patch.starredModelSelection !== undefined
+      ? { starredModelSelection: patch.starredModelSelection }
+      : {}),
     ...(patch.defaultModelSelection !== undefined
       ? { defaultModelSelection: patch.defaultModelSelection }
       : {}),

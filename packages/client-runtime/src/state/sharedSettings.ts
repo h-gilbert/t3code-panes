@@ -28,6 +28,7 @@ const SHARED_SERVER_SETTING_KEYS = [
   "newWorktreesStartFromOrigin",
   "sourceControlWritingStyle",
   "textGenerationModelSelection",
+  "starredModelSelection",
 ] as const satisfies ReadonlyArray<keyof ServerSettings & keyof ServerSettingsPatch>;
 
 export type SharedServerSettingKey = (typeof SHARED_SERVER_SETTING_KEYS)[number];
@@ -62,6 +63,17 @@ export function filterSharedServerPatch(
   sourceSettings = settings,
   targetIsSource = false,
 ): ServerSettingsPatch {
+  if (!targetIsSource && patch.starredModelSelection) {
+    const selection = patch.starredModelSelection;
+    if (
+      !settings ||
+      (sourceSettings?.providerInstances[selection.instanceId]?.driver ?? selection.instanceId) !==
+        (settings.providerInstances[selection.instanceId]?.driver ?? selection.instanceId) ||
+      !isModelSelectionProviderEnabled(settings, selection)
+    ) {
+      patch = Struct.omit(patch, ["starredModelSelection"]);
+    }
+  }
   const instanceId =
     patch.textGenerationModelSelection?.instanceId ??
     sourceSettings?.textGenerationModelSelection.instanceId;
@@ -166,6 +178,9 @@ export function findSharedSettingsMismatches(input: {
       input.primaryCapabilities,
       environment.settings,
     );
+    if (!Object.hasOwn(expected, "starredModelSelection")) {
+      actual = Struct.omit(actual, ["starredModelSelection"]);
+    }
     if (!expected.textGenerationModelSelection) {
       actual = Struct.omit(actual, ["textGenerationModelSelection"]);
     }

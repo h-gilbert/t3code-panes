@@ -18,6 +18,39 @@ const projectId = ProjectId.make("project-a");
 const otherProjectId = ProjectId.make("project-b");
 
 describe("resolveProjectSettings", () => {
+  it("uses the single starred model over project and legacy defaults, and restores them on clear", () => {
+    const starred = createModelSelection(ProviderInstanceId.make("codex"), "gpt-6-astra", [
+      { id: "reasoningEffort", value: "high" },
+    ]);
+    const projectModel = createModelSelection(ProviderInstanceId.make("codex"), "gpt-6-sol");
+    const settings = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      starredModelSelection: starred,
+      projectSettingsOverrides: { [projectId]: { defaultModelSelection: projectModel } },
+    });
+    expect(resolveProjectSettings(settings, projectId).settings.defaultModelSelection).toEqual(
+      starred,
+    );
+    expect(resolveProjectSettings(settings, null).settings.defaultModelSelection).toEqual(starred);
+    const replaced = applyServerSettingsPatch(settings, {
+      starredModelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-6-luna"),
+    });
+    expect(resolveProjectSettings(replaced, projectId).settings.defaultModelSelection?.model).toBe(
+      "gpt-6-luna",
+    );
+    const cleared = applyServerSettingsPatch(replaced, { starredModelSelection: null });
+    expect(resolveProjectSettings(cleared, projectId).settings.defaultModelSelection).toEqual(
+      projectModel,
+    );
+  });
+
+  it("falls back to project defaults when the starred provider is disabled", () => {
+    const settings = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      providers: { claudeAgent: { enabled: false } },
+      starredModelSelection: createModelSelection(ProviderInstanceId.make("claudeAgent"), "opus"),
+    });
+    expect(resolveProjectSettings(settings, projectId).settings.defaultModelSelection).toBeNull();
+  });
+
   it("inherits every scopable key when the project has no overrides", () => {
     const resolved = resolveProjectSettings(DEFAULT_SERVER_SETTINGS, projectId);
     expect(resolved.settings).toBe(DEFAULT_SERVER_SETTINGS);

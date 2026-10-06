@@ -143,7 +143,10 @@ interface ProviderModelsSectionProps {
    */
   readonly onChange: (next: ReadonlyArray<CustomModelDefinition>) => void;
   readonly onHiddenModelsChange: (next: ReadonlyArray<string>) => void;
-  readonly onFavoriteModelsChange: (next: ReadonlyArray<string>) => void;
+  readonly onFavoriteModelsChange: (
+    next: ReadonlyArray<string>,
+    anchor?: HTMLButtonElement,
+  ) => void;
   readonly onModelOrderChange: (next: ReadonlyArray<string>) => void;
 }
 
@@ -278,12 +281,8 @@ export function ProviderModelsSection({
     );
   };
 
-  const handleToggleFavorite = (slug: string) => {
-    if (favoriteModelSet.has(slug)) {
-      onFavoriteModelsChange(favoriteModels.filter((model) => model !== slug));
-      return;
-    }
-    onFavoriteModelsChange([...favoriteModels, slug]);
+  const handleToggleFavorite = (slug: string, anchor: HTMLButtonElement) => {
+    onFavoriteModelsChange([slug], anchor);
   };
 
   // Rows only trade places with a neighbour in the same group (favorites,
@@ -319,17 +318,17 @@ export function ProviderModelsSection({
                 ? "text-yellow-500 hover:text-yellow-600"
                 : "text-muted-foreground/40 hover:text-muted-foreground",
             )}
-            onClick={() => handleToggleFavorite(model.slug)}
-            aria-label={`${isFavorite ? "Remove" : "Add"} ${model.name} ${
-              isFavorite ? "from" : "to"
-            } favorites`}
+            onClick={(event) => handleToggleFavorite(model.slug, event.currentTarget)}
+            aria-label={
+              isFavorite ? `Edit default model ${model.name}` : `Use ${model.name} as default model`
+            }
           />
         }
       >
         <StarIcon className={cn("size-3", isFavorite && "fill-current")} />
       </TooltipTrigger>
       <TooltipPopup side="top">
-        {isFavorite ? "Remove from favorites" : "Add to favorites"}
+        {isFavorite ? "Edit default model" : "Use as default model"}
       </TooltipPopup>
     </Tooltip>
   );
@@ -573,7 +572,7 @@ export function ProviderModelsSection({
           return (
             <div key={`${instanceId}:${model.slug}:group`}>
               {startsGroup && favoriteCount > 0 && group === "favorite"
-                ? groupLabel("Favorites", index === 0)
+                ? groupLabel("Default model", index === 0)
                 : null}
               {startsGroup && favoriteCount > 0 && group === "visible"
                 ? groupLabel("All", index === 0)

@@ -388,6 +388,17 @@ export function useEnvironmentSettings<T = UnifiedSettings>(
   return useMergedSettings(serverSettings ?? DEFAULT_SERVER_SETTINGS, selector);
 }
 
+/** Model pickers in composers use their environment; global settings use the primary. */
+export function useSettingsTarget<T = UnifiedSettings>(
+  environmentId: EnvironmentId | null,
+  selector?: (settings: UnifiedSettings) => T,
+): T {
+  const settings = useAtomValue(
+    environmentId ? serverEnvironment.settingsValueAtom(environmentId) : primaryServerSettingsAtom,
+  );
+  return useMergedSettings(settings ?? DEFAULT_SERVER_SETTINGS, selector);
+}
+
 /** Primary-only settings access for the settings UI and other explicitly global surfaces. */
 export function usePrimarySettings<T = UnifiedSettings>(
   selector?: (settings: UnifiedSettings) => T,
@@ -418,7 +429,7 @@ export function usePrimarySettingsAvailable(): boolean {
  * a user preference does not silently drift between machines. Client keys go
  * through client persistence.
  */
-function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
+export function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
   const persistServerSettings = useAtomCommand(
     serverEnvironment.updateSettings,
     "server settings update",

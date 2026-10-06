@@ -303,6 +303,32 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     ).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
+  it.effect("persists, replaces, and clears the single starred default model", () =>
+    Effect.gen(function* () {
+      const serverConfig = yield* ServerConfig.ServerConfig;
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const fileSystem = yield* FileSystem.FileSystem;
+      for (const selection of [
+        createModelSelection(ProviderInstanceId.make("claudeAgent"), "claude-opus-5-5", [
+          { id: "effort", value: "high" },
+        ]),
+        createModelSelection(ProviderInstanceId.make("codex"), "gpt-6.1-sol", [
+          { id: "reasoningEffort", value: "medium" },
+        ]),
+        null,
+      ]) {
+        const patch = yield* decodeSettingsPatch({ starredModelSelection: selection });
+        const next = yield* serverSettings.updateSettings(patch);
+        assert.deepEqual(next.starredModelSelection, selection);
+        const persisted = yield* decodeServerSettings(
+          JSON.parse(yield* fileSystem.readFileString(serverConfig.settingsPath)),
+        );
+        assert.deepEqual(persisted.starredModelSelection, selection);
+        assert.deepEqual((yield* serverSettings.getSettings).starredModelSelection, selection);
+      }
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect("persists and broadcasts thread settlement settings", () =>
     Effect.scoped(
       Effect.gen(function* () {

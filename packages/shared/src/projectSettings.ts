@@ -63,6 +63,14 @@ export function resolveProjectSettings(
   // project straight through, and that is null until the shell snapshot lands.
   project?: LegacyProjectSettingsFields | null,
 ): ResolvedProjectSettings {
+  const starredSelection = settings.starredModelSelection;
+  const useStarredSelection =
+    starredSelection !== null &&
+    starredSelection !== undefined &&
+    isModelSelectionProviderEnabled(settings, starredSelection);
+  if (useStarredSelection) {
+    settings = { ...settings, defaultModelSelection: starredSelection };
+  }
   const stored = projectId === null ? undefined : settings.projectSettingsOverrides[projectId];
   const overrides: ProjectSettingsOverrides =
     project == null || settings.projectSettingsFolded
@@ -85,6 +93,7 @@ export function resolveProjectSettings(
   const effective: Record<string, unknown> = { ...settings };
   for (const key of PROJECT_SCOPED_SERVER_SETTING_KEYS) {
     if (!Object.hasOwn(overrides, key)) continue;
+    if (key === "defaultModelSelection" && useStarredSelection) continue;
     const value = overrides[key];
     // A model on a disabled provider falls back to the environment, like the
     // environment-level guards do for these keys.

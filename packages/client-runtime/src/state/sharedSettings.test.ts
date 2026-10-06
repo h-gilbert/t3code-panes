@@ -44,6 +44,65 @@ describe("supportsSharedSettingsSync", () => {
 });
 
 describe("splitSharedServerPatch", () => {
+  it("shares one starred default with Mac and Fred, including clear", () => {
+    const selection = {
+      instanceId: ProviderInstanceId.make("codex"),
+      model: "gpt-6-astra",
+      options: [{ id: "reasoningEffort", value: "high" }],
+    };
+    for (const starredModelSelection of [selection, null]) {
+      const patch = { starredModelSelection };
+      expect(splitSharedServerPatch(patch)).toEqual({ sharedPatch: patch, localPatch: {} });
+      expect(filterSharedServerPatch(patch, restartCapabilities, DEFAULT_SERVER_SETTINGS)).toEqual(
+        patch,
+      );
+    }
+    expect(
+      findSharedSettingsMismatches({
+        primaryEnvironmentId: primaryId,
+        primarySettings: { ...DEFAULT_SERVER_SETTINGS, starredModelSelection: selection },
+        environments: [
+          {
+            environmentId: boxId,
+            label: "Fred",
+            syncEligible: true,
+            settings: DEFAULT_SERVER_SETTINGS,
+          },
+        ],
+      }),
+    ).toEqual([{ environmentId: boxId, label: "Fred" }]);
+  });
+
+  it("does not share a starred model with a disabled provider or a different driver", () => {
+    const selection = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-6-astra" };
+    expect(
+      filterSharedServerPatch({ starredModelSelection: selection }, restartCapabilities, {
+        ...DEFAULT_SERVER_SETTINGS,
+        providers: {
+          ...DEFAULT_SERVER_SETTINGS.providers,
+          codex: { ...DEFAULT_SERVER_SETTINGS.providers.codex, enabled: false },
+        },
+      }),
+    ).toEqual({});
+    expect(
+      filterSharedServerPatch(
+        { starredModelSelection: selection },
+        restartCapabilities,
+        {
+          ...DEFAULT_SERVER_SETTINGS,
+          providerInstances: {
+            ...DEFAULT_SERVER_SETTINGS.providerInstances,
+            [selection.instanceId]: {
+              ...DEFAULT_SERVER_SETTINGS.providerInstances[selection.instanceId],
+              driver: ProviderDriverKind.make("claudeAgent"),
+            },
+          },
+        },
+        DEFAULT_SERVER_SETTINGS,
+      ),
+    ).toEqual({});
+  });
+
   it("keeps project overrides local: project ids belong to one environment", () => {
     const patch = {
       projectSettingsOverrides: { [ProjectId.make("project")]: { defaultAutoPull: true } },
@@ -128,6 +187,7 @@ describe("pickSharedServerSettings", () => {
       "sidebarAutoSettleAfterDays",
       "sidebarAutoSettleOnMerge",
       "sourceControlWritingStyle",
+      "starredModelSelection",
       "textGenerationModelSelection",
     ]);
   });

@@ -6,6 +6,9 @@ import {
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
+import { createModelCapabilities } from "@t3tools/shared/model";
+import { getDefaultModelThinkingBudgetDescriptors } from "./DefaultModelThinkingBudgetPicker";
+
 import { deriveProviderInstanceEntries } from "../../providerInstances";
 import {
   adjacentModelPickerProvider,
@@ -283,5 +286,67 @@ describe("adjacentModelPickerProvider", () => {
         direction: -1,
       }),
     ).toBe(claude.instanceId);
+  });
+});
+
+describe("default model thinking budgets", () => {
+  it("provider shortcuts skip the removed favorites rail", () => {
+    const ready = entry("ready", "codex");
+    expect(
+      adjacentModelPickerProvider({
+        entries: [ready],
+        selectedInstanceId: ready.instanceId,
+        direction: 1,
+        includeFavorites: false,
+        disabledInstanceIds: undefined,
+        selectableUnavailableInstanceIds: undefined,
+      }),
+    ).toBe(ready.instanceId);
+  });
+
+  it("uses the model catalog's budgets and saved choice, excluding prompt-only effort and unrelated options", () => {
+    const selection = {
+      instanceId: ProviderInstanceId.make("codex"),
+      model: "test-model",
+      options: [{ id: "reasoningEffort", value: "high" }],
+    };
+    const model = {
+      slug: selection.model,
+      name: "Test model",
+      isCustom: false,
+      capabilities: createModelCapabilities({
+        optionDescriptors: [
+          {
+            id: "reasoningEffort",
+            label: "Reasoning effort",
+            type: "select",
+            options: [
+              { id: "low", label: "Low", isDefault: true },
+              { id: "high", label: "High" },
+              { id: "ultrathink", label: "Ultrathink" },
+            ],
+            promptInjectedValues: ["ultrathink"],
+          },
+          { id: "thinking", label: "Thinking", type: "boolean", currentValue: true },
+          { id: "fastMode", label: "Fast", type: "boolean" },
+        ],
+      }),
+    };
+    const descriptors = getDefaultModelThinkingBudgetDescriptors(model, selection);
+    expect(descriptors.map((descriptor) => descriptor.id)).toEqual(["reasoningEffort", "thinking"]);
+    expect(descriptors[0]).toMatchObject({
+      currentValue: "high",
+      options: [
+        { id: "low", label: "Low", isDefault: true },
+        { id: "high", label: "High" },
+      ],
+    });
+    expect(getDefaultModelThinkingBudgetDescriptors(undefined, selection)).toEqual([]);
+    expect(
+      getDefaultModelThinkingBudgetDescriptors(
+        { ...model, capabilities: createModelCapabilities({ optionDescriptors: [] }) },
+        selection,
+      ),
+    ).toEqual([]);
   });
 });

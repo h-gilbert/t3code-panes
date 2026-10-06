@@ -373,11 +373,15 @@ interface ProviderInstanceCardProps {
    */
   readonly headerAction?: ReactNode | undefined;
   readonly setup?: ReactNode;
+  readonly defaultThinkingBudget?: ReactNode;
   readonly hiddenModels: ReadonlyArray<string>;
   readonly favoriteModels: ReadonlyArray<string>;
   readonly modelOrder: ReadonlyArray<string>;
   readonly onHiddenModelsChange: (next: ReadonlyArray<string>) => void;
-  readonly onFavoriteModelsChange: (next: ReadonlyArray<string>) => void;
+  readonly onFavoriteModelsChange: (
+    next: ReadonlyArray<string>,
+    anchor?: HTMLButtonElement,
+  ) => void;
   readonly onModelOrderChange: (next: ReadonlyArray<string>) => void;
   readonly onRunUpdate?: (() => void) | undefined;
   readonly isUpdating?: boolean | undefined;
@@ -415,6 +419,7 @@ export function ProviderInstanceCard({
   onDelete,
   headerAction,
   setup,
+  defaultThinkingBudget,
   hiddenModels,
   favoriteModels,
   modelOrder,
@@ -893,8 +898,9 @@ export function ProviderInstanceCard({
         >
           <div className="px-3 py-3 sm:px-4">
             <p className="mb-3 text-xs text-muted-foreground">
-              Favorites, visibility, and ordering are saved on this device. Custom models are saved
-              on the selected environment.
+              The starred model and thinking budget are shared across connected environments.
+              Visibility and ordering are saved on this device. Custom models are saved on the
+              selected environment.
             </p>
             <ProviderModelsSection
               instanceId={instanceId}
@@ -909,6 +915,7 @@ export function ProviderInstanceCard({
               onFavoriteModelsChange={onFavoriteModelsChange}
               onModelOrderChange={onModelOrderChange}
             />
+            {defaultThinkingBudget}
           </div>
         </SettingsSection>
       ) : null}

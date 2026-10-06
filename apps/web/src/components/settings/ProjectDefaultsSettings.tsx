@@ -158,9 +158,11 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
             id="default-model"
             title="Model"
             description={
-              isProjectScope
-                ? "Model for new threads in this project."
-                : "Default model for new threads. Projects can override it."
+              settings.starredModelSelection
+                ? "The starred model is used for all new threads. Clear its star to use these defaults."
+                : isProjectScope
+                  ? "Model for new threads in this project."
+                  : "Default model for new threads. Projects can override it."
             }
             status={
               unavailable || mixedModel || modelSource === "project"
@@ -178,6 +180,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
               selection && activeEntry ? (
                 <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
                   <ProviderModelPicker
+                    {...(representative ? { environmentId: representative.environmentId } : {})}
                     activeInstanceId={selection.instanceId}
                     model={selection.model}
                     lockedProvider={null}

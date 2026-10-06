@@ -7,12 +7,13 @@ for other customizations before each update.
 
 ## New-thread model
 
-New threads follow the saved default model (project override, then environment
-setting), as upstream does, including when reusing an empty draft or switching its
-project; explicit model picks in a draft remain intact. The developer sets the
-default in Settings, so do not reintroduce a hard-coded new-thread model. The shared
-Codex fallback model is Sol, and the provider prefers GPT-6 Sol over Astra and
-older Sol when available.
+Starring a model sets one shared default model and thinking budget across connected
+environments. It takes precedence over project and environment defaults, including
+when reusing an empty draft or switching projects. Explicit model picks in a draft
+remain intact. The star opens the budget popup; clearing the star restores project
+and environment defaults. Do not reintroduce a favorites list or a hard-coded
+new-thread model. The shared Codex fallback model is Sol, and the provider prefers
+GPT-6 Sol over Astra and older Sol when available.
 
 Workspace panes hide the Git toolbar. Switching a draft to another environment
 must clear its old branch and worktree context and use that environment's current

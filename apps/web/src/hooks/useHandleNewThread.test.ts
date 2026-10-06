@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import type { RuntimeMode } from "@t3tools/contracts";
+import { ProviderInstanceId, type ModelSelection, type RuntimeMode } from "@t3tools/contracts";
 
 const testState = vi.hoisted(() => {
   let completeProjectFileRead: (value: null) => void = () => undefined;
@@ -9,6 +9,7 @@ const testState = vi.hoisted(() => {
     newWorktreesStartFromOrigin: false,
     defaultModelSelection: null as { instanceId: string; model: string } | null,
     defaultRuntimeMode: "full-access" as RuntimeMode,
+    starredModelSelection: null as ModelSelection | null,
   };
   let storedDraft: {
     readonly draftId: string;
@@ -57,6 +58,7 @@ const testState = vi.hoisted(() => {
         defaultThreadEnvMode: workspaceDefaults.envMode,
         newWorktreesStartFromOrigin: workspaceDefaults.startFromOrigin,
         defaultModelSelection: null,
+        starredModelSelection: null,
         defaultRuntimeMode: "full-access",
       };
       router.state.location.href = "/";
@@ -102,24 +104,15 @@ vi.mock("@t3tools/contracts", async (importOriginal) => ({
   DEFAULT_RUNTIME_MODE: "default",
 }));
 vi.mock("../components/ui/toast", () => ({ toastManager: { add: vi.fn() } }));
-vi.mock("@t3tools/shared/projectSettings", () => ({
-  // Environment settings pass through; the tests set project fields on the
-  // project record, which the hook still honors until the server folds them.
-  resolveProjectSettings: (settings: Record<string, unknown>) => ({
-    settings,
-    sources: { defaultModelSelection: "environment", defaultThreadEnvMode: "environment" },
-    overrides: {},
-  }),
-}));
-vi.mock("@t3tools/shared/projectSettings", () => ({
-  // Environment settings pass through; the tests set project fields on the
-  // project record, which the hook still honors until the server folds them.
-  resolveProjectSettings: (settings: Record<string, unknown>) => ({
-    settings,
-    sources: { defaultModelSelection: "environment", defaultThreadEnvMode: "environment" },
-    overrides: {},
-  }),
-}));
+vi.mock("@t3tools/shared/projectSettings", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@t3tools/shared/projectSettings")>();
+  const { DEFAULT_SERVER_SETTINGS } = await import("@t3tools/contracts");
+  return {
+    ...original,
+    resolveProjectSettings: (settings: Parameters<typeof original.resolveProjectSettings>[0]) =>
+      original.resolveProjectSettings({ ...DEFAULT_SERVER_SETTINGS, ...settings }, null),
+  };
+});
 vi.mock("@t3tools/shared/threadEnvMode", () => ({
   resolveDefaultThreadEnvMode: (input: {
     readonly projectFile: "local" | "worktree" | null;
@@ -239,6 +232,37 @@ describe("useNewThreadHandler", () => {
       savedDefault,
       { replaceOptions: true },
     );
+  });
+
+  it("new threads switch from starred Opus to starred Sol with the new thinking budget", async () => {
+    for (const selection of [
+      {
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        model: "claude-opus-5-5",
+        options: [{ id: "effort", value: "high" }],
+      },
+      {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-6.1-sol",
+        options: [{ id: "reasoningEffort", value: "medium" }],
+      },
+    ]) {
+      testState.reset(null);
+      testState.targetSettings.starredModelSelection = selection;
+      const opened = useNewThreadHandler()({
+        environmentId: "environment-ssh",
+        projectId: "project-remote",
+      } as never);
+      testState.completeProjectFileRead(null);
+      const draft = await opened;
+      expect(testState.draftStore.setModelSelection).toHaveBeenCalledWith(
+        draft?.draftId,
+        selection,
+        {
+          replaceOptions: true,
+        },
+      );
+    }
   });
 
   it("keeps the sticky model when there is no saved default or thread to carry from", async () => {

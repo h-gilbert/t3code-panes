@@ -1,3 +1,4 @@
+import { DefaultModelThinkingBudgetPicker } from "../chat/DefaultModelThinkingBudgetPicker";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { useAtomValue } from "@effect/atom-react";
 import { connectionStatusTitle } from "@t3tools/client-runtime/connection";
@@ -13,6 +14,7 @@ import {
   ProviderDriverKind,
   type ProviderInstanceConfig,
   type ProviderInstanceId,
+  type ModelSelection,
   resolveEnvironmentMachineKind,
   resolveProviderInstanceEnabled,
 } from "@t3tools/contracts";
@@ -120,13 +122,6 @@ function withoutProviderInstanceKey<V>(
   const next = { ...record } as Record<ProviderInstanceId, V>;
   delete next[key];
   return next;
-}
-
-function withoutProviderInstanceFavorites(
-  favorites: ReadonlyArray<{ readonly provider: ProviderInstanceId; readonly model: string }>,
-  instanceId: ProviderInstanceId,
-) {
-  return favorites.filter((favorite) => favorite.provider !== instanceId);
 }
 
 const PROVIDER_SETTINGS = DRIVER_OPTIONS.map((definition) => ({
@@ -586,6 +581,8 @@ export function EnvironmentProviderSettings({
     reportFailure: false,
   });
   const [isRefreshingProviders, setIsRefreshingProviders] = useState(false);
+  const [budgetSelection, setBudgetSelection] = useState<ModelSelection | null>(null);
+  const [budgetAnchor, setBudgetAnchor] = useState<HTMLButtonElement | null>(null);
   const [isAddInstanceDialogOpen, setIsAddInstanceDialogOpen] = useState(false);
   const [selectedInstanceId, setSelectedInstanceId] = useState<ProviderInstanceId | null>(
     targetInstanceId ?? null,
@@ -849,6 +846,7 @@ export function EnvironmentProviderSettings({
   const updateProviderFavoriteModels = (
     instanceId: ProviderInstanceId,
     nextFavoriteModels: ReadonlyArray<string>,
+    anchor?: HTMLButtonElement,
   ) => {
     const favoriteModels = [
       ...new Set(
@@ -858,12 +856,18 @@ export function EnvironmentProviderSettings({
         }),
       ),
     ];
-    updateClientSettings({
-      favorites: [
-        ...withoutProviderInstanceFavorites(settings.favorites ?? [], instanceId),
-        ...favoriteModels.map((model) => ({ provider: instanceId, model })),
-      ],
-    });
+    const model = favoriteModels.at(-1);
+    const selection = model
+      ? settings.starredModelSelection?.instanceId === instanceId &&
+        settings.starredModelSelection.model === model
+        ? settings.starredModelSelection
+        : { instanceId, model }
+      : null;
+    if (anchor) {
+      setBudgetAnchor(anchor);
+      setBudgetSelection(selection);
+    }
+    updateSettings({ starredModelSelection: selection });
   };
 
   const resetDefaultInstance = (driverKind: ProviderDriverKind) => {
@@ -900,9 +904,10 @@ export function EnvironmentProviderSettings({
       hiddenModels: [],
       modelOrder: [],
     };
-    const favoriteModels = Arr.filterMap(settings.favorites ?? [], (favorite) =>
-      favorite.provider === row.instanceId ? Result.succeed(favorite.model) : Result.failVoid,
-    );
+    const favoriteModels =
+      settings.starredModelSelection?.instanceId === row.instanceId
+        ? [settings.starredModelSelection.model]
+        : [];
     const resetLabel = driverOption?.label ?? String(row.driver);
 
     return (
@@ -961,6 +966,24 @@ export function EnvironmentProviderSettings({
         }
         hiddenModels={modelPreferences.hiddenModels}
         favoriteModels={favoriteModels}
+        defaultThinkingBudget={
+          mode === "editor" && budgetSelection?.instanceId === row.instanceId ? (
+            <DefaultModelThinkingBudgetPicker
+              model={liveProvider?.models.find((model) => model.slug === budgetSelection.model)}
+              selection={budgetSelection}
+              anchor={budgetAnchor}
+              open
+              onOpenChange={(open) => {
+                if (!open) setBudgetSelection(null);
+              }}
+              onChange={(selection) => updateSettings({ starredModelSelection: selection })}
+              onClear={() => {
+                updateSettings({ starredModelSelection: null });
+                setBudgetSelection(null);
+              }}
+            />
+          ) : null
+        }
         modelOrder={modelPreferences.modelOrder}
         onHiddenModelsChange={(hiddenModels) =>
           updateProviderModelPreferences(row.instanceId, {
@@ -968,7 +991,9 @@ export function EnvironmentProviderSettings({
             hiddenModels,
           })
         }
-        onFavoriteModelsChange={(next) => updateProviderFavoriteModels(row.instanceId, next)}
+        onFavoriteModelsChange={(next, anchor) =>
+          updateProviderFavoriteModels(row.instanceId, next, anchor)
+        }
         onModelOrderChange={(modelOrder) =>
           updateProviderModelPreferences(row.instanceId, {
             ...modelPreferences,

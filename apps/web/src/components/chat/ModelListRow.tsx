@@ -37,7 +37,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
   unavailable?: boolean;
   jumpLabel?: string | null;
   disabledReason?: string | null;
-  onToggleFavorite: () => void;
+  onToggleFavorite: (anchor: HTMLButtonElement) => void;
 }) {
   const ProviderIcon = PROVIDER_ICON_BY_PROVIDER[props.driverKind] ?? null;
   const row = (
@@ -108,13 +108,13 @@ export const ModelListRow = memo(function ModelListRow(props: {
                 )}
                 onClick={(event) => {
                   event.stopPropagation();
-                  props.onToggleFavorite();
+                  props.onToggleFavorite(event.currentTarget);
                 }}
                 onKeyDown={(event) => {
                   event.stopPropagation();
                 }}
                 disabled={Boolean(props.disabledReason)}
-                aria-label={props.isFavorite ? "Remove from favorites" : "Add to favorites"}
+                aria-label={props.isFavorite ? "Edit default model" : "Use as default model"}
               >
                 <StarIcon
                   className={cn(
@@ -126,7 +126,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
             }
           />
           <TooltipPopup side="top" align="center">
-            {props.isFavorite ? "Remove from favorites" : "Add to favorites"}
+            {props.isFavorite ? "Edit default model" : "Use as default model"}
           </TooltipPopup>
         </Tooltip>
       </div>

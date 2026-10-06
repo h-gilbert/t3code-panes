@@ -230,7 +230,7 @@ describe("EnvironmentProviderSettings routing", () => {
   });
 
   it.each([
-    ["onFavoriteModelsChange", { favorites: [{ provider: codexId, model: "chosen" }] }],
+    ["onFavoriteModelsChange", { starredModelSelection: { instanceId: codexId, model: "chosen" } }],
     [
       "onHiddenModelsChange",
       { providerModelPreferences: { [codexId]: { hiddenModels: ["chosen"], modelOrder: [] } } },
@@ -239,7 +239,7 @@ describe("EnvironmentProviderSettings routing", () => {
       "onModelOrderChange",
       { providerModelPreferences: { [codexId]: { hiddenModels: [], modelOrder: ["chosen"] } } },
     ],
-  ])("saves %s on this device without changing the selected server", (action, expected) => {
+  ])("saves %s in its backing store", (action, expected) => {
     atoms.providers = [provider()];
     const panel = renderPanel();
     const editor = visitElements(
@@ -249,8 +249,13 @@ describe("EnvironmentProviderSettings routing", () => {
     expect(editor).not.toBeNull();
     if (!editor) throw new Error("Provider editor was not rendered");
     (editor.props[action] as (models: string[]) => void)(["chosen"]);
-    expect(settingsState.updateClientSettings).toHaveBeenCalledExactlyOnceWith(expected);
-    expect(settingsState.updateSettings).not.toHaveBeenCalled();
+    const writesServer = action === "onFavoriteModelsChange";
+    const update = writesServer ? settingsState.updateSettings : settingsState.updateClientSettings;
+    const otherUpdate = writesServer
+      ? settingsState.updateClientSettings
+      : settingsState.updateSettings;
+    expect(update).toHaveBeenCalledExactlyOnceWith(expected);
+    expect(otherUpdate).not.toHaveBeenCalled();
   });
 
   it("does not substitute another account when the requested instance was removed", () => {
