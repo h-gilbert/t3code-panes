@@ -1815,7 +1815,8 @@ function ComposerPromptEditorInner({
     contextIds: string[];
   } => {
     let snapshot = snapshotRef.current;
-    editor.getEditorState().read(() => {
+    // Imperative reads must include pending controlled updates, such as clearing a sent prompt.
+    editor.read(() => {
       const nextValue = $getRoot().getTextContent();
       const fallbackCursor = clampCollapsedComposerCursor(nextValue, snapshotRef.current.cursor);
       const nextCursor = clampCollapsedComposerCursor(
@@ -1882,9 +1883,9 @@ function ComposerPromptEditorInner({
       },
       requestCitationComment: (request) => {
         citationCommentRequestRef.current = request;
-        const target = editor
-          .getEditorState()
-          .read(() => $consumeComposerCitationCommentRequest(citationCommentRequestRef));
+        const target = editor.read(() =>
+          $consumeComposerCitationCommentRequest(citationCommentRequestRef),
+        );
         if (target) setOpenCitationComment(target);
       },
       readSnapshot,

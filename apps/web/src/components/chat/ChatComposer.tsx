@@ -3538,7 +3538,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       options?: {
         expectedText?: string;
         focusEditorAfterReplace?: boolean;
-        citationComment?: { start: number; sourceAnchor: AssistantCitationSourceAnchor };
+        citationComment?: {
+          start: number;
+          previousValue: string;
+          sourceAnchor: AssistantCitationSourceAnchor;
+        };
       },
     ): boolean => {
       if (
@@ -3561,7 +3565,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       const nextExpandedCursor = expandCollapsedComposerCursor(next.text, nextCursor);
       if (options?.citationComment) {
         composerEditorRef.current?.requestCitationComment({
-          previousValue: currentText,
+          previousValue: options.citationComment.previousValue,
           value: next.text,
           citationStart: options.citationComment.start,
           sourceAnchor: options.citationComment.sourceAnchor,
@@ -5674,8 +5678,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       if (options?.clipboardData) {
         text = importPastedComposerText(options.clipboardData, importContextFragment);
       }
-      const prompt = promptRef.current;
-      const cursor = position === "cursor" ? readComposerSnapshot().expandedCursor : prompt.length;
+      // A submitted draft can clear before React and the editor finish synchronizing.
+      const snapshot = readComposerSnapshot();
+      const prompt = activePendingUserInput
+        ? snapshot.value
+        : (getComposerDraft(composerDraftTarget)?.prompt ?? "");
+      promptRef.current = prompt;
+      const cursor =
+        position === "cursor"
+          ? expandCollapsedComposerCursor(
+              prompt,
+              clampCollapsedComposerCursor(prompt, snapshot.cursor),
+            )
+          : prompt.length;
       const needsLeadingSpace =
         (options?.ensureLeadingBoundary ?? false) &&
         cursor > 0 &&
@@ -5689,6 +5704,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           ? {
               citationComment: {
                 start: cursor + (needsLeadingSpace ? 1 : 0),
+                previousValue: snapshot.value,
                 sourceAnchor: options.citationCommentAnchor,
               },
               focusEditorAfterReplace: false,
@@ -5697,7 +5713,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       );
     },
     [
+      activePendingUserInput,
       applyPromptReplacement,
+      composerDraftTarget,
+      getComposerDraft,
       isComposerApprovalState,
       isConnecting,
       pendingUserInputs.length,
