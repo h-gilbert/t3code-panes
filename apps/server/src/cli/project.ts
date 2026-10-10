@@ -32,6 +32,7 @@ import { layerConfig as SqlitePersistenceLayerLive } from "../persistence/Layers
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import {
   clearPersistedServerRuntimeState,
+  isProcessAlive,
   readPersistedServerRuntimeState,
 } from "../serverRuntimeState.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
@@ -368,7 +369,11 @@ const tryResolveLiveProjectExecutionMode = Effect.fn("tryResolveLiveProjectExecu
       origin: runtimeState.value.origin,
       cause: attempted.failure,
     });
-    yield* clearPersistedServerRuntimeState(config.serverRuntimeStatePath);
+    // A live server that refused this request (auth, a slow start) is still the
+    // home's server; only a dead one's record is stale.
+    if (!isProcessAlive(runtimeState.value.pid)) {
+      yield* clearPersistedServerRuntimeState(config.serverRuntimeStatePath);
+    }
     return Option.none<{ readonly origin: string }>();
   },
 );

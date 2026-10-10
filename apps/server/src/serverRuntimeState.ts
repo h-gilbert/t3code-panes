@@ -127,6 +127,43 @@ export const isProcessAlive = (pid: number): boolean => {
   }
 };
 
+/**
+ * Advertise this server as the home's server. Clients and the SSH launcher
+ * find a home's server through this one record, so a second server sharing the
+ * home (hand-started or SSH-launched) must not displace a live one: doing so
+ * hides the service, and the launcher keeps starting servers beside it. The
+ * supervised service always claims the record, so clients converge back to
+ * it. Returns the live record this server deferred to, if any.
+ */
+export const claimServerRuntimeState = (input: {
+  readonly path: string;
+  readonly state: PersistedServerRuntimeState;
+}) =>
+  Effect.gen(function* () {
+    if (!input.state.serviceManaged) {
+      const existing = yield* readPersistedServerRuntimeState(input.path);
+      if (
+        Option.isSome(existing) &&
+        existing.value.pid !== input.state.pid &&
+        isProcessAlive(existing.value.pid)
+      ) {
+        return existing;
+      }
+    }
+    yield* persistServerRuntimeState(input);
+    return Option.none<PersistedServerRuntimeState>();
+  });
+
+/** Remove the runtime record only while it still names `pid`. */
+export const releaseServerRuntimeState = (input: { readonly path: string; readonly pid: number }) =>
+  readPersistedServerRuntimeState(input.path).pipe(
+    Effect.flatMap((existing) =>
+      Option.isSome(existing) && existing.value.pid === input.pid
+        ? clearPersistedServerRuntimeState(input.path)
+        : Effect.void,
+    ),
+  );
+
 export const readPersistedServerRuntimeState = (path: string) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;

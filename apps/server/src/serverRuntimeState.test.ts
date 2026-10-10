@@ -202,4 +202,79 @@ describe("serverRuntimeState", () => {
       }
     }).pipe(Effect.provide(NodeServices.layer)),
   );
+
+  it.effect("keeps one advertised server per home", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-server-runtime-state-test-",
+      });
+      const statePath = path.join(root, "server-runtime.json");
+      const record = (pid: number, serviceManaged?: true) => ({
+        version: 1 as const,
+        pid,
+        port: 4_971,
+        origin: "http://127.0.0.1:4971",
+        startedAt: "2026-06-20T00:00:00.000Z",
+        ...(serviceManaged ? { serviceManaged } : {}),
+      });
+      const recordedPid = ServerRuntimeState.readPersistedServerRuntimeState(statePath).pipe(
+        Effect.map(Option.map((state) => state.pid)),
+      );
+      // The test runner's parent stands in for another live server.
+      const liveServer = record(process.ppid, true);
+      yield* ServerRuntimeState.persistServerRuntimeState({ path: statePath, state: liveServer });
+
+      // A hand-started or SSH-launched server defers to the live one, and
+      // stopping it leaves that server's record alone.
+      const holder = yield* ServerRuntimeState.claimServerRuntimeState({
+        path: statePath,
+        state: record(process.pid),
+      });
+      assert.deepEqual(holder, Option.some(liveServer));
+      yield* ServerRuntimeState.releaseServerRuntimeState({ path: statePath, pid: process.pid });
+      assert.deepEqual(yield* recordedPid, Option.some(process.ppid));
+
+      // The service always claims the record, then removes it on stop.
+      const claimed = yield* ServerRuntimeState.claimServerRuntimeState({
+        path: statePath,
+        state: record(process.pid, true),
+      });
+      assert.isTrue(Option.isNone(claimed));
+      assert.deepEqual(yield* recordedPid, Option.some(process.pid));
+      yield* ServerRuntimeState.releaseServerRuntimeState({ path: statePath, pid: process.pid });
+      assert.isTrue(Option.isNone(yield* recordedPid));
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("replaces the record of a server that is no longer running", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-server-runtime-state-test-",
+      });
+      const statePath = path.join(root, "server-runtime.json");
+      // Above every platform's pid limit, so no process can hold it.
+      const exitedPid = 2_147_483_646;
+      const state = {
+        version: 1 as const,
+        pid: exitedPid,
+        port: 4_971,
+        origin: "http://127.0.0.1:4971",
+        startedAt: "2026-06-20T00:00:00.000Z",
+      };
+      yield* ServerRuntimeState.persistServerRuntimeState({ path: statePath, state });
+
+      const holder = yield* ServerRuntimeState.claimServerRuntimeState({
+        path: statePath,
+        state: { ...state, pid: process.pid },
+      });
+
+      assert.isTrue(Option.isNone(holder));
+      const restored = yield* ServerRuntimeState.readPersistedServerRuntimeState(statePath);
+      assert.equal(Option.getOrThrow(restored).pid, process.pid);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
 });

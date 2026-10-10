@@ -13,6 +13,7 @@ import * as Duration from "effect/Duration";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
 import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
@@ -150,9 +151,10 @@ import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
 import {
-  clearPersistedServerRuntimeState,
+  claimServerRuntimeState,
   makePersistedServerRuntimeState,
-  persistServerRuntimeState,
+  type PersistedServerRuntimeState,
+  releaseServerRuntimeState,
 } from "./serverRuntimeState.ts";
 import { orchestrationHttpApiLayer } from "./orchestration/http.ts";
 import * as NetService from "@t3tools/shared/Net";
@@ -652,17 +654,28 @@ const makeServerLayer = Layer.unwrap(
             port: address.port,
             serviceManaged: launcher.managed,
           });
-          yield* persistServerRuntimeState({
+          const holder = yield* claimServerRuntimeState({
             path: config.serverRuntimeStatePath,
             state,
           }).pipe(
             Effect.catchCause((cause) =>
-              Effect.logWarning("Failed to persist server runtime state", { cause }),
+              Effect.logWarning("Failed to persist server runtime state", { cause }).pipe(
+                Effect.as(Option.none<PersistedServerRuntimeState>()),
+              ),
             ),
           );
+          if (Option.isSome(holder)) {
+            yield* Effect.logWarning(
+              "Another T3 server already serves this home; clients will keep finding that server",
+              { pid: holder.value.pid, origin: holder.value.origin },
+            );
+          }
         }),
         () =>
-          clearPersistedServerRuntimeState(config.serverRuntimeStatePath).pipe(
+          releaseServerRuntimeState({
+            path: config.serverRuntimeStatePath,
+            pid: process.pid,
+          }).pipe(
             Effect.catchCause((cause) =>
               Effect.logWarning("Failed to clear server runtime state", { cause }),
             ),
