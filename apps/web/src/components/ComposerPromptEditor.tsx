@@ -1662,6 +1662,27 @@ function ComposerPromptEditorInner({
   });
   const selectionRangeRef = useRef({ start: initialExpandedCursor, end: initialExpandedCursor });
   const isApplyingControlledUpdateRef = useRef(false);
+  const isHandlingCommandRef = useRef(false);
+  const readEditor = useCallback(
+    <T,>(read: () => T): T => {
+      // Lexical commands already run inside an update. Flushing it with editor.read()
+      // would commit the state before the remaining handlers can edit it.
+      return isHandlingCommandRef.current ? read() : editor.read(read);
+    },
+    [editor],
+  );
+  const handleCommandKeyDown: NonNullable<ComposerPromptEditorProps["onCommandKeyDown"]> = (
+    key,
+    event,
+  ) => {
+    const wasHandlingCommand = isHandlingCommandRef.current;
+    isHandlingCommandRef.current = true;
+    try {
+      return onCommandKeyDown?.(key, event) ?? false;
+    } finally {
+      isHandlingCommandRef.current = wasHandlingCommand;
+    }
+  };
   // Latest controlled value, readable from editor listeners that fire before the layout
   // effect has rewritten the editor to match it.
   const latestValueRef = useRef(value);
@@ -1816,7 +1837,7 @@ function ComposerPromptEditorInner({
   } => {
     let snapshot = snapshotRef.current;
     // Imperative reads must include pending controlled updates, such as clearing a sent prompt.
-    editor.read(() => {
+    readEditor(() => {
       const nextValue = $getRoot().getTextContent();
       const fallbackCursor = clampCollapsedComposerCursor(nextValue, snapshotRef.current.cursor);
       const nextCursor = clampCollapsedComposerCursor(
@@ -1846,7 +1867,7 @@ function ComposerPromptEditorInner({
     });
     snapshotRef.current = snapshot;
     return snapshot;
-  }, [editor]);
+  }, [readEditor]);
 
   useImperativeHandle(
     editorRef,
@@ -1883,7 +1904,7 @@ function ComposerPromptEditorInner({
       },
       requestCitationComment: (request) => {
         citationCommentRequestRef.current = request;
-        const target = editor.read(() =>
+        const target = readEditor(() =>
           $consumeComposerCitationCommentRequest(citationCommentRequestRef),
         );
         if (target) setOpenCitationComment(target);
@@ -1920,7 +1941,7 @@ function ComposerPromptEditorInner({
           : edgeRect.bottom - caretRect.bottom < threshold;
       },
     }),
-    [editor, focusAt, readSnapshot],
+    [editor, focusAt, readEditor, readSnapshot],
   );
 
   const handleEditorChange = useCallback((editorState: EditorState) => {
@@ -2073,7 +2094,7 @@ function ComposerPromptEditorInner({
             ErrorBoundary={LexicalErrorBoundary}
           />
           <OnChangePlugin onChange={handleEditorChange} />
-          <ComposerCommandKeyPlugin {...(onCommandKeyDown ? { onCommandKeyDown } : {})} />
+          <ComposerCommandKeyPlugin onCommandKeyDown={handleCommandKeyDown} />
           <ComposerSurroundSelectionPlugin skills={skills} />
           <ComposerHomeEndKeyPlugin />
           <ComposerInlineTokenArrowPlugin />
