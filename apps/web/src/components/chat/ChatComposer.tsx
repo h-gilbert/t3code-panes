@@ -5409,7 +5409,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (acceptedFiles.length > 0) {
       // Only files the draft actually took get a chip; a duplicate is deduped by the store
       // and a chip for it would point at nothing.
-      const storedIds = new Set(addComposerFilesToDraft(acceptedFiles));
+      // insertAttachmentReferences owns placement here. Appending in the store too
+      // makes insertComposerText read a prompt that already contains the new chip.
+      const storedIds = new Set(
+        addComposerDraftFiles(attachmentDraftTarget, acceptedFiles, { appendReference: false }),
+      );
       const storedFiles = acceptedFiles.filter((file) => storedIds.has(file.id));
       if (storedFiles.length > 0) {
         insertedAny = insertAttachmentReferences(
