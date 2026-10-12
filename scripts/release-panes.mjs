@@ -6,8 +6,8 @@
  *   vp run release:panes --no-wait  return once the GitHub workflow has started
  *   vp run release:panes --no-publish  build and sign only (also prepares local promotion)
  *
- * The macOS app is built here because it must be signed with the same
- * certificate as the installed app, or macOS refuses the update. The Linux
+ * The macOS app is built here to use the maintainer's Apple signing key.
+ * Signing and updater compatibility are checked before building. The Linux
  * server is built by .github/workflows/release-panes.yml, which publishes the
  * draft release once both halves are attached, so no updater ever sees half a
  * release. See docs/operations/fork-releases.md.
@@ -55,25 +55,128 @@ export function latestForkReleaseTag(tags) {
     .toSorted((left, right) => Number(right.stamp) - Number(left.stamp))[0]?.tag;
 }
 
-function signingIdentity() {
-  const configured = process.env.T3CODE_LOCAL_SIGNING_IDENTITY?.trim();
-  if (configured) return configured;
-  // Updates must carry the installed app's signature, so sign with what it was signed with.
+/** Valid keychain identities only; expired certificates are excluded by security -v. */
+export function parseSigningIdentities(output, certificatesPem) {
+  const teams = new Map();
+  for (const pem of certificatesPem.match(
+    /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g,
+  ) ?? []) {
+    const certificate = new NodeCrypto.X509Certificate(pem);
+    teams.set(
+      certificate.fingerprint.replaceAll(":", ""),
+      /^OU=(.+)$/m.exec(certificate.subject)?.[1],
+    );
+  }
+  return [...output.matchAll(/^\s*\d+\) ([A-F0-9]{40}) "(.+)"\s*$/gm)].map((match) => ({
+    fingerprint: match[1],
+    name: match[2],
+    team: teams.get(match[1]),
+  }));
+}
+
+export function selectSigningIdentity(identities, { team, authority, configured }) {
+  const compatible = identities.filter(
+    (identity) => identity.team === team && identity.name.startsWith("Apple Development:"),
+  );
+  const preferred = configured
+    ? compatible.filter(
+        (identity) =>
+          identity.fingerprint === configured.toUpperCase() || identity.name === configured,
+      )
+    : compatible.filter((identity) => identity.name === authority);
+  const candidates = preferred.length || configured ? preferred : compatible;
+  if (candidates.length !== 1) {
+    throw new Error(
+      `Expected one valid Apple Development signing identity for team ${team}, found ${candidates.length}. Renew an expired certificate or set T3CODE_LOCAL_SIGNING_IDENTITY to a valid certificate's SHA-1 fingerprint.`,
+    );
+  }
+  return candidates[0];
+}
+
+/** Pin the app, Apple certificate type, and team while allowing certificate renewal. */
+export function signingRequirement(identifier, team) {
+  if (!/^[A-Za-z0-9.-]+$/.test(identifier) || !/^[A-Z0-9]{10}$/.test(team)) {
+    throw new Error("Invalid installed app identifier or Apple team identifier.");
+  }
+  return `identifier "${identifier}" and anchor apple generic and certificate leaf[subject.OU] = "${team}" and certificate 1[field.1.2.840.113635.100.6.2.1] exists and certificate leaf[field.1.2.840.113635.100.6.1.12] exists`;
+}
+
+function signingPreflight(allowSigningChange) {
   const store = NodePath.join(NodeOS.homedir(), ".t3-promotions");
   const journal = NodePath.join(store, "installation.json");
   const app = NodeFS.existsSync(journal)
     ? JSON.parse(NodeFS.readFileSync(journal, "utf8")).app
     : DEFAULT_APP;
-  const details = NodeChildProcess.spawnSync("/usr/bin/codesign", ["-dvv", app], {
+  const details = NodeChildProcess.spawnSync("/usr/bin/codesign", ["-dvv", "-r-", app], {
     encoding: "utf8",
   });
-  const authority = /^Authority=(.+)$/m.exec(details.stderr ?? "")?.[1]?.trim();
-  if (!authority || !authority.startsWith("Apple Development:")) {
+  if (details.error) throw details.error;
+  const metadata = `${details.stdout ?? ""}\n${details.stderr ?? ""}`;
+  const authority = /^Authority=(.+)$/m.exec(metadata)?.[1]?.trim();
+  const team = /^TeamIdentifier=(.+)$/m.exec(metadata)?.[1]?.trim();
+  const identifier = /^Identifier=(.+)$/m.exec(metadata)?.[1]?.trim();
+  const installedRequirement = /^designated => (.+)$/m.exec(metadata)?.[1]?.trim();
+  if (
+    details.status !== 0 ||
+    !authority?.startsWith("Apple Development:") ||
+    !team ||
+    !identifier ||
+    !installedRequirement
+  ) {
     throw new Error(
-      `Could not read an Apple Development signature from ${app}. Set T3CODE_LOCAL_SIGNING_IDENTITY to the certificate that signed the installed app.`,
+      `Could not read an Apple Development signature and updater requirement from ${app}.`,
     );
   }
-  return authority;
+  const identity = selectSigningIdentity(
+    parseSigningIdentities(
+      run("/usr/bin/security", ["find-identity", "-v", "-p", "codesigning"]),
+      run("/usr/bin/security", ["find-certificate", "-a", "-p"]),
+    ),
+    { team, authority, configured: process.env.T3CODE_LOCAL_SIGNING_IDENTITY?.trim() },
+  );
+  const requirement = signingRequirement(identifier, team);
+  const temporary = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-release-signing-"));
+  try {
+    const probe = NodePath.join(temporary, "probe");
+    NodeFS.copyFileSync("/usr/bin/true", probe);
+    run("/usr/bin/codesign", [
+      "--force",
+      "--sign",
+      identity.fingerprint,
+      "--identifier",
+      identifier,
+      "--requirements",
+      `=designated => ${requirement}`,
+      "--timestamp",
+      probe,
+    ]);
+    run("/usr/bin/codesign", [
+      "--verify",
+      "--strict",
+      "--test-requirement",
+      `=${requirement}`,
+      probe,
+    ]);
+    const compatibility = NodeChildProcess.spawnSync(
+      "/usr/bin/codesign",
+      ["--verify", "--strict", "--test-requirement", `=${installedRequirement}`, probe],
+      { encoding: "utf8" },
+    );
+    if (compatibility.error) throw compatibility.error;
+    const requiresLocalInstall = compatibility.status !== 0;
+    if (requiresLocalInstall && !allowSigningChange) {
+      throw new Error(
+        "The valid signing certificate cannot satisfy the installed app's updater requirement. Rerun with --allow-signing-change only for an intentional certificate migration, then install this release once with vp run promote:desktop install after safely quitting the app.",
+      );
+    }
+    if (requiresLocalInstall)
+      console.log(
+        "Certificate migration: this Mac needs a one-time local installation after release.",
+      );
+    return { identity, identifier, requirement, installedRequirement, requiresLocalInstall };
+  } finally {
+    NodeFS.rmSync(temporary, { recursive: true, force: true });
+  }
 }
 
 function sha512Base64(file) {
@@ -110,6 +213,7 @@ function main() {
     options: {
       wait: { type: "boolean", default: true },
       publish: { type: "boolean", default: true },
+      "allow-signing-change": { type: "boolean", default: false },
     },
     allowNegative: true,
   });
@@ -132,7 +236,7 @@ function main() {
     );
   }
   if (values.publish) run("gh", ["auth", "status"]);
-  const identity = signingIdentity();
+  const signing = signingPreflight(values["allow-signing-change"]);
 
   const desktopPackage = JSON.parse(
     NodeFS.readFileSync(NodePath.join(repo, "apps/desktop/package.json"), "utf8"),
@@ -144,7 +248,7 @@ function main() {
   const directory = NodePath.join(store, `release-${stamp}`);
   const worktree = NodePath.join(directory, "source");
   NodeFS.mkdirSync(directory, { recursive: true, mode: 0o700 });
-  console.log(`Building ${version} from ${sha.slice(0, 10)}, signed by ${identity}…`);
+  console.log(`Building ${version} from ${sha.slice(0, 10)}, signed by ${signing.identity.name}…`);
 
   // A separate worktree stamps the release version into every package without
   // touching the checkout people are working in.
@@ -199,12 +303,39 @@ function main() {
     "--force",
     "--deep",
     "--sign",
-    identity,
+    signing.identity.fingerprint,
     "--preserve-metadata=entitlements,flags,runtime",
-    "--timestamp=none",
+    "--timestamp",
     app,
   ]);
-  run("/usr/bin/codesign", ["--verify", "--deep", "--strict", app]);
+  // Apply the app requirement only to the outer bundle, not its nested helpers.
+  run("/usr/bin/codesign", [
+    "--force",
+    "--sign",
+    signing.identity.fingerprint,
+    "--preserve-metadata=entitlements,flags,runtime",
+    "--requirements",
+    `=designated => ${signing.requirement}`,
+    "--timestamp",
+    app,
+  ]);
+  run("/usr/bin/codesign", [
+    "--verify",
+    "--deep",
+    "--strict",
+    "--test-requirement",
+    `=${signing.requirement}`,
+    app,
+  ]);
+  if (!signing.requiresLocalInstall) {
+    run("/usr/bin/codesign", [
+      "--verify",
+      "--strict",
+      "--test-requirement",
+      `=${signing.installedRequirement}`,
+      app,
+    ]);
+  }
   const info = bundleInfo(app);
   if (info.version !== version) throw new Error(`Built ${info.version}, expected ${version}.`);
 
@@ -223,7 +354,18 @@ function main() {
     }),
   );
   const notes = NodePath.join(directory, "notes.md");
-  NodeFS.writeFileSync(notes, releaseNotes(sha));
+  NodeFS.writeFileSync(
+    notes,
+    [
+      ...(signing.requiresLocalInstall
+        ? [
+            "Mac signing certificate renewed. Older Mac installations pin the expired certificate and need a one-time local installation of this release. Future releases accept renewed Apple Development certificates from the same team. Server updates are unchanged.",
+            "",
+          ]
+        : []),
+      releaseNotes(sha),
+    ].join("\n"),
+  );
 
   // The same signed app can be installed by `vp run promote:desktop install`,
   // which is how a machine still on a local build joins the release feed.
@@ -234,6 +376,7 @@ function main() {
     info,
     digest: treeDigest(app),
     preparedAt: new Date().toISOString(),
+    requiresLocalInstall: signing.requiresLocalInstall,
   });
 
   if (!values.publish) {
@@ -303,7 +446,9 @@ function main() {
     stdio: "inherit",
   });
   console.log(
-    `Published ${tag}. Installed apps show the update shortly; use "Update everywhere" to update this Mac and your servers.`,
+    signing.requiresLocalInstall
+      ? `Published ${tag}. After safely quitting this Mac app, install once with: vp run promote:desktop install. Servers can update from the release feed.`
+      : `Published ${tag}. Installed apps show the update shortly; use "Update everywhere" to update this Mac and your servers.`,
   );
 }
 

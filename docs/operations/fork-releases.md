@@ -16,12 +16,27 @@ vp run release:panes
 ```
 
 It builds the macOS app in a temporary worktree with every package stamped
-`<upstream core>-panes.<millisecond timestamp>`, signs it with the certificate that signed the
-installed app (override with `T3CODE_LOCAL_SIGNING_IDENTITY`), and attaches it with its
+`<upstream core>-panes.<millisecond timestamp>`, signs it with a valid Apple Development certificate
+from the installed app's team, and attaches it with its
 `latest-mac.yml` to a draft release on `h-gilbert/t3code-panes`. It then starts
 `.github/workflows/release-panes.yml`, which builds the Linux x64 server archive, attaches it with
 `SHA256SUMS`, and publishes the release. Updaters only read published releases, so no machine sees
 half a release. The command waits for the workflow unless given `--no-wait`.
+
+Before building, the command checks valid keychain identities, signs a temporary executable,
+and verifies it against the installed app's update requirement. It prefers the installed
+certificate when valid, otherwise a unique replacement from the same team. Use
+`T3CODE_LOCAL_SIGNING_IDENTITY` with a certificate's SHA-1 fingerprint to choose between valid
+certificates. New releases use secure timestamps and require the same app ID, Apple Development
+certificate type, and Apple team, so renewing a certificate does not change the updater's identity.
+
+Older installations pinned the certificate's exact name. If renewal breaks that requirement,
+the preflight stops before building. For an intentional migration, run
+`vp run release:panes --allow-signing-change`. This still checks the certificate and Apple team,
+but marks the release as needing a one-time local Mac installation. After a safe normal quit,
+install the prepared candidate using `vp run promote:desktop install`, following the
+[local promotion restart checks](local-desktop-promotion.md). Publishing does not quit or replace
+the running app. Servers can update normally.
 
 `--no-publish` builds and signs only. Either way the signed app also becomes the local promotion
 candidate, so `vp run promote:desktop install` can install it on a Mac still running a local build.
