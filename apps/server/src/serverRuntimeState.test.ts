@@ -236,7 +236,14 @@ describe("serverRuntimeState", () => {
       yield* ServerRuntimeState.releaseServerRuntimeState({ path: statePath, pid: process.pid });
       assert.deepEqual(yield* recordedPid, Option.some(process.ppid));
 
-      // The service always claims the record, then removes it on stop.
+      // Starting the service must not hide a live SSH-launched server either.
+      const serviceHolder = yield* ServerRuntimeState.claimServerRuntimeState({
+        path: statePath,
+        state: record(process.pid, true),
+      });
+      assert.deepEqual(serviceHolder, Option.some(liveServer));
+      assert.deepEqual(yield* recordedPid, Option.some(process.ppid));
+      yield* ServerRuntimeState.releaseServerRuntimeState({ path: statePath, pid: process.ppid });
       const claimed = yield* ServerRuntimeState.claimServerRuntimeState({
         path: statePath,
         state: record(process.pid, true),

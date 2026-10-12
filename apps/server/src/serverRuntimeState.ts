@@ -132,23 +132,21 @@ export const isProcessAlive = (pid: number): boolean => {
  * find a home's server through this one record, so a second server sharing the
  * home (hand-started or SSH-launched) must not displace a live one: doing so
  * hides the service, and the launcher keeps starting servers beside it. The
- * supervised service always claims the record, so clients converge back to
- * it. Returns the live record this server deferred to, if any.
+ * boot service follows the same rule. Startup exclusivity is enforced by
+ * serverHomeLock before any runtime layers are built.
  */
 export const claimServerRuntimeState = (input: {
   readonly path: string;
   readonly state: PersistedServerRuntimeState;
 }) =>
   Effect.gen(function* () {
-    if (!input.state.serviceManaged) {
-      const existing = yield* readPersistedServerRuntimeState(input.path);
-      if (
-        Option.isSome(existing) &&
-        existing.value.pid !== input.state.pid &&
-        isProcessAlive(existing.value.pid)
-      ) {
-        return existing;
-      }
+    const existing = yield* readPersistedServerRuntimeState(input.path);
+    if (
+      Option.isSome(existing) &&
+      existing.value.pid !== input.state.pid &&
+      isProcessAlive(existing.value.pid)
+    ) {
+      return existing;
     }
     yield* persistServerRuntimeState(input);
     return Option.none<PersistedServerRuntimeState>();

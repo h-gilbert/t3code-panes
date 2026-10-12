@@ -5,6 +5,15 @@ upstream changes, including changes that apply without textual conflicts. This
 is not an exhaustive file list: inspect local history and uncommitted changes
 for other customizations before each update.
 
+## Server ownership
+
+Only one server may open a state directory, including during boot-service,
+SSH, desktop, and CLI startup races. Acquire ownership before database and
+provider initialization. A discovery-file warning is insufficient: the command
+model is process-local, so two servers sharing SQLite can show saved threads
+while rejecting commands for them. Reconnecting must not silently retire a live
+duplicate and switch to a server with stale command state.
+
 ## New-thread model
 
 Starring a model sets one shared default model and thinking budget across connected

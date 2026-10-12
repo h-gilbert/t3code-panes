@@ -674,14 +674,13 @@ fi
 # switch to: retiring it would restart it, and its running agents, on every
 # reconnect.
 if [ -n "$DEFAULT_REMOTE_PORT" ] && [ "$DEFAULT_RUNTIME_PID" != "$REMOTE_PID" ]; then
+  if [ "$REMOTE_MANAGED" = "managed" ] && [ -n "$REMOTE_PID" ] && kill -0 "$REMOTE_PID" 2>/dev/null; then
+    printf 'Two T3 servers are using the default home (PIDs %s and %s). Stop the duplicate at a safe boundary and restart the remaining server before reconnecting.\\n' "$REMOTE_PID" "$DEFAULT_RUNTIME_PID" >&2
+    exit 1
+  fi
   REMOTE_PORT="$DEFAULT_REMOTE_PORT"
-  if wait_ready "@@T3_REUSE_READY_TIMEOUT_MS@@"; then
+  if wait_ready "@@T3_READY_TIMEOUT_MS@@"; then
     if [ "$REMOTE_MANAGED" = "managed" ]; then
-      PID_TO_STOP="\${REMOTE_PID:-$DEFAULT_RUNTIME_PID}"
-      if [ -n "$PID_TO_STOP" ] && kill -0 "$PID_TO_STOP" 2>/dev/null; then
-        kill "$PID_TO_STOP" 2>/dev/null || true
-        wait_for_pid_exit "$PID_TO_STOP"
-      fi
       REMOTE_PID=""
       REMOTE_PORT="$DEFAULT_REMOTE_PORT"
       REMOTE_MANAGED="external"
@@ -695,9 +694,8 @@ if [ -n "$DEFAULT_REMOTE_PORT" ] && [ "$DEFAULT_RUNTIME_PID" != "$REMOTE_PID" ];
       REMOTE_MANAGED="external"
     fi
   else
-    REMOTE_PID="$(cat "$PID_FILE" 2>/dev/null || true)"
-    REMOTE_PORT="$(cat "$PORT_FILE" 2>/dev/null || true)"
-    REMOTE_MANAGED="$(cat "$MANAGED_FILE" 2>/dev/null || true)"
+    printf 'The existing T3 server (PID %s, port %s) is not ready. Refusing to start another server against its home.\\n' "$DEFAULT_RUNTIME_PID" "$DEFAULT_REMOTE_PORT" >&2
+    exit 1
   fi
 fi
 if [ "$REMOTE_MANAGED" = "external" ]; then
@@ -741,6 +739,21 @@ if [ -z "$REMOTE_PORT" ]; then
   printf '%s\\n' "$REMOTE_PORT" >"$PORT_FILE"
   printf 'managed\\n' >"$MANAGED_FILE"
   if ! wait_ready "@@T3_READY_TIMEOUT_MS@@"; then
+    # A service or another SSH client may have won the home lock while this
+    # runner was starting. Only adopt it if our contender has already exited;
+    # a live duplicate needs an explicit recovery, never an automatic switch.
+    DEFAULT_RUNTIME_INFO="$(resolve_default_runtime_port 2>/dev/null || true)"
+    if ! kill -0 "$REMOTE_PID" 2>/dev/null && [ -n "$DEFAULT_RUNTIME_INFO" ]; then
+      DEFAULT_RUNTIME_PID="\${DEFAULT_RUNTIME_INFO%% *}"
+      REMOTE_PORT="\${DEFAULT_RUNTIME_INFO#* }"
+      if wait_ready "@@T3_READY_TIMEOUT_MS@@"; then
+        rm -f "$PID_FILE"
+        printf '%s\\n' "$REMOTE_PORT" >"$PORT_FILE"
+        printf 'external\\n' >"$MANAGED_FILE"
+        printf '{"remotePort":%s,"serverKind":"external"}\\n' "$REMOTE_PORT"
+        exit 0
+      fi
+    fi
     printf 'Remote T3 server did not become ready on 127.0.0.1:%s.\\n' "$REMOTE_PORT" >&2
     if [ -s "$LOG_FILE" ]; then
       tail -n 80 "$LOG_FILE" >&2 2>/dev/null || true

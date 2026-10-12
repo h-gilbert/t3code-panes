@@ -2,13 +2,24 @@
 import { assert, it } from "@effect/vitest";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeNet from "node:net";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import * as NodeEvents from "node:events";
 
 import { buildRemoteLaunchScript } from "./tunnel.ts";
+
+const decodeLaunchResult = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(
+    Schema.Struct({
+      remotePort: Schema.Int,
+      serverKind: Schema.Literals(["external", "managed"]),
+    }),
+  ),
+);
 
 // Stands in for `t3 serve`: answers readiness probes and owns the home's
 // runtime record the way a real server does.
@@ -22,7 +33,7 @@ const record = path.join(args[args.indexOf("--base-dir") + 1], "userdata", "serv
 // Written before listening so a ready probe implies the record exists.
 fs.mkdirSync(path.dirname(record), { recursive: true });
 fs.writeFileSync(record, JSON.stringify({ version: 1, pid: process.pid, port, origin: "http://127.0.0.1:" + port, startedAt: "" }));
-http.createServer((_request, response) => response.end("ok")).listen(port, "127.0.0.1");
+http.createServer((_request, response) => response.end("ok")).listen(port, "127.0.0.1", () => process.send?.("ready"));
 process.on("SIGTERM", () => {
   fs.rmSync(record, { force: true });
   process.exit(0);
@@ -41,6 +52,98 @@ const freeLoopbackPort = Effect.promise(
     }),
 );
 
+it.effect("reuses the boot service even when stale managed metadata has no PID", () =>
+  Effect.gen(function* () {
+    if ((yield* HostProcessPlatform) === "win32") return;
+    const home = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-ssh-service-"));
+    const serverPath = NodePath.join(home, "fake-server.mjs");
+    NodeFS.writeFileSync(serverPath, FAKE_SERVER);
+    const port = yield* freeLoopbackPort;
+    const stateDir = NodePath.join(home, ".t3", "ssh-launch", "test-key");
+    NodeFS.mkdirSync(stateDir, { recursive: true });
+    NodeFS.writeFileSync(NodePath.join(stateDir, "managed"), "managed\n");
+    const service = NodeChildProcess.spawn(
+      process.execPath,
+      [serverPath, "--port", String(port), "--base-dir", NodePath.join(home, ".t3")],
+      { stdio: ["ignore", "ignore", "inherit", "ipc"] },
+    );
+    const exited = NodeEvents.EventEmitter.once(service, "exit");
+    try {
+      yield* Effect.promise(() => NodeEvents.EventEmitter.once(service, "message"));
+      const result = NodeChildProcess.spawnSync("/bin/sh", ["-s", "--", "test-key"], {
+        input: buildRemoteLaunchScript({ nodeScriptPath: serverPath }),
+        env: { HOME: home, PATH: process.env.PATH ?? "" },
+        encoding: "utf8",
+        timeout: 30_000,
+      });
+      assert.equal(result.status, 0, result.stderr);
+      assert.deepEqual(yield* decodeLaunchResult(result.stdout.trim().split("\n").at(-1) ?? ""), {
+        remotePort: port,
+        serverKind: "external",
+      });
+      assert.isTrue(isAlive(service.pid!));
+      assert.isFalse(NodeFS.existsSync(NodePath.join(stateDir, "pid")));
+    } finally {
+      service.kill();
+      yield* Effect.promise(() => exited);
+      NodeFS.rmSync(home, { recursive: true, force: true });
+    }
+  }),
+);
+
+it.effect("refuses to retire a live duplicate and switch to a stale service", () =>
+  Effect.gen(function* () {
+    if ((yield* HostProcessPlatform) === "win32") return;
+    const home = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-ssh-duplicate-"));
+    const serverPath = NodePath.join(home, "fake-server.mjs");
+    NodeFS.writeFileSync(serverPath, FAKE_SERVER);
+    const stateDir = NodePath.join(home, ".t3", "ssh-launch", "test-key");
+    NodeFS.mkdirSync(stateDir, { recursive: true });
+    const servicePort = yield* freeLoopbackPort;
+    const service = NodeChildProcess.spawn(
+      process.execPath,
+      [serverPath, "--port", String(servicePort), "--base-dir", NodePath.join(home, ".t3")],
+      { stdio: ["ignore", "ignore", "inherit", "ipc"] },
+    );
+    const exited = NodeEvents.EventEmitter.once(service, "exit");
+    const serviceReady = NodeEvents.EventEmitter.once(service, "message");
+    const duplicatePort = yield* freeLoopbackPort;
+    const duplicate = NodeChildProcess.spawn(
+      process.execPath,
+      [serverPath, "--port", String(duplicatePort), "--base-dir", NodePath.join(home, "duplicate")],
+      { stdio: ["ignore", "ignore", "inherit", "ipc"] },
+    );
+    const duplicateExited = NodeEvents.EventEmitter.once(duplicate, "exit");
+    const duplicateReady = NodeEvents.EventEmitter.once(duplicate, "message");
+    try {
+      yield* Effect.promise(() => Promise.all([serviceReady, duplicateReady]));
+      // Both owners must survive the rejected handover.
+      NodeFS.writeFileSync(NodePath.join(stateDir, "pid"), String(duplicate.pid));
+      NodeFS.writeFileSync(NodePath.join(stateDir, "managed"), "managed\n");
+      NodeFS.writeFileSync(NodePath.join(stateDir, "port"), String(duplicatePort));
+      const result = NodeChildProcess.spawnSync("/bin/sh", ["-s", "--", "test-key"], {
+        input: buildRemoteLaunchScript({ nodeScriptPath: serverPath }),
+        env: { HOME: home, PATH: process.env.PATH ?? "" },
+        encoding: "utf8",
+        timeout: 30_000,
+      });
+      assert.equal(result.status, 1);
+      assert.include(result.stderr, "Two T3 servers");
+      assert.isTrue(isAlive(service.pid!));
+      assert.isTrue(isAlive(duplicate.pid!));
+      assert.equal(
+        NodeFS.readFileSync(NodePath.join(stateDir, "pid"), "utf8"),
+        String(duplicate.pid),
+      );
+    } finally {
+      service.kill();
+      duplicate.kill();
+      yield* Effect.promise(() => Promise.all([exited, duplicateExited]));
+      NodeFS.rmSync(home, { recursive: true, force: true });
+    }
+  }),
+);
+
 const isAlive = (pid: number) => {
   try {
     process.kill(pid, 0);
@@ -49,6 +152,63 @@ const isAlive = (pid: number) => {
     return false;
   }
 };
+
+it.effect("adopts a service that appears while the SSH contender is starting", () =>
+  Effect.gen(function* () {
+    if ((yield* HostProcessPlatform) === "win32") return;
+    const home = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-ssh-race-"));
+    const serverPath = NodePath.join(home, "fake-server.mjs");
+    const contenderPath = NodePath.join(home, "contender.mjs");
+    const runtimePath = NodePath.join(home, ".t3", "userdata", "server-runtime.json");
+    NodeFS.writeFileSync(serverPath, FAKE_SERVER);
+    NodeFS.writeFileSync(
+      contenderPath,
+      `
+      import * as fs from "node:fs";
+      import * as path from "node:path";
+      const record = path.join(process.env.HOME, ".t3", "userdata", "server-runtime.json");
+      fs.renameSync(record + ".pending", record);
+      process.exit(1);
+    `,
+    );
+    const stateDir = NodePath.join(home, ".t3", "ssh-launch", "test-key");
+    NodeFS.mkdirSync(stateDir, { recursive: true });
+    NodeFS.writeFileSync(NodePath.join(stateDir, "port"), String(yield* freeLoopbackPort));
+    const port = yield* freeLoopbackPort;
+    const service = NodeChildProcess.spawn(
+      process.execPath,
+      [serverPath, "--port", String(port), "--base-dir", NodePath.join(home, ".t3")],
+      { stdio: ["ignore", "ignore", "inherit", "ipc"] },
+    );
+    const exited = NodeEvents.EventEmitter.once(service, "exit");
+    try {
+      yield* Effect.promise(() => NodeEvents.EventEmitter.once(service, "message"));
+      NodeFS.renameSync(runtimePath, runtimePath + ".pending");
+      const result = NodeChildProcess.spawnSync("/bin/sh", ["-s", "--", "test-key"], {
+        // The contender deterministically exits without listening. Only shorten
+        // the production readiness deadline; no sleep coordinates the race.
+        input: buildRemoteLaunchScript({ nodeScriptPath: contenderPath }).replaceAll(
+          'wait_ready "60000"',
+          'wait_ready "1000"',
+        ),
+        env: { HOME: home, PATH: process.env.PATH ?? "" },
+        encoding: "utf8",
+        timeout: 30_000,
+      });
+      assert.equal(result.status, 0, result.stderr);
+      assert.deepEqual(yield* decodeLaunchResult(result.stdout.trim().split("\n").at(-1) ?? ""), {
+        remotePort: port,
+        serverKind: "external",
+      });
+      assert.isTrue(isAlive(service.pid!));
+      assert.isFalse(NodeFS.existsSync(NodePath.join(stateDir, "pid")));
+    } finally {
+      service.kill();
+      yield* Effect.promise(() => exited);
+      NodeFS.rmSync(home, { recursive: true, force: true });
+    }
+  }),
+);
 
 it.effect(
   "reconnecting keeps the managed server that owns the home's runtime record",

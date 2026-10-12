@@ -22,6 +22,7 @@ import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as HostPowerMonitor from "./background/HostPowerMonitor.ts";
 import * as ServerConfig from "./config.ts";
+import { acquireServerHomeLock } from "./serverHomeLock.ts";
 import {
   otlpTracesProxyRouteLayer,
   assetRouteLayer,
@@ -843,4 +844,10 @@ const makeServerLayer = Layer.unwrap(
 );
 
 // The CLI supplies configuration.
-export const runServer = Layer.launch(makeServerLayer);
+export const runServer = Effect.scoped(
+  Effect.gen(function* () {
+    const config = yield* ServerConfig.ServerConfig;
+    yield* acquireServerHomeLock(config).pipe(Effect.provide(NodeServices.layer));
+    return yield* Layer.launch(makeServerLayer);
+  }),
+);
