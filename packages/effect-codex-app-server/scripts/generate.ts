@@ -9,13 +9,8 @@ import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import {
-  FetchHttpClient,
-  HttpClient,
-  HttpClientRequest,
-  HttpClientResponse,
-} from "effect/unstable/http";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 const UPSTREAM_REF = "687a119f0fcaace47e1f1abcc77cec6c813fd6da";
 const USER_AGENT = "effect-codex-app-server-generator";
@@ -156,7 +151,7 @@ const ManualSchemas: Record<string, Schema.Json> = {
 
 // Codex 0.150 added these multi-agent values before our next full protocol
 // refresh. Keep every generated response namespace compatible with them.
-const Codex0150DefinitionSchemas: Record<string, Schema.Json> = {
+const DefinitionOverrides: Record<string, Schema.Json> = {
   CollabAgentTool: {
     type: "string",
     enum: [
@@ -183,8 +178,6 @@ const Codex0150DefinitionSchemas: Record<string, Schema.Json> = {
   },
 };
 
-// Pinned protocol JSON omits later CodexErrorInfo variants. Keep historical
-// thread payloads decodable; do not fold unknown values into "other".
 const CodexErrorInfoCompatibilityValues = [
   "rateLimitExceeded",
   "misalignmentPolicyViolation",
@@ -381,8 +374,6 @@ function stripNullDefaults(value: Schema.Json): Schema.Json {
   ) as Schema.Json;
 }
 
-// Codex 0.153 adds async questions to agent messages. Keep older protocol
-// fields until the next full refresh, including every thread history namespace.
 function addAsyncQuestionFields(value: Schema.Json): Schema.Json {
   if (Array.isArray(value)) {
     return value.map(addAsyncQuestionFields);
@@ -793,8 +784,20 @@ const generateFiles = Effect.fn("generateFiles")(function* () {
 
     for (const [definitionName, definitionSchema] of Object.entries(parsed.definitions ?? {})) {
       let compatibleDefinitionSchema =
-        Codex0150DefinitionSchemas[definitionName] ??
+        DefinitionOverrides[definitionName] ??
         applyCodex0151DefinitionCompatibility(file.exportName, definitionName, definitionSchema);
+      // Keep new protocol enum values alongside the fork's backported values.
+      if (
+        isJsonSchemaNode(definitionSchema) &&
+        Array.isArray(definitionSchema.enum) &&
+        isJsonSchemaNode(compatibleDefinitionSchema) &&
+        Array.isArray(compatibleDefinitionSchema.enum)
+      ) {
+        compatibleDefinitionSchema = {
+          ...compatibleDefinitionSchema,
+          enum: [...new Set([...definitionSchema.enum, ...compatibleDefinitionSchema.enum])],
+        };
+      }
       // Codex before 0.159 omits projectId; the same client still connects to it.
       if (
         definitionName === "Thread" &&

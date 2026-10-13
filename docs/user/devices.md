@@ -47,6 +47,14 @@ iOS, and power off. Close the tab to stop watching; the device keeps running
 unless you power it off. Closed tabs stay closed after a reload. To watch the
 device again, choose it from **+ → Device**.
 
+Choose **3D view** to inspect supported devices while the live screen stays
+interactive. On iPhone Duo, use the fold and stance controls to change its
+physical pose, or pinch over the device to adjust the hinge. Turning the model
+to the other screen switches the live display and touch input to that screen.
+**Restore 3D view** returns the device to a screen-facing position.
+On supported Android foldables, use **Fold device** and **Unfold device** beside
+the screen to change its posture in either view.
+
 ## Tools
 
 The toolbar's **Tools** button opens a drawer for the open device. It shows the
@@ -63,12 +71,13 @@ back from the device after a change.
 When an agent opens a device, it floats over the chat in web and desktop clients
 connected to the thread, the same way an agent-driven browser does. Turn off
 **Auto-show floating preview** in **Settings → Integrations → Browser** to open a
-right-panel tab instead. Mobile clients show device activity in the thread
-timeline. In the iOS app, a thread with an open iOS Simulator also has a
-simulator button in its header. Tap it for a full-screen, read-only live view.
-If you started the simulator directly on your Mac, first open that running
-device in the desktop Device panel to attach it to the thread. Agents drive
-the device through the `agent-device` command line. T3
+right-panel tab instead. In the mobile app, open the agent's thread and tap the
+device button above the composer to watch the live screen and control it.
+If the thread has several devices open, choose one in the viewer. Closing the
+viewer stops streaming and leaves the device available to the agent. Device
+The iOS thread header also opens its attached Simulator in a full-screen viewer. Device activity also appears in the thread timeline.
+
+Agents drive the device through the `agent-device` command line. T3
 Code installs and starts it only after **Agent device access** is enabled. iOS
 taps build a small test runner on first use, which takes a couple of minutes
 once per server. Restart an existing agent session after granting access so it
@@ -109,3 +118,9 @@ T3 provides discovery, streaming, and control. Arrange app builds,
 installation, and connectivity to development servers such as Metro separately.
 A simulator on another machine cannot reach Metro through your environment's
 localhost without forwarding or another reachable address.
+
+## Device tool updates
+
+The connected T3 server manages the device hub and agent tools on its own machine and configured SSH hosts. Required versions install automatically the next time those tools are used. Settings → Integrations → Check device tool versions reads installed versions without installing tools or starting devices.
+
+To receive newer tool versions on a remote environment, update that environment's T3 server. Updating only the browser or mobile app does not update the remote server. An offline host keeps its installed files, but an update needs network access before device support can start; T3 does not fall back to an older version. Reconnect the host and use Retry if installation fails. Existing device and agent-access settings are preserved.

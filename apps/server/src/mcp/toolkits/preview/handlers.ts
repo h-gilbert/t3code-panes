@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off -- Transfer bearer tokens use native cryptographic random bytes.
 import * as NodeCrypto from "node:crypto";
 import { safeFileNameSegment } from "@t3tools/shared/fileNameSegment";
 import * as Effect from "effect/Effect";
@@ -27,6 +28,7 @@ import {
   type ThreadId,
   type PreviewAutomationRecordingStatus,
   type PreviewAutomationResizeResult,
+  type PreviewAutomationSelectResult,
   type PreviewAutomationSetColorSchemeResult,
   type PreviewAutomationSnapshot,
   type PreviewAutomationStatus,
@@ -45,6 +47,7 @@ import { issueStagedAttachmentUrl } from "../../../assets/AssetAccess.ts";
 import { resolveAttachmentRelativePath } from "../../../attachmentPaths.ts";
 import * as ServerConfig from "../../../config.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
+import * as McpToolAccess from "../../McpToolAccess.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 import { PreviewSnapshotToolkit, PreviewStandardToolkit, PreviewToolkit } from "./tools.ts";
 
@@ -77,7 +80,7 @@ const invoke = Effect.fn("PreviewToolkit.invoke")(function* <A>(
   import("@t3tools/contracts").PreviewAutomationError,
   McpInvocationContext.McpInvocationContext | PreviewAutomationBroker.PreviewAutomationBroker
 > {
-  const scope = yield* McpInvocationContext.requireMcpCapability("preview");
+  const scope = yield* McpInvocationContext.requireThreadMcpCapability("preview");
   const broker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
   let targetTabId = tabId;
   const result = yield* broker.invoke<A>({
@@ -105,7 +108,7 @@ const invoke = Effect.fn("PreviewToolkit.invoke")(function* <A>(
       updateCurrentTab: false,
       ...(statusTabId === undefined ? {} : { tabId: statusTabId }),
     })
-    .pipe(Effect.catch(() => Effect.succeed(null)));
+    .pipe(Effect.orElseSucceed(() => null));
   return {
     result,
     ...(page?.url && /^https?:\/\//i.test(page.url) && page.url.length <= 4096
@@ -193,10 +196,11 @@ export const claimPreviewRecording = Effect.fn("PreviewToolkit.claimRecording")(
     yield* fileSystem.rename(currentPath, finalPath);
   }).pipe(
     // Another stop may already have claimed this exact upload for this thread.
-    Effect.catch((cause) =>
-      cause._tag !== "PreviewAutomationRecordingTransferError" && cause.reason._tag === "NotFound"
-        ? validateFile(finalPath)
-        : Effect.fail(cause),
+    Effect.catchIf(
+      (cause) =>
+        cause._tag !== "PreviewAutomationRecordingTransferError" &&
+        cause.reason._tag === "NotFound",
+      () => validateFile(finalPath),
     ),
     Effect.mapError((cause) => new PreviewAutomationRecordingTransferError({ threadId, cause })),
   );
@@ -248,11 +252,9 @@ export const stageUploadFile = Effect.fn("PreviewToolkit.stageUploadFile")(funct
 const uploadFiles = Effect.fn("PreviewToolkit.uploadFiles")(function* (
   input: PreviewAutomationUploadInput,
 ) {
-  const { tabId, paths, ...target } = input;
-  const files = yield* Effect.forEach(paths, stageUploadFile);
   return yield* invokeTargeted<PreviewAutomationUploadResult>(
     "upload",
-    { ...(tabId === undefined ? {} : { tabId }), ...target, files },
+    input,
     PREVIEW_FILE_TRANSFER_TIMEOUT_MS,
   );
 }, Effect.scoped);
@@ -322,7 +324,7 @@ const readStatusWithHold = Effect.fn("PreviewToolkit.statusWithHold")(function* 
   input: { readonly tabId?: PreviewTabId | undefined } | undefined,
 ) {
   const status = yield* invokeTargeted<PreviewAutomationStatus>("status", input ?? {});
-  const scope = yield* McpInvocationContext.requireMcpCapability("preview");
+  const scope = yield* McpInvocationContext.requireThreadMcpCapability("preview");
   const broker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
   const hold = yield* broker.readHold({
     scope,
@@ -334,41 +336,67 @@ const readStatusWithHold = Effect.fn("PreviewToolkit.statusWithHold")(function* 
 });
 
 const handlers = {
-  preview_status: (input) => readStatusWithHold(input),
-  preview_open: (input) =>
+  preview_dialog: McpToolAccess.actsAsCaller((input) =>
+    invokeTargeted<PreviewAutomationStatus>("dialog", input),
+  ),
+  preview_status: McpToolAccess.readsAsCaller((input) => readStatusWithHold(input)),
+  preview_open: McpToolAccess.actsAsCaller((input) =>
     invokeTargeted<PreviewAutomationStatus>("open", normalizePreviewOpenInput(input)),
-  preview_navigate: (input) =>
+  ),
+  preview_navigate: McpToolAccess.actsAsCaller((input) =>
     invokeTargeted<PreviewAutomationStatus>("navigate", input, input.timeoutMs),
-  preview_resize: (input) =>
+  ),
+  preview_resize: McpToolAccess.actsAsCaller((input) =>
     invokeTargeted<PreviewAutomationResizeResult>("resize", input, input.timeoutMs),
-  preview_set_appearance: (input) =>
+  ),
+  preview_set_appearance: McpToolAccess.actsAsCaller((input) =>
     invokeTargeted<PreviewAutomationSetColorSchemeResult>("setColorScheme", input),
-  preview_snapshot: (input) => {
-    // Saving still needs pixels even when the inline image is omitted.
+  ),
+  preview_snapshot: McpToolAccess.readsAsCaller((input) => {
+    // Output selection and saving are MCP-only; the browser still produces a complete snapshot.
     const { includeImage, save, ...operationInput } = input ?? {};
     return invokeTargeted<PreviewAutomationSnapshot>("snapshot", {
       ...operationInput,
       includeImage: includeImage !== false || save === true,
     });
-  },
-  preview_click: (input) =>
+  }),
+  preview_click: McpToolAccess.actsAsCaller((input) =>
     invokeTargeted<PreviewAutomationInputResult>("click", input, input.timeoutMs),
-  preview_type: (input) => invokeTargeted<object>("type", input, input.timeoutMs),
-  preview_press: (input) => invokeTargeted<PreviewAutomationInputResult>("press", input),
-  preview_scroll: (input) => invokeTargeted<object>("scroll", input),
-  preview_evaluate: ({ tabId, ...input }) =>
+  ),
+  preview_type: McpToolAccess.actsAsCaller((input) =>
+    invokeTargeted<object>("type", input, input.timeoutMs),
+  ),
+  preview_hover: McpToolAccess.actsAsCaller((input) =>
+    invokeTargeted<object>("hover", input, input.timeoutMs),
+  ),
+  preview_select: McpToolAccess.actsAsCaller((input) =>
+    invokeTargeted<PreviewAutomationSelectResult>("select", input, input.timeoutMs),
+  ),
+  preview_drag: McpToolAccess.actsAsCaller((input) =>
+    invokeTargeted<object>("drag", input, input.timeoutMs),
+  ),
+  preview_upload: McpToolAccess.actsAsCaller((input) => uploadFiles(input)),
+  preview_press: McpToolAccess.actsAsCaller((input) =>
+    invokeTargeted<PreviewAutomationInputResult>("press", input),
+  ),
+  preview_scroll: McpToolAccess.actsAsCaller((input) => invokeTargeted<object>("scroll", input)),
+  preview_evaluate: McpToolAccess.actsAsCaller(({ tabId, ...input }) =>
     invoke<unknown>("evaluate", input, undefined, tabId).pipe(
       Effect.map(({ result, toolIcon }) => ({
         value: result ?? null,
         ...(toolIcon ? { toolIcon } : {}),
       })),
     ),
-  preview_wait_for: (input) => invokeTargeted<object>("waitFor", input, input.timeoutMs),
-  preview_recording_start: (input) =>
+  ),
+  preview_wait_for: McpToolAccess.readsAsCaller((input) =>
+    invokeTargeted<object>("waitFor", input, input.timeoutMs),
+  ),
+  preview_recording_start: McpToolAccess.actsAsCaller((input) =>
     invokeTargeted<PreviewAutomationRecordingStatus>("recordingStart", input ?? {}),
-  preview_recording_stop: (input) =>
+  ),
+  preview_recording_stop: McpToolAccess.actsAsCaller((input) =>
     Effect.gen(function* () {
-      const scope = yield* McpInvocationContext.requireMcpCapability("preview");
+      const scope = yield* McpInvocationContext.requireThreadMcpCapability("preview");
       const { tabId, ...operationInput } = input;
       const response = yield* invoke<unknown>(
         "recordingStop",
@@ -376,13 +404,13 @@ const handlers = {
         PREVIEW_RECORDING_STOP_TIMEOUT_MS,
         tabId,
       );
-      const artifact = yield* claimPreviewRecording(scope.threadId, response.result);
+      const artifact = yield* claimPreviewRecording(scope.thread.threadId, response.result);
       return { ...artifact, ...(response.toolIcon ? { toolIcon: response.toolIcon } : {}) };
     }),
-  preview_upload: (input) => uploadFiles(input),
-  preview_download: (input: PreviewAutomationDownloadInput) =>
+  ),
+  preview_download: McpToolAccess.actsAsCaller((input: PreviewAutomationDownloadInput) =>
     Effect.gen(function* () {
-      const scope = yield* McpInvocationContext.requireMcpCapability("preview");
+      const scope = yield* McpInvocationContext.requireThreadMcpCapability("preview");
       const { tabId, ...operationInput } = input;
       const response = yield* invoke<unknown>(
         "download",
@@ -390,18 +418,22 @@ const handlers = {
         (input.timeoutMs ?? 15_000) + PREVIEW_FILE_TRANSFER_TIMEOUT_MS,
         tabId,
       );
-      const artifact = yield* claimPreviewDownload(scope.threadId, response.result);
+      const artifact = yield* claimPreviewDownload(scope.thread.threadId, response.result);
       return { ...artifact, ...(response.toolIcon ? { toolIcon: response.toolIcon } : {}) };
     }),
-  preview_close: (input) => invokeTargeted<PreviewAutomationCloseResult>("close", input ?? {}),
-  preview_autofill: (input) =>
+  ),
+  preview_close: McpToolAccess.actsAsCaller((input) =>
+    invokeTargeted<PreviewAutomationCloseResult>("close", input ?? {}),
+  ),
+  preview_autofill: McpToolAccess.actsAsCaller((input) =>
     invokeTargeted<PreviewAutomationAutofillResult>("autofill", input ?? {}),
-} satisfies Parameters<typeof PreviewToolkit.toLayer>[0];
+  ),
+} satisfies McpToolAccess.Handlers<typeof PreviewToolkit.tools>;
 
 const { preview_snapshot, ...standardHandlers } = handlers;
 
-export const PreviewStandardToolkitHandlersLive = PreviewStandardToolkit.toLayer(standardHandlers);
+export const layerStandard = McpToolAccess.toLayer(PreviewStandardToolkit, standardHandlers);
 
-export const PreviewSnapshotToolkitHandlersLive = PreviewSnapshotToolkit.toLayer({
+export const layerSnapshot = McpToolAccess.toLayer(PreviewSnapshotToolkit, {
   preview_snapshot,
 });

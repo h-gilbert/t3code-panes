@@ -1,12 +1,9 @@
 /** Keep a native agent click from replacing the host renderer's active editor. */
-export async function preserveRendererFocus<A>(
-  document: Document,
-  tabId: string,
-  action: () => Promise<A>,
-): Promise<A> {
+// Self-contained so main can install the same guard in the host's isolated world.
+export function beginRendererFocusGuard(document: Document, tabId: string): () => void {
   const previous = document.activeElement as HTMLElement | null;
   if (!previous || previous === document.body || previous.tagName === "WEBVIEW") {
-    return action();
+    return () => {};
   }
   let userMovedFocus = false;
   const onUserInput = (event: Event) => {
@@ -26,12 +23,23 @@ export async function preserveRendererFocus<A>(
   document.addEventListener("pointerdown", onUserInput, true);
   document.addEventListener("keydown", onUserInput, true);
   document.addEventListener("focusin", restore, true);
-  try {
-    return await action();
-  } finally {
+  return () => {
     restore();
     document.removeEventListener("focusin", restore, true);
     document.removeEventListener("pointerdown", onUserInput, true);
     document.removeEventListener("keydown", onUserInput, true);
+  };
+}
+
+export async function preserveRendererFocus<A>(
+  document: Document,
+  tabId: string,
+  action: () => Promise<A>,
+): Promise<A> {
+  const release = beginRendererFocusGuard(document, tabId);
+  try {
+    return await action();
+  } finally {
+    release();
   }
 }

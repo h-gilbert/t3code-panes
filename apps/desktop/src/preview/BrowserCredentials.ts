@@ -17,7 +17,7 @@ import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as Encoding from "effect/Encoding";
+import * as Base64 from "effect/encoding/Base64";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -290,7 +290,7 @@ export const make = Effect.gen(function* BrowserCredentialsMake() {
         return yield* new BrowserCredentialInvalidOriginError({ url: input.url });
       }
       yield* requireEncryption;
-      const encryptedPassword = Encoding.encodeBase64(
+      const encryptedPassword = Base64.encode(
         yield* safeStorage
           .encryptString(input.password)
           .pipe(
@@ -375,7 +375,7 @@ export const make = Effect.gen(function* BrowserCredentialsMake() {
       );
       if ("reason" in selected) return selected;
       const encrypted = yield* Effect.fromResult(
-        Encoding.decodeBase64(selected.credential.encryptedPassword),
+        Base64.decode(selected.credential.encryptedPassword),
       ).pipe(
         Effect.mapError(
           (cause) => new BrowserCredentialStoreError({ operation: "decode-password", cause }),

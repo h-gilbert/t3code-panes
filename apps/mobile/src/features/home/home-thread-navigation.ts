@@ -7,6 +7,8 @@ import {
 } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useCallback, useEffect, useRef } from "react";
+import { Platform } from "react-native";
+import { useAndroidWorkspaceSelection } from "../workspace/useAndroidWorkspaceSelection";
 
 import type { AppRootParamList } from "../../Stack";
 
@@ -35,6 +37,7 @@ export function createHomeThreadNavigationAction(input: {
 export function useHomeThreadSelection() {
   const navigation = useNavigation<NativeStackNavigationProp<AppRootParamList, "Home">>();
   const dismissingRouteKey = useRef<string | null>(null);
+  const selectAndroidWorkspace = useAndroidWorkspaceSelection();
 
   useEffect(() => {
     const clear = () => {
@@ -59,6 +62,13 @@ export function useHomeThreadSelection() {
 
   return useCallback(
     (thread: ThreadSelection) => {
+      if (Platform.OS === "android") {
+        selectAndroidWorkspace({
+          name: "Thread",
+          params: { environmentId: String(thread.environmentId), threadId: String(thread.id) },
+        });
+        return;
+      }
       navigation.dispatch((state) =>
         createHomeThreadNavigationAction({
           state,
@@ -67,6 +77,6 @@ export function useHomeThreadSelection() {
         }),
       );
     },
-    [navigation],
+    [navigation, selectAndroidWorkspace],
   );
 }

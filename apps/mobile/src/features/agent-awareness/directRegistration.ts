@@ -2,7 +2,7 @@ import {
   makeEnvironmentHttpApiClient,
   makeEnvironmentHttpApiUrlBuilder,
   executeEnvironmentHttpRequest,
-  remoteHttpClientLayer,
+  layerRemoteHttpClient,
 } from "@t3tools/client-runtime/rpc";
 import type { RelayDeviceRegistrationRequest } from "@t3tools/contracts/relay";
 import * as Effect from "effect/Effect";
@@ -10,7 +10,7 @@ import * as Effect from "effect/Effect";
 import type { SavedRemoteConnection } from "../../lib/connection";
 
 const REQUEST_TIMEOUT_MS = 10_000;
-const directHttpClientLayer = remoteHttpClientLayer(fetch);
+const directHttpClientLayer = layerRemoteHttpClient(fetch);
 
 function authorizationHeaders(connection: SavedRemoteConnection) {
   return connection.bearerToken ? { authorization: `Bearer ${connection.bearerToken}` } : {};

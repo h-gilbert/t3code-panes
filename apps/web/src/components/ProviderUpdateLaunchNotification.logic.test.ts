@@ -6,7 +6,7 @@ import {
   type ServerProvider,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 
 import {
   buildLocalEnvironmentUpdateGroups,
@@ -25,6 +25,7 @@ import {
   getProviderUpdateSidebarPillView,
   hasOneClickUpdateProviderCandidate,
   isProviderUpdateCandidate,
+  isProviderSettingsUpdateCandidate,
   isTerminalProviderUpdatePhase,
   localEnvironmentUpdateNotificationKey,
   providerUpdateNotificationKey,
@@ -1038,6 +1039,25 @@ describe("provider update launch notification logic", () => {
       ).toMatchObject({ kind: "idle", text: "Codex" });
     });
   });
+});
+
+it("does not offer incompatible latest versions and restores suggestions after policy relaxation", () => {
+  const installed = provider({ driver: driver("codex") });
+  for (const latestVersionStatus of ["broken", "unsupported", "supported", "unknown"] as const) {
+    const snapshot: ServerProvider = {
+      ...installed,
+      compatibilityAdvisory: {
+        status: "supported",
+        latestVersionStatus,
+        message: null,
+        recommendedRange: null,
+        recommendedVersion: null,
+      },
+    };
+    const expected = latestVersionStatus === "supported" || latestVersionStatus === "unknown";
+    expect(isProviderUpdateCandidate(snapshot)).toBe(expected);
+    expect(isProviderSettingsUpdateCandidate(snapshot)).toBe(expected);
+  }
 });
 
 describe("getProviderUpdateRunToastView", () => {

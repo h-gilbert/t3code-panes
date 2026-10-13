@@ -1,4 +1,3 @@
-import type { OrchestrationThreadShell } from "@t3tools/contracts";
 import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
 
 /**
@@ -10,7 +9,22 @@ export type FloatingWorkingStatus =
   | { readonly kind: "working"; readonly startedAt: string }
   | { readonly kind: "syncing"; readonly label: string }
   | { readonly kind: "compacting" }
-  | { readonly kind: "background"; readonly label: string }
+  | {
+      readonly kind: "child-input";
+      readonly label: string;
+      readonly accessibilityLabel: string;
+      readonly onPress: () => void;
+    }
+  // The turn settled while background work it started still runs. `waiting`
+  // is false when only commands remain, such as a dev server: the agent is done.
+  | {
+      readonly kind: "background";
+      readonly label: string;
+      readonly accessibilityLabel: string;
+      readonly waiting: boolean;
+    }
+  // A native /goal on an idle thread: paused, blocked, complete, or set.
+  | { readonly kind: "goal"; readonly label: string; readonly accessibilityLabel: string }
   // A task whose thread the server has not created yet: the worktree may
   // still be checking out, so there is no turn to time.
   | { readonly kind: "preparing"; readonly label: string }
@@ -53,6 +67,8 @@ export function connectionFloatingStatus(input: {
       };
     case "offline":
       return unavailable("You are offline");
+    case "unsupported":
+      return unavailable("Client not supported");
     case "error":
       return unavailable(
         input.connectionError
@@ -64,26 +80,4 @@ export function connectionFloatingStatus(input: {
     case "connected":
       return null;
   }
-}
-
-/** Background work remains visible after the primary turn finishes. */
-export function backgroundFloatingStatus(input: {
-  readonly backgroundLiveness: OrchestrationThreadShell["backgroundLiveness"];
-  readonly liveAgentCount: number;
-  readonly failed: boolean;
-}): FloatingWorkingStatus | null {
-  if (input.failed) return null;
-  if (input.backgroundLiveness === "monitoring") {
-    return { kind: "background", label: "Monitoring" };
-  }
-  if (input.backgroundLiveness === "working") {
-    return {
-      kind: "background",
-      label:
-        input.liveAgentCount > 0
-          ? `${input.liveAgentCount} ${input.liveAgentCount === 1 ? "agent" : "agents"} working`
-          : "Background work",
-    };
-  }
-  return null;
 }

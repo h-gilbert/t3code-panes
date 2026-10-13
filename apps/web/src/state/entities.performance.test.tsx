@@ -2,7 +2,7 @@ import { RegistryContext } from "@effect/atom-react";
 import type { EnvironmentShellState } from "@t3tools/client-runtime/state/shell";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
-import { Atom, AtomRegistry } from "effect/unstable/reactivity";
+import { Atom, AtomRegistry } from "effect/reactivity";
 import { act } from "react";
 import { create, type ReactTestRenderer } from "react-test-renderer";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -12,7 +12,7 @@ import { environmentShell } from "./shell";
 import { environmentThreadDetails, environmentThreadShells } from "./threads";
 
 vi.mock("./threads", async () => {
-  const { Atom } = await import("effect/unstable/reactivity");
+  const { Atom } = await import("effect/reactivity");
   return {
     environmentThreadShells: {
       threadShellAtom: Atom.family(() => Atom.make<{ title: string } | null>(null)),
@@ -24,7 +24,7 @@ vi.mock("./threads", async () => {
 });
 
 vi.mock("./shell", async () => {
-  const { Atom } = await import("effect/unstable/reactivity");
+  const { Atom } = await import("effect/reactivity");
   const Option = await import("effect/Option");
   const initial: EnvironmentShellState = {
     snapshot: Option.none(),

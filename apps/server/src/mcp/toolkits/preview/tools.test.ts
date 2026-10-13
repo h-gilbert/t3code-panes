@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest";
 import * as Context from "effect/Context";
-import { Tool } from "effect/unstable/ai";
+import { Tool } from "effect/ai";
 
 import { PreviewStandardToolkit, PreviewToolkit } from "./tools.ts";
 
@@ -58,12 +58,20 @@ it("exports provider-compatible object schemas with described parameters", () =>
 });
 
 it("exports exact object result schemas for preview actions", () => {
-  const actionNames = ["preview_type", "preview_scroll", "preview_wait_for"] as const;
+  const actionNames = [
+    "preview_type",
+    "preview_hover",
+    "preview_drag",
+    "preview_scroll",
+    "preview_wait_for",
+  ] as const;
   for (const name of actionNames) {
+    // Effect's tool schemas follow the decoder default since rc.113 and leave
+    // unmodeled result keys open.
     expect(Tool.getJsonSchemaFromSchema(PreviewToolkit.tools[name].successSchema)).toEqual({
       type: "object",
       properties: { toolIcon: expect.any(Object) },
-      additionalProperties: false,
+      additionalProperties: true,
       description: "The preview action completed successfully.",
     });
   }
@@ -76,7 +84,7 @@ it("reports a file picker opened by a click or key press", () => {
       readonly additionalProperties?: boolean;
     };
     expect(Object.keys(schema.properties ?? {}).toSorted()).toEqual(["fileChooser", "toolIcon"]);
-    expect(schema.additionalProperties).toBe(false);
+    expect(schema.additionalProperties).toBe(true);
   }
 });
 

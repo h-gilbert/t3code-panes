@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -8,9 +8,10 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import * as NodeNet from "node:net";
 
+import { remoteStateKey } from "./command.ts";
 import { buildRemoteStopScript, buildRemoteT3RunnerScript } from "./tunnel.ts";
 
 const Started = Schema.Struct({
@@ -36,7 +37,7 @@ const withFixturePathOnly = (script: string) => {
   return isolated;
 };
 
-describe.skipIf(HostProcessPlatform.defaultValue() === "win32")(
+describe.skipIf(HostProcess.Platform.defaultValue() === "win32")(
   "remote runner process ownership",
   () => {
     it.live("keeps the server PID and graceful shutdown through the node-script runner", () =>
@@ -148,7 +149,7 @@ server.listen(Number(process.env.T3_TEST_PORT ?? 0), "127.0.0.1", () => {
   },
 );
 
-describe.skipIf(HostProcessPlatform.defaultValue() === "win32")(
+describe.skipIf(HostProcess.Platform.defaultValue() === "win32")(
   "remote stop process ownership",
   () => {
     it.live.each(["graceful", "timeout", "external"] as const)(
@@ -205,12 +206,14 @@ server.listen(0, "127.0.0.1", () => {
           for (const [name, contents] of Object.entries(savedState)) {
             yield* fs.writeFileString(path.join(fixture, name), contents);
           }
-          const script = buildRemoteStopScript({
-            alias: "fixture",
-            hostname: "fixture",
-            username: null,
-            port: null,
-          });
+          const script = buildRemoteStopScript(
+            yield* remoteStateKey({
+              alias: "fixture",
+              hostname: "fixture",
+              username: null,
+              port: null,
+            }),
+          );
           // Redirect only the state directory. Never use the developer's SSH state.
           const isolatedScript = script.replace(
             /^STATE_DIR=.*$/mu,

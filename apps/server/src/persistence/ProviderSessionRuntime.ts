@@ -6,14 +6,13 @@ import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import * as SqlSchema from "effect/unstable/sql/SqlSchema";
+import * as SqlClient from "effect/sql/SqlClient";
+import * as SqlSchema from "effect/sql/SqlSchema";
 
 import {
   AgentSessionImportSource,
   IsoDateTime,
   ProviderInstanceId,
-  ProviderSessionRuntimeStatus,
   RuntimeMode,
   ThreadId,
 } from "@t3tools/contracts";
@@ -32,6 +31,8 @@ import {
  *
  * @module ProviderSessionRuntimeRepository
  */
+
+const ProviderSessionRuntimeStatus = Schema.Literals(["starting", "running", "stopped", "error"]);
 
 export const ProviderSessionRuntime = Schema.Struct({
   threadId: ThreadId,
@@ -402,7 +403,7 @@ export const make = Effect.gen(function* () {
       ),
       Effect.flatMap((runtimeRowOption) =>
         Option.match(runtimeRowOption, {
-          onNone: () => Effect.succeed(Option.none()),
+          onNone: () => Effect.succeedNone,
           onSome: (row) =>
             decodeRuntimeRow(row).pipe(
               Effect.mapError((cause) =>
@@ -412,7 +413,7 @@ export const make = Effect.gen(function* () {
                   { threadId: input.threadId },
                 ),
               ),
-              Effect.map((runtime) => Option.some(runtime)),
+              Effect.asSome,
             ),
         }),
       ),
@@ -432,7 +433,7 @@ export const make = Effect.gen(function* () {
         // every consumer that enumerates sessions, such as the reaper.
         Effect.forEach(rows, (row) =>
           decodeRuntimeRow(row).pipe(
-            Effect.map(Option.some),
+            Effect.asSome,
             Effect.catch((cause) =>
               Effect.logWarning("provider.session.runtime.row-skipped", {
                 threadId: row.threadId,

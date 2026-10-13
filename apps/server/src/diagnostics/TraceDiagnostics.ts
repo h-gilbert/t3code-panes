@@ -72,6 +72,8 @@ interface TraceDiagnosticsErrorSummary {
 const DEFAULT_SLOW_SPAN_THRESHOLD_MS = 1_000;
 const TOP_LIMIT = 10;
 const RECENT_LIMIT = 20;
+
+/** The trace file and its rotated backups, oldest first. */
 export function toRotatedTracePaths(
   traceFilePath: string,
   maxFiles: number,

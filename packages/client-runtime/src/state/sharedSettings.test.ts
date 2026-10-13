@@ -78,9 +78,9 @@ describe("splitSharedServerPatch", () => {
     expect(
       filterSharedServerPatch({ starredModelSelection: selection }, restartCapabilities, {
         ...DEFAULT_SERVER_SETTINGS,
-        providers: {
-          ...DEFAULT_SERVER_SETTINGS.providers,
-          codex: { ...DEFAULT_SERVER_SETTINGS.providers.codex, enabled: false },
+        providerInstances: {
+          ...DEFAULT_SERVER_SETTINGS.providerInstances,
+          codex: { ...DEFAULT_SERVER_SETTINGS.providerInstances.codex, enabled: false },
         },
       }),
     ).toEqual({});
@@ -182,10 +182,12 @@ describe("pickSharedServerSettings", () => {
     expect(
       Object.keys(pickSharedServerSettings(DEFAULT_SERVER_SETTINGS, restartCapabilities)).sort(),
     ).toEqual([
+      "autoResumeLimitedThreads",
       "continueThreadsAfterServerUpdate",
       "newWorktreesStartFromOrigin",
       "sidebarAutoSettleAfterDays",
       "sidebarAutoSettleOnMerge",
+      "snoozeLimitedThreads",
       "sourceControlWritingStyle",
       "starredModelSelection",
       "textGenerationModelSelection",

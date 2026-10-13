@@ -1,4 +1,5 @@
-"use client";
+import { observeResize } from "~/lib/observeResize";
+("use client");
 
 import type { ScopedThreadRef } from "@t3tools/contracts";
 
@@ -27,7 +28,7 @@ import { useRightPanelStore } from "~/rightPanelStore";
 import { useDeviceState } from "~/state/device";
 
 import { DeviceStreamView } from "../device/DeviceStreamView";
-import type { DeviceScreenSize } from "../device/deviceStream";
+import type { DeviceScreenSize } from "@t3tools/client-runtime/device/stream";
 import {
   clampPreviewMiniPlayerPosition,
   PREVIEW_MINI_PLAYER_CORNER_RADIUS,
@@ -162,6 +163,7 @@ function MiniPlayerShell({
   const [container, setContainer] = useState<PreviewMiniPlayerSize | null>(null);
   const sourceKey = previewMiniPlayerSourceKey(miniPlayer.source);
   const obstacles = {
+    detailsCard: null,
     composer:
       container && bottomInset > 0
         ? { left: 0, right: container.width, height: bottomInset }
@@ -197,9 +199,7 @@ function MiniPlayerShell({
     };
     measure();
     if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    return () => observer.disconnect();
+    return observeResize(element, measure);
   }, []);
 
   const beginGesture = (

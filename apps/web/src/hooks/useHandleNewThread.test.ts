@@ -109,8 +109,20 @@ vi.mock("@t3tools/shared/projectSettings", async (importOriginal) => {
   const { DEFAULT_SERVER_SETTINGS } = await import("@t3tools/contracts");
   return {
     ...original,
-    resolveProjectSettings: (settings: Parameters<typeof original.resolveProjectSettings>[0]) =>
-      original.resolveProjectSettings({ ...DEFAULT_SERVER_SETTINGS, ...settings }, null),
+    resolveProjectSettings: (
+      settings: Parameters<typeof original.resolveProjectSettings>[0],
+      ...rest: [
+        Parameters<typeof original.resolveProjectSettings>[1],
+        Parameters<typeof original.resolveProjectSettings>[2]?,
+        Parameters<typeof original.resolveProjectSettings>[3]?,
+      ]
+    ) =>
+      original.resolveProjectSettings(
+        { ...DEFAULT_SERVER_SETTINGS, ...settings },
+        rest[0],
+        rest[1],
+        rest[2] ?? null,
+      ),
   };
 });
 vi.mock("@t3tools/shared/threadEnvMode", () => ({
@@ -142,7 +154,7 @@ vi.mock("../lib/chatThreadActions", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/chatThreadActions")>()),
 }));
 vi.mock("../lib/t3ProjectFileDefaults", () => ({
-  readT3ProjectFileDefaultThreadEnvMode: () => testState.projectFileRead,
+  readT3ProjectFile: () => testState.projectFileRead,
 }));
 vi.mock("../lib/utils", () => ({
   newDraftId: () => "draft-delayed",
@@ -164,6 +176,7 @@ vi.mock("../state/entities", () => ({
     },
   ],
   readThreadShell: () => null,
+  readThreadShells: () => [],
   useProjects: () => [],
   useThread: () => null,
 }));

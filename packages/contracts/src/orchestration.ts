@@ -461,7 +461,8 @@ const ProjectEmoji = TrimmedNonEmptyString.check(Schema.isMaxLength(32));
 
 const monogramSegmenter =
   typeof Intl.Segmenter === "function"
-    ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
+    ? // oxlint-disable-next-line t3code/no-hermes-unsupported-apis -- Feature-checked; Hermes uses the portable fallback below.
+      new Intl.Segmenter(undefined, { granularity: "grapheme" })
     : null;
 // Hermes does not provide Intl.Segmenter. Monograms contain only letters,
 // numbers, marks, and joiners, so this fallback covers their allowed clusters.

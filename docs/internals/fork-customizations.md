@@ -116,3 +116,9 @@ through the diff panel.
 - Updating source does not authorize replacing or restarting the installed app.
   Follow `docs/operations/fork-releases.md` for an authorized release and
   `docs/operations/local-desktop-promotion.md` for a requested one-off local install.
+
+Queued web and desktop follow-ups wait for the next completed tool call or the end
+of the turn, including when the thread is offscreen. Deliver at most one per tool
+boundary, and hold delivery during pending approval or input. The server owns the
+durable queue; Stop returns messages, attachments and context to the composer,
+keeping attachment overflow held. Queue edits retain the original model selection.

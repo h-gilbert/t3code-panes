@@ -80,6 +80,7 @@ describe("previewMiniPlayerStore", () => {
       width: null,
       maximized: false,
       floating: false,
+      lastInteraction: "drag",
     });
   });
 
@@ -97,6 +98,7 @@ describe("previewMiniPlayerStore", () => {
       width: null,
       maximized: false,
       floating: false,
+      lastInteraction: "drag",
     });
   });
 
@@ -111,6 +113,19 @@ describe("previewMiniPlayerStore", () => {
       source: { kind: "browser", tabId: "tab-b" },
       size: { width: 480, height: 320 },
     });
+  });
+
+  it("keeps a resize placement after release and clears it when dragging", () => {
+    const store = usePreviewMiniPlayerStore.getState();
+    store.open(refA, tabA);
+    store.resize(refA, "browser:tab-a", 460, { x: 1112, y: 275 });
+    expect(
+      selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
+    ).toMatchObject({ width: 460, position: { x: 1112, y: 275 }, lastInteraction: "resize" });
+    store.move(refA, "browser:tab-a", { x: 1112, y: 275 });
+    expect(
+      selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, refA),
+    ).toMatchObject({ width: 460, position: { x: 1112, y: 275 }, lastInteraction: "drag" });
   });
 
   it("preserves fullscreen state while switching tabs", () => {

@@ -1,3 +1,4 @@
+// @effect-diagnostics cryptoRandomUUID:off -- Synchronous workspace drag-and-drop allocates local view identities.
 import { useAtomValue } from "@effect/atom-react";
 import {
   scopedThreadKey,
@@ -126,9 +127,9 @@ function workspacePaneRenderKey(target: WorkspacePaneTarget | null, index: numbe
 }
 
 const EMPTY_PANE_SECTION_LABEL_CLASS =
-  "px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground";
+  "px-2 pb-1 pt-1 text-3xs font-medium uppercase tracking-wide text-muted-foreground";
 const EMPTY_PANE_ROW_CLASS =
-  "flex min-h-9 w-full items-center gap-2 rounded px-2 py-1.5 text-left outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring";
+  "flex min-h-9 w-full items-center gap-2 rounded px-2 py-1.5 text-left outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring";
 const EMPTY_PANE_COLUMN_CLASS =
   "flex max-h-44 min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-y-auto rounded-md border border-border bg-muted/20 p-1 text-left @lg/empty-pane:max-h-80";
 
@@ -170,7 +171,7 @@ function EmptyWorkspacePane({
         <span className="min-w-0 flex-1">
           <span className="block truncate text-xs font-medium text-foreground">{thread.title}</span>
           {!projectSelected ? (
-            <span className="block truncate text-[11px] text-muted-foreground">
+            <span className="block truncate text-2xs text-muted-foreground">
               {thread.projectName}
             </span>
           ) : null}
@@ -205,7 +206,7 @@ function EmptyWorkspacePane({
                 <span className="block truncate text-xs font-medium text-foreground">
                   {project.displayName}
                 </span>
-                <span className="block truncate text-[11px] text-muted-foreground">
+                <span className="block truncate text-2xs text-muted-foreground">
                   {project.workspaceRoot}
                 </span>
               </span>
@@ -249,7 +250,7 @@ function EmptyWorkspacePane({
             </>
           ) : null}
           {threads.length === 0 ? (
-            <p className="px-2 py-1.5 text-[11px] text-muted-foreground">
+            <p className="px-2 py-1.5 text-2xs text-muted-foreground">
               {projectSelected ? "No other open threads in this project." : "No open threads."}
             </p>
           ) : null}
@@ -302,9 +303,8 @@ function WorkspaceThreadPane({
   const serverThreadStatus = useThreadStatus(threadRef);
   const renderState = resolveThreadRouteRenderState({
     bootstrapComplete,
-    serverThreadShellExists,
-    serverThreadDetailExists,
-    serverThreadDetailDeleted: serverThreadStatus === "deleted",
+    serverThreadExists: serverThreadShellExists || serverThreadDetailExists,
+    serverThreadDeleted: serverThreadStatus === "deleted",
     draftThreadExists: false,
   });
   const threadSyncPhase = resolveThreadSyncPhase({
@@ -619,7 +619,7 @@ function WorkspacePane({
       ) : null}
       <div
         className={cn(
-          "flex h-7 shrink-0 items-center border-b px-2 text-[11px] font-medium",
+          "flex h-7 shrink-0 items-center border-b px-2 text-2xs font-medium",
           focused
             ? "border-primary/40 bg-primary/[0.07] text-foreground"
             : "border-border bg-muted/30 text-muted-foreground",
@@ -646,7 +646,7 @@ function WorkspacePane({
         {projects.length === 0 ? (
           <button
             type="button"
-            className="flex h-5 min-w-0 max-w-[45%] items-center gap-1.5 truncate rounded px-1.5 text-left text-[11px] text-foreground outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex h-5 min-w-0 max-w-[45%] items-center gap-1.5 truncate rounded px-1.5 text-left text-2xs text-foreground outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
             onClick={openProjectPicker}
           >
             <FolderOpenIcon className="size-3 shrink-0 text-muted-foreground" aria-hidden />
@@ -655,7 +655,12 @@ function WorkspacePane({
         ) : (
           <DropdownMenu>
             <DropdownMenuTrigger
-              className="flex h-5 min-w-0 max-w-[45%] items-center gap-1 rounded px-1.5 text-left text-[11px] text-foreground outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring"
+              render={
+                <button
+                  type="button"
+                  className="flex h-5 min-w-0 max-w-[45%] items-center gap-1 rounded px-1.5 text-left text-2xs text-foreground outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                />
+              }
               aria-label={`Change project for pane ${index + 1}`}
             >
               <span className="truncate">{selectedProject?.displayName ?? "Choose project"}</span>
@@ -667,10 +672,14 @@ function WorkspacePane({
                 {menuProjects.map((project) => (
                   <DropdownMenuItem
                     key={project.projectKey}
-                    className={cn(
-                      "group",
-                      project.projectKey === projectKey && "bg-foreground/[0.08]",
-                    )}
+                    className="group"
+                    render={
+                      <div
+                        className={
+                          project.projectKey === projectKey ? "bg-foreground/[0.08]" : undefined
+                        }
+                      />
+                    }
                     onClick={() =>
                       selectProject(scopeProjectRef(project.environmentId, project.id))
                     }
@@ -682,7 +691,7 @@ function WorkspacePane({
                   >
                     <span className="min-w-0 flex-1">
                       <span className="block truncate">{project.displayName}</span>
-                      <span className="block truncate text-[11px] text-muted-foreground">
+                      <span className="block truncate text-2xs text-muted-foreground">
                         {project.workspaceRoot}
                       </span>
                     </span>
@@ -718,7 +727,7 @@ function WorkspacePane({
                       >
                         <span className="min-w-0 flex-1">
                           <span className="block truncate">{project.displayName}</span>
-                          <span className="block truncate text-[11px] text-muted-foreground">
+                          <span className="block truncate text-2xs text-muted-foreground">
                             {project.workspaceRoot}
                           </span>
                         </span>
@@ -984,7 +993,7 @@ export function ProjectPaneWorkspace({
   ]);
 
   return (
-    <SidebarInset className="flex h-svh min-h-0 flex-col overflow-hidden overscroll-y-none bg-background text-foreground md:h-dvh">
+    <SidebarInset className="flex h-svh min-h-0 flex-col overflow-hidden overscroll-y-none  md:h-dvh">
       {active ? (
         <div
           className={cn(
@@ -998,19 +1007,19 @@ export function ProjectPaneWorkspace({
         </div>
       ) : null}
       {isMacosDesktop && !isWindowFullscreen ? (
-        <header className="drag-region flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center gap-2 border-b border-border bg-background pr-3 pl-[var(--workspace-titlebar-content-left)]">
+        <header className="drag-region flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center gap-2 border-b border-border bg-background pr-3 pl-(--workspace-titlebar-content-left)">
           <div className="min-w-0 flex-1" aria-hidden />
           <div
             className="flex items-center gap-1 [-webkit-app-region:no-drag]"
             aria-label="Workspace layout controls"
           >
-            <div className="relative h-6 w-[4.75rem] shrink-0 text-[11px]">
+            <div className="relative h-6 w-[4.75rem] shrink-0 text-2xs">
               <span className="pointer-events-none absolute inset-y-0 left-2 flex items-center text-muted-foreground">
                 Panes
               </span>
               <select
                 aria-label="Number of panes"
-                className="h-6 w-full appearance-none rounded-md border border-border bg-background pr-5 pl-[2.65rem] text-[11px] text-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+                className="h-6 w-full appearance-none rounded-md border border-border bg-background pr-5 pl-10.5 text-2xs text-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                 value={String(paneCount)}
                 onChange={(event) =>
                   setPaneCount(

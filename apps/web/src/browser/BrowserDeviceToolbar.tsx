@@ -193,8 +193,8 @@ export function BrowserDeviceToolbar({
       }}
     >
       {width >= 560 ? (
-        <span className="mr-0.5 shrink-0 text-[11px] font-medium text-muted-foreground">
-          Viewport
+        <span className="mr-0.5 shrink-0 text-2xs font-medium text-muted-foreground">
+          Dimensions
         </span>
       ) : null}
       <Select
@@ -207,15 +207,12 @@ export function BrowserDeviceToolbar({
         <SelectTrigger
           variant="ghost"
           size="xs"
-          className={cn(
-            "shrink-0 justify-between px-1.5 font-medium",
-            width >= 440 ? "w-36" : "w-24",
-          )}
+          className={cn("shrink-0 justify-between", width >= 440 ? "w-36" : "w-24")}
           aria-label="Browser device preset"
         >
           <SelectValue />
         </SelectTrigger>
-        <SelectPopup align="start" alignItemWithTrigger={false} className="min-w-64">
+        <SelectPopup align="start" alignItemWithTrigger={false}>
           <SelectItem value={RESPONSIVE_VALUE}>Responsive</SelectItem>
           <SelectGroup>
             <SelectGroupLabel>Phones</SelectGroupLabel>
@@ -262,7 +259,8 @@ export function BrowserDeviceToolbar({
           nativeInput
           type="number"
           inputMode="numeric"
-          size="sm"
+          size="compact"
+          font="mono"
           min={PREVIEW_VIEWPORT_MIN_DIMENSION}
           max={PREVIEW_VIEWPORT_MAX_DIMENSION}
           value={presentedSize.width}
@@ -279,17 +277,15 @@ export function BrowserDeviceToolbar({
           onChange={(event) => updateCustomDimension("width", event.target.value)}
           aria-label="Viewport width"
           aria-invalid={!customValid}
-          className={cn(
-            "h-6 rounded-md text-center tabular-nums [&_[data-slot=input]]:h-full [&_[data-slot=input]]:px-1 [&_[data-slot=input]]:text-xs [&_[data-slot=input]]:leading-none [&_[data-slot=input]::-webkit-inner-spin-button]:appearance-none [&_[data-slot=input]]:[appearance:textfield]",
-            width >= 360 ? "w-14" : "w-11",
-          )}
+          className={width >= 360 ? "w-14" : "w-13"}
         />
         <span className="text-xs text-muted-foreground">×</span>
         <Input
           nativeInput
           type="number"
           inputMode="numeric"
-          size="sm"
+          size="compact"
+          font="mono"
           min={PREVIEW_VIEWPORT_MIN_DIMENSION}
           max={PREVIEW_VIEWPORT_MAX_DIMENSION}
           value={presentedSize.height}
@@ -306,10 +302,7 @@ export function BrowserDeviceToolbar({
           onChange={(event) => updateCustomDimension("height", event.target.value)}
           aria-label="Viewport height"
           aria-invalid={!customValid}
-          className={cn(
-            "h-6 rounded-md text-center tabular-nums [&_[data-slot=input]]:h-full [&_[data-slot=input]]:px-1 [&_[data-slot=input]]:text-xs [&_[data-slot=input]]:leading-none [&_[data-slot=input]::-webkit-inner-spin-button]:appearance-none [&_[data-slot=input]]:[appearance:textfield]",
-            width >= 360 ? "w-14" : "w-11",
-          )}
+          className={width >= 360 ? "w-14" : "w-13"}
         />
       </form>
 
@@ -317,14 +310,13 @@ export function BrowserDeviceToolbar({
         <TooltipTrigger
           render={
             <Button
-              variant="ghost"
-              size={width >= 660 ? "xs" : "icon-xs"}
+              variant={aspectRatio === null ? "ghost" : "secondary"}
+              size="icon-xs"
               type="button"
               aria-label={
                 aspectRatio === null ? "Lock viewport aspect ratio" : "Unlock viewport aspect ratio"
               }
               aria-pressed={aspectRatio !== null}
-              className={cn(aspectRatio !== null && "bg-accent text-foreground")}
               disabled={pending || !customValid}
               onPointerDown={(event) => event.preventDefault()}
               onClick={toggleAspectRatio}
@@ -378,7 +370,7 @@ export function BrowserDeviceToolbar({
         size="xs"
         type="button"
         aria-label="Fill available space"
-        className="sticky right-0 ml-auto bg-background/95"
+        className="sticky right-0 ml-auto"
         disabled={pending}
         onClick={() => {
           apply({ _tag: "fill" }, null);

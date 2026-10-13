@@ -10,6 +10,10 @@ import {
   PreviewAutomationError,
   PreviewAutomationEvaluateInput,
   PreviewAutomationInputResult,
+  OrchestratorMcpFailure,
+  PreviewAutomationDialogInput,
+  PreviewAutomationDragInput,
+  PreviewAutomationHoverInput,
   PreviewAutomationNavigateInput,
   PreviewAutomationOpenInput,
   PreviewAutomationPressInput,
@@ -18,6 +22,8 @@ import {
   PreviewAutomationResizeInput,
   PreviewAutomationResizeResult,
   PreviewAutomationScrollInput,
+  PreviewAutomationSelectInput,
+  PreviewAutomationSelectResult,
   PreviewAutomationSetColorSchemeInput,
   PreviewAutomationSetColorSchemeResult,
   PreviewAutomationSnapshot,
@@ -31,17 +37,22 @@ import {
 import * as Schema from "effect/Schema";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
-import { Tool, Toolkit } from "effect/unstable/ai";
+import { Tool, Toolkit } from "effect/ai";
 
 import * as ServerSecretStore from "../../../auth/ServerSecretStore.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 import * as ServerConfig from "../../../config.ts";
+import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 
 const dependencies = [
   McpInvocationContext.McpInvocationContext,
+  ThreadManagementService.ThreadManagementService,
   PreviewAutomationBroker.PreviewAutomationBroker,
 ];
+
+/** What a browser action fails with, including the access gate's refusal. */
+const PreviewToolFailure = Schema.Union([PreviewAutomationError, OrchestratorMcpFailure]);
 
 const presentationFields = { toolIcon: Schema.optional(ToolActivityIcon) };
 
@@ -71,10 +82,10 @@ const readonlyBrowserTool = <T extends Tool.Any>(tool: T): T =>
 
 const PreviewStatusTool = Tool.make("preview_status", {
   description:
-    "Report whether a collaborative browser tab is automation-capable, including its URL, title, visibility, loading state, viewport mode, and measured CSS-pixel size. `available` means the tab can be driven at all, not that it is free: when another agent session is mid-interaction on it, `heldByAnotherSession` is true and an interaction now would fail until that step finishes. Pass tabId to inspect a specific tab; omit it to use this agent session's current tab.",
+    "Report whether a collaborative browser tab is automation-capable, including its control owner, pending dialog, URL, title, visibility, loading state, viewport mode, and measured CSS-pixel size. Pass tabId to inspect a specific tab; omit it to use this agent session's current tab, or the tab the user is viewing when you have none. Server hosts also list every tab in the thread (tabs) with its owner, including tabs the user opened, and the browser profiles preview_open accepts. You can read any listed tab; act only on your own tabs, or on an unclaimed tab while no human controls it. While another agent session is mid-interaction, heldByAnotherSession is true and competing actions fail until that step finishes.",
   parameters: PreviewAutomationTabTargetInput,
   success: PreviewAutomationStatus,
-  failure: PreviewAutomationError,
+  failure: PreviewToolFailure,
   dependencies,
 })
   .annotate(Tool.Title, "Get preview status")
@@ -85,14 +96,25 @@ const PreviewStatusTool = Tool.make("preview_status", {
 const PreviewOpenTool = browserTool(
   Tool.make("preview_open", {
     description:
-      "Initialize a collaborative browser tab. Visibility defaults to the user’s auto-show preference, which is off by default. Use open=false for routine background automation; use open=true when the user asks to see the page or the task requires human interaction. Pass tabId to reuse a specific existing tab, set reuseExistingTab=false to create another tab, or omit both to use this agent session's current tab.",
+      "Initialize a collaborative browser tab with visibility controlled by the user’s auto-show preference, off by default. Use open=false for routine background automation and open=true when the user asks to see the page. Pass tabId to reuse a specific existing tab, set reuseExistingTab=false to create another tab, or omit both to use this agent session's current tab. Parallel subagents sharing a provider session must each open with reuseExistingTab=false and pass their returned tabId on every call. Pass profileId (an id or name from preview_status profiles) to open under a browser profile and its saved logins; omit it for the user's default profile. Another agent session's tabs can be read but not operated.",
     parameters: PreviewAutomationOpenInput,
     success: PreviewAutomationStatus,
-    failure: PreviewAutomationError,
+    failure: PreviewToolFailure,
     dependencies,
   })
     .annotate(Tool.Title, "Open browser preview")
     .annotate(Tool.Destructive, false),
+);
+
+const PreviewDialogTool = browserTool(
+  Tool.make("preview_dialog", {
+    description:
+      "Accept or dismiss the server browser dialog reported by preview_status. For a prompt, supply promptText when accepting. Requires this agent to own the tab, or the tab to be unclaimed with no human in control. Desktop hosts may not support this operation.",
+    parameters: PreviewAutomationDialogInput,
+    success: PreviewAutomationStatus,
+    failure: PreviewToolFailure,
+    dependencies,
+  }).annotate(Tool.Title, "Resolve browser dialog"),
 );
 
 const PreviewNavigateTool = safeBrowserTool(
@@ -101,7 +123,7 @@ const PreviewNavigateTool = safeBrowserTool(
       "Navigate a collaborative browser tab. Pass tabId to target a specific tab, plus {url:'https://t3.chat'} for a website or {target:{kind:'environment-port',port:5173}} for a dev server. Exactly one of url or target is required.",
     parameters: PreviewAutomationNavigateInput,
     success: PreviewAutomationStatus,
-    failure: PreviewAutomationError,
+    failure: PreviewToolFailure,
     dependencies,
   }).annotate(Tool.Title, "Navigate browser preview"),
 );
@@ -112,7 +134,7 @@ const PreviewResizeTool = safeBrowserTool(
       "Resize a collaborative browser tab, optionally selected by tabId. Use {mode:'fill'}, {mode:'freeform',width:1024,height:768}, or {mode:'preset',preset:'iphone-12-pro',orientation:'portrait'}. This changes CSS layout breakpoints without changing the desktop browser user agent.",
     parameters: PreviewAutomationResizeInput,
     success: Schema.Struct({ ...PreviewAutomationResizeResult.fields, ...presentationFields }),
-    failure: PreviewAutomationError,
+    failure: PreviewToolFailure,
     dependencies,
   })
     .annotate(Tool.Title, "Resize browser viewport")
@@ -128,17 +150,18 @@ const PreviewSetAppearanceTool = safeBrowserTool(
       ...PreviewAutomationSetColorSchemeResult.fields,
       ...presentationFields,
     }),
-    failure: PreviewAutomationError,
+    failure: PreviewToolFailure,
     dependencies,
   })
     .annotate(Tool.Title, "Set preview appearance")
     .annotate(Tool.Idempotent, true),
 );
 
-export const PreviewSnapshotTool = readonlyBrowserTool(
+// Not read-only: save=true writes the screenshot to disk.
+export const PreviewSnapshotTool = safeBrowserTool(
   Tool.make("preview_snapshot", {
     description:
-      "Inspect a page before interacting. Pass tabId to inspect a specific tab; omit it to use this agent session's current tab. Returns page state, semantic elements, diagnostics, action history, and a PNG screenshot. The text is capped near 20 KB and lists what it omitted; use preview_evaluate to read more. Set includeImage=false for text-only output with the same page metadata. Set save=true to also write the PNG to disk and get screenshotPath back; with includeImage=false, save=true returns only the url and screenshotPath. Embed that path in your reply as ![alt](screenshotPath) so the user sees it. This is the only way to show the user a screenshot; the image in the tool result is not saved anywhere.",
+      "Inspect a page before interacting. Pass tabId to inspect a specific tab, including one the user opened (see preview_status tabs), even while they control it; omit it to use this agent session's current tab, or the tab the user is viewing when you have none. Returns page state, semantic elements, diagnostics, action history, and a PNG screenshot. Server snapshots include an accessibilityTree with refs; pass locator=aria-ref=<ref> to target one exact element, including inside frames. Refresh refs after navigation, another snapshot, or human takeover. The text is capped near 20 KB and lists what it omitted; use preview_evaluate to read more. Set includeImage=false for text-only output. Set save=true to also write the PNG to disk; with includeImage=false, return only the url and screenshotPath. Embed that path in your reply as ![alt](screenshotPath) so the user sees it. This is the only way to show the user a screenshot; the image in the tool result is not saved anywhere.",
     parameters: Schema.Struct({
       ...PreviewAutomationTabTargetInput.fields,
       includeImage: Schema.optional(
@@ -155,7 +178,7 @@ export const PreviewSnapshotTool = readonlyBrowserTool(
       ),
     }),
     success: PreviewAutomationSnapshot,
-    failure: PreviewAutomationError,
+    failure: PreviewToolFailure,
     dependencies,
   }).annotate(Tool.Title, "Inspect browser page"),
 );
@@ -163,10 +186,10 @@ export const PreviewSnapshotTool = readonlyBrowserTool(
 const PreviewClickTool = browserTool(
   Tool.make("preview_click", {
     description:
-      "Click exactly one target in the tab selected by tabId, or this agent session's current tab when omitted. Prefer a Playwright locator; selector accepts legacy CSS; x and y must be supplied together. A file picker the click opens is held without a native dialog and reported as fileChooser; a file the click downloads is held for preview_download without a Save dialog.",
+      "Click exactly one target in the tab selected by tabId, or this agent session's current tab when omitted. Prefer a Playwright locator; selector accepts legacy CSS; x and y must be supplied together. Set button=right or clickCount=2 for server tabs. A file picker the click opens is held without a native dialog and reported as fileChooser; a file the click downloads is held for preview_download without a Save dialog.",
     parameters: PreviewAutomationClickInput,
     success: PreviewInputActionResult,
-    failure: PreviewAutomationError,
+    failure: PreviewToolFailure,
     dependencies,
   }).annotate(Tool.Title, "Click preview page"),
 );
@@ -177,9 +200,45 @@ const PreviewTypeTool = browserTool(
       "Insert literal text into one input in the tab selected by tabId, or this agent session's current tab when omitted. Prefer a Playwright locator; set clear=true to replace existing text.",
     parameters: PreviewAutomationTypeInput,
     success: PreviewActionResult,
-    failure: PreviewAutomationError,
+    failure: PreviewToolFailure,
     dependencies,
   }).annotate(Tool.Title, "Type into preview page"),
+);
+
+const PreviewHoverTool = safeBrowserTool(
+  Tool.make("preview_hover", {
+    description:
+      "Move the mouse over exactly one target in the tab selected by tabId, or this agent session's current tab when omitted, to reveal hover menus and tooltips. Server browser tabs only.",
+    parameters: PreviewAutomationHoverInput,
+    success: PreviewActionResult,
+    failure: PreviewToolFailure,
+    dependencies,
+  }).annotate(Tool.Title, "Hover preview page"),
+);
+
+const PreviewSelectTool = browserTool(
+  Tool.make("preview_select", {
+    description:
+      "Choose options in one native <select> in the tab selected by tabId, or this agent session's current tab when omitted, by option value or visible label. Custom dropdowns are not <select>; click them open and click the option instead. Server browser tabs only.",
+    parameters: PreviewAutomationSelectInput,
+    success: Schema.Struct({
+      ...PreviewAutomationSelectResult.fields,
+      ...presentationFields,
+    }),
+    failure: PreviewToolFailure,
+    dependencies,
+  }).annotate(Tool.Title, "Select preview option"),
+);
+
+const PreviewDragTool = browserTool(
+  Tool.make("preview_drag", {
+    description:
+      "Drag one element onto another in the tab selected by tabId, or this agent session's current tab when omitted. Server browser tabs only.",
+    parameters: PreviewAutomationDragInput,
+    success: PreviewActionResult,
+    failure: PreviewToolFailure,
+    dependencies,
+  }).annotate(Tool.Title, "Drag in preview page"),
 );
 
 const PreviewPressTool = browserTool(
@@ -188,7 +247,7 @@ const PreviewPressTool = browserTool(
       "Press one keyboard key in the tab selected by tabId, or this agent session's current tab when omitted. Examples: {key:'Enter'}, {key:'Escape'}, or {key:'a',modifiers:['Meta']}.",
     parameters: PreviewAutomationPressInput,
     success: PreviewInputActionResult,
-    failure: PreviewAutomationError,
+    failure: PreviewToolFailure,
     dependencies,
   }).annotate(Tool.Title, "Press key in preview page"),
 );
@@ -199,7 +258,7 @@ const PreviewScrollTool = safeBrowserTool(
       "Scroll the tab selected by tabId, or this agent session's current tab when omitted. Positive deltaY scrolls down and positive deltaX scrolls right; a locator/selector targets a container.",
     parameters: PreviewAutomationScrollInput,
     success: PreviewActionResult,
-    failure: PreviewAutomationError,
+    failure: PreviewToolFailure,
     dependencies,
   }).annotate(Tool.Title, "Scroll preview page"),
 );
@@ -219,10 +278,10 @@ export const PreviewEvaluateResult = Schema.Struct({
 const PreviewEvaluateTool = browserTool(
   Tool.make("preview_evaluate", {
     description:
-      "Evaluate JavaScript in the tab selected by tabId, or this agent session's current tab when omitted. Returns {value} with a serializable result up to 64 KB; the expression may mutate page state. A document that runs agent JavaScript cannot receive saved-login autofill, and evaluation is unavailable after password autofill. A full navigation resets either restriction.",
+      "Evaluate JavaScript in the tab selected by tabId, or this agent session's current tab when omitted. Needs the same control as clicking: it works on your own tabs and on the user's tab only while nobody controls it. To read a tab the user is driving, use preview_snapshot. Returns {value} with a serializable result up to 64 KB; the expression may mutate page state. A document that runs agent JavaScript cannot receive saved-login autofill, and evaluation is unavailable after password autofill. A full navigation resets either restriction.",
     parameters: PreviewAutomationEvaluateInput,
     success: PreviewEvaluateResult,
-    failure: PreviewAutomationError,
+    failure: PreviewToolFailure,
     dependencies,
   }).annotate(Tool.Title, "Evaluate JavaScript in preview"),
 );
@@ -233,7 +292,7 @@ const PreviewWaitForTool = readonlyBrowserTool(
       "Wait in the tab selected by tabId, or this agent session's current tab when omitted, until all supplied locator, selector, text, and URL conditions match.",
     parameters: PreviewAutomationWaitForInput,
     success: PreviewActionResult,
-    failure: PreviewAutomationError,
+    failure: PreviewToolFailure,
     dependencies,
   }).annotate(Tool.Title, "Wait for preview page condition"),
 );
@@ -244,7 +303,7 @@ const PreviewRecordingStartTool = safeBrowserTool(
       "Start recording the collaborative browser tab selected by tabId, or this agent session's current tab when omitted.",
     parameters: PreviewAutomationTabTargetInput,
     success: Schema.Struct({ ...PreviewAutomationRecordingStatus.fields, ...presentationFields }),
-    failure: PreviewAutomationError,
+    failure: PreviewToolFailure,
     dependencies,
   }).annotate(Tool.Title, "Start browser recording"),
 );
@@ -255,7 +314,7 @@ const PreviewRecordingStopTool = safeBrowserTool(
       "Stop recording the collaborative browser tab selected by tabId, or this agent session's current tab when omitted, and transfer the compressed recording once (up to 50 MiB) to an evidence file readable in this agent's environment. Returns its environment-local path after transfer succeeds.",
     parameters: PreviewAutomationTabTargetInput,
     success: Schema.Struct({ ...PreviewAutomationRecordingArtifact.fields, ...presentationFields }),
-    failure: PreviewAutomationError,
+    failure: PreviewToolFailure,
     dependencies: [...dependencies, FileSystem.FileSystem, ServerConfig.ServerConfig],
   }).annotate(Tool.Title, "Stop browser recording"),
 );
@@ -266,7 +325,7 @@ const PreviewUploadTool = browserTool(
       "Choose files for a page's file picker in the tab selected by tabId, or this agent session's current tab when omitted. No native file dialog opens. Pass absolute paths from this agent's environment; they are copied to the browser even when it runs on another machine. Target an <input type=file>, its label, or the button that opens the picker with locator or selector, or omit the target to answer the picker your last click or key press opened.",
     parameters: PreviewAutomationUploadInput,
     success: Schema.Struct({ ...PreviewAutomationUploadResult.fields, ...presentationFields }),
-    failure: PreviewAutomationError,
+    failure: PreviewToolFailure,
     dependencies: [
       ...dependencies,
       FileSystem.FileSystem,
@@ -283,7 +342,7 @@ const PreviewDownloadTool = safeBrowserTool(
       "Receive a file your actions downloaded in the tab selected by tabId, or this agent session's current tab when omitted. Downloads started by your clicks or key presses never show a Save dialog; they wait in the browser until you call this. Returns the oldest download not yet received, waiting up to timeoutMs for one to start and finish, and copies it (up to 50 MiB) into this agent's environment. Returns its environment-local path.",
     parameters: PreviewAutomationDownloadInput,
     success: Schema.Struct({ ...PreviewAutomationDownloadArtifact.fields, ...presentationFields }),
-    failure: PreviewAutomationError,
+    failure: PreviewToolFailure,
     dependencies: [...dependencies, FileSystem.FileSystem, Path.Path, ServerConfig.ServerConfig],
   }).annotate(Tool.Title, "Receive browser download"),
 );
@@ -294,7 +353,7 @@ export const PreviewAutofillTool = browserTool(
       "Fill the current page's login form from the user's saved browser logins. Logins are bound to the exact page origin and profile; the password is typed directly into the page and never returned. Returns filled=false with a reason when no saved login matches, several match (pass username), or the page has no login fields.",
     parameters: PreviewAutomationAutofillInput,
     success: PreviewAutomationAutofillResult,
-    failure: PreviewAutomationError,
+    failure: PreviewToolFailure,
     dependencies,
   }).annotate(Tool.Title, "Autofill saved login"),
 );
@@ -305,12 +364,13 @@ export const PreviewCloseTool = safeBrowserTool(
       "Close the collaborative browser tab selected by tabId, or this agent session's current tab when omitted. Ends the shared session and removes the tab from every connected client, including its inline preview.",
     parameters: PreviewAutomationCloseInput,
     success: PreviewAutomationCloseResult,
-    failure: PreviewAutomationError,
+    failure: PreviewToolFailure,
     dependencies,
   }).annotate(Tool.Title, "Close browser preview"),
 );
 
 export const PreviewToolkit = Toolkit.make(
+  PreviewDialogTool,
   PreviewStatusTool,
   PreviewOpenTool,
   PreviewNavigateTool,
@@ -319,6 +379,10 @@ export const PreviewToolkit = Toolkit.make(
   PreviewSnapshotTool,
   PreviewClickTool,
   PreviewTypeTool,
+  PreviewHoverTool,
+  PreviewSelectTool,
+  PreviewDragTool,
+  PreviewUploadTool,
   PreviewPressTool,
   PreviewScrollTool,
   PreviewEvaluateTool,
@@ -332,6 +396,7 @@ export const PreviewToolkit = Toolkit.make(
 );
 
 export const PreviewStandardToolkit = Toolkit.make(
+  PreviewDialogTool,
   PreviewStatusTool,
   PreviewOpenTool,
   PreviewNavigateTool,
@@ -339,6 +404,10 @@ export const PreviewStandardToolkit = Toolkit.make(
   PreviewSetAppearanceTool,
   PreviewClickTool,
   PreviewTypeTool,
+  PreviewHoverTool,
+  PreviewSelectTool,
+  PreviewDragTool,
+  PreviewUploadTool,
   PreviewPressTool,
   PreviewScrollTool,
   PreviewEvaluateTool,

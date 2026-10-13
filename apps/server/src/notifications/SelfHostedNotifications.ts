@@ -1,7 +1,8 @@
+// @effect-diagnostics nodeBuiltinImport:off -- APNs requires native HTTP/2 and ES256 P1363 signatures.
 import * as NodeCrypto from "node:crypto";
 import * as NodeHttp2 from "node:http2";
 
-import type { OrchestrationEvent, ThreadId } from "@t3tools/contracts";
+import type { OrchestrationV2DomainEvent, ThreadId } from "@t3tools/contracts";
 import {
   RelayAgentActivityAggregateState,
   type RelayAgentActivityAggregateState as RelayAgentActivityAggregateStateType,
@@ -14,7 +15,7 @@ import type * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as Encoding from "effect/Encoding";
+import * as Base64Url from "effect/encoding/Base64Url";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
@@ -22,14 +23,14 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
-import { readTurnClientOrigin } from "./turnClientOrigin.ts";
+import { readRunClientOrigin } from "./turnClientOrigin.ts";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
-import * as OrchestrationEngine from "../orchestration/Services/OrchestrationEngine.ts";
-import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ProjectService from "../project/ProjectService.ts";
+import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import {
   eventThreadId,
   resolveAgentAwarenessRelayPublishSnapshot,
@@ -282,7 +283,7 @@ export function makeNotificationPayload(
 }
 
 function base64UrlJson(value: unknown): string {
-  return Encoding.encodeBase64Url(encodeUnknownJson(value));
+  return Base64Url.encode(encodeUnknownJson(value));
 }
 
 let cachedProviderToken: {
@@ -307,7 +308,7 @@ export function makeApnsProviderToken(credentials: ApnsCredentials, nowSeconds: 
     key: privateKey,
     dsaEncoding: "ieee-p1363",
   });
-  const jwt = `${signingInput}.${Encoding.encodeBase64Url(signature)}`;
+  const jwt = `${signingInput}.${Base64Url.encode(signature)}`;
   cachedProviderToken = { key, issuedAt, jwt };
   return jwt;
 }
@@ -381,8 +382,8 @@ export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
-  const snapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
-  const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService;
+  const threads = yield* ThreadManagement.ThreadManagementService;
+  const projects = yield* ProjectService.ProjectService;
   const statesRef = yield* Ref.make(new Map<ThreadId, RelayAgentActivityState>());
 
   const readSecret = (name: string) =>
@@ -441,8 +442,11 @@ export const make = Effect.gen(function* () {
   });
   const readProjectedStates = Effect.gen(function* () {
     const environmentId = yield* serverEnvironment.getEnvironmentId;
-    const snapshot = yield* snapshotQuery.getShellSnapshot();
-    const projectById = new Map(snapshot.projects.map((project) => [project.id, project]));
+    const [snapshot, projectSnapshot] = yield* Effect.all([
+      threads.getShellSnapshot(),
+      projects.snapshot,
+    ]);
+    const projectById = new Map(projectSnapshot.projects.map((project) => [project.id, project]));
     const states = new Map<ThreadId, RelayAgentActivityState>();
     for (const thread of snapshot.threads) {
       const project = projectById.get(thread.projectId);
@@ -509,37 +513,6 @@ export const make = Effect.gen(function* () {
         ),
       );
     }
-    if (registration.activityPushToken && registration.device.preferences.liveActivitiesEnabled) {
-      const event = next === null || next.activeCount === 0 ? "end" : "update";
-      const aps =
-        event === "end"
-          ? {
-              timestamp: Math.floor(now.epochMilliseconds / 1_000),
-              event,
-              ...(next
-                ? { "content-state": { name: "AgentActivity", props: encodeAggregateJson(next) } }
-                : {}),
-              "dismissal-date": Math.floor(now.epochMilliseconds / 1_000) + 5 * 60,
-            }
-          : {
-              timestamp: Math.floor(now.epochMilliseconds / 1_000),
-              event,
-              "content-state": { name: "AgentActivity", props: encodeAggregateJson(next) },
-              "stale-date": Math.floor(now.epochMilliseconds / 1_000) + 10 * 60,
-            };
-      deliveries.push(
-        Effect.tryPromise(() =>
-          sendApns({
-            credentials: targetCredentials,
-            token: registration.activityPushToken!,
-            pushType: "liveactivity",
-            priority: notification ? "10" : "5",
-            nowSeconds: Math.floor(now.epochMilliseconds / 1_000),
-            payload: { aps },
-          }).then((result) => ({ kind: "activity" as const, result })),
-        ),
-      );
-    }
     const results = yield* Effect.all(deliveries, { concurrency: 2 });
     for (const { kind, result } of results) {
       if (!result.ok) {
@@ -585,9 +558,10 @@ export const make = Effect.gen(function* () {
   ) {
     if ((yield* readCredentials) === null) return;
     const environmentId = yield* serverEnvironment.getEnvironmentId;
-    const thread = yield* snapshotQuery.getThreadShellById(threadId);
+    const shell = yield* threads.getThreadShell(threadId);
+    const thread = shell === null || shell.archivedAt !== null ? Option.none() : Option.some(shell);
     const project = Option.isSome(thread)
-      ? yield* snapshotQuery.getProjectShellById(thread.value.projectId)
+      ? yield* projects.getById(thread.value.projectId)
       : Option.none();
     const snapshot = resolveAgentAwarenessRelayPublishSnapshot({
       environmentId,
@@ -597,8 +571,12 @@ export const make = Effect.gen(function* () {
     });
     const previousThread = (yield* Ref.get(statesRef)).get(threadId) ?? null;
     const iosCompletionThreads = new Set<ThreadId>();
-    if (snapshot.state?.phase === "completed" && Option.isSome(thread) && thread.value.latestTurn) {
-      const origin = yield* readTurnClientOrigin(threadId, thread.value.latestTurn.turnId).pipe(
+    if (
+      snapshot.state?.phase === "completed" &&
+      Option.isSome(thread) &&
+      thread.value.latestRunId
+    ) {
+      const origin = yield* readRunClientOrigin(threadId, thread.value.latestRunId).pipe(
         Effect.provideService(SqlClient.SqlClient, sql),
       );
       if (origin === "ios") iosCompletionThreads.add(threadId);
@@ -637,7 +615,7 @@ export const make = Effect.gen(function* () {
   const start = Effect.fn("SelfHostedNotifications.start")(function* () {
     yield* forkParked(hydrate);
     yield* forkParked(
-      Stream.runForEach(orchestrationEngine.streamDomainEvents, (event: OrchestrationEvent) => {
+      Stream.runForEach(threads.streamDomainEvents, (event: OrchestrationV2DomainEvent) => {
         const threadId = eventThreadId(event);
         return threadId !== null && shouldPublishAgentAwarenessEvent(event)
           ? worker.enqueue(threadId)

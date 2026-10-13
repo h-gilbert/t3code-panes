@@ -1,3 +1,4 @@
+import { observeResize } from "~/lib/observeResize";
 import { DeviceMiniPlayer } from "./DeviceMiniPlayer";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 
@@ -12,6 +13,9 @@ import {
 } from "~/browser/browserRecording";
 import { BrowserSurfaceSlot } from "~/browser/BrowserSurfaceSlot";
 import { previewRuntimeTabId } from "~/browser/previewRuntimeTabId";
+import { useRendersServerTabNatively } from "~/browser/previewRuntime";
+import { ServerBrowserSurface } from "~/browser/ServerBrowserSurface";
+
 import { Button } from "~/components/ui/button";
 import { toastManager } from "~/components/ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
@@ -27,6 +31,7 @@ import { previewEnvironment } from "~/state/preview";
 import { useAtomCommand } from "~/state/use-atom-command";
 
 import { closePreviewSession } from "./closePreviewSession";
+import { showPreviewPopup } from "./showPreviewPopup";
 import {
   resizeFloatingPreviewFrame,
   clampPreviewMiniPlayerPosition,
@@ -37,6 +42,7 @@ import {
 
 interface DragState {
   readonly pointerId: number;
+  readonly pointerType: string;
   readonly pointerX: number;
   readonly pointerY: number;
   readonly playerX: number;
@@ -95,6 +101,8 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
   const previewState = useThreadPreviewState(threadRef);
   const snapshot = previewState.sessions[tabId] ?? null;
   const hasPreview = snapshot !== null;
+  const nativeServerTab = useRendersServerTabNatively(threadRef.environmentId, snapshot);
+  const serverTab = snapshot?.runtime === "server" && !nativeServerTab;
   const runtimeTabId = previewRuntimeTabId(threadRef, previewState.serverEpoch, tabId);
   const recordingTabIds = useActiveBrowserRecordingTabIds();
   const recording =
@@ -156,9 +164,7 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
   useLayoutEffect(() => {
     const anchor = anchorRef.current;
     if (!compact || !hasPreview || !anchor) return;
-    const observer = new ResizeObserver(() => setAnchorLayout((version) => version + 1));
-    observer.observe(anchor);
-    return () => observer.disconnect();
+    return observeResize(anchor, () => setAnchorLayout((version) => version + 1));
   }, [compact, hasPreview]);
 
   useLayoutEffect(() => {
@@ -209,6 +215,7 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
     const rootRect = root.getBoundingClientRect();
     dragRef.current = {
       pointerId: event.pointerId,
+      pointerType: event.pointerType,
       pointerX: event.clientX,
       pointerY: event.clientY,
       playerX: rootRect.left,
@@ -364,7 +371,7 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
       >
-        <span className="min-w-0 flex-1 truncate pl-1 text-[11px] text-muted-foreground">
+        <span className="min-w-0 flex-1 truncate pl-1 text-2xs text-muted-foreground">
           {snapshot.navStatus._tag === "Idle"
             ? "Browser"
             : snapshot.navStatus.title.trim() || snapshot.navStatus.url.trim() || "Browser"}
@@ -373,7 +380,7 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
           <span
             role="status"
             aria-label="Recording browser preview"
-            className="shrink-0 rounded-full bg-red-500 size-2"
+            className="shrink-0 rounded-full bg-error size-2"
           />
         ) : null}
         <Tooltip>
@@ -432,27 +439,42 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
 
       <div className="relative min-h-0 flex-1">
         <div className="absolute inset-0 z-[29] bg-muted" />
-        <BrowserSurfaceSlot
-          tabId={runtimeTabId}
-          // Presenting a tab another window owns is what moves it here.
-          visible={Boolean(desktopOverlay?.hasWebContents || desktopOverlay?.hostedElsewhere)}
-          cornerRadius={0}
-          fitSourceContent={compact}
-          fillContainer={!compact}
-          zIndex={compact ? 110 : windowLayer + 1}
-          layoutVersion={
-            compact
-              ? `compact:${anchorLayout}`
-              : maximized
-                ? "maximized"
-                : position
-                  ? `${position.x}:${position.y}`
-                  : "initial"
-          }
-          className="absolute inset-0"
-        />
+        {serverTab ? (
+          <div className="pointer-events-auto absolute inset-0 z-[30]">
+            <ServerBrowserSurface
+              environmentId={threadRef.environmentId}
+              threadId={threadRef.threadId}
+              tabId={tabId}
+              visible
+              followSize={!compact}
+              controlPosition="bottom"
+              onPopup={(popupTabId) => showPreviewPopup(threadRef, popupTabId, "floating")}
+              className="size-full"
+            />
+          </div>
+        ) : (
+          <BrowserSurfaceSlot
+            tabId={runtimeTabId}
+            // Presenting a tab another window owns is what moves it here.
+            visible={Boolean(desktopOverlay?.hasWebContents || desktopOverlay?.hostedElsewhere)}
+            cornerRadius={0}
+            fitSourceContent={compact}
+            fillContainer={!compact}
+            zIndex={compact ? 110 : windowLayer + 1}
+            layoutVersion={
+              compact
+                ? `compact:${anchorLayout}`
+                : maximized
+                  ? "maximized"
+                  : position
+                    ? `${position.x}:${position.y}`
+                    : "initial"
+            }
+            className="absolute inset-0"
+          />
+        )}
         <div className="pointer-events-none absolute inset-0 z-[31] ring-1 ring-inset ring-border/80" />
-        {!desktopOverlay?.hasWebContents ? (
+        {!serverTab && !desktopOverlay?.hasWebContents ? (
           <div className="pointer-events-none absolute inset-0 z-[32] flex items-center justify-center bg-muted text-xs text-muted-foreground">
             {desktopOverlay?.hostedElsewhere
               ? "Showing in another window…"

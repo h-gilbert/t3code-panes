@@ -43,7 +43,7 @@ const DynamicIcon = lazy(() =>
 );
 
 function DynamicProjectIconFallback() {
-  return <FolderCodeIcon className="size-full text-[inherit]" />;
+  return <FolderCodeIcon className="size-full text-inherit" />;
 }
 
 const PROJECT_ICONS: Record<ProjectIconName, ComponentType<{ className?: string }>> = {
@@ -117,10 +117,10 @@ export function ProjectFavicon(input: {
       faviconPath: project.faviconPath,
     }),
   );
-  if (project.projectIcon?.kind === "lucide" && project.projectIcon.monogram) {
+  if (project.projectIcon?.kind === "monogram") {
     return (
       <ProjectMonogram
-        text={project.projectIcon.monogram}
+        text={project.projectIcon.text}
         color={project.projectIcon.color}
         className={input.className}
       />
@@ -263,7 +263,7 @@ function ProjectFaviconImage({
         <img
           src={displayedSrc}
           alt=""
-          className={cn("size-3.5 shrink-0 rounded-[37.5%] object-contain", className)}
+          className={cn("size-3.5 shrink-0 rounded-[25%] object-contain", className)}
           onError={() => handleLoadError(displayedSrc)}
         />
       ) : null}

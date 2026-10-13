@@ -1,9 +1,10 @@
 // @effect-diagnostics nodeBuiltinImport:off - verifies OS locks across real processes.
 // @effect-diagnostics preferSchemaOverJson:off - quotes trusted literals in a child-process test script.
 import { assert, describe, it } from "@effect/vitest";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Scope from "effect/Scope";
@@ -34,8 +35,11 @@ describe("server home ownership", () => {
       assert.isFalse(yield* fs.exists(config.dbPath));
       assert.isFalse(yield* fs.exists(config.serverRuntimeStatePath));
     }).pipe(
-      Effect.provide(ServerConfig.layerTest("/tmp", { prefix: "t3-home-startup-" })),
-      Effect.provide(NodeServices.layer),
+      Effect.provide(
+        ServerConfig.layerTest("/tmp", { prefix: "t3-home-startup-" }).pipe(
+          Layer.provideMerge(NodeServices.layer),
+        ),
+      ),
     ),
   );
   it.effect(
@@ -83,7 +87,7 @@ describe("server home ownership", () => {
     "treats symlinked state directories as the same home and ignores dead runtime records",
     () =>
       Effect.gen(function* () {
-        if ((yield* HostProcessPlatform) === "win32") return;
+        if ((yield* HostProcess.Platform) === "win32") return;
         const config = yield* fixture;
         const alias = yield* fixture;
         const fs = yield* FileSystem.FileSystem;
@@ -130,13 +134,17 @@ describe("server home ownership", () => {
         ],
         { stdio: ["ignore", "ignore", "pipe", "ipc"] },
       );
+      let childError = "";
+      child.stderr?.on("data", (chunk: Buffer) => {
+        childError += chunk.toString();
+      });
       const exited = NodeEvents.EventEmitter.once(child, "exit");
       try {
         const message = yield* Effect.promise(() =>
           Promise.race([
             NodeEvents.EventEmitter.once(child, "message"),
             exited.then(() => {
-              throw new Error("Lock owner exited before acquiring the lock");
+              throw new Error(`Lock owner exited before acquiring the lock: ${childError}`);
             }),
           ]),
         );

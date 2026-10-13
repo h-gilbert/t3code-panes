@@ -14,7 +14,7 @@ export function SimulatorViewer(props: {
   readonly device: DeviceSummary;
   readonly onClose: () => void;
 }) {
-  const access = useDeviceHubAccess(props.environmentId, props.device.hostId);
+  const { access } = useDeviceHubAccess(props.environmentId, props.device.hostId);
   const insets = useSafeAreaInsets();
   const [streamFailed, setStreamFailed] = useState(false);
   const url = access ? simulatorStreamUrl(access, props.device.id) : null;

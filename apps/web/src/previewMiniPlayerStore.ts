@@ -31,6 +31,7 @@ export interface PreviewMiniPlayerState {
   /** Fills the window instead of floating; position/size are kept for restore. */
   readonly maximized: boolean;
   readonly floating: boolean;
+  readonly lastInteraction: "drag" | "resize";
 }
 
 interface PreviewMiniPlayerStoreState {
@@ -46,6 +47,7 @@ interface PreviewMiniPlayerStoreState {
     ref: ScopedThreadRef,
     tabId: string,
     size: PreviewMiniPlayerSize | number,
+    position?: PreviewMiniPlayerPosition,
   ) => void;
   readonly removeThread: (ref: ScopedThreadRef) => void;
 }
@@ -93,6 +95,7 @@ export const usePreviewMiniPlayerStore = create<PreviewMiniPlayerStoreState>()((
             size: sameKind ? current.size : null,
             maximized: sameKind ? current.maximized : false,
             floating: sameKind ? current.floating : false,
+            lastInteraction: sameKind ? current.lastInteraction : "drag",
           },
         },
       };
@@ -135,28 +138,48 @@ export const usePreviewMiniPlayerStore = create<PreviewMiniPlayerStoreState>()((
       const threadKey = scopedThreadKey(ref);
       const current = state.byThreadKey[threadKey];
       if (!current || !matchesSource(current.source, tabId)) return state;
-      if (current.position?.x === position.x && current.position.y === position.y) return state;
+      if (
+        current.position?.x === position.x &&
+        current.position.y === position.y &&
+        current.lastInteraction === "drag"
+      )
+        return state;
       return {
         byThreadKey: {
           ...state.byThreadKey,
-          [threadKey]: { ...current, position },
+          [threadKey]: { ...current, position, lastInteraction: "drag" },
         },
       };
     }),
-  resize: (ref, tabId, size) =>
+  resize: (ref, tabId, size, position) =>
     set((state) => {
       const threadKey = scopedThreadKey(ref);
       const current = state.byThreadKey[threadKey];
       if (!current || !matchesSource(current.source, tabId)) return state;
       if (typeof size === "number") {
-        if (current.width === size) return state;
-        return { byThreadKey: { ...state.byThreadKey, [threadKey]: { ...current, width: size } } };
+        if (
+          current.width === size &&
+          current.lastInteraction === "resize" &&
+          (!position || (current.position?.x === position.x && current.position.y === position.y))
+        )
+          return state;
+        return {
+          byThreadKey: {
+            ...state.byThreadKey,
+            [threadKey]: {
+              ...current,
+              width: size,
+              position: position ?? current.position,
+              lastInteraction: "resize",
+            },
+          },
+        };
       }
       if (current.size?.width === size.width && current.size.height === size.height) return state;
       return {
         byThreadKey: {
           ...state.byThreadKey,
-          [threadKey]: { ...current, size },
+          [threadKey]: { ...current, size, lastInteraction: "resize" },
         },
       };
     }),
