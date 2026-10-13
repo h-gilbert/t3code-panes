@@ -7,7 +7,7 @@ import {
   StackActions,
   useNavigation,
 } from "@react-navigation/native";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 
 import { useConnectionController } from "../connection/useConnectionController";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
@@ -54,7 +54,14 @@ function sceneFromPathname(pathname: string): ShowcaseScene | null {
   return null;
 }
 
+// Showcase capture only runs in showcase builds. Gate the mount so normal builds
+// never subscribe to workspace, project, or thread shell state.
 export function ShowcaseCaptureCoordinator(props: { readonly pathname: string }) {
+  if (!SHOWCASE_ENABLED) return null;
+  return <EnabledShowcaseCaptureCoordinator pathname={props.pathname} />;
+}
+
+function EnabledShowcaseCaptureCoordinator(props: { readonly pathname: string }) {
   const navigation = useNavigation();
   const { connectPairingUrl } = useConnectionController();
   const {
@@ -83,7 +90,7 @@ export function ShowcaseCaptureCoordinator(props: { readonly pathname: string })
   );
 
   useEffect(() => {
-    if (!SHOWCASE_ENABLED || pairingUrls.length > 0) return;
+    if (pairingUrls.length > 0) return;
 
     const readLaunchRequest = () => {
       const values = getNativeShowcasePairingUrls();
@@ -101,7 +108,7 @@ export function ShowcaseCaptureCoordinator(props: { readonly pathname: string })
   }, [pairingUrls.length]);
 
   useEffect(() => {
-    if (!SHOWCASE_ENABLED || orientationSettled) return;
+    if (orientationSettled) return;
     const orientation = getNativeShowcaseOrientation();
     if (orientation === null) {
       setOrientationSettled(true);
@@ -120,8 +127,6 @@ export function ShowcaseCaptureCoordinator(props: { readonly pathname: string })
   }, [orientationSettled]);
 
   useEffect(() => {
-    if (!SHOWCASE_ENABLED) return;
-
     const readRequestedScene = () => {
       const value = getNativeShowcaseScene();
       if (!value || requestedSceneRef.current === value) return;
@@ -145,7 +150,6 @@ export function ShowcaseCaptureCoordinator(props: { readonly pathname: string })
 
   useEffect(() => {
     if (
-      !SHOWCASE_ENABLED ||
       requestedTheme === null ||
       themeApplied ||
       // Writing before stored preferences load would be overwritten by them.
@@ -157,7 +161,7 @@ export function ShowcaseCaptureCoordinator(props: { readonly pathname: string })
   }, [appearancePreferencesReady, requestedTheme, setThemeIdForBothAppearances, themeApplied]);
 
   useEffect(() => {
-    if (!SHOWCASE_ENABLED || pairingUrls.length === 0) return;
+    if (pairingUrls.length === 0) return;
     let cancelled = false;
     void (async () => {
       await Promise.all(
@@ -186,7 +190,7 @@ export function ShowcaseCaptureCoordinator(props: { readonly pathname: string })
   const showcaseThread = threads.find((thread) => String(thread.id) === SHOWCASE_THREAD_ID);
 
   useEffect(() => {
-    if (!SHOWCASE_ENABLED || !hasServerFixture || pendingTasksReady) return;
+    if (!hasServerFixture || pendingTasksReady) return;
 
     const pendingTasks = buildShowcasePendingTasks(projects, Date.now());
     if (pendingTasks.length !== SHOWCASE_PENDING_TASK_DEFINITIONS.length) return;
@@ -217,7 +221,7 @@ export function ShowcaseCaptureCoordinator(props: { readonly pathname: string })
   }, [hasServerFixture, pendingTasksReady, projects]);
 
   useEffect(() => {
-    if (!SHOWCASE_ENABLED || requestedScene === null || !hasFixture || !showcaseThread) return;
+    if (requestedScene === null || !hasFixture || !showcaseThread) return;
     if (scene === requestedScene) return;
 
     const params = {
@@ -266,7 +270,6 @@ export function ShowcaseCaptureCoordinator(props: { readonly pathname: string })
 
   useEffect(() => {
     if (
-      !SHOWCASE_ENABLED ||
       scene === null ||
       requestedScene === null ||
       scene !== requestedScene ||
@@ -300,7 +303,7 @@ export function ShowcaseCaptureCoordinator(props: { readonly pathname: string })
     };
   }, [hasFixture, orientationSettled, renderSignal, requestedScene, scene, themeApplied, themeId]);
 
-  if (!SHOWCASE_ENABLED || readyScene === null) return null;
+  if (readyScene === null) return null;
 
   return (
     <View

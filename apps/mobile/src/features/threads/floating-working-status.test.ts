@@ -67,33 +67,33 @@ describe("connectionFloatingStatus", () => {
 
 describe("backgroundFloatingStatus", () => {
   it.each([
-    ["working", 1, "1 agent working"],
-    ["working", 3, "3 agents working"],
-    ["working", 0, "Background work"],
-    ["monitoring", 2, "Monitoring"],
-  ] as const)(
-    "shows %s activity after the primary turn finishes",
-    (backgroundLiveness, liveAgentCount, label) => {
-      expect(
-        backgroundFloatingStatus({ backgroundLiveness, liveAgentCount, failed: false }),
-      ).toEqual({ kind: "background", label });
-    },
-  );
-  it.each([null, undefined])(
-    "clears the indicator when background work ends",
-    (backgroundLiveness) => {
-      expect(
-        backgroundFloatingStatus({ backgroundLiveness, liveAgentCount: 2, failed: false }),
-      ).toBeNull();
-    },
-  );
-  it("does not hide a failed session behind background activity", () => {
+    [[{ taskId: "one", kind: "subagent" }], "Waiting on a subagent"],
+    [
+      [
+        { taskId: "one", kind: "subagent" },
+        { taskId: "two", kind: "subagent" },
+      ],
+      "Waiting on 2 subagents",
+    ],
+    [[{ taskId: "watch", kind: "monitor" }], "Waiting on a monitor"],
+  ] as const)("keeps post-turn work visible for %j", (tasks, label) => {
+    expect(backgroundFloatingStatus({ tasks, failed: false })).toMatchObject({
+      kind: "background",
+      label,
+      waiting: true,
+    });
+  });
+  it("distinguishes a running command from an agent still working", () => {
     expect(
-      backgroundFloatingStatus({
-        backgroundLiveness: "monitoring",
-        liveAgentCount: 1,
-        failed: true,
-      }),
+      backgroundFloatingStatus({ tasks: [{ taskId: "server", kind: "command" }], failed: false }),
+    ).toMatchObject({ kind: "background", waiting: false });
+  });
+  it("clears the indicator after background work ends", () => {
+    expect(backgroundFloatingStatus({ tasks: [], failed: false })).toBeNull();
+  });
+  it("does not hide a failed runtime behind background activity", () => {
+    expect(
+      backgroundFloatingStatus({ tasks: [{ taskId: "watch", kind: "monitor" }], failed: true }),
     ).toBeNull();
   });
 });

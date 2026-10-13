@@ -177,6 +177,9 @@ export function setAgentAwarenessRelayTokenProvider(
 export function releaseAgentAwarenessRelayTokenProvider(): void {
   relayTokenProvider = null;
   relayTokenProviderIdentity = null;
+  deviceRegistrationGeneration++;
+  activeDeviceRegistration = null;
+  pendingDeviceRegistration = null;
   pushTokenSubscription?.remove();
   pushTokenSubscription = null;
 }
@@ -195,9 +198,6 @@ function nativePushTokenRegistration(observedPushToken?: string) {
     if (!canRegisterAgentAwarenessDevice() || !supportsAgentAwarenessPush()) {
       return { notificationsEnabled: false, pushToken: null };
     }
-    if (observedPushToken) {
-      return { notificationsEnabled: true, pushToken: observedPushToken };
-    }
     const permissions = yield* Effect.tryPromise({
       try: () => Notifications.getPermissionsAsync(),
       catch: (cause) =>
@@ -208,6 +208,9 @@ function nativePushTokenRegistration(observedPushToken?: string) {
     });
     if (!permissions.granted) {
       return { notificationsEnabled: false, pushToken: null };
+    }
+    if (observedPushToken) {
+      return { notificationsEnabled: true, pushToken: observedPushToken };
     }
     const token = yield* Effect.tryPromise({
       try: () => Notifications.getDevicePushTokenAsync(),
