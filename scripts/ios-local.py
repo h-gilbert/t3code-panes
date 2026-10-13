@@ -85,7 +85,7 @@ def check_artifact_policy(artifact):
         raise RuntimeError('Built app contains the Live Activity SDK.')
 
 
-def stable_target(fetch=False, tag=None):
+def stable_target(fetch=False, tag=None, allow_nightly=False):
     record_path = STATE / 'upstream-target.json'
     if not fetch and tag is None and record_path.is_file():
         return json.loads(record_path.read_text())
@@ -94,8 +94,14 @@ def stable_target(fetch=False, tag=None):
         if release.get('draft') or release.get('prerelease'):
             raise RuntimeError('The upstream release is not stable.')
         tag = release['tag_name']
-    if not re.fullmatch(r'v\d+\.\d+\.\d+', tag):
-        raise RuntimeError('iOS updates require a stable release tag, never upstream/main or a nightly.')
+    stable = bool(re.fullmatch(r'v\d+\.\d+\.\d+', tag))
+    nightly = bool(re.fullmatch(r'v\d+\.\d+\.\d+-nightly\.\d{8}\.\d+', tag))
+    if not stable and not (allow_nightly and nightly):
+        raise RuntimeError('iOS updates require a stable tag, or an explicitly approved pinned nightly with --allow-nightly.')
+    if nightly:
+        release = json.loads(run('gh', 'api', 'repos/pingdotgg/t3code/releases/tags/' + tag))
+        if release.get('draft') or release.get('tag_name') != tag:
+            raise RuntimeError('The requested nightly is not a published release.')
     ref = 'refs/upstream-tags/' + tag
     if fetch:
         run('git', 'fetch', 'upstream', 'refs/tags/' + tag + ':' + ref)
@@ -103,14 +109,14 @@ def stable_target(fetch=False, tag=None):
     return {'tag': tag, 'revision': revision}
 
 
-def update(tag=None):
+def update(tag=None, allow_nightly=False):
     if run('git', 'status', '--porcelain'):
         raise RuntimeError('Commit the private iOS changes before updating; they must survive the merge.')
-    target = stable_target(fetch=True, tag=tag)
+    target = stable_target(fetch=True, tag=tag, **({'allow_nightly': True} if allow_nightly else {}))
     save(STATE / 'upstream-target.json', target)
     subprocess.run(['git', 'merge', '--no-edit', target['revision']], cwd=SOURCE, check=True)
     check_source_policy()
-    print('Stable release merged; private iOS policy passed. Install dependencies and regenerate iOS before building.')
+    print('Pinned release merged; private iOS policy passed. Install dependencies and regenerate iOS before building.')
 
 
 def run(*args, cwd=SOURCE):
@@ -157,7 +163,7 @@ def installed_app():
 def status(fetch):
     target = stable_target(fetch=fetch)
     print('Source:', SOURCE)
-    print('Stable upstream:', target['tag'], target['revision'])
+    print('Pinned upstream:', target['tag'], target['revision'])
     builds = list((STATE / 'builds').glob('*/record.json'))
     if builds:
         latest = max(builds, key=lambda path: int(path.parent.name))
@@ -218,7 +224,7 @@ def worker(number):
         check_source_policy()
         check_native_policy(native)
         with (directory / 'validation.log').open('w') as validation:
-            subprocess.run([str(SOURCE / 'apps/mobile/node_modules/.bin/tsc'), '--noEmit'],
+            subprocess.run([str(SOURCE / 'node_modules/.bin/tsc-rs'), '--noEmit'],
                            cwd=SOURCE / 'apps/mobile', stdout=validation,
                            stderr=subprocess.STDOUT, check=True)
             subprocess.run([str(SOURCE / 'node_modules/.bin/vp'), 'test', 'run',
@@ -291,12 +297,14 @@ if __name__ == '__main__':
     parser.add_argument('command', choices=['status', 'update', 'check', 'build', '_build', 'install'])
     parser.add_argument('number', nargs='?')
     parser.add_argument('--fetch', action='store_true')
-    parser.add_argument('--upstream-tag', help='Pin an explicit stable upstream release tag.')
+    parser.add_argument('--upstream-tag', help='Pin an explicit upstream release tag.')
+    parser.add_argument('--allow-nightly', action='store_true',
+                        help='Allow an explicitly approved, fully pinned published nightly.')
     args = parser.parse_args()
     if args.command == 'status':
         status(args.fetch)
     elif args.command == 'update':
-        update(args.upstream_tag)
+        update(args.upstream_tag, allow_nightly=args.allow_nightly)
     elif args.command == 'check':
         check_source_policy()
         check_native_policy(SOURCE / 'apps/mobile/ios')

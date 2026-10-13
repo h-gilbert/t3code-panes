@@ -152,11 +152,30 @@ class PrivateSourcePolicyTests(unittest.TestCase):
 
 class StableUpdateTests(unittest.TestCase):
     def test_unreleased_refs_are_rejected_before_fetch_or_merge(self):
-        for tag in ['main', 'upstream/main', 'v0.0.46-nightly', 'deadbeef']:
+        for tag in ['main', 'upstream/main', 'v0.0.46-nightly', 'v0.0.46-nightly.20261013.3042', 'deadbeef']:
             with self.subTest(tag=tag), patch.object(ios, 'run') as run:
                 with self.assertRaises(RuntimeError):
                     ios.stable_target(fetch=True, tag=tag)
                 run.assert_not_called()
+
+    def test_explicit_nightly_requires_published_tag_and_pins_commit(self):
+        tag = 'v0.0.46-nightly.20261013.3042'
+        with patch.object(ios, 'run', side_effect=[json.dumps({'tag_name': tag, 'draft': False}), '', 'nightly-sha']) as run:
+            target = ios.stable_target(fetch=True, tag=tag, allow_nightly=True)
+        self.assertEqual(target, {'tag': tag, 'revision': 'nightly-sha'})
+        self.assertEqual(run.call_args_list[-1].args, ('git', 'rev-parse', 'refs/upstream-tags/' + tag + '^{commit}'))
+
+    def test_nightly_opt_in_does_not_allow_branches_or_unpublished_tags(self):
+        for tag in ['main', 'upstream/main', 'deadbeef', 'v0.0.46-nightly']:
+            with self.subTest(tag=tag), patch.object(ios, 'run') as run:
+                with self.assertRaises(RuntimeError):
+                    ios.stable_target(fetch=True, tag=tag, allow_nightly=True)
+                run.assert_not_called()
+        tag = 'v0.0.46-nightly.20261013.3042'
+        with patch.object(ios, 'run', return_value=json.dumps({'tag_name': tag, 'draft': True})) as run:
+            with self.assertRaises(RuntimeError):
+                ios.stable_target(fetch=True, tag=tag, allow_nightly=True)
+            self.assertEqual(run.call_count, 1)
 
     def test_release_discovery_rejects_prereleases(self):
         with patch.object(ios, 'run', return_value=json.dumps({'tag_name': 'v0.0.46', 'prerelease': True})):

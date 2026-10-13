@@ -53,7 +53,10 @@ When updating all clients together, use the same stable tag selected for the pan
 python3 scripts/ios-local.py update --upstream-tag vX.Y.Z
 ```
 
-The helper rejects branch names, raw SHAs and nightly tags. Do not merge `upstream/main`
+The helper rejects branch names, raw SHAs and nightly tags by default. When the developer explicitly
+approves a matching nightly, use `update --upstream-tag <full-nightly-tag> --allow-nightly`;
+the helper verifies it is published and records its exact commit. All private notification,
+signing and installation checks still apply. Do not merge `upstream/main`
 to work around a failed stable integration. Keep the target record, source revision and
 build fingerprint together so the ledger identifies what was actually installed.
 
