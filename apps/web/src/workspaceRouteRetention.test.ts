@@ -27,7 +27,7 @@ describe("resolveRetainedWorkspaceKey", () => {
     ).toBe("window-a");
   });
 
-  it("retains the default workspace and releases it on unrelated routes", () => {
+  it("retains the default workspace when opening a thread", () => {
     const workspaceKey = resolveRetainedWorkspaceKey({
       pathname: "/workspace",
       workspaceSearch: undefined,
@@ -48,16 +48,28 @@ describe("resolveRetainedWorkspaceKey", () => {
         workspaceSearch: undefined,
         previousWorkspaceKey: workspaceKey,
       }),
-    ).toBeNull();
+    ).toBe(DEFAULT_WORKSPACE_KEY);
   });
 
-  it("does not create a workspace when settings is opened directly", () => {
+  it("opens direct settings links over the default workspace", () => {
     expect(
       resolveRetainedWorkspaceKey({
         pathname: "/settings/general",
         workspaceSearch: undefined,
         previousWorkspaceKey: null,
       }),
-    ).toBeNull();
+    ).toBe(DEFAULT_WORKSPACE_KEY);
+  });
+
+  it("restores a named workspace from a settings or thread link after reload", () => {
+    for (const pathname of ["/settings/appearance", "/environment-1/thread-1"]) {
+      expect(
+        resolveRetainedWorkspaceKey({
+          pathname,
+          workspaceSearch: "window-b",
+          previousWorkspaceKey: null,
+        }),
+      ).toBe("window-b");
+    }
   });
 });

@@ -974,6 +974,7 @@ type ShellThreadRow = {
   readonly forked_from_run_source_thread_id: string | null;
   readonly latest_run_id: string | null;
   readonly latest_run_status: string | null;
+  readonly native_subagent_status: string | null;
   readonly latest_run_requested_at: string | null;
   readonly latest_run_started_at: string | null;
   readonly latest_run_completed_at: string | null;
@@ -1494,7 +1495,15 @@ export function threadShellFromProjection(
     activityRunStatus: activityRun?.status ?? null,
     activityRunStartedAt:
       activityRun === null ? null : orchestrationV2RunWorkStartedAt(activityRun),
-    status: latestRun?.status ?? "idle",
+    status:
+      latestRun?.status ??
+      (projection.thread.creationSource === "provider" &&
+      projection.thread.lineage.relationshipToParent === "subagent"
+        ? shellStatusFromNativeNode(
+            projection.nodes.findLast((node) => node.runId === null && node.kind === "root_turn")
+              ?.status ?? null,
+          )
+        : "idle"),
     ...threadErrorSummary(
       latestRootProviderFailure(latestRun, projection.turnItems),
       providerSession?.lastError ?? null,
@@ -1620,6 +1629,13 @@ type ShellThreadState = {
   readonly runOrdinalById: ReadonlyMap<RunId, number>;
   readonly itemCountByRunId: ReadonlyMap<RunId, number>;
 };
+
+// Native subagents have a runless root node instead of an app run.
+function shellStatusFromNativeNode(status: string | null): OrchestrationV2ShellThreadStatus {
+  if (status === "pending") return "starting";
+  if (status === "idle") return "idle";
+  return shellStatusFromStoredRunStatus(status);
+}
 
 function shellStatusFromStoredRunStatus(status: string | null): OrchestrationV2ShellThreadStatus {
   switch (status) {
@@ -5168,6 +5184,13 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               END AS forked_from_run_source_thread_id,
               presented.run_id AS latest_run_id,
               presented.status AS latest_run_status,
+              CASE WHEN json_extract(t.payload_json, '$.creationSource') = 'provider'
+                AND json_extract(t.payload_json, '$.lineage.relationshipToParent') = 'subagent'
+                THEN (
+                  SELECT node.status FROM orchestration_v2_projection_nodes node
+                  WHERE node.thread_id = t.thread_id AND node.run_id IS NULL AND node.kind = 'root_turn'
+                  ORDER BY node.started_at DESC, node.node_id DESC LIMIT 1
+                ) ELSE NULL END AS native_subagent_status,
               presented.requested_at AS latest_run_requested_at,
               json_extract(presented.payload_json, '$.startedAt') AS latest_run_started_at,
               presented.completed_at AS latest_run_completed_at,
@@ -5645,7 +5668,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             ? null
             : yield* decodeTurnItemPayload(row.terminal_failure_payload_json);
         let latestRunId = row.latest_run_id === null ? null : RunId.make(row.latest_run_id);
-        let latestRunStatus = shellStatusFromStoredRunStatus(row.latest_run_status);
+        let latestRunStatus =
+          row.latest_run_id === null && row.native_subagent_status !== null
+            ? shellStatusFromNativeNode(row.native_subagent_status)
+            : shellStatusFromStoredRunStatus(row.latest_run_status);
         let latestRunRequestedAt =
           row.latest_run_requested_at === null
             ? null

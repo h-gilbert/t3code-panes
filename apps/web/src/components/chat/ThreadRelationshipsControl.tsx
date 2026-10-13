@@ -1,3 +1,4 @@
+import { useWorkspacePaneNavigation } from "../../workspacePaneNavigation";
 import { useAtomValue } from "@effect/atom-react";
 import { ThreadDetailsControl } from "./ThreadDetailsControl";
 import { ThreadHoverCardPopup } from "../ThreadHoverCard";
@@ -276,6 +277,7 @@ export function ThreadRelationshipsPanel(props: {
   const currentThread = projection?.thread ?? graph.nodes.get(props.threadId)?.thread;
   const currentProject = projects.find((project) => project.id === currentThread?.projectId);
   const navigate = useNavigate();
+  const navigateInPane = useWorkspacePaneNavigation();
   const mergeBack = useAtomCommand(threadEnvironment.mergeBack);
   const stopSession = useAtomCommand(threadEnvironment.stopSession);
   const interruptTurn = useAtomCommand(threadEnvironment.interruptTurn);
@@ -338,6 +340,10 @@ export function ThreadRelationshipsPanel(props: {
   }
 
   const openThread = (threadId: ThreadId) => {
+    if (navigateInPane) {
+      navigateInPane(scopeThreadRef(props.environmentId, threadId));
+      return;
+    }
     void navigate({
       to: "/$environmentId/$threadId",
       params: buildThreadRouteParams(scopeThreadRef(props.environmentId, threadId)),

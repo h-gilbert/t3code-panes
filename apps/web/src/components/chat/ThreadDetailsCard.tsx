@@ -20,7 +20,11 @@ export function ThreadDetailsCard({
   handle,
   onPresentationChange,
   children,
+  forcePopover = false,
+  popoverActive = true,
 }: {
+  forcePopover?: boolean;
+  popoverActive?: boolean;
   threadRef: ScopedThreadRef;
   anchor: RefObject<Element | null>;
   handle: ReturnType<typeof PopoverCreateHandle>;
@@ -28,23 +32,25 @@ export function ThreadDetailsCard({
   children: (density: "full" | "compact" | "essential") => ReactNode;
 }) {
   const canvas = useChatCanvas();
-  const preferredPlacement = canvas
-    ? resolveThreadDetailsCardLayout({
-        container: canvas.container,
-        lane: canvas.lane,
-        frame: null,
-        topInset: canvas.detailsCardTopInset,
-      })
-    : null;
-  const placement = canvas
-    ? resolveThreadDetailsCardLayout({
-        container: canvas.container,
-        lane: canvas.lane,
-        frame: canvas.layout.frame,
-        overlapsDetailsCard: canvas.layout.overlapsDetailsCard,
-        topInset: canvas.detailsCardTopInset,
-      })
-    : null;
+  const preferredPlacement =
+    canvas && !forcePopover
+      ? resolveThreadDetailsCardLayout({
+          container: canvas.container,
+          lane: canvas.lane,
+          frame: null,
+          topInset: canvas.detailsCardTopInset,
+        })
+      : null;
+  const placement =
+    canvas && !forcePopover
+      ? resolveThreadDetailsCardLayout({
+          container: canvas.container,
+          lane: canvas.lane,
+          frame: canvas.layout.frame,
+          overlapsDetailsCard: canvas.layout.overlapsDetailsCard,
+          topInset: canvas.detailsCardTopInset,
+        })
+      : null;
   const mode = placement ? "inline" : "popover";
   const topInset = canvas?.detailsCardTopInset ?? 0;
   const inlineOpen = useRightPanelStore((state) =>
@@ -63,7 +69,7 @@ export function ThreadDetailsCard({
   const contentHeights =
     measurements.key === measurementKey ? measurements.heights : { full: 0, compact: 0 };
   const height = placement?.height ?? Math.max(0, (canvas?.container.height ?? 0) - 52);
-  const density = resolveThreadDetailsCardDensity(height, contentHeights);
+  const density = forcePopover ? "full" : resolveThreadDetailsCardDensity(height, contentHeights);
   const reportDetailsCard = canvas?.reportDetailsCard;
   const cardLeft = preferredPlacement?.x;
   const cardRight = preferredPlacement
@@ -138,8 +144,9 @@ export function ThreadDetailsCard({
   return (
     <Popover
       handle={handle}
-      open={mode === "popover" && popoverOpen}
+      open={mode === "popover" && popoverOpen && popoverActive}
       onOpenChange={(open, details) => {
+        if (!popoverActive) return;
         // The find bar sits beside the card, so clicking or focusing it does not
         // dismiss the card. Escape still does.
         const target =

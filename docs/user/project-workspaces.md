@@ -1,10 +1,16 @@
 # Pane workspaces
 
-Pane workspaces are the desktop app's default view. They let you watch and interact with several
+Pane workspaces are the web and desktop app's primary view. They let you watch and interact with several
 threads and projects at once. Each app window keeps its own workspace configuration.
 
-The thread sidebar starts collapsed so the panes receive the full window. Use the sidebar button
-in the top-left corner or the configured sidebar shortcut to open it when choosing a thread.
+Use the sidebar button in the top-left corner or the configured sidebar shortcut to choose a
+project or thread. The sidebar overlays the panes and closes after selection. Settings, usage,
+and pull requests also open over the workspace; dismiss them to return to your panes.
+
+Project thread lists show primary threads and user-created forks. Subagents live under their parent
+thread: the running count includes nested subagents, and opens the thread details. Opening a
+subagent replaces the same pane. Use its Back button to retrace your path without changing other
+panes. Direct thread links and the command palette also open threads in the workspace.
 
 The project name in each pane header is the project menu. A project represents a directory (or a
 logical group of the same repository across environments). The generated thread title appears next
@@ -41,7 +47,7 @@ switching: files that exist only in another machine's working tree are not trans
 If the destination already contains a checkout with the same `origin`, T3 Code refreshes and reuses
 it. A non-empty directory with a different origin is left untouched.
 
-Workspace layout controls are available in the macOS desktop titlebar when the app is windowed.
+Workspace layout controls are available above the panes (in the macOS desktop titlebar when windowed).
 They are also available from the keyboard: use **Option-Command-1** through
 **Option-Command-9** to set the pane count, **Option-Command-G** for grid,
 **Option-Command-C** for columns, and **Option-Command-R** for rows. Use

@@ -108,6 +108,9 @@ through the diff panel.
 
 - Preserve pane workspaces, independent window restoration, thread settlement,
   and multi-environment selection described in `docs/user/project-workspaces.md`.
+  Web/desktop thread routes must land in panes. Subagents navigate within the originating pane
+  with Back history; project lists exclude them and show running descendant counts on parents.
+  Navigation and settings overlay the mounted panes instead of replacing the workspace.
 - Preserve retained terminal sessions and reconnect behavior described in
   `docs/internals/terminal-runtime.md`.
 - Preserve the separate private iOS branch and its normal push notifications for approval, input,

@@ -6,7 +6,7 @@ import {
 } from "@t3tools/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 
-import { sortThreadsForSidebar } from "./components/Sidebar.logic";
+import { isSidebarSubagentThread, sortThreadsForSidebar } from "./components/Sidebar.logic";
 import type { WorkspacePaneTarget } from "./workspacePaneStore";
 
 export interface WorkspaceThreadPickerProject {
@@ -21,6 +21,7 @@ export interface WorkspaceThreadPickerItem {
   readonly projectKey: string;
   readonly projectName: string;
   readonly status: "open" | "settled";
+  readonly runningSubagentCount: number;
 }
 
 export function buildWorkspaceThreadPickerItems(input: {
@@ -42,9 +43,10 @@ export function buildWorkspaceThreadPickerItems(input: {
     ),
   );
 
+  const runningCounts = countRunningWorkspaceSubagents(input.threads);
   return sortThreadsForSidebar(
     input.threads.filter((thread) => {
-      if (thread.archivedAt !== null) return false;
+      if (thread.archivedAt !== null || isSidebarSubagentThread(thread)) return false;
       const threadRef = scopeThreadRef(thread.environmentId, thread.id);
       return (
         !openThreadKeys.has(scopedThreadKey(threadRef)) &&
@@ -60,6 +62,8 @@ export function buildWorkspaceThreadPickerItems(input: {
       {
         threadRef: scopeThreadRef(thread.environmentId, thread.id),
         title: thread.title,
+        runningSubagentCount:
+          runningCounts.get(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))) ?? 0,
         projectKey: project.projectKey,
         projectName: project.displayName,
         status: input.settledThreadKeys?.has(
@@ -77,4 +81,39 @@ export function workspaceThreadPickerItemsForProject(
   projectKey: string | null,
 ): readonly WorkspaceThreadPickerItem[] {
   return projectKey === null ? items : items.filter((item) => item.projectKey === projectKey);
+}
+
+/** Counts active descendants under each ancestor using environment-scoped shell identities. */
+export function countRunningWorkspaceSubagents(
+  threads: readonly EnvironmentThreadShell[],
+): ReadonlyMap<string, number> {
+  const byKey = new Map(
+    threads.map((thread) => [
+      scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+      thread,
+    ]),
+  );
+  const counts = new Map<string, number>();
+  for (const thread of threads) {
+    if (
+      thread.archivedAt !== null ||
+      !isSidebarSubagentThread(thread) ||
+      !["preparing", "queued", "starting", "running", "waiting"].includes(
+        thread.source?.activityRunStatus ?? thread.source?.status ?? thread.runtime?.status ?? "",
+      )
+    )
+      continue;
+    const seen = new Set([scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))]);
+    let child: EnvironmentThreadShell | undefined = thread;
+    while (child?.lineage.relationshipToParent === "subagent" && child.lineage.parentThreadId) {
+      const parentKey = scopedThreadKey(
+        scopeThreadRef(thread.environmentId, child.lineage.parentThreadId),
+      );
+      if (seen.has(parentKey)) break;
+      seen.add(parentKey);
+      counts.set(parentKey, (counts.get(parentKey) ?? 0) + 1);
+      child = byKey.get(parentKey);
+    }
+  }
+  return counts;
 }

@@ -3,6 +3,7 @@ import { useAtomValue } from "@effect/atom-react";
 import * as Schema from "effect/Schema";
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -23,13 +24,22 @@ import { isTerminalFocused } from "../lib/terminalFocus";
 import { isModelPickerOpen } from "../modelPickerVisibility";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
-import { resolveThreadRouteRef } from "../threadRoutes";
-import { cn, isMacPlatform } from "../lib/utils";
+import { ThreadLinkPrompt } from "./promptLinks/ThreadLinkPrompt";
+import { ChatRouteGlobalShortcuts } from "../routes/_chat";
+import { Sheet, SheetPopup, SheetTitle } from "./ui/sheet";
+import { resolveThreadRouteTarget } from "../threadRoutes";
+import { cn } from "../lib/utils";
 import { primaryServerKeybindingsAtom } from "../state/server";
-import { isWorkspacePath } from "../workspacePaneStore";
+import {
+  DEFAULT_WORKSPACE_KEY,
+  selectProjectWorkspaceLayout,
+  useWorkspacePaneStore,
+  isWorkspacePath,
+} from "../workspacePaneStore";
 import { resolveRetainedWorkspaceKey } from "../workspaceRouteRetention";
 import { ProjectPaneWorkspace } from "../routes/_chat.workspace";
 import { useEnvironmentIdentificationMode, useLegacySidebarEnabled } from "../hooks/useSettings";
+import { useCurrentThreadTarget } from "../hooks/useCurrentThreadTarget";
 import { useDesktopFullscreen } from "../hooks/useDesktopFullscreen";
 import {
   PanelAnimationSuppressionProvider,
@@ -178,11 +188,10 @@ function SidebarControl({ hidden }: { readonly hidden: boolean }) {
 
 // Moves through the app's route history like a browser's back/forward buttons.
 function NavigationHistoryShortcuts() {
+  const location = useLocation();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const routeThreadRef = useParams({
-    strict: false,
-    select: (params) => resolveThreadRouteRef(params),
-  });
+  const currentTarget = useCurrentThreadTarget();
+  const routeThreadRef = currentTarget?.kind === "server" ? currentTarget.threadRef : null;
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -215,20 +224,27 @@ function NavigationHistoryShortcuts() {
 
       event.preventDefault();
       event.stopPropagation();
+      if (command === "navigation.back" && isWorkspacePath(location.pathname)) {
+        const workspace = location.search.workspace ?? DEFAULT_WORKSPACE_KEY;
+        const store = useWorkspacePaneStore.getState();
+        const layout = selectProjectWorkspaceLayout(store, workspace);
+        if ((layout.backStacks?.[layout.focusedPaneIndex]?.length ?? 0) > 0) {
+          store.goBack(workspace, layout.focusedPaneIndex);
+          return;
+        }
+      }
       if (command === "navigation.back") window.history.back();
       else window.history.forward();
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [keybindings, routeThreadRef]);
+  }, [keybindings, routeThreadRef, location.pathname, location.search.workspace]);
 
   return null;
 }
 
-// Settings swaps the thread sidebar out of the tree. Keep the lightweight
-// project projection subscribed so returning to a draft never renders the
-// zero-project state while the environment snapshot reconnects.
+// Keep projects subscribed while the navigation overlay is closed.
 function ProjectProjectionRetention() {
   useProjects();
   return null;
@@ -240,20 +256,59 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const location = useLocation();
   const pathname = location.pathname;
   const isOnWorkspace = isWorkspacePath(pathname);
-  const retainedWorkspaceKeyRef = useRef<string | null>(null);
+  const retainedWorkspaceKeyRef = useRef<string | null>(DEFAULT_WORKSPACE_KEY);
   const search = location.search as Record<string, unknown>;
   retainedWorkspaceKeyRef.current = resolveRetainedWorkspaceKey({
     pathname,
     workspaceSearch: search.workspace,
     previousWorkspaceKey: retainedWorkspaceKeyRef.current,
   });
-  const retainedWorkspaceKey = retainedWorkspaceKeyRef.current;
+  const retainedWorkspaceKey = retainedWorkspaceKeyRef.current ?? DEFAULT_WORKSPACE_KEY;
+  const threadTarget = useParams({ strict: false, select: resolveThreadRouteTarget });
+  const isUtility =
+    pathname === "/settings" ||
+    pathname.startsWith("/settings/") ||
+    pathname === "/usage" ||
+    pathname === "/pull-requests";
+  const closeUtility = () =>
+    void navigate({ to: "/workspace", search: { workspace: retainedWorkspaceKey } });
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const handledRouteRef = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (pathname !== "/" && !threadTarget) {
+      handledRouteRef.current = null;
+      return;
+    }
+    if (new URLSearchParams(location.searchStr).has("prompt")) return;
+    const routeKey = `${location.state.__TSR_key}:${location.href}`;
+    if (handledRouteRef.current === routeKey) return;
+    handledRouteRef.current = routeKey;
+    if (pathname === "/") {
+      void navigate({
+        to: "/workspace",
+        search: { workspace: retainedWorkspaceKey },
+        replace: true,
+      });
+      return;
+    }
+    if (!threadTarget) return;
+    const store = useWorkspacePaneStore.getState();
+    if (threadTarget.kind === "server")
+      store.assignThread(retainedWorkspaceKey, threadTarget.threadRef);
+    else store.assignDraft(retainedWorkspaceKey, threadTarget.draftId);
+    setSidebarOpen(false);
+    void navigate({
+      to: "/workspace",
+      search: { ...location.search, workspace: retainedWorkspaceKey },
+      replace: true,
+    });
+  }, [threadTarget, retainedWorkspaceKey, navigate, location, pathname]);
+  useEffect(() => {
+    setSidebarOpen(false);
+  }, [pathname]);
   const { isMacosDesktop, isWindowFullscreen } = useDesktopFullscreen();
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
-  // Settings routes show the settings nav in place of whichever thread
-  // sidebar is active.
-  // Seeds server-side visited tracking from this browser's localStorage the
   useThreadVisitedMigration();
   const panelAnimationsSuppressed = usePanelNavigationSuppression(pathname);
   const routePanelAnimationsActive = panelAnimationsActive && !panelAnimationsSuppressed;
@@ -310,12 +365,14 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       <SidebarProvider
         className="h-dvh! min-h-0!"
         data-panel-animations={routePanelAnimationsActive ? "true" : "false"}
-        defaultOpen={false}
+        open={sidebarOpen}
+        onOpenChange={setSidebarOpen}
         style={sidebarProviderStyle}
       >
         <SidebarBrandWidthProbe onWidthChange={setBrandWidth} />
         <ProjectProjectionRetention />
         <Sidebar
+          overlay
           side="left"
           collapsible="offcanvas"
           data-app-sidebar=""
@@ -324,14 +381,14 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
           resizable={{
             maxWidth: sidebarMaximumWidth,
             minWidth: sidebarMinimumWidth,
-            shouldAcceptWidth: ({ currentWidth, nextWidth, wrapper }) =>
+            shouldAcceptWidth: ({ currentWidth, nextWidth }) =>
               nextWidth <= currentWidth ||
-              wrapper.clientWidth - nextWidth >= THREAD_MAIN_CONTENT_MIN_WIDTH,
+              viewportWidth - nextWidth >= THREAD_MAIN_CONTENT_MIN_WIDTH,
             storageKey: THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
             onResize: setSidebarWidth,
           }}
           // The narrow-window sidebar is a sheet, portaled outside the provider's styles.
-          style={windowControlsInsetStyle}
+          style={sidebarProviderStyle}
         >
           {isOnSettings ? (
             <>
@@ -345,18 +402,44 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
           )}
           <SidebarRail onDoubleClick={resetSidebarWidth} />
         </Sidebar>
-        {retainedWorkspaceKey ? (
-          <div
-            className={isOnWorkspace ? "flex min-h-0 min-w-0 flex-1" : "hidden"}
-            aria-hidden={isOnWorkspace ? undefined : true}
-          >
-            <ProjectPaneWorkspace workspaceKey={retainedWorkspaceKey} active={isOnWorkspace} />
-          </div>
+        <div className="flex min-h-0 min-w-0 flex-1">
+          <ProjectPaneWorkspace workspaceKey={retainedWorkspaceKey} active={!isUtility} />
+        </div>
+        {threadTarget?.kind === "server" ? (
+          <ThreadLinkPrompt threadRef={threadTarget.threadRef} />
         ) : null}
-        {isOnWorkspace ? null : children}
+        {isUtility ? (
+          <Sheet
+            open
+            onOpenChange={(open) => {
+              if (!open) closeUtility();
+            }}
+          >
+            <SheetPopup size="wide" side="right">
+              <SheetTitle className="sr-only">
+                {isOnSettings ? "Settings" : pathname === "/usage" ? "Usage" : "Pull requests"}
+              </SheetTitle>
+              <div className="flex min-h-0 flex-1 overflow-hidden">
+                {isOnSettings ? (
+                  <nav
+                    aria-label="Settings sections"
+                    className="hidden w-48 shrink-0 overflow-y-auto border-r pt-12 sm:block"
+                  >
+                    <SettingsSidebarNav pathname={pathname} />
+                  </nav>
+                ) : null}
+                <div className="flex min-h-0 min-w-0 flex-1">{children}</div>
+              </div>
+            </SheetPopup>
+          </Sheet>
+        ) : null}
+        {!isUtility && !threadTarget && !isOnWorkspace && pathname !== "/" ? children : null}
         <SidebarControl
-          hidden={isWorkspacePath(pathname) && (!isMacosDesktop || isWindowFullscreen)}
+          hidden={
+            sidebarOpen || isUtility || (isOnWorkspace && isMacosDesktop && isWindowFullscreen)
+          }
         />
+        {!isUtility ? <ChatRouteGlobalShortcuts /> : null}
         <NavigationHistoryShortcuts />
         <MainAppLocationTracker />
       </SidebarProvider>

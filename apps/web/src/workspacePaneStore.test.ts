@@ -306,3 +306,92 @@ describe("window workspace layouts", () => {
     expect(expanded.panes.slice(0, 5)).toContain(threads[3]);
   });
 });
+
+describe("pane-local related thread navigation", () => {
+  const env = "pane-navigation" as EnvironmentId;
+  const parent = scopeThreadRef(env, ThreadId.make("parent"));
+  const child = scopeThreadRef(env, ThreadId.make("child"));
+  const grandchild = scopeThreadRef(env, ThreadId.make("grandchild"));
+  const key = "navigation-test";
+  const layout = () => selectProjectWorkspaceLayout(useWorkspacePaneStore.getState(), key);
+
+  it("opens nested agents in the originating pane, leaves neighbours intact, and returns through each parent", () => {
+    const store = useWorkspacePaneStore.getState();
+    store.resetWorkspace(key);
+    store.setPaneCount(key, 2);
+    store.assignThread(key, parent, 0);
+    store.assignThread(key, child, 1);
+    store.openRelatedThread(key, child, 0);
+    store.openRelatedThread(key, grandchild, 0);
+    expect(layout().panes.slice(0, 2)).toEqual([grandchild, child]);
+    store.goBack(key, 0);
+    expect(layout().panes.slice(0, 2)).toEqual([child, child]);
+    store.goBack(key, 0);
+    expect(layout().panes.slice(0, 2)).toEqual([parent, child]);
+    expect(layout().backStacks?.[0]).toEqual([]);
+    store.resetWorkspace(key);
+  });
+
+  it("moves history with swaps and a shrinking layout, and clears it with the pane", () => {
+    const store = useWorkspacePaneStore.getState();
+    store.resetWorkspace(key);
+    store.setPaneCount(key, 3);
+    store.assignThread(key, parent, 0);
+    store.openRelatedThread(key, child, 0);
+    store.swapPanes(key, 0, 2);
+    store.setPaneCount(key, 1);
+    expect(layout().panes[0]).toEqual(child);
+    store.goBack(key, 0);
+    expect(layout().panes[0]).toEqual(parent);
+    store.openRelatedThread(key, child, 0);
+    store.clearPane(key, 0);
+    store.goBack(key, 0);
+    expect(layout().panes[0]).toBeNull();
+    store.resetWorkspace(key);
+  });
+
+  it("opens a hidden thread in a visible pane instead of focusing an invisible slot", () => {
+    const store = useWorkspacePaneStore.getState();
+    store.resetWorkspace(key);
+    store.setPaneCount(key, 2);
+    store.assignThread(key, parent, 0);
+    store.assignThread(key, child, 1);
+    store.focusPane(key, 0);
+    store.setPaneCount(key, 1);
+    store.assignThread(key, child);
+    expect(layout().panes[0]).toEqual(child);
+    expect(layout().focusedPaneIndex).toBe(0);
+    expect(layout().panes[1]).toBeNull();
+    store.resetWorkspace(key);
+  });
+
+  it("starts fresh history when choosing an unrelated thread or draft", () => {
+    const store = useWorkspacePaneStore.getState();
+    store.resetWorkspace(key);
+    store.assignThread(key, parent);
+    store.openRelatedThread(key, child, 0);
+    store.assignThread(key, grandchild);
+    store.goBack(key, 0);
+    expect(layout().panes[0]).toEqual(grandchild);
+    store.openRelatedThread(key, child, 0);
+    store.assignDraft(key, "draft" as DraftId);
+    store.goBack(key, 0);
+    expect(layout().panes[0]).toEqual({ draftId: "draft" });
+    store.resetWorkspace(key);
+  });
+
+  it("brings a hidden draft into the focused visible pane", () => {
+    const store = useWorkspacePaneStore.getState();
+    store.resetWorkspace(key);
+    store.setPaneCount(key, 2);
+    store.assignThread(key, parent, 0);
+    store.assignDraft(key, "draft" as DraftId, 1);
+    store.focusPane(key, 0);
+    store.setPaneCount(key, 1);
+    store.assignDraft(key, "draft" as DraftId);
+    expect(layout().panes[0]).toEqual({ draftId: "draft" });
+    expect(layout().panes[1]).toBeNull();
+    expect(layout().focusedPaneIndex).toBe(0);
+    store.resetWorkspace(key);
+  });
+});

@@ -1,3 +1,4 @@
+import { useRightPanelStore } from "../rightPanelStore";
 // @effect-diagnostics cryptoRandomUUID:off -- Synchronous workspace drag-and-drop allocates local view identities.
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -10,6 +11,7 @@ import { canSettle, effectiveSnoozed } from "@t3tools/client-runtime/state/threa
 import { createFileRoute } from "@tanstack/react-router";
 import type { ScopedProjectRef, ScopedThreadRef } from "@t3tools/contracts";
 import {
+  ArrowLeftIcon,
   ChevronDownIcon,
   CircleCheckIcon,
   Columns3Icon,
@@ -37,6 +39,7 @@ import {
 } from "react";
 
 import { ChatViewContent, shouldTypeToFocusComposer } from "../components/ChatView";
+import { WorkspacePaneNavigationContext } from "../workspacePaneNavigation";
 import { WorkspaceUpdatePill } from "../components/sidebar/SidebarUpdatePill";
 import type { ChatComposerHandle } from "../components/chat/ChatComposer";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
@@ -107,6 +110,7 @@ import {
 import { resolveWorkspaceDraftThreadRef } from "../workspacePaneTitle";
 import {
   buildWorkspaceThreadPickerItems,
+  countRunningWorkspaceSubagents,
   workspaceThreadPickerItemsForProject,
   type WorkspaceThreadPickerItem,
 } from "../workspacePaneThreadPicker";
@@ -176,6 +180,11 @@ function EmptyWorkspacePane({
             </span>
           ) : null}
         </span>
+        {thread.runningSubagentCount > 0 ? (
+          <span className="shrink-0 text-2xs text-muted-foreground">
+            {thread.runningSubagentCount} running
+          </span>
+        ) : null}
       </button>
     ));
 
@@ -420,6 +429,7 @@ function WorkspacePane({
   style,
   composerHandleRef,
   settleThread,
+  runningSubagentCount,
 }: {
   readonly workspaceKey: string;
   readonly index: WorkspacePaneIndex;
@@ -432,8 +442,21 @@ function WorkspacePane({
   readonly rearrangeable: boolean;
   readonly style: CSSProperties;
   readonly composerHandleRef: RefObject<ChatComposerHandle | null>;
+  readonly runningSubagentCount: number;
   readonly settleThread: ReturnType<typeof useThreadActions>["settleThread"];
 }) {
+  const openRelatedThread = useWorkspacePaneStore((state) => state.openRelatedThread);
+  const goBack = useWorkspacePaneStore((state) => state.goBack);
+  const canGoBack = useWorkspacePaneStore(
+    (state) =>
+      (selectProjectWorkspaceLayout(state, workspaceKey).backStacks?.[index]?.length ?? 0) > 0,
+  );
+  const openRelated = useCallback(
+    (threadRef: ScopedThreadRef) => {
+      openRelatedThread(workspaceKey, threadRef, index);
+    },
+    [index, openRelatedThread, workspaceKey],
+  );
   const focusPane = useWorkspacePaneStore((state) => state.focusPane);
   const clearPane = useWorkspacePaneStore((state) => state.clearPane);
   const setPaneProject = useWorkspacePaneStore((state) => state.setPaneProject);
@@ -759,6 +782,29 @@ function WorkspacePane({
           <span className="min-w-0 flex-1" />
         )}
         <div className="ml-auto flex items-center gap-0.5">
+          {serverThreadRef && runningSubagentCount > 0 ? (
+            <Button
+              size="xs"
+              variant="ghost"
+              aria-label={`${runningSubagentCount} running subagents`}
+              onClick={() =>
+                useRightPanelStore.getState().setThreadPanelOpen(serverThreadRef, "popover", true)
+              }
+            >
+              {runningSubagentCount} running
+            </Button>
+          ) : null}
+          {canGoBack ? (
+            <Button
+              size="icon-micro"
+              variant="ghost"
+              aria-label="Back in pane"
+              title="Back in pane"
+              onClick={() => goBack(workspaceKey, index)}
+            >
+              <ArrowLeftIcon className="size-3" />
+            </Button>
+          ) : null}
           {serverThreadRef ? (
             <Button
               size="icon-micro"
@@ -799,34 +845,36 @@ function WorkspacePane({
           ) : null}
         </div>
       </div>
-      {paneTarget && "draftId" in paneTarget ? (
-        <WorkspaceDraftPane
-          workspaceKey={workspaceKey}
-          index={index}
-          draftId={paneTarget.draftId}
-          focused={focused}
-          composerHandleRef={composerHandleRef}
-        />
-      ) : paneTarget ? (
-        <WorkspaceThreadPane
-          threadRef={paneTarget}
-          focused={focused}
-          composerHandleRef={composerHandleRef}
-        />
-      ) : (
-        <EmptyWorkspacePane
-          paneNumber={index + 1}
-          projects={menuProjects}
-          selectedProjectKey={selectedProject?.projectKey ?? null}
-          threads={pickerThreads}
-          onSelectProject={(project) =>
-            selectProject(scopeProjectRef(project.environmentId, project.id))
-          }
-          onAddProject={openProjectPicker}
-          onNewThread={selectedProject ? startNewThread : null}
-          onSelectThread={openExistingThread}
-        />
-      )}
+      <WorkspacePaneNavigationContext value={openRelated}>
+        {paneTarget && "draftId" in paneTarget ? (
+          <WorkspaceDraftPane
+            workspaceKey={workspaceKey}
+            index={index}
+            draftId={paneTarget.draftId}
+            focused={focused}
+            composerHandleRef={composerHandleRef}
+          />
+        ) : paneTarget ? (
+          <WorkspaceThreadPane
+            threadRef={paneTarget}
+            focused={focused}
+            composerHandleRef={composerHandleRef}
+          />
+        ) : (
+          <EmptyWorkspacePane
+            paneNumber={index + 1}
+            projects={menuProjects}
+            selectedProjectKey={selectedProject?.projectKey ?? null}
+            threads={pickerThreads}
+            onSelectProject={(project) =>
+              selectProject(scopeProjectRef(project.environmentId, project.id))
+            }
+            onAddProject={openProjectPicker}
+            onNewThread={selectedProject ? startNewThread : null}
+            onSelectThread={openExistingThread}
+          />
+        )}
+      </WorkspacePaneNavigationContext>
     </section>
   );
 }
@@ -840,6 +888,7 @@ export function ProjectPaneWorkspace({
 }) {
   const projects = useProjects();
   const threads = useThreadShells();
+  const runningCounts = useMemo(() => countRunningWorkspaceSubagents(threads), [threads]);
   const serverConfigs = useServerConfigs();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -876,7 +925,7 @@ export function ProjectPaneWorkspace({
     .map((paneTarget, index) => ({
       paneTarget,
       index: index as WorkspacePaneIndex,
-      key: workspacePaneRenderKey(paneTarget, index),
+      key: `${workspacePaneRenderKey(paneTarget, index)}:${panes.slice(0, index).filter((target) => target && paneTarget && "threadId" in target && "threadId" in paneTarget && scopedThreadKey(target) === scopedThreadKey(paneTarget)).length}`,
     }))
     .toSorted((left, right) => left.key.localeCompare(right.key));
   const settledThreadKeys = useMemo(() => {
@@ -1006,7 +1055,7 @@ export function ProjectPaneWorkspace({
           <WorkspaceUpdatePill />
         </div>
       ) : null}
-      {isMacosDesktop && !isWindowFullscreen ? (
+      {!isWindowFullscreen ? (
         <header className="drag-region flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center gap-2 border-b border-border bg-background pr-3 pl-(--workspace-titlebar-content-left)">
           <div className="min-w-0 flex-1" aria-hidden />
           <div
@@ -1100,6 +1149,11 @@ export function ProjectPaneWorkspace({
           if (maximizedPaneIndex !== null && maximizedPaneIndex !== index) return null;
           return (
             <WorkspacePane
+              runningSubagentCount={
+                paneTarget && "threadId" in paneTarget
+                  ? (runningCounts.get(scopedThreadKey(paneTarget)) ?? 0)
+                  : 0
+              }
               key={key}
               workspaceKey={workspaceKey}
               index={index}

@@ -1,3 +1,4 @@
+import { useWorkspacePaneNavigation } from "../workspacePaneNavigation";
 import { restoreQueuedMessage } from "./chat/restoreQueuedMessage";
 import type { ThreadSyncPhase } from "../threadSync";
 import { useEnvironmentBootstrapComplete } from "../state/entities";
@@ -1822,6 +1823,7 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
   );
   const timestampFormat = settings.timestampFormat;
   const navigate = useNavigate();
+  const navigateInPane = useWorkspacePaneNavigation();
   const citationLocation = useLocation({
     select: (location) => ({
       href: location.href,
@@ -1980,7 +1982,7 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
     useState<Record<string, number>>({});
   const viewportRequiresRightPanelSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const shouldUseRightPanelSheet = embeddedPane || viewportRequiresRightPanelSheet;
-  const shouldUsePlanSidebarSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
+  const shouldUsePlanSidebarSheet = embeddedPane || viewportRequiresRightPanelSheet;
   const isMobileViewport = useMediaQuery("max-sm");
   const [workspaceLayoutElement, setWorkspaceLayoutElement] = useState<HTMLDivElement | null>(null);
   const setChatViewElement = useCallback((element: HTMLDivElement | null) => {
@@ -7261,12 +7263,20 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
   useEffect(() => {
     if (!isPaneFocused || !activeThread?.id || terminalUiState.terminalOpen) return;
     const frame = window.requestAnimationFrame(() => {
+      // Selecting a pane through its tools must not steal focus from the control
+      // or immediately dismiss the popover it just opened.
+      if (
+        embeddedPane &&
+        document.activeElement instanceof Element &&
+        document.activeElement.closest('button, [role="dialog"], [role="menu"], [role="listbox"]')
+      )
+        return;
       focusComposer();
     });
     return () => {
       window.cancelAnimationFrame(frame);
     };
-  }, [activeThread?.id, focusComposer, isPaneFocused, terminalUiState.terminalOpen]);
+  }, [activeThread?.id, embeddedPane, focusComposer, isPaneFocused, terminalUiState.terminalOpen]);
 
   // Tabbing back into the app lands focus wherever it last was, often the right panel or the
   // body. Put it in the composer unless something that takes typing already holds it. The
@@ -7748,12 +7758,17 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
   }, [activeThread, environmentId, interruptThreadTurn, setThreadError]);
   const onOpenRelatedThread = useCallback(
     (threadId: ThreadId) => {
+      const threadRef = scopeThreadRef(environmentId, threadId);
+      if (navigateInPane) {
+        navigateInPane(threadRef);
+        return;
+      }
       void navigate({
         to: "/$environmentId/$threadId",
-        params: buildThreadRouteParams(scopeThreadRef(environmentId, threadId)),
+        params: buildThreadRouteParams(threadRef),
       });
     },
-    [environmentId, navigate],
+    [environmentId, navigate, navigateInPane],
   );
   const childThreadInputs = useChildThreadInputs(activeThreadRef);
   const childInputBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
@@ -11634,6 +11649,7 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
     ) : null
   ) : null;
   const threadDetailsPanelProps: ThreadDetailsPanelProps = {
+    forcePopover: embeddedPane,
     anchor: threadPanelPopoverAnchorRef,
     handle: threadPanelPopoverHandle,
     onPresentationChange: setThreadPanelPresentation,
@@ -11793,6 +11809,24 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
         )}
         data-chat-column-maximized-away={rightPanelMaximized ? "true" : "false"}
       >
+        {embeddedPane ? (
+          <header
+            ref={threadPanelPopoverAnchorRef}
+            className="flex h-8 shrink-0 items-center justify-end gap-1 border-b border-border/50 px-2"
+            aria-label="Pane thread tools"
+          >
+            {parentThreadLink ? (
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() => onOpenRelatedThread(parentThreadLink.threadId)}
+              >
+                Parent thread
+              </Button>
+            ) : null}
+            {panelToggleControls}
+          </header>
+        ) : null}
         {/* Top bar */}
         {!embeddedPane && (
           <header
@@ -12406,7 +12440,10 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
               </AlertDialogPopup>
             </AlertDialog>
 
-            <ThreadDetailsPanel {...threadDetailsPanelProps} />
+            <ThreadDetailsPanel
+              {...threadDetailsPanelProps}
+              popoverActive={!embeddedPane || isPaneFocused}
+            />
 
             {pullRequestDialogState ? (
               <PullRequestThreadDialog

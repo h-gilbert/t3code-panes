@@ -29,6 +29,7 @@ const EMPTY_PANE_PROJECTS: WorkspacePaneProjects = Array.from(
 
 export interface ProjectWorkspaceLayout {
   panes: WorkspacePanes;
+  backStacks?: ReadonlyArray<ReadonlyArray<WorkspacePaneTarget>>;
   projectKeys: WorkspacePaneProjects;
   paneCount: WorkspacePaneCount;
   layoutMode: WorkspaceLayoutMode;
@@ -54,6 +55,12 @@ export interface WorkspacePaneState {
     threadRef: ScopedThreadRef,
     paneIndex?: WorkspacePaneIndex,
   ) => void;
+  openRelatedThread: (
+    workspaceKey: string,
+    threadRef: ScopedThreadRef,
+    paneIndex: WorkspacePaneIndex,
+  ) => void;
+  goBack: (workspaceKey: string, paneIndex: WorkspacePaneIndex) => void;
   assignDraft: (projectKey: string, draftId: DraftId, paneIndex?: WorkspacePaneIndex) => void;
   focusPane: (projectKey: string, paneIndex: WorkspacePaneIndex) => void;
   clearPane: (projectKey: string, paneIndex: WorkspacePaneIndex) => void;
@@ -142,6 +149,9 @@ export function swapWorkspaceLayoutPanes(
   if (fromIndex === toIndex) return layout;
   const panes = [...layout.panes];
   const projectKeys = [...layout.projectKeys];
+  const backStacks = [...(layout.backStacks ?? EMPTY_PANES.map(() => []))];
+  backStacks[fromIndex] = layout.backStacks?.[toIndex] ?? [];
+  backStacks[toIndex] = layout.backStacks?.[fromIndex] ?? [];
   panes[fromIndex] = layout.panes[toIndex] ?? null;
   panes[toIndex] = layout.panes[fromIndex] ?? null;
   projectKeys[fromIndex] = layout.projectKeys[toIndex] ?? null;
@@ -152,6 +162,7 @@ export function swapWorkspaceLayoutPanes(
     ...layout,
     panes,
     projectKeys,
+    backStacks,
     focusedPaneIndex: followMove(layout.focusedPaneIndex),
     maximizedPaneIndex:
       layout.maximizedPaneIndex === null ? null : followMove(layout.maximizedPaneIndex),
@@ -259,6 +270,7 @@ export function resizeWorkspaceLayoutPaneCount(
   return {
     ...layout,
     panes: reorderedSlots.map((slot) => slot.target),
+    backStacks: reorderedSlots.map((slot) => layout.backStacks?.[slot.originalIndex] ?? []),
     projectKeys: reorderedSlots.map((slot) => slot.projectKey),
     paneCount,
     focusedPaneIndex: (focusedPaneIndex >= 0 ? focusedPaneIndex : 0) as WorkspacePaneIndex,
@@ -293,31 +305,100 @@ export const useWorkspacePaneStore = create<WorkspacePaneState>()(
         set((state) =>
           updateProjectLayout(state, projectKey, (layout) => {
             const targetIndex = paneIndex ?? layout.focusedPaneIndex;
-            const assigned = assignWorkspaceThread(layout.panes, threadRef, targetIndex);
+            const assigned = assignWorkspaceThread(
+              layout.panes.slice(0, layout.paneCount),
+              threadRef,
+              targetIndex,
+            );
+            const panes = [...layout.panes];
+            const backStacks = [...(layout.backStacks ?? EMPTY_PANES.map(() => []))];
+            if (
+              layout.panes[assigned.focusedPaneIndex] !== assigned.panes[assigned.focusedPaneIndex]
+            )
+              backStacks[assigned.focusedPaneIndex] = [];
+            for (let i = 0; i < layout.paneCount; i++) panes[i] = assigned.panes[i] ?? null;
+            for (let i = layout.paneCount; i < panes.length; i++) {
+              const target = panes[i];
+              if (
+                target &&
+                "threadId" in target &&
+                scopedThreadKey(target) === scopedThreadKey(threadRef)
+              ) {
+                panes[i] = null;
+                backStacks[i] = [];
+              }
+            }
             return {
               ...layout,
               ...assigned,
+              panes,
+              backStacks,
               maximizedPaneIndex:
                 layout.maximizedPaneIndex === null ? null : assigned.focusedPaneIndex,
             };
           }),
         ),
+      openRelatedThread: (workspaceKey, threadRef, paneIndex) =>
+        set((state) =>
+          updateProjectLayout(state, workspaceKey, (layout) => {
+            const current = layout.panes[paneIndex];
+            if (
+              current &&
+              "threadId" in current &&
+              scopedThreadKey(current) === scopedThreadKey(threadRef)
+            )
+              return layout;
+            const panes = [...layout.panes];
+            const backStacks = [...(layout.backStacks ?? EMPTY_PANES.map(() => []))];
+            backStacks[paneIndex] = current
+              ? [...(backStacks[paneIndex] ?? []), current].slice(-50)
+              : [];
+            // A related thread stays in the originating pane, even if it is also open elsewhere.
+            panes[paneIndex] = threadRef;
+            return { ...layout, panes, backStacks, focusedPaneIndex: paneIndex };
+          }),
+        ),
+      goBack: (workspaceKey, paneIndex) =>
+        set((state) =>
+          updateProjectLayout(state, workspaceKey, (layout) => {
+            const stack = layout.backStacks?.[paneIndex] ?? [];
+            const previous = stack.at(-1);
+            if (!previous) return layout;
+            const panes = [...layout.panes];
+            const backStacks = [...(layout.backStacks ?? [])];
+            panes[paneIndex] = previous;
+            backStacks[paneIndex] = stack.slice(0, -1);
+            return { ...layout, panes, backStacks, focusedPaneIndex: paneIndex };
+          }),
+        ),
       assignDraft: (projectKey, draftId, paneIndex) =>
         set((state) =>
           updateProjectLayout(state, projectKey, (layout) => {
-            const existingIndex = layout.panes.findIndex(
-              (candidate) =>
-                candidate !== null && "draftId" in candidate && candidate.draftId === draftId,
-            );
+            const existingIndex = layout.panes
+              .slice(0, layout.paneCount)
+              .findIndex(
+                (candidate) =>
+                  candidate !== null && "draftId" in candidate && candidate.draftId === draftId,
+              );
             const targetIndex =
               existingIndex >= 0
                 ? (existingIndex as WorkspacePaneIndex)
                 : (paneIndex ?? layout.focusedPaneIndex);
             const panes = [...layout.panes];
+            const backStacks = [...(layout.backStacks ?? EMPTY_PANES.map(() => []))];
+            if (existingIndex < 0) backStacks[targetIndex] = [];
+            for (let i = layout.paneCount; i < panes.length; i++) {
+              const target = panes[i];
+              if (target && "draftId" in target && target.draftId === draftId) {
+                panes[i] = null;
+                backStacks[i] = [];
+              }
+            }
             panes[targetIndex] = { draftId };
             return {
               ...layout,
               panes,
+              backStacks,
               focusedPaneIndex: targetIndex,
               maximizedPaneIndex: layout.maximizedPaneIndex === null ? null : targetIndex,
             };
@@ -343,6 +424,9 @@ export const useWorkspacePaneStore = create<WorkspacePaneState>()(
             return {
               ...layout,
               panes: next as unknown as WorkspacePanes,
+              backStacks: EMPTY_PANES.map((_, i) =>
+                i === paneIndex ? [] : (layout.backStacks?.[i] ?? []),
+              ),
               maximizedPaneIndex:
                 layout.maximizedPaneIndex === paneIndex ? null : layout.maximizedPaneIndex,
             };
@@ -360,6 +444,9 @@ export const useWorkspacePaneStore = create<WorkspacePaneState>()(
               ...layout,
               projectKeys,
               panes,
+              backStacks: EMPTY_PANES.map((_, i) =>
+                i === paneIndex ? [] : (layout.backStacks?.[i] ?? []),
+              ),
               focusedPaneIndex: paneIndex,
               maximizedPaneIndex: null,
             };

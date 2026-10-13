@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId, TurnId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, ProviderInstanceId, RunId, ThreadId } from "@t3tools/contracts";
 import type { Project, Thread } from "../types";
 import { makeThreadFixture } from "../test-fixtures";
 import {
@@ -422,9 +422,9 @@ describe("buildThreadActionItems", () => {
         }),
         makeThread({
           id: ThreadId.make("thread-later-completion"),
-          latestTurn: {
-            turnId: TurnId.make("turn-1"),
-            state: "completed",
+          latestRun: {
+            runId: RunId.make("run-1"),
+            status: "completed",
             requestedAt: "2026-03-20T10:00:00.000Z",
             startedAt: "2026-03-20T10:00:01.000Z",
             completedAt: "2026-03-20T13:00:00.000Z",

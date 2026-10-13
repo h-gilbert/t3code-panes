@@ -204,6 +204,7 @@ function Sidebar({
   variant = "sidebar",
   collapsible = "offcanvas",
   resizable = false,
+  overlay = false,
   className,
   children,
   ...props
@@ -212,8 +213,10 @@ function Sidebar({
   variant?: "sidebar" | "floating" | "inset";
   collapsible?: "offcanvas" | "icon" | "none";
   resizable?: boolean | SidebarResizableOptions;
+  overlay?: boolean;
 }) {
-  const { isMobile, state, openMobile, setOpenMobile, setMobileSheetElement } = useSidebar();
+  const { isMobile, state, open, setOpen, openMobile, setOpenMobile, setMobileSheetElement } =
+    useSidebar();
   const resolvedResizable = React.useMemo<SidebarResolvedResizableOptions | null>(() => {
     if (isMobile || collapsible === "none" || !resizable) {
       return null;
@@ -250,30 +253,36 @@ function Sidebar({
     );
   }
 
-  if (isMobile) {
+  if (isMobile || overlay) {
     return (
       <SidebarInstanceContext value={instanceContextValue}>
-        <Sheet onOpenChange={setOpenMobile} open={openMobile}>
+        <Sheet
+          onOpenChange={isMobile ? setOpenMobile : setOpen}
+          open={isMobile ? openMobile : open}
+        >
           <SheetPopup
-            ref={setMobileSheetElement}
+            ref={isMobile ? setMobileSheetElement : undefined}
             className={cn(
-              "w-(--sidebar-width) max-w-none bg-sidebar surface-grain p-0 text-sidebar-foreground",
+              "group w-(--sidebar-width) max-w-none bg-sidebar surface-grain p-0 text-sidebar-foreground",
               className,
             )}
-            data-mobile="true"
+            data-mobile={isMobile ? "true" : undefined}
+            data-overlay={overlay ? "true" : undefined}
+            data-side={side}
             data-sidebar="sidebar"
             data-slot="sidebar"
-            showCloseButton={false}
+            showCloseButton={overlay && !isMobile}
             side={side}
             style={
               {
-                "--sidebar-width": SIDEBAR_WIDTH_MOBILE,
+                ...props.style,
+                ...(isMobile ? { "--sidebar-width": SIDEBAR_WIDTH_MOBILE } : {}),
               } as React.CSSProperties
             }
           >
             <SheetHeader className="sr-only">
               <SheetTitle>Sidebar</SheetTitle>
-              <SheetDescription>Displays the mobile sidebar.</SheetDescription>
+              <SheetDescription>Choose a project or thread.</SheetDescription>
             </SheetHeader>
             <div
               className={cn(
@@ -396,11 +405,12 @@ function SidebarRail({
   const resize = useResizeDrag<HTMLButtonElement>((event) => {
     if (!resolvedResizable || !open) return null;
     const rail = event.currentTarget;
-    const wrapper = rail.closest<HTMLElement>("[data-slot='sidebar-wrapper']");
     const sidebarRoot = rail.closest<HTMLElement>("[data-slot='sidebar']");
-    const sidebarContainer = sidebarRoot?.querySelector<HTMLElement>(
-      "[data-slot='sidebar-container']",
-    );
+    const wrapper = rail.closest<HTMLElement>("[data-slot='sidebar-wrapper']") ?? sidebarRoot;
+    const sidebarContainer =
+      sidebarRoot?.dataset.overlay === "true"
+        ? sidebarRoot
+        : sidebarRoot?.querySelector<HTMLElement>("[data-slot='sidebar-container']");
     if (!wrapper || !sidebarRoot || !sidebarContainer) return null;
 
     const side = sidebarInstance?.side ?? "left";

@@ -5479,3 +5479,72 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
     }),
   );
 });
+
+const nativeSubagentShellStatus = Effect.gen(function* () {
+  const store = yield* ProjectionStore.ProjectionStoreV2;
+  const templateId = yield* addOrphanedRecoveryCandidate("native-shell-template");
+  const template = (yield* store.getThreadProjection(templateId)).thread;
+  const threadId = ThreadId.make("native-shell-child");
+  const nodeId = NodeId.make("native-shell-root");
+  const now = yield* DateTime.now;
+  yield* store.apply({
+    id: EventId.make("native-shell-created"),
+    type: "thread.created",
+    threadId,
+    occurredAt: now,
+    payload: {
+      ...template,
+      id: threadId,
+      creationSource: "provider",
+      createdBy: "agent",
+      lineage: {
+        parentThreadId: templateId,
+        rootThreadId: templateId,
+        relationshipToParent: "subagent",
+      },
+    },
+  });
+  for (const [status, expected] of [
+    ["pending", "starting"],
+    ["running", "running"],
+    ["waiting", "waiting"],
+    ["completed", "completed"],
+    ["idle", "idle"],
+  ] as const) {
+    yield* store.apply({
+      id: EventId.make(`native-shell-${status}`),
+      type: "node.updated",
+      threadId,
+      occurredAt: now,
+      payload: {
+        id: nodeId,
+        threadId,
+        runId: null,
+        parentNodeId: null,
+        rootNodeId: nodeId,
+        kind: "root_turn",
+        status,
+        countsForRun: false,
+        providerThreadId: null,
+        providerTurnId: null,
+        nativeItemRef: null,
+        runtimeRequestId: null,
+        checkpointScopeId: null,
+        startedAt: now,
+        completedAt: status === "completed" ? now : null,
+      },
+    });
+    const shell = (yield* store.getShellSnapshot()).threads.find(
+      (thread) => thread.id === threadId,
+    )!;
+    assert.equal(shell.status, expected);
+    assert.isNull(shell.latestRunId);
+    assert.isNull(shell.activeRunId);
+  }
+});
+it.effect("memory shell follows native subagent work without inventing an app run", () =>
+  nativeSubagentShellStatus.pipe(Effect.provide(ProjectionStore.layerMemory)),
+);
+it.effect("SQLite shell follows native subagent work without loading its transcript", () =>
+  nativeSubagentShellStatus.pipe(Effect.provide(layerTest)),
+);

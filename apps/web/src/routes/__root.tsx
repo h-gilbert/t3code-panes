@@ -5,6 +5,7 @@ import {
   Outlet,
   Link,
   redirect,
+  retainSearchParams,
   createRootRoute,
   type ErrorComponentProps,
   useLocation,
@@ -87,6 +88,9 @@ import { installDesktopPasteAsText } from "../lib/desktopPasteAsText";
 import { shouldResumeSnapShotSetupOnStartup } from "../lib/snapShotSetupResume";
 
 export const Route = createRootRoute({
+  validateSearch: (search: Record<string, unknown>): { workspace?: string } =>
+    typeof search.workspace === "string" ? { workspace: search.workspace } : {},
+  search: { middlewares: [retainSearchParams(["workspace"])] },
   beforeLoad: async ({ location }) => {
     if (location.pathname === "/pair" && hasHostedPairingRequest(new URL(window.location.href))) {
       return {

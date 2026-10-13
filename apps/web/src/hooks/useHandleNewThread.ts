@@ -1,3 +1,10 @@
+import { useCurrentThreadTarget } from "./useCurrentThreadTarget";
+import {
+  DEFAULT_WORKSPACE_KEY,
+  isWorkspacePath,
+  selectProjectWorkspaceLayout,
+  useWorkspacePaneStore,
+} from "../workspacePaneStore";
 import { useAtomValue } from "@effect/atom-react";
 import {
   scopedProjectKey,
@@ -5,7 +12,7 @@ import {
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
 import { DEFAULT_SERVER_SETTINGS, type ScopedProjectRef, type ThreadId } from "@t3tools/contracts";
-import { useParams, useRouter } from "@tanstack/react-router";
+import { useLocation, useRouter } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import {
   composerDraftHasUserContent,
@@ -68,6 +75,15 @@ export function useNewThreadHandler() {
   const router = useRouter();
   const getCurrentRouteTarget = useCallback(() => {
     const currentRouteParams = router.state.matches[router.state.matches.length - 1]?.params ?? {};
+    if (isWorkspacePath(router.state.location.pathname)) {
+      const workspace = router.state.location.search.workspace ?? DEFAULT_WORKSPACE_KEY;
+      const layout = selectProjectWorkspaceLayout(useWorkspacePaneStore.getState(), workspace);
+      const target = layout.panes[layout.focusedPaneIndex];
+      if (target)
+        return "draftId" in target
+          ? { kind: "draft" as const, draftId: target.draftId }
+          : { kind: "server" as const, threadRef: target };
+    }
     return resolveThreadRouteTarget(currentRouteParams);
   }, [router]);
 
@@ -515,10 +531,16 @@ export function useNewThreadHandler() {
 
 export function useHandleNewThread() {
   const projectOrder = useUiStateStore((store) => store.projectOrder);
-  const routeTarget = useParams({
-    strict: false,
-    select: (params) => resolveThreadRouteTarget(params),
+  const location = useLocation();
+  const focusedProjectKey = useWorkspacePaneStore((state) => {
+    if (!isWorkspacePath(location.pathname)) return null;
+    const layout = selectProjectWorkspaceLayout(
+      state,
+      location.search.workspace ?? DEFAULT_WORKSPACE_KEY,
+    );
+    return layout.projectKeys[layout.focusedPaneIndex] ?? null;
   });
+  const routeTarget = useCurrentThreadTarget();
   const routeThreadRef = routeTarget?.kind === "server" ? routeTarget.threadRef : null;
   const routeDraftId = routeTarget?.kind === "draft" ? routeTarget.draftId : null;
   const activeThread = useThreadShell(routeThreadRef);
@@ -544,8 +566,18 @@ export function useHandleNewThread() {
       ],
     });
   }, [projectOrder, projects]);
-  const contextualEnvironmentId = activeThread?.environmentId ?? activeDraftThread?.environmentId;
-  const contextualProjectId = activeThread?.projectId ?? activeDraftThread?.projectId;
+  const paneProject =
+    focusedProjectKey === null
+      ? undefined
+      : orderedProjects.find(
+          (project) =>
+            deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings) ===
+            focusedProjectKey,
+        );
+  const contextualEnvironmentId =
+    activeThread?.environmentId ?? activeDraftThread?.environmentId ?? paneProject?.environmentId;
+  const contextualProjectId =
+    activeThread?.projectId ?? activeDraftThread?.projectId ?? paneProject?.id;
   const preferredProjectRef = useMemo(() => {
     if (!contextualEnvironmentId || !contextualProjectId) return null;
     const contextualProjectRef = scopeProjectRef(contextualEnvironmentId, contextualProjectId);

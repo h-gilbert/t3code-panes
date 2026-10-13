@@ -2432,7 +2432,7 @@ export default function Sidebar() {
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const threads = useThreadShells();
   const router = useRouter();
-  const { isMobile, setOpenMobile } = useSidebar();
+  const { isMobile, setOpen, setOpenMobile } = useSidebar();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
@@ -3267,6 +3267,7 @@ export default function Sidebar() {
         clearSelection();
       }
       setSelectionAnchor(scopedThreadKey(threadRef));
+      setOpen(false);
       if (isMobile) {
         setOpenMobile(false);
       }
@@ -3297,6 +3298,7 @@ export default function Sidebar() {
     },
     [
       assignWorkspaceThread,
+      setOpen,
       activeWorkspaceKey,
       activeWorkspaceLayout.focusedPaneIndex,
       clearSelection,
@@ -3320,11 +3322,16 @@ export default function Sidebar() {
         activeWorkspaceLayout.focusedPaneIndex,
         nextProjectKey,
       );
+      setOpen(false);
+      setOpenMobile(false);
     },
     [
+      setProjectScopeKey,
       activeWorkspaceKey,
       activeWorkspaceLayout.focusedPaneIndex,
       setWorkspacePaneProject,
+      setOpen,
+      setOpenMobile,
       workspaceActive,
     ],
   );
@@ -3343,6 +3350,7 @@ export default function Sidebar() {
 
       try {
         await navigateToThread(threadRef);
+        if (workspaceActive) return;
         const landed =
           router.buildLocation({
             to: "/$environmentId/$threadId",
@@ -3353,7 +3361,7 @@ export default function Sidebar() {
         clearPendingFileDrop(dropId);
       }
     },
-    [clearPendingFileDrop, navigateToThread, queuePendingFileDrop, router],
+    [clearPendingFileDrop, navigateToThread, queuePendingFileDrop, router, workspaceActive],
   );
 
   const navigateToDraft = useCallback(
@@ -3363,12 +3371,17 @@ export default function Sidebar() {
       // instead of ranging from a row that is no longer the context.
       // (clearSelection no-ops when there is nothing to clear.)
       clearSelection();
+      setOpen(false);
       if (isMobile) {
         setOpenMobile(false);
       }
+      if (workspaceActive) {
+        useWorkspacePaneStore.getState().assignDraft(activeWorkspaceKey, draftId);
+        return;
+      }
       void router.navigate({ to: "/draft/$draftId", params: { draftId } });
     },
-    [clearSelection, isMobile, router, setOpenMobile],
+    [clearSelection, isMobile, router, setOpenMobile, setOpen, workspaceActive, activeWorkspaceKey],
   );
 
   const clearThreadSearch = useCallback(() => {

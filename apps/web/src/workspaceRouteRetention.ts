@@ -5,15 +5,10 @@ export function resolveRetainedWorkspaceKey(input: {
   readonly workspaceSearch: unknown;
   readonly previousWorkspaceKey: string | null;
 }): string | null {
+  if (typeof input.workspaceSearch === "string") return input.workspaceSearch;
   if (isWorkspacePath(input.pathname)) {
-    return typeof input.workspaceSearch === "string"
-      ? input.workspaceSearch
-      : DEFAULT_WORKSPACE_KEY;
+    return DEFAULT_WORKSPACE_KEY;
   }
 
-  if (input.pathname === "/settings" || input.pathname.startsWith("/settings/")) {
-    return input.previousWorkspaceKey;
-  }
-
-  return null;
+  return input.previousWorkspaceKey ?? DEFAULT_WORKSPACE_KEY;
 }
