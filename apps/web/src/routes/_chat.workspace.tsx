@@ -39,7 +39,10 @@ import {
 } from "react";
 
 import { ChatViewContent, shouldTypeToFocusComposer } from "../components/ChatView";
-import { WorkspacePaneNavigationContext } from "../workspacePaneNavigation";
+import {
+  WorkspacePaneHeaderContext,
+  WorkspacePaneNavigationContext,
+} from "../workspacePaneNavigation";
 import { WorkspaceUpdatePill } from "../components/sidebar/SidebarUpdatePill";
 import type { ChatComposerHandle } from "../components/chat/ChatComposer";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
@@ -471,6 +474,7 @@ function WorkspacePane({
   const [settling, setSettling] = useState(false);
   const [draggingPane, setDraggingPane] = useState(false);
   const [paneDropActive, setPaneDropActive] = useState(false);
+  const [headerControls, setHeaderControls] = useState<HTMLDivElement | null>(null);
   const draftRequestVersionRef = useRef(0);
   const serverThreadRef = paneTarget && "threadId" in paneTarget ? paneTarget : null;
   const serverThreadShell = useThreadShell(serverThreadRef);
@@ -641,6 +645,7 @@ function WorkspacePane({
         />
       ) : null}
       <div
+        data-workspace-pane-header
         className={cn(
           "flex h-7 shrink-0 items-center border-b px-2 text-2xs font-medium",
           focused
@@ -782,6 +787,7 @@ function WorkspacePane({
           <span className="min-w-0 flex-1" />
         )}
         <div className="ml-auto flex items-center gap-0.5">
+          <div ref={setHeaderControls} className="flex shrink-0 items-center" />
           {serverThreadRef && runningSubagentCount > 0 ? (
             <Button
               size="xs"
@@ -846,34 +852,36 @@ function WorkspacePane({
         </div>
       </div>
       <WorkspacePaneNavigationContext value={openRelated}>
-        {paneTarget && "draftId" in paneTarget ? (
-          <WorkspaceDraftPane
-            workspaceKey={workspaceKey}
-            index={index}
-            draftId={paneTarget.draftId}
-            focused={focused}
-            composerHandleRef={composerHandleRef}
-          />
-        ) : paneTarget ? (
-          <WorkspaceThreadPane
-            threadRef={paneTarget}
-            focused={focused}
-            composerHandleRef={composerHandleRef}
-          />
-        ) : (
-          <EmptyWorkspacePane
-            paneNumber={index + 1}
-            projects={menuProjects}
-            selectedProjectKey={selectedProject?.projectKey ?? null}
-            threads={pickerThreads}
-            onSelectProject={(project) =>
-              selectProject(scopeProjectRef(project.environmentId, project.id))
-            }
-            onAddProject={openProjectPicker}
-            onNewThread={selectedProject ? startNewThread : null}
-            onSelectThread={openExistingThread}
-          />
-        )}
+        <WorkspacePaneHeaderContext value={headerControls}>
+          {paneTarget && "draftId" in paneTarget ? (
+            <WorkspaceDraftPane
+              workspaceKey={workspaceKey}
+              index={index}
+              draftId={paneTarget.draftId}
+              focused={focused}
+              composerHandleRef={composerHandleRef}
+            />
+          ) : paneTarget ? (
+            <WorkspaceThreadPane
+              threadRef={paneTarget}
+              focused={focused}
+              composerHandleRef={composerHandleRef}
+            />
+          ) : (
+            <EmptyWorkspacePane
+              paneNumber={index + 1}
+              projects={menuProjects}
+              selectedProjectKey={selectedProject?.projectKey ?? null}
+              threads={pickerThreads}
+              onSelectProject={(project) =>
+                selectProject(scopeProjectRef(project.environmentId, project.id))
+              }
+              onAddProject={openProjectPicker}
+              onNewThread={selectedProject ? startNewThread : null}
+              onSelectThread={openExistingThread}
+            />
+          )}
+        </WorkspacePaneHeaderContext>
       </WorkspacePaneNavigationContext>
     </section>
   );

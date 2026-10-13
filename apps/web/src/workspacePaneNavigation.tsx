@@ -8,3 +8,10 @@ export const WorkspacePaneNavigationContext = createContext<
 export function useWorkspacePaneNavigation() {
   return useContext(WorkspacePaneNavigationContext);
 }
+
+// ChatView owns the actions; the pane owns their header position.
+export const WorkspacePaneHeaderContext = createContext<HTMLDivElement | null>(null);
+
+export function useWorkspacePaneHeader() {
+  return useContext(WorkspacePaneHeaderContext);
+}

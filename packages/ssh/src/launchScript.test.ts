@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off - runs the generated launch script with a real shell and Node server.
 import { assert, it } from "@effect/vitest";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as NodeChildProcess from "node:child_process";
@@ -52,9 +52,53 @@ const freeLoopbackPort = Effect.promise(
     }),
 );
 
+it.effect.each(["plain", "quoted", "launchd"] as const)(
+  "does not start a competing server while a boot service is down (%s)",
+  (kind) =>
+    Effect.gen(function* () {
+      if ((yield* HostProcess.Platform) === "win32") return;
+      if (kind === "launchd" && !NodeFS.existsSync("/usr/libexec/PlistBuddy")) return;
+      const home = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-ssh-service-gap-"));
+      try {
+        const unit = NodePath.join(
+          home,
+          kind === "launchd"
+            ? "Library/LaunchAgents/com.t3tools.t3code.service.plist"
+            : ".config/systemd/user/t3code.service",
+        );
+        NodeFS.mkdirSync(NodePath.dirname(unit), { recursive: true });
+        const baseDir = NodePath.join(home, ".t3");
+        NodeFS.writeFileSync(
+          unit,
+          kind === "launchd"
+            ? `<?xml version="1.0"?><plist version="1.0"><dict><key>EnvironmentVariables</key><dict><key>T3CODE_HOME</key><string>${baseDir}</string></dict></dict></plist>`
+            : `Environment=T3CODE_HOME=${kind === "quoted" ? JSON.stringify(baseDir) : baseDir}\n`,
+        );
+        const serverPath = NodePath.join(home, "must-not-start.mjs");
+        const marker = NodePath.join(home, "started");
+        NodeFS.writeFileSync(
+          serverPath,
+          `import {writeFileSync} from 'node:fs'; writeFileSync(${JSON.stringify(marker)}, 'started');`,
+        );
+        const result = NodeChildProcess.spawnSync("/bin/sh", ["-s", "--", "test-key"], {
+          input: buildRemoteLaunchScript({ nodeScriptPath: serverPath }),
+          env: { HOME: home, PATH: process.env.PATH ?? "" },
+          encoding: "utf8",
+          timeout: 10_000,
+        });
+        assert.equal(result.status, 1);
+        assert.include(result.stderr, "background service owns this home");
+        assert.isFalse(NodeFS.existsSync(marker));
+        assert.isFalse(NodeFS.existsSync(NodePath.join(home, ".t3/ssh-launch/test-key/pid")));
+      } finally {
+        NodeFS.rmSync(home, { recursive: true, force: true });
+      }
+    }),
+);
+
 it.effect("reuses the boot service even when stale managed metadata has no PID", () =>
   Effect.gen(function* () {
-    if ((yield* HostProcessPlatform) === "win32") return;
+    if ((yield* HostProcess.Platform) === "win32") return;
     const home = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-ssh-service-"));
     const serverPath = NodePath.join(home, "fake-server.mjs");
     NodeFS.writeFileSync(serverPath, FAKE_SERVER);
@@ -93,7 +137,7 @@ it.effect("reuses the boot service even when stale managed metadata has no PID",
 
 it.effect("refuses to retire a live duplicate and switch to a stale service", () =>
   Effect.gen(function* () {
-    if ((yield* HostProcessPlatform) === "win32") return;
+    if ((yield* HostProcess.Platform) === "win32") return;
     const home = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-ssh-duplicate-"));
     const serverPath = NodePath.join(home, "fake-server.mjs");
     NodeFS.writeFileSync(serverPath, FAKE_SERVER);
@@ -155,7 +199,7 @@ const isAlive = (pid: number) => {
 
 it.effect("adopts a service that appears while the SSH contender is starting", () =>
   Effect.gen(function* () {
-    if ((yield* HostProcessPlatform) === "win32") return;
+    if ((yield* HostProcess.Platform) === "win32") return;
     const home = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-ssh-race-"));
     const serverPath = NodePath.join(home, "fake-server.mjs");
     const contenderPath = NodePath.join(home, "contender.mjs");
@@ -214,11 +258,15 @@ it.effect(
   "reconnecting keeps the managed server that owns the home's runtime record",
   () =>
     Effect.gen(function* () {
-      if ((yield* HostProcessPlatform) === "win32") return;
+      if ((yield* HostProcess.Platform) === "win32") return;
       const home = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-ssh-launch-"));
       const serverPath = NodePath.join(home, "fake-server.mjs");
       NodeFS.writeFileSync(serverPath, FAKE_SERVER);
       const stateDir = NodePath.join(home, ".t3", "ssh-launch", "test-key");
+      // A boot service for another home must not prevent an SSH-owned server.
+      const unit = NodePath.join(home, ".config/systemd/user/t3code.service");
+      NodeFS.mkdirSync(NodePath.dirname(unit), { recursive: true });
+      NodeFS.writeFileSync(unit, `Environment=T3CODE_HOME=${NodePath.join(home, "other")}\n`);
       // Seed the launcher's preferred port with a free one so the script
       // never probes a real T3 server on the default port.
       NodeFS.mkdirSync(stateDir, { recursive: true });

@@ -9,6 +9,7 @@ import { Toggle } from "../ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 export interface PanelLayoutControlsProps {
+  size?: "sm" | "xs";
   showThreadPanelControl?: boolean;
   showTerminalControl?: boolean;
   showRightPanelControl?: boolean;
@@ -29,6 +30,7 @@ export interface PanelLayoutControlsProps {
 }
 
 export const PanelLayoutControls = memo(function PanelLayoutControls({
+  size = "sm",
   showThreadPanelControl = true,
   showTerminalControl = true,
   showRightPanelControl = true,
@@ -53,7 +55,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
       pressed={threadPanelOpen}
       aria-label="Toggle thread details panel"
       variant="ghost"
-      size="sm"
+      size={size}
     >
       <SquareMenuIcon className="size-4" />
     </Toggle>
@@ -92,7 +94,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
               onPressedChange={onToggleTerminal}
               aria-label="Toggle terminal drawer"
               variant="ghost"
-              size="sm"
+              size={size}
               disabled={!terminalAvailable}
             >
               <PanelBottomIcon className="size-4" />
@@ -114,7 +116,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
               onPressedChange={onToggleRightPanel}
               aria-label="Toggle right panel"
               variant="ghost"
-              size="sm"
+              size={size}
               disabled={!rightPanelAvailable}
             >
               <PanelRightIcon className="size-4" />

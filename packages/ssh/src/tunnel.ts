@@ -723,6 +723,21 @@ else
   REMOTE_MANAGED=""
 fi
 if [ -z "$REMOTE_PORT" ]; then
+  # A disconnected service may be between update candidates. Starting a
+  # standalone server here would steal its home lock and force a rollback.
+  # Keep ownership with the installed service even when it has failed.
+  SERVICE_UNIT="$HOME/.config/systemd/user/t3code.service"
+  SERVICE_PLIST="$HOME/Library/LaunchAgents/com.t3tools.t3code.service.plist"
+  SERVICE_HOME=""
+  if [ -f "$SERVICE_UNIT" ]; then
+    SERVICE_HOME="$(sed -n 's/^Environment=T3CODE_HOME=//p' "$SERVICE_UNIT")"
+  elif [ -f "$SERVICE_PLIST" ] && [ -x /usr/libexec/PlistBuddy ]; then
+    SERVICE_HOME="$(/usr/libexec/PlistBuddy -c 'Print :EnvironmentVariables:T3CODE_HOME' "$SERVICE_PLIST" 2>/dev/null || true)"
+  fi
+  if [ "$SERVICE_HOME" = "$DEFAULT_SERVER_HOME" ] || [ "$SERVICE_HOME" = '"'"$DEFAULT_SERVER_HOME"'"' ]; then
+    printf 'The T3 background service owns this home but is not ready. Wait for its update to finish, or repair the service before reconnecting. Refusing to start a competing server.\\n' >&2
+    exit 1
+  fi
   REMOTE_PORT="$(pick_port)" || true
   if [ -z "$REMOTE_PORT" ]; then
     if [ "$T3_ARCHIVE_MODE" = "1" ]; then

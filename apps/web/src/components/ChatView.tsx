@@ -1,4 +1,4 @@
-import { useWorkspacePaneNavigation } from "../workspacePaneNavigation";
+import { useWorkspacePaneHeader, useWorkspacePaneNavigation } from "../workspacePaneNavigation";
 import { restoreQueuedMessage } from "./chat/restoreQueuedMessage";
 import type { ThreadSyncPhase } from "../threadSync";
 import { useEnvironmentBootstrapComplete } from "../state/entities";
@@ -171,7 +171,7 @@ import {
   useState,
   type RefObject,
 } from "react";
-import { flushSync } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { assistantCitationFromLocation } from "../lib/assistantCitationNavigation";
 import { isMacPlatform } from "../lib/utils";
@@ -1824,6 +1824,7 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
   const timestampFormat = settings.timestampFormat;
   const navigate = useNavigate();
   const navigateInPane = useWorkspacePaneNavigation();
+  const paneHeader = useWorkspacePaneHeader();
   const citationLocation = useLocation({
     select: (location) => ({
       href: location.href,
@@ -1989,7 +1990,7 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
     chatViewElementRef.current = element;
     setWorkspaceLayoutElement(element);
   }, []);
-  const threadPanelPopoverAnchorRef = useRef<HTMLElement | null>(null);
+  const threadPanelPopoverAnchorRef = useRef<HTMLDivElement | null>(null);
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   // When set, the thread-change reset effect will open the sidebar instead of closing it.
   // Used by "Implement in a new thread" to carry the sidebar-open intent across navigation.
@@ -11716,6 +11717,7 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
   const panelToggleControls = (
     <PanelLayoutControls
       {...panelToggleControlProps}
+      size={embeddedPane ? "xs" : "sm"}
       showThreadPanelControl={!inlineRightPanelOwnsTitleBar}
     />
   );
@@ -11809,24 +11811,28 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
         )}
         data-chat-column-maximized-away={rightPanelMaximized ? "true" : "false"}
       >
-        {embeddedPane ? (
-          <header
-            ref={threadPanelPopoverAnchorRef}
-            className="flex h-8 shrink-0 items-center justify-end gap-1 border-b border-border/50 px-2"
-            aria-label="Pane thread tools"
-          >
-            {parentThreadLink ? (
-              <Button
-                size="xs"
-                variant="ghost"
-                onClick={() => onOpenRelatedThread(parentThreadLink.threadId)}
+        {embeddedPane && paneHeader
+          ? createPortal(
+              <div
+                ref={threadPanelPopoverAnchorRef}
+                className="flex shrink-0 items-center gap-1"
+                aria-label="Pane thread tools"
+                onDoubleClick={(event) => event.stopPropagation()}
               >
-                Parent thread
-              </Button>
-            ) : null}
-            {panelToggleControls}
-          </header>
-        ) : null}
+                {parentThreadLink ? (
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => onOpenRelatedThread(parentThreadLink.threadId)}
+                  >
+                    Parent thread
+                  </Button>
+                ) : null}
+                {panelToggleControls}
+              </div>,
+              paneHeader,
+            )
+          : null}
         {/* Top bar */}
         {!embeddedPane && (
           <header
