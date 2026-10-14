@@ -181,6 +181,68 @@ describe("window workspace layouts", () => {
     expect(expanded.projectKeys[8]).toBeNull();
   });
 
+  it("shows a sixth empty pane without its previously selected project", () => {
+    const workspaceKey = "expand-empty-pane";
+    const actions = useWorkspacePaneStore.getState();
+    actions.setPaneCount(workspaceKey, 6);
+    const threads = Array.from({ length: 5 }, (_, index) =>
+      scopeThreadRef("environment-1" as EnvironmentId, ThreadId.make(`thread-${index}`)),
+    );
+    for (const [index, thread] of threads.entries()) {
+      const paneIndex = index as 0 | 1 | 2 | 3 | 4;
+      actions.setPaneProject(workspaceKey, paneIndex, `project-${index}`);
+      actions.assignThread(workspaceKey, thread, paneIndex);
+    }
+    actions.setPaneProject(workspaceKey, 5, "previous-project");
+    actions.setPaneCount(workspaceKey, 5);
+    actions.setPaneCount(workspaceKey, 6);
+
+    const layout = selectProjectWorkspaceLayout(useWorkspacePaneStore.getState(), workspaceKey);
+    expect(layout.panes.slice(0, 6)).toEqual([...threads, null]);
+    expect(layout.projectKeys.slice(0, 6)).toEqual([
+      "project-0",
+      "project-1",
+      "project-2",
+      "project-3",
+      "project-4",
+      null,
+    ]);
+    actions.resetWorkspace(workspaceKey);
+  });
+
+  it("preserves visible project selections and restored threads and drafts when expanding", () => {
+    const thread = scopeThreadRef("environment-1" as EnvironmentId, ThreadId.make("thread"));
+    const draft = { draftId: "draft" as DraftId };
+    const expanded = resizeWorkspaceLayoutPaneCount(
+      {
+        ...DEFAULT_PROJECT_WORKSPACE_LAYOUT,
+        panes: [null, thread, draft, null, null, ...EMPTY_PANES.slice(5)],
+        projectKeys: [
+          "visible",
+          "thread",
+          "draft",
+          "newly-visible",
+          "still-hidden",
+          null,
+          null,
+          null,
+          null,
+        ],
+      },
+      4,
+    );
+
+    expect(expanded.panes.slice(0, 4)).toEqual([null, thread, draft, null]);
+    expect(expanded.projectKeys.slice(0, 5)).toEqual([
+      "visible",
+      "thread",
+      "draft",
+      null,
+      "still-hidden",
+    ]);
+    expect(resizeWorkspaceLayoutPaneCount(expanded, 4)).toBe(expanded);
+  });
+
   it("assigns one project to a pane and clears its previous thread", () => {
     useWorkspacePaneStore.setState({ layoutsByProjectKey: {} });
     const thread = scopeThreadRef("environment-1" as EnvironmentId, ThreadId.make("thread-1"));

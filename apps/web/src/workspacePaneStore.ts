@@ -194,10 +194,14 @@ export function resizeWorkspaceLayoutPaneCount(
         { length: WORKSPACE_PANE_COUNT },
         (_, index) => layout.panes[index] ?? null,
       ),
-      projectKeys: Array.from(
-        { length: WORKSPACE_PANE_COUNT },
-        (_, index) => layout.projectKeys[index] ?? null,
-      ),
+      projectKeys: Array.from({ length: WORKSPACE_PANE_COUNT }, (_, index) => {
+        // Newly visible empty panes start at the project picker. Keep the
+        // project for restored threads and drafts, and for visible panes.
+        if (index >= layout.paneCount && index < paneCount && !layout.panes[index]) {
+          return null;
+        }
+        return layout.projectKeys[index] ?? null;
+      }),
       paneCount,
     };
   }
