@@ -18,7 +18,7 @@ to the project name and updates everywhere when the thread is renamed or its tit
 Hover a project in the menu and click its X (or press Delete) to hide it from the menu on this
 device. The project and its threads are kept. Choose it again from **Hidden projects**, or add its
 directory again, to bring it back. An empty pane lists your projects next to the selected project's
-threads. Click a project to start a new thread in it.
+threads. Click a project to browse its threads, or use the + beside it to start a new thread.
 The sidebar shows threads from every project assigned to a visible pane. Focusing a pane chooses
 where the next thread opens, and the project picker in the sidebar changes that pane's project. Use
 the pane header to maximize it temporarily. The X removes the thread from that pane without stopping
@@ -61,8 +61,8 @@ Choose one of those titles to bring that workspace to the front.
 
 An empty pane lists open threads that are not already assigned elsewhere in the workspace. Select
 a project in the pane header to limit the list to that project, or clear the project to see threads
-from every project. Choose a thread to resume it in the pane, or use **New thread** when a project
-is selected.
+from every project. Choose a thread to resume it in the pane, or use the + beside a project to
+start a new thread in it.
 
 When you quit and reopen the desktop app, T3 Code restores every workspace window with the same
 pane assignments, size, position, and maximized state. Closing one window removes it from the next

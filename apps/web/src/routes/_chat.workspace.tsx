@@ -156,7 +156,7 @@ function EmptyWorkspacePane({
   readonly threads: readonly WorkspaceThreadPickerItem[];
   readonly onSelectProject: (project: SidebarProjectSnapshot) => void;
   readonly onAddProject: () => void;
-  readonly onNewThread: (() => void) | null;
+  readonly onNewThread: (project: SidebarProjectSnapshot) => void;
   readonly onSelectThread: (thread: WorkspaceThreadPickerItem) => void;
 }) {
   const projectSelected = selectedProjectKey !== null;
@@ -204,25 +204,39 @@ function EmptyWorkspacePane({
         <div className={EMPTY_PANE_COLUMN_CLASS}>
           <p className={EMPTY_PANE_SECTION_LABEL_CLASS}>Projects</p>
           {projects.map((project) => (
-            <button
+            <div
               key={project.projectKey}
-              type="button"
               className={cn(
-                EMPTY_PANE_ROW_CLASS,
+                "flex items-center rounded pr-1",
                 project.projectKey === selectedProjectKey && "bg-foreground/[0.08]",
               )}
-              aria-label={`New thread in ${project.displayName}`}
-              onClick={() => onSelectProject(project)}
             >
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-xs font-medium text-foreground">
-                  {project.displayName}
+              <button
+                type="button"
+                className={cn(EMPTY_PANE_ROW_CLASS, "min-w-0 flex-1")}
+                aria-label={`Show threads in ${project.displayName}`}
+                aria-pressed={project.projectKey === selectedProjectKey}
+                onClick={() => onSelectProject(project)}
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-xs font-medium text-foreground">
+                    {project.displayName}
+                  </span>
+                  <span className="block truncate text-2xs text-muted-foreground">
+                    {project.workspaceRoot}
+                  </span>
                 </span>
-                <span className="block truncate text-2xs text-muted-foreground">
-                  {project.workspaceRoot}
-                </span>
-              </span>
-            </button>
+              </button>
+              <Button
+                variant="ghost-muted"
+                size="icon-xs"
+                aria-label={`New thread in ${project.displayName}`}
+                title={`New thread in ${project.displayName}`}
+                onClick={() => onNewThread(project)}
+              >
+                <PlusIcon aria-hidden />
+              </Button>
+            </div>
           ))}
           <button
             type="button"
@@ -235,16 +249,6 @@ function EmptyWorkspacePane({
         </div>
         <div className={EMPTY_PANE_COLUMN_CLASS}>
           <p className={EMPTY_PANE_SECTION_LABEL_CLASS}>Threads</p>
-          {onNewThread ? (
-            <button
-              type="button"
-              className={cn(EMPTY_PANE_ROW_CLASS, "text-xs font-medium text-foreground")}
-              onClick={onNewThread}
-            >
-              <PlusIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-              New thread
-            </button>
-          ) : null}
           {openThreads.length > 0 ? (
             <>
               <p className={cn(EMPTY_PANE_SECTION_LABEL_CLASS, "mt-1 border-t border-border pt-2")}>
@@ -492,6 +496,7 @@ function WorkspacePane({
   );
   const selectProject = useCallback(
     (projectRef: ScopedProjectRef) => {
+      draftRequestVersionRef.current += 1;
       const project = projects.find((candidate) =>
         candidate.memberProjectRefs.some(
           (member) =>
@@ -508,9 +513,8 @@ function WorkspacePane({
       // back in the pane project menu.
       setPickerProjectHidden(project.projectKey, false);
       setPaneProject(workspaceKey, index, project.projectKey);
-      openFreshDraft(projectRef);
     },
-    [index, openFreshDraft, projects, setPaneProject, setPickerProjectHidden, workspaceKey],
+    [index, projects, setPaneProject, setPickerProjectHidden, workspaceKey],
   );
   const openProjectPicker = useCallback(
     () => openCommandPalette({ open: "add-local-project", onProjectSelected: selectProject }),
@@ -539,11 +543,14 @@ function WorkspacePane({
     }
   }, [pendingProjectRef, selectProject]);
 
-  const startNewThread = useCallback(() => {
-    if (selectedProject) {
-      openFreshDraft(scopeProjectRef(selectedProject.environmentId, selectedProject.id));
-    }
-  }, [openFreshDraft, selectedProject]);
+  const startNewThread = useCallback(
+    (project: SidebarProjectSnapshot) => {
+      const projectRef = scopeProjectRef(project.environmentId, project.id);
+      selectProject(projectRef);
+      openFreshDraft(projectRef);
+    },
+    [openFreshDraft, selectProject],
+  );
   const openExistingThread = useCallback(
     (thread: WorkspaceThreadPickerItem) => {
       draftRequestVersionRef.current += 1;
@@ -877,7 +884,7 @@ function WorkspacePane({
                 selectProject(scopeProjectRef(project.environmentId, project.id))
               }
               onAddProject={openProjectPicker}
-              onNewThread={selectedProject ? startNewThread : null}
+              onNewThread={startNewThread}
               onSelectThread={openExistingThread}
             />
           )}
