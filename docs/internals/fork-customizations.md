@@ -104,6 +104,10 @@ visible without covering it, and stop following when the user navigates history.
 Changed-file cards stay out of assistant messages; file changes remain available
 through the diff panel.
 
+In web and desktop, dropping, pasting, or choosing image attachments shows their
+previews without inserting inline image chips into the prompt, even when it
+already contains text. Preserve this when integrating upstream composer changes.
+
 ## Other custom behavior
 
 - Preserve pane workspaces, independent window restoration, thread settlement,

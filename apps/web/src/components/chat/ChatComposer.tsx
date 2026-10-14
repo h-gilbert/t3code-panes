@@ -218,7 +218,6 @@ import {
 import { useOpenPrLink } from "~/lib/openPullRequestLink";
 import {
   collectInlineContextIds,
-  stripInlineContextReferences,
   type ComposerContextReference,
   ensureInlineContextReferences,
   formatInlineContextReference,
@@ -5966,7 +5965,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     options?: {
       readonly source?: ChatFileAttachment["source"];
       readonly selection?: { start: number; end: number };
-      readonly skipImageInlineChip?: boolean;
     },
   ): Promise<boolean> => {
     if (!activeThreadId || files.length === 0 || isRevertingCheckpointRef.current) return false;
@@ -5986,21 +5984,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     // large image is being compressed, and the attachments and errors belong
     // to the thread the paste happened in.
     const threadId = activeThreadId;
-    // Images landing with no prose live on the shelf with no chip. Read before
-    // the awaits below: compression is async and the prompt may change while it
-    // runs. An explicit selection replace and states where the editor refuses
-    // input (connecting, approval, pending questions, project selection) still
-    // get chips so the image is never invisible, unless paste-as-text explicitly
-    // requests no inline image chip.
-    const imageAttachmentsGetChips =
-      !options?.skipImageInlineChip &&
-      (options?.selection !== undefined ||
-        isConnecting ||
-        isComposerApprovalState ||
-        pendingUserInputs.length > 0 ||
-        projectSelectionRequired ||
-        stripInlineContextReferences(promptRef.current).trim().length > 0);
-
     // Validation happens synchronously so concurrent pastes see each other:
     // accepted files reserve their attachment slots (via the pending counter)
     // before the first await, keeping the total under the limit.
@@ -6152,18 +6135,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         for (const image of nextImages) URL.revokeObjectURL(image.previewUrl);
         return false;
       }
-      const storedImageIds = new Set(
-        nextImages.length === 1 && nextImages[0]
-          ? addComposerImage(nextImages[0])
-          : nextImages.length > 1
-            ? addComposerImagesToDraft(nextImages)
-            : [],
-      );
-      const storedImages = nextImages.filter((image) => storedImageIds.has(image.id));
-      if (storedImages.length > 0 && imageAttachmentsGetChips) {
-        insertedAny =
-          insertAttachmentReferences(storedImages.map(imageContextReference)) || insertedAny;
-      }
+      // Image attachments stay in the preview tray without changing the prompt,
+      // including when the user has already typed text or selected a range.
+      addComposerImagesToDraft(nextImages);
       // Only failures are reported here. Success must not pass `null`: by
       // now other work (a failed send, an overlapping paste) may have set a
       // thread error this call knows nothing about, and clearing it would
@@ -6188,8 +6162,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   /**
    * Chips for freshly attached files land at the caret; when the editor cannot take
    * input (approval, pending questions) they are appended so the file is never invisible.
-   * Images skip this when they land with no prose and the editor takes input:
-   * the shelf thumbnail is enough.
+   * Images stay in the preview tray and do not get automatic inline references.
    */
   const insertAttachmentReferences = (
     references: ReadonlyArray<ComposerContextReference>,
@@ -6330,7 +6303,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ) {
       event.preventDefault();
       event.stopPropagation();
-      void addComposerAttachments(files, { skipImageInlineChip: bypassAutoAttachment });
+      void addComposerAttachments(files);
       return;
     }
 
