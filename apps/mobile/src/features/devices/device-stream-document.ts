@@ -33,9 +33,16 @@ export function deviceStreamMessage(data: string) {
     if (
       message.type === "input" &&
       "connected" in message &&
-      typeof message.connected === "boolean"
+      typeof message.connected === "boolean" &&
+      (!("detail" in message) || typeof message.detail === "string")
     ) {
-      return { type: message.type, connected: message.connected } as const;
+      return {
+        type: message.type,
+        connected: message.connected,
+        ...("detail" in message && typeof message.detail === "string"
+          ? { detail: message.detail }
+          : {}),
+      } as const;
     }
     if (
       message.type === "status" &&

@@ -7,10 +7,7 @@ import { useIsFocused, useNavigation, type StaticScreenProps } from "@react-navi
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import * as Haptics from "expo-haptics";
-import { Accelerometer } from "expo-sensors";
-import { Alert, AppState, BackHandler, Pressable, StatusBar, View } from "react-native";
-import Animated, { FadeIn, FadeOut, ReduceMotion } from "react-native-reanimated";
+import { Alert, AppState, Pressable, StatusBar, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { SymbolView } from "../../components/AppSymbol";
@@ -33,17 +30,13 @@ import {
   threadDevicePreviews,
   type ThreadDevicePreview,
 } from "./threadDevicePreviews";
-import { createShakeDetector } from "./shakeDetector";
-
-const OVERLAY_ENTERING = FadeIn.duration(160).reduceMotion(ReduceMotion.System);
-const OVERLAY_EXITING = FadeOut.duration(120).reduceMotion(ReduceMotion.System);
 
 type DevicePreviewRouteScreenProps = StaticScreenProps<{
   readonly environmentId: string;
   readonly threadId: string;
 }>;
 
-/** Full-screen viewer; controls live in an overlay toggled by the handle or a shake. */
+/** Keep navigation outside the stream so a failed device cannot trap the viewer. */
 export function DevicePreviewRouteScreen({ route }: DevicePreviewRouteScreenProps) {
   const navigation = useNavigation();
   const onClose = useCallback(() => navigation.goBack(), [navigation]);
@@ -78,9 +71,9 @@ function DevicePreviewScreen({
   const [foreground, setForeground] = useState(AppState.currentState !== "background");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [inputConnected, setInputConnected] = useState(false);
+  const [inputDetail, setInputDetail] = useState<string | null>(null);
   const [streamAttempt, setStreamAttempt] = useState(0);
   const [shuttingDown, setShuttingDown] = useState(false);
-  const [controlsVisible, setControlsVisible] = useState(true);
   const retryHost = useAtomCommand(deviceEnvironment.list);
   const shutdown = useAtomCommand(deviceEnvironment.shutdown, { reportFailure: false });
   const streamRef = useRef<DeviceStreamRef>(null);
@@ -90,10 +83,9 @@ function DevicePreviewScreen({
     [state.data, threadId],
   );
   const preview = selectedThreadDevicePreview(previews, selectedKey);
-  const onInputConnected = useCallback(async (connected: boolean) => {
+  const onInputConnected = useCallback(async (connected: boolean, detail?: string) => {
     setInputConnected(connected);
-    // Controls greet the user while connecting, then get out of the stream's way.
-    if (connected) setControlsVisible(false);
+    setInputDetail(connected ? null : (detail ?? null));
   }, []);
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) =>
@@ -104,27 +96,6 @@ function DevicePreviewScreen({
   useEffect(() => {
     if (focused && state.data !== null && previews.length === 0) onClose();
   }, [focused, state.data, previews.length, onClose]);
-  useEffect(() => {
-    if (!focused || !foreground) return;
-    const shaken = createShakeDetector();
-    Accelerometer.setUpdateInterval(50);
-    const subscription = Accelerometer.addListener((sample) => {
-      if (!shaken({ ...sample, timestamp: sample.timestamp * 1000 })) return;
-      void Haptics.selectionAsync();
-      setControlsVisible((visible) => !visible);
-    });
-    return () => subscription.remove();
-  }, [focused, foreground]);
-  // Android back reveals the controls first, so leaving takes a deliberate second press.
-  useEffect(() => {
-    if (controlsVisible) return;
-    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
-      setControlsVisible(true);
-      return true;
-    });
-    return () => subscription.remove();
-  }, [controlsVisible]);
-
   const shutDownDevice = async () => {
     if (!preview || shuttingDown) return;
     setShuttingDown(true);
@@ -264,6 +235,29 @@ function DevicePreviewScreen({
   return (
     <View className="flex-1" style={{ backgroundColor: themeVariables["--color-sheet-solid"] }}>
       <StatusBar hidden animated />
+      <View className="px-3" style={{ paddingTop: Math.max(insets.top, 12) }}>
+        <GlassSurface className="flex-row items-center gap-1 p-1">
+          <ControlPill accessibilityLabel="Close device preview" icon="xmark" onPress={onClose} />
+          <AppText numberOfLines={1} className="flex-1 text-center font-t3-medium text-base">
+            {preview?.name ?? "Devices"}
+          </AppText>
+          <ControlPill
+            accessibilityLabel="Home"
+            icon="house"
+            disabled={!inputConnected}
+            onPress={pressHome}
+          />
+          <DeviceOptionsMenu items={menuItems} />
+        </GlassSurface>
+      </View>
+      {inputDetail ? (
+        <AppText
+          accessibilityLiveRegion="polite"
+          className="px-6 py-2 text-center text-sm text-foreground-muted"
+        >
+          {inputDetail}
+        </AppText>
+      ) : null}
       {preview && focused && foreground ? (
         <OpenDevicePreview
           key={`${preview.key}:${streamAttempt}`}
@@ -291,53 +285,6 @@ function DevicePreviewScreen({
             <AppActivityIndicator color={themeVariables["--color-icon"]} />
           ) : null}
         </View>
-      )}
-      {controlsVisible ? (
-        <Animated.View
-          entering={OVERLAY_ENTERING}
-          exiting={OVERLAY_EXITING}
-          pointerEvents="box-none"
-          className="absolute inset-0"
-        >
-          {inputConnected ? (
-            <Pressable
-              accessibilityLabel="Hide device controls"
-              className="absolute inset-0 bg-black/30"
-              onPress={() => setControlsVisible(false)}
-            />
-          ) : null}
-          <View className="px-3" style={{ paddingTop: Math.max(insets.top, 12) }}>
-            <GlassSurface className="flex-row items-center gap-1 p-1">
-              <ControlPill
-                accessibilityLabel="Close device preview"
-                icon="xmark"
-                onPress={onClose}
-              />
-              <AppText numberOfLines={1} className="flex-1 text-center font-t3-medium text-base">
-                {preview?.name ?? "Devices"}
-              </AppText>
-              <ControlPill
-                accessibilityLabel="Home"
-                icon="house"
-                disabled={!inputConnected}
-                onPress={pressHome}
-              />
-              <DeviceOptionsMenu items={menuItems} />
-            </GlassSurface>
-          </View>
-        </Animated.View>
-      ) : (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Show device controls"
-          accessibilityHint="Shaking the phone also shows them"
-          hitSlop={12}
-          className="absolute h-6 w-16 items-center justify-center self-center"
-          style={{ top: Math.max(insets.top - 18, 4) }}
-          onPress={() => setControlsVisible(true)}
-        >
-          <View className="h-1.5 w-10 rounded-full bg-white/40" />
-        </Pressable>
       )}
     </View>
   );
@@ -374,7 +321,7 @@ function OpenDevicePreview({
   readonly environmentId: EnvironmentId;
   readonly preview: ThreadDevicePreview;
   readonly streamRef: RefObject<DeviceStreamRef | null>;
-  readonly onInputConnected: (connected: boolean) => Promise<void>;
+  readonly onInputConnected: (connected: boolean, detail?: string) => Promise<void>;
 }) {
   const { session } = preview;
   const { themeVariables } = useAppearancePreferences();

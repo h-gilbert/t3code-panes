@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vite-plus/test";
-import { start, stop } from "./device-stream.browser";
+import { command, start, stop } from "./device-stream.browser";
 
 class Element extends EventTarget {
   readonly style = {};
@@ -16,6 +16,11 @@ class Element extends EventTarget {
     if (name === "src") this.src = "";
   }
   append() {}
+  getBoundingClientRect() {
+    return { left: 10, top: 20, width: 400, height: 800 };
+  }
+  setPointerCapture() {}
+  focus() {}
 }
 
 async function setup() {
@@ -117,4 +122,58 @@ it("bridges shared first-frame readiness, image failure, and a successful fresh 
   stop();
   expect(replacement.src).toBe("");
   expect(vi.getTimerCount()).toBe(0);
+});
+
+it("delivers admitted taps, swipes, and hardware buttons through the native viewer bridge", async () => {
+  const { elements, sockets } = await setup();
+  const socket = sockets[0]!;
+  const frame = elements.filter((element) => element.tag === "div")[1]!;
+  const pointer = (type: string, x: number, y: number) => {
+    const event = new Event(type, { cancelable: true });
+    Object.assign(event, { pointerId: 7, clientX: 10 + x * 400, clientY: 20 + y * 800 });
+    frame.dispatchEvent(event);
+  };
+  pointer("pointerdown", 0.5, 0.6);
+  pointer("pointerup", 0.5, 0.6);
+  expect(socket.send).not.toHaveBeenCalled();
+  socket.onmessage?.({ data: new Uint8Array([0x83]).buffer });
+  pointer("pointerdown", 0.5, 0.6);
+  pointer("pointerup", 0.5, 0.6);
+  pointer("pointerdown", 0.4, 0.8);
+  pointer("pointermove", 0.4, 0.5);
+  pointer("pointerup", 0.4, 0.2);
+  command("home");
+  const messages = socket.send.mock.calls.map(([data]) => ({
+    tag: (data as Uint8Array)[0],
+    payload: JSON.parse(new TextDecoder().decode((data as Uint8Array).subarray(1))),
+  }));
+  expect(messages).toEqual([
+    { tag: 3, payload: { type: "begin", x: 0.5, y: 0.6 } },
+    { tag: 3, payload: { type: "end", x: 0.5, y: 0.6 } },
+    { tag: 3, payload: { type: "begin", x: 0.4, y: 0.8 } },
+    { tag: 3, payload: { type: "move", x: 0.4, y: 0.5 } },
+    { tag: 3, payload: { type: "end", x: 0.4, y: 0.2 } },
+    { tag: 4, payload: { button: "home" } },
+  ]);
+});
+
+it("reports simulator input failures instead of hiding them behind a working video stream", async () => {
+  const { elements, sockets, messages } = await setup();
+  const socket = sockets[0]!;
+  socket.onmessage?.({ data: new Uint8Array([0x83]).buffer });
+  const config = new TextEncoder().encode(
+    JSON.stringify({ width: 400, height: 800, orientation: "portrait", inputUnavailable: true }),
+  );
+  const frame = new Uint8Array(config.length + 1);
+  frame[0] = 0x82;
+  frame.set(config, 1);
+  socket.onmessage?.({ data: frame.buffer });
+  expect(messages()).toContainEqual({
+    type: "input",
+    connected: false,
+    detail: "Simulator input is unavailable",
+  });
+  expect(elements.findLast((element) => element.tag === "div")).toMatchObject({
+    textContent: "Simulator input is unavailable",
+  });
 });
