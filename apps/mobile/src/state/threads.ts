@@ -11,6 +11,10 @@ import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 
+import { createThreadCreationGatedStateAtoms } from "./thread-creation-gate";
+import { pendingThreadCreationOutcomesAtom } from "./pending-thread-creation";
+import { threadOutboxManager } from "./thread-outbox";
+
 import { environmentCatalog } from "../connection/catalog";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { environmentSnapshotAtom } from "./shell";
@@ -19,14 +23,21 @@ export const threadEnvironment = createThreadEnvironmentAtoms(
   connectionAtomRuntime,
   environmentSnapshotAtom,
 );
-export const environmentThreads = createEnvironmentThreadStateAtoms(connectionAtomRuntime);
-export const environmentThreadDetails = createEnvironmentThreadDetailAtoms(
-  environmentThreads.stateAtom,
-);
+const liveEnvironmentThreads = createEnvironmentThreadStateAtoms(connectionAtomRuntime);
 export const environmentThreadShells = createEnvironmentThreadShellAtoms({
   catalogValueAtom: environmentCatalog.catalogValueAtom,
   snapshotAtom: threadEnvironment.snapshotAtom,
 });
+
+export const environmentThreads = createThreadCreationGatedStateAtoms({
+  stateAtom: liveEnvironmentThreads.stateAtom,
+  queuedMessagesAtom: threadOutboxManager.queuedMessagesByThreadKeyAtom,
+  outcomesAtom: pendingThreadCreationOutcomesAtom,
+  shellAtom: environmentThreadShells.threadShellAtom,
+});
+export const environmentThreadDetails = createEnvironmentThreadDetailAtoms(
+  environmentThreads.stateAtom,
+);
 
 const EMPTY_THREAD_STATE_ATOM = Atom.make(AsyncResult.success(EMPTY_ENVIRONMENT_THREAD_STATE)).pipe(
   Atom.withLabel("mobile-environment-thread:empty"),
