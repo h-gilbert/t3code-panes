@@ -1,4 +1,9 @@
-import type { AuthClientMetadata, AuthClientSession, AuthPairingLink } from "@t3tools/contracts";
+import type {
+  AuthClientMetadata,
+  AuthClientSession,
+  AuthMcpClientAccess,
+  AuthPairingLink,
+} from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 
 import type { IssuedBearerSession, IssuedPairingLink } from "./auth/EnvironmentAuth.ts";
@@ -109,6 +114,7 @@ export function formatIssuedSession(
   options?: {
     readonly json?: boolean;
     readonly tokenOnly?: boolean;
+    readonly mcpAccess?: AuthMcpClientAccess;
   },
 ): string {
   if (options?.tokenOnly) {
@@ -124,6 +130,7 @@ export function formatIssuedSession(
         scopes: session.scopes,
         subject: session.subject,
         client: session.client,
+        ...(options?.mcpAccess === undefined ? {} : { access: options.mcpAccess }),
         expiresAt: toIsoString(session.expiresAt),
       },
       null,
@@ -135,6 +142,7 @@ export function formatIssuedSession(
     [
       `Issued bearer access token ${session.sessionId}.`,
       `Scopes: ${session.scopes.join(" ")}`,
+      ...(options?.mcpAccess === undefined ? [] : [`MCP access: ${options.mcpAccess}`]),
       `Token: ${session.token}`,
       `Subject: ${session.subject}`,
       `Client: ${formatClientMetadata(session.client)}`,

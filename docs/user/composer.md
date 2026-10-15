@@ -107,6 +107,27 @@ instance:
 }
 ```
 
+## Access modes
+
+Changing access in the composer saves a setting for your next message. Send a
+message in that same thread to apply it. Selecting Full access alone, or saying
+"you have full access" in an answer to an agent's question, does not change the
+running agent's permissions. To resume with new permissions, stop the current
+turn, choose the mode, and send a follow-up.
+
+Delegated workers inherit the calling thread's applied mode when they start,
+stepping down if their provider does not support it.
+Changing a parent's mode does not update existing workers. Open the worker's
+thread to change its mode and send a follow-up there, or start a new worker after
+applying the parent's change. An agent cannot grant a worker broader access than
+its own thread has.
+
+Auto uses the provider's automatic approval behavior. For Codex, it keeps the
+workspace sandbox, including network restrictions; an operation such as SSH may
+need a separate approval. Full access removes that sandbox. Claude uses its own
+automatic permission checks in Auto. The same mode name does not promise
+identical permissions across providers.
+
 ## Model defaults
 
 New threads start with the model set in Settings → General → New threads →

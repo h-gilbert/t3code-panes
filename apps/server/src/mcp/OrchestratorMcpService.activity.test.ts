@@ -356,6 +356,7 @@ it("taskStatus returns task.providerInstanceId rather than the driver kind", asy
 });
 
 it("readThread and sendToThread reach threads in other projects", async () => {
+  let sentMessages = 0;
   let parentRuns: ReadonlyArray<unknown> = [
     makeRun({ id: RunId.make("run-parent-live"), ordinal: 1, status: "running" }),
   ];
@@ -446,10 +447,13 @@ it("readThread and sendToThread reach threads in other projects", async () => {
                   }),
                 ),
           sendToThread: () =>
-            Effect.succeed({
-              run: { id: "run-foreign", status: "queued" },
-              delivery: "started",
-            } as unknown as ThreadManagementService.ThreadManagementSendResult),
+            Effect.sync(() => {
+              sentMessages += 1;
+              return {
+                run: { id: "run-foreign", status: "queued" },
+                delivery: "started",
+              } as unknown as ThreadManagementService.ThreadManagementSendResult;
+            }),
         } satisfies Partial<ThreadManagementService.ThreadManagementService["Service"]>),
         ServerSettings.layerTest(),
         Layer.mock(ProviderRegistry.ProviderRegistry)({
@@ -490,6 +494,38 @@ it("readThread and sendToThread reach threads in other projects", async () => {
       message: "hi",
     });
     expect(sent.threadId).toBe(foreignThreadId);
+
+    // Outside clients are capped by their signed grant, even when merely
+    // messaging an existing thread. They have no parent or child thread.
+    const clientScope = {
+      ...makeScope(),
+      thread: undefined,
+      requestNamespace: "client:remote-helper",
+      client: { sessionId: "remote-helper", label: "Remote helper", access: "approval-required" },
+    } satisfies McpInvocationContext.McpInvocationScope;
+    const denied = yield* service
+      .sendToThread(clientScope, {
+        threadId: foreignThreadId,
+        message: "unauthorized follow-up",
+      })
+      .pipe(Effect.flip);
+    expect(denied.code).toBe("runtime_mode_escalation_denied");
+    expect(denied.message).toBe(
+      "Runtime mode full-access exceeds this caller's authorized ceiling approval-required. Have the user raise the calling thread's access or approve a new MCP client grant before retrying.",
+    );
+    expect(sentMessages).toBe(1);
+    const authorized = yield* service.sendToThread(
+      {
+        ...clientScope,
+        client: { ...clientScope.client, access: "full-access" },
+      },
+      {
+        threadId: foreignThreadId,
+        message: "authorized follow-up",
+      },
+    );
+    expect(authorized.threadId).toBe(foreignThreadId);
+    expect(sentMessages).toBe(2);
 
     // Once the caller's run ends, it can still read other threads but no longer write to them.
     parentRuns = [];

@@ -86,7 +86,32 @@ Add the environment as a custom MCP app in ChatGPT's apps settings:
 
 Any agent that supports remote MCP servers over HTTP with OAuth can connect. Give
 it the MCP URL and choose OAuth, and the agent finds the sign-in settings itself.
-Agents without OAuth support cannot connect.
+Each MCP URL controls only that environment. To message a thread on another
+server, connect to that server's MCP URL and approve access there. A saved remote
+environment in the T3 client does not forward the local agent's MCP calls.
+
+## Headless clients
+
+A host administrator can issue an MCP-only bearer token for a client without
+OAuth support:
+
+```sh
+t3 auth mcp issue --access auto --ttl 5m --label "Remote helper" --token-only
+```
+
+Run this on the destination host, with `--base-dir` if it uses a custom T3 home.
+Issuing this token is an access approval. Choose a mode no broader than the client
+needs. Without `--access`, the token is read only. Send the token in the
+`Authorization: Bearer <token>` header to that environment's `/mcp` endpoint.
+Keep it secret. List and revoke it with `t3 auth session list` and
+`t3 auth session revoke <session-id>`.
+
+The ceiling applies to existing threads too: messaging an Auto thread needs at
+least Auto access; messaging a Full access thread needs Full access. Changing
+the target thread does not raise the client's grant. Generic `auth session issue`
+tokens with `--subject mcp-client` have a Supervised ceiling even when they
+include `orchestration:operate`. Use OAuth approval or `auth mcp issue` to
+explicitly authorize a broader ceiling.
 
 ## Remove an agent
 

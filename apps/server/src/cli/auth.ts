@@ -1,5 +1,6 @@
 import {
   AuthAdministrativeScopes,
+  AuthMcpClientAccess,
   AuthSessionId,
   AuthStandardClientScopes,
 } from "@t3tools/contracts";
@@ -243,7 +244,50 @@ const sessionCommand = Command.make("session").pipe(
   Command.withSubcommands([sessionIssueCommand, sessionListCommand, sessionRevokeCommand]),
 );
 
+const mcpIssueCommand = Command.make("issue", {
+  ...authLocationFlags,
+  access: Flag.Literals("access", AuthMcpClientAccess.literals).pipe(
+    Flag.withDescription("Maximum access approved for this MCP client."),
+    Flag.withDefault("read-only"),
+  ),
+  ttl: ttlFlag,
+  label: labelFlag,
+  tokenOnly: tokenOnlyFlag,
+  json: jsonFlag,
+}).pipe(
+  Command.withDescription(
+    "Approve an MCP-only bearer session using local host administrator access.",
+  ),
+  Command.withHandler((flags) =>
+    runWithEnvironmentAuth(
+      flags,
+      (environmentAuth) =>
+        Effect.gen(function* () {
+          const issued = yield* environmentAuth.issueMcpClientSession({
+            access: flags.access,
+            label: Option.getOrElse(flags.label, () => "CLI MCP client"),
+            client: { deviceType: "bot" },
+            ...(Option.isSome(flags.ttl) ? { ttl: flags.ttl.value } : {}),
+          });
+          yield* Console.log(
+            formatIssuedSession(issued, {
+              json: flags.json,
+              tokenOnly: flags.tokenOnly,
+              mcpAccess: flags.access,
+            }),
+          );
+        }),
+      { quietLogs: flags.json || flags.tokenOnly },
+    ),
+  ),
+);
+
+const mcpCommand = Command.make("mcp").pipe(
+  Command.withDescription("Manage outside-agent access to this environment's MCP server."),
+  Command.withSubcommands([mcpIssueCommand]),
+);
+
 export const authCommand = Command.make("auth").pipe(
   Command.withDescription("Manage the local auth control plane for headless deployments."),
-  Command.withSubcommands([pairingCommand, sessionCommand]),
+  Command.withSubcommands([pairingCommand, sessionCommand, mcpCommand]),
 );

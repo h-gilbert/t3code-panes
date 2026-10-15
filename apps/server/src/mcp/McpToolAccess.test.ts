@@ -245,6 +245,7 @@ it.effect.each([
   ["writes_threads", fullAccess, { threadId: supervisedThreadId }, "ran"],
   ["writes_threads", ended, { threadId: supervisedThreadId }, "parent_not_active"],
   ["writes_threads", supervisedClient, { threadId: supervisedThreadId }, "ran"],
+  ["writes_threads", fullAccessClient, { threadId: fullAccessThreadId }, "ran"],
   [
     "writes_threads",
     supervisedClient,

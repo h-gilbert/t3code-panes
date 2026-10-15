@@ -553,7 +553,7 @@ export function resolveRuntimeMode(
     return Effect.fail(
       failure(
         "runtime_mode_escalation_denied",
-        `Child runtime mode ${resolved} is broader than parent mode ${parentMode}.`,
+        `Runtime mode ${resolved} exceeds this caller's authorized ceiling ${parentMode}. Have the user raise the calling thread's access or approve a new MCP client grant before retrying.`,
       ),
     );
   }
@@ -586,7 +586,7 @@ export function resolveInteractionMode(
     ? Effect.fail(
         failure(
           "interaction_mode_escalation_denied",
-          `Child interaction mode ${resolved} is broader than parent mode ${parentMode}.`,
+          `Interaction mode ${resolved} exceeds this caller's authorized ceiling ${parentMode}. Have the user change the calling thread's interaction mode before retrying.`,
         ),
       )
     : Effect.succeed(resolved);
