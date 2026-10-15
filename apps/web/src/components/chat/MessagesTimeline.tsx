@@ -477,6 +477,7 @@ interface MessagesTimelineProps {
   footer?: ReactNode;
 
   listRef: React.RefObject<LegendListRef | null>;
+  onScrollNodeChange?: (node: HTMLElement | null) => void;
   timelineEntries: ReadonlyArray<TimelineEntry>;
   latestRun: TimelineLatestRun | null;
   runningRunId?: RunId | null;
@@ -593,6 +594,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   isCompacting = false,
   awaitingUser = false,
   listRef,
+  onScrollNodeChange,
   timelineEntries,
   findExpanded = false,
   findQuery = "",
@@ -1110,8 +1112,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const [findListReady, setFindListReady] = useState(false);
   const handleListLoad = useCallback(() => {
     onCitationListLoad();
+    onScrollNodeChange?.(listRef.current?.getScrollableNode() ?? null);
     setFindListReady(true);
-  }, [onCitationListLoad]);
+  }, [listRef, onCitationListLoad, onScrollNodeChange]);
   const [minimapHasPersistentGutter, setMinimapHasPersistentGutter] = useState(compactMinimap);
   const [fullscreenAppRowId, setFullscreenAppRowId] = useState<string | null>(null);
   // Only the row that holds the pin can release it.
@@ -1525,9 +1528,11 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const setTimelineList = useCallback(
     (list: LegendListRef | null) => {
       listRef.current = list;
-      registerTimeline?.(list?.getScrollableNode() ?? null);
+      const node = list?.getScrollableNode() ?? null;
+      registerTimeline?.(node);
+      onScrollNodeChange?.(node);
     },
-    [listRef, registerTimeline],
+    [listRef, registerTimeline, onScrollNodeChange],
   );
 
   useLayoutEffect(() => {
