@@ -72,7 +72,10 @@ describe("thread creation subscription gate", () => {
   it("does not request missing detail before creation, then loads when delivery completes", () => {
     const h = harness();
     try {
-      expect(h.registry.get(h.gated)).toEqual(AsyncResult.success(EMPTY_ENVIRONMENT_THREAD_STATE));
+      expect(h.registry.get(h.gated)).toMatchObject({
+        _tag: "Success",
+        value: EMPTY_ENVIRONMENT_THREAD_STATE,
+      });
       expect(h.subscriptions()).toBe(0);
       h.registry.set(h.outcomes, { [key]: { kind: "delivered", message } });
       expect(h.registry.get(h.gated)).toBe(h.live);
@@ -101,10 +104,16 @@ describe("thread creation subscription gate", () => {
     const h = harness();
     try {
       h.registry.set(h.queued, {});
-      expect(h.registry.get(h.gated)).toEqual(AsyncResult.success(EMPTY_ENVIRONMENT_THREAD_STATE));
+      expect(h.registry.get(h.gated)).toMatchObject({
+        _tag: "Success",
+        value: EMPTY_ENVIRONMENT_THREAD_STATE,
+      });
       expect(h.subscriptions()).toBe(0);
       h.registry.set(h.outcomes, { [key]: { kind: "failed", message, reason: "Setup failed" } });
-      expect(h.registry.get(h.gated)).toEqual(AsyncResult.success(EMPTY_ENVIRONMENT_THREAD_STATE));
+      expect(h.registry.get(h.gated)).toMatchObject({
+        _tag: "Success",
+        value: EMPTY_ENVIRONMENT_THREAD_STATE,
+      });
       expect(h.subscriptions()).toBe(0);
       h.registry.set(h.queued, { [key]: [message] });
       h.registry.set(h.outcomes, { [key]: { kind: "delivered", message } });

@@ -513,7 +513,8 @@ describe("mobile cloud link environment client", () => {
             label: "Desktop",
           },
           status: null,
-          statusError: "https://relay.example.test/v1/environments/env-1/status failed",
+          statusError:
+            "https://relay.example.test/v1/environments/env-1/status failed: Relay returned an unexpected HTTP 503.",
         },
       ]);
     }),
