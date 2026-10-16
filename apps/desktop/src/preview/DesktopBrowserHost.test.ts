@@ -6,6 +6,7 @@ import * as Fiber from "effect/Fiber";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as NodeEvents from "node:events";
+import * as NodeFSP from "node:fs/promises";
 
 import * as DesktopBrowserHost from "./DesktopBrowserHost.ts";
 
@@ -184,4 +185,100 @@ it.effect.each([false, true])(
           : { result: { filled: true } }),
       });
     }).pipe(Effect.scoped),
+);
+
+it.effect("keeps identical tab IDs in different environments separate from the local backend", () =>
+  Effect.gen(function* () {
+    const host = yield* DesktopBrowserHost.make;
+    const local = makeDebuggee();
+    const remote = makeDebuggee();
+    const other = makeDebuggee();
+    host.attach(key, local.tab);
+    host.attach({ ...key, environmentId: "fred" }, remote.tab);
+    host.attach({ ...key, environmentId: "other" }, other.tab);
+    expect(yield* takeEvents(host, 1)).toEqual([{ type: "attached", ...key }]);
+    const reader = yield* host.remoteEvents.pipe(
+      Stream.take(2),
+      Stream.runCollect,
+      Effect.forkScoped,
+    );
+    yield* Effect.yieldNow;
+    yield* host.connectRemote("fred");
+    yield* host.remoteCommand("fred", {
+      type: "cdp",
+      ...key,
+      message: encodeJson({ id: 1, method: "Browser.getVersion" }),
+    });
+    const events = yield* Fiber.join(reader);
+    expect(events.map((event) => event.environmentId)).toEqual(["fred", "fred"]);
+    expect(events[0]?.event.type).toBe("attached");
+    expect(events[1]?.event.type).toBe("cdp");
+    host.detach({ ...key, environmentId: "fred" });
+    expect(yield* takeEvents(host, 1)).toEqual([{ type: "attached", ...key }]);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("stores remote downloads locally and only transfers registered files", () =>
+  Effect.gen(function* () {
+    const host = yield* DesktopBrowserHost.make;
+    const debuggee = makeDebuggee();
+    const remoteKey = { ...key, environmentId: "fred" };
+    host.attach(remoteKey, debuggee.tab);
+    yield* host.remoteCommand("fred", {
+      type: "cdp",
+      ...key,
+      message: encodeJson({
+        id: 1,
+        method: "Browser.setDownloadBehavior",
+        params: { behavior: "allowAndName", downloadPath: "/does-not-exist-on-mac" },
+      }),
+    });
+    debuggee.emit("Browser.downloadWillBegin", { guid: "download-1" });
+    let savedPath = "";
+    expect(
+      host.placeDownload(debuggee.tab.webContents, {
+        setSavePath: (path: string) => {
+          savedPath = path;
+        },
+      } as Electron.DownloadItem),
+    ).toBe(true);
+    expect(savedPath).not.toContain("does-not-exist-on-mac");
+    yield* Effect.promise(() => NodeFSP.writeFile(savedPath, "download content"));
+    const transfer = (guid: string) =>
+      Effect.gen(function* () {
+        const reply = yield* host.remoteEvents.pipe(
+          Stream.filter((event) => event.event.type === "operationResult"),
+          Stream.take(1),
+          Stream.runCollect,
+          Effect.forkScoped,
+        );
+        yield* Effect.yieldNow;
+        yield* host.remoteCommand("fred", {
+          type: "operation",
+          ...key,
+          requestId: "read",
+          request: { operation: "readDownload", guid, offset: 0 },
+        });
+        return (yield* Fiber.join(reply))[0]!.event;
+      });
+    const denied = yield* transfer("../../secrets");
+    expect(denied).toMatchObject({
+      type: "operationResult",
+      error: "Unknown browser download or invalid offset.",
+    });
+    const result = yield* transfer("download-1");
+    expect(result).toMatchObject({
+      type: "operationResult",
+      result: { data: Buffer.from("download content").toString("base64"), done: true },
+    });
+    expect(
+      yield* Effect.promise(() =>
+        NodeFSP.stat(savedPath).then(
+          () => true,
+          () => false,
+        ),
+      ),
+    ).toBe(false);
+    host.detach(remoteKey);
+  }).pipe(Effect.scoped),
 );

@@ -1,4 +1,9 @@
 import {
+  DesktopBrowserHostConnectInput,
+  DesktopBrowserHostStreamEvent,
+  DesktopBrowserHostError,
+} from "./desktopBrowser.ts";
+import {
   OrchestrationV2SearchThreadError,
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
@@ -459,6 +464,7 @@ export const WS_METHODS = {
   previewList: "preview.list",
   previewClearProfile: "preview.clearProfile",
   previewReportProfiles: "preview.reportProfiles",
+  previewDesktopHostConnect: "preview.desktopHostConnect",
   previewReportStatus: "preview.reportStatus",
 
   // Device methods
@@ -1538,6 +1544,13 @@ const WsPreviewClearProfileRpc = Rpc.make(WS_METHODS.previewClearProfile, {
   error: Schema.Union([PreviewClearProfileError, EnvironmentAuthorizationError]),
 });
 
+const WsPreviewDesktopHostConnectRpc = Rpc.make(WS_METHODS.previewDesktopHostConnect, {
+  payload: DesktopBrowserHostConnectInput,
+  success: DesktopBrowserHostStreamEvent,
+  error: Schema.Union([DesktopBrowserHostError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
 const WsPreviewReportProfilesRpc = Rpc.make(WS_METHODS.previewReportProfiles, {
   payload: PreviewReportProfilesInput,
   error: EnvironmentAuthorizationError,
@@ -2037,6 +2050,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsPreviewListRpc,
   WsPreviewClearProfileRpc,
   WsPreviewReportProfilesRpc,
+  WsPreviewDesktopHostConnectRpc,
   WsPreviewReportStatusRpc,
   WsSubscribePreviewEventsRpc,
   WsSubscribeDiscoveredLocalServersRpc,

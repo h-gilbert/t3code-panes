@@ -26,6 +26,8 @@ const { fromWebContents } = vi.hoisted(() => ({
 }));
 
 vi.mock("electron", () => ({
+  app: { on: vi.fn(), off: vi.fn() },
+  webContents: { getAllWebContents: () => [] },
   BrowserWindow: { fromWebContents },
   session: {
     fromPartition,
@@ -34,19 +36,21 @@ vi.mock("electron", () => ({
 
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as BrowserSession from "./BrowserSession.ts";
+import * as DesktopClientSettings from "../settings/DesktopClientSettings.ts";
 
 const { showMessageBox } = vi.hoisted(() => ({
   showMessageBox: vi.fn<
     (options: Electron.MessageBoxOptions, owner?: Electron.BrowserWindow) => number
   >(() => 1),
 }));
-const layerDialog = Layer.succeed(ElectronDialog.ElectronDialog, {
+const layerDialogBase = Layer.succeed(ElectronDialog.ElectronDialog, {
   pickFolder: () => Effect.die("unused"),
   pickFiles: () => Effect.die("unused"),
   showMessageBox: (options, owner) =>
     Effect.sync(() => ({ response: showMessageBox(options, owner), checkboxChecked: false })),
   showErrorBox: () => Effect.void,
 });
+const layerDialog = Layer.merge(layerDialogBase, DesktopClientSettings.layerTest());
 const layer = BrowserSession.layer.pipe(
   Layer.provide(Layer.merge(NodeServices.layer, layerDialog)),
 );
@@ -57,6 +61,8 @@ describe("BrowserSession", () => {
     fromPartition.mockReset();
     fromPartition.mockImplementation((partition: string) => {
       const browserSession = {
+        setProxy: vi.fn(() => Promise.resolve()),
+        closeAllConnections: vi.fn(() => Promise.resolve()),
         clearCache: vi.fn(() => Promise.resolve()),
         clearStorageData: vi.fn(() => Promise.resolve()),
         getUserAgent: vi.fn(() => "Mozilla/5.0 Electron/41.5.0 t3code/0.0.27"),
@@ -157,6 +163,8 @@ describe("BrowserSession", () => {
       fromPartition.mockImplementation((partition: string) => {
         let userAgent = nativeUserAgent;
         const browserSession = {
+          setProxy: vi.fn(() => Promise.resolve()),
+          closeAllConnections: vi.fn(() => Promise.resolve()),
           clearCache: vi.fn(() => Promise.resolve()),
           clearStorageData: vi.fn(() => Promise.resolve()),
           getUserAgent: vi.fn(() => userAgent),

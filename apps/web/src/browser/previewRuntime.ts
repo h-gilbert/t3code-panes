@@ -1,3 +1,4 @@
+import { serverEnvironment } from "~/state/server";
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId, PreviewRuntime, PreviewSessionSnapshot } from "@t3tools/contracts";
 
@@ -20,6 +21,11 @@ import {
 export function previewRuntimeFor(environmentId: EnvironmentId): PreviewRuntime | undefined {
   if (!readEnvironmentSupportsServerBrowser(environmentId)) return undefined;
   if (
+    appAtomRegistry.get(serverEnvironment.settingsValueAtom(environmentId))
+      ?.browserHostEnvironmentId
+  )
+    return "server";
+  if (
     isPreviewSupportedInRuntime() &&
     environmentId !== appAtomRegistry.get(primaryEnvironmentIdAtom)
   ) {
@@ -39,7 +45,12 @@ export function alternatePreviewRuntime(
   snapshot: Pick<PreviewSessionSnapshot, "runtime"> | null | undefined,
 ): PreviewRuntime | null {
   if (!snapshot || !serverBrowser || !isPreviewSupportedInRuntime()) return null;
-  if (environmentId === primaryEnvironmentId) return null;
+  if (
+    environmentId === primaryEnvironmentId ||
+    appAtomRegistry.get(serverEnvironment.settingsValueAtom(environmentId))
+      ?.browserHostEnvironmentId
+  )
+    return null;
   return snapshot.runtime === "server" ? "desktop" : "server";
 }
 
@@ -62,12 +73,13 @@ export function rendersServerTabNatively(
   environmentId: EnvironmentId,
   primaryEnvironmentId: EnvironmentId | null,
   snapshot: Pick<PreviewSessionSnapshot, "runtime"> | null | undefined,
+  hostEnvironmentId?: string | null,
 ): boolean {
   return (
     isElectron &&
     snapshot?.runtime === "server" &&
     primaryEnvironmentId !== null &&
-    environmentId === primaryEnvironmentId
+    (environmentId === primaryEnvironmentId || hostEnvironmentId === primaryEnvironmentId)
   );
 }
 
@@ -75,5 +87,11 @@ export function useRendersServerTabNatively(
   environmentId: EnvironmentId,
   snapshot: Pick<PreviewSessionSnapshot, "runtime"> | null | undefined,
 ): boolean {
-  return rendersServerTabNatively(environmentId, useAtomValue(primaryEnvironmentIdAtom), snapshot);
+  const settings = useAtomValue(serverEnvironment.settingsValueAtom(environmentId));
+  return rendersServerTabNatively(
+    environmentId,
+    useAtomValue(primaryEnvironmentIdAtom),
+    snapshot,
+    settings?.browserHostEnvironmentId,
+  );
 }

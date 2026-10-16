@@ -3,26 +3,42 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 const state = vi.hoisted(() => ({
   desktop: false,
+  host: null as string | null,
   primary: null as string | null,
   serverBrowser: new Set<string>(),
 }));
 
-vi.mock("~/env", () => ({ isElectron: false }));
+vi.mock("~/env", () => ({
+  get isElectron() {
+    return state.desktop;
+  },
+}));
+vi.mock("~/state/server", () => ({ serverEnvironment: { settingsValueAtom: () => "settings" } }));
 vi.mock("~/previewStateStore", () => ({ isPreviewSupportedInRuntime: () => state.desktop }));
-vi.mock("~/rpc/atomRegistry", () => ({ appAtomRegistry: { get: () => state.primary } }));
+vi.mock("~/rpc/atomRegistry", () => ({
+  appAtomRegistry: {
+    get: (atom: unknown) =>
+      atom === "settings" ? { browserHostEnvironmentId: state.host } : state.primary,
+  },
+}));
 vi.mock("~/state/primaryEnvironment", () => ({ primaryEnvironmentIdAtom: {} }));
 vi.mock("~/state/entities", () => ({
   readEnvironmentSupportsServerBrowser: (id: string) => state.serverBrowser.has(id),
   useEnvironmentSupportsServerBrowser: () => false,
 }));
 
-import { alternatePreviewRuntime, previewRuntimeFor } from "./previewRuntime";
+import {
+  alternatePreviewRuntime,
+  previewRuntimeFor,
+  rendersServerTabNatively,
+} from "./previewRuntime";
 
 const local = "local" as EnvironmentId;
 const remote = "remote" as EnvironmentId;
 
 afterEach(() => {
   state.desktop = false;
+  state.host = null;
   state.primary = null;
   state.serverBrowser = new Set();
 });
@@ -57,4 +73,15 @@ describe("alternatePreviewRuntime", () => {
   it("offers no move outside the desktop app", () => {
     expect(alternatePreviewRuntime(remote, null, true, { runtime: "server" })).toBeNull();
   });
+});
+
+it("hosts selected remote tabs on the primary desktop and keeps them on that host", () => {
+  state.desktop = true;
+  state.primary = local;
+  state.host = local;
+  state.serverBrowser = new Set([local, remote]);
+  expect(previewRuntimeFor(remote)).toBe("server");
+  expect(rendersServerTabNatively(remote, local, { runtime: "server" }, local)).toBe(true);
+  expect(rendersServerTabNatively(remote, local, { runtime: "server" }, "other")).toBe(false);
+  expect(alternatePreviewRuntime(remote, local, true, { runtime: "server" })).toBeNull();
 });

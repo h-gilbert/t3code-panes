@@ -7,8 +7,9 @@ import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 /**
  * The desktop app renders browser tabs for the server it launched, and the
  * server drives them with the same engine as its headless tabs. Messages
- * travel as newline-delimited JSON over two bootstrap file descriptors, so
- * only that one server can reach the desktop's pages; nothing listens on a port.
+ * travel over bootstrap file descriptors for the local server, or an
+ * authenticated RPC stream for an environment that selected this desktop.
+ * Remote CDP endpoints are never exposed on the network.
  *
  * Each tab carries one CDP connection, multiplexed by `tabId`. CDP frames pass
  * through untouched; the desktop answers them with `CdpRelay`.
@@ -19,8 +20,13 @@ const TabKey = {
   tabId: TrimmedNonEmptyString,
 };
 
-/** These operations stay in the desktop so saved passwords never cross the channel. */
+/** Evaluation and autofill stay in the desktop; downloads cross in bounded chunks. */
 export const DesktopBrowserPrivateOperation = Schema.Union([
+  Schema.Struct({
+    operation: Schema.Literal("readDownload"),
+    guid: TrimmedNonEmptyString,
+    offset: Schema.Number,
+  }),
   Schema.Struct({ operation: Schema.Literal("evaluate"), input: PreviewAutomationEvaluateInput }),
   Schema.Struct({
     operation: Schema.Literal("autofill"),
@@ -74,3 +80,21 @@ export const DesktopBrowserCommand = Schema.Union([
   }),
 ]);
 export type DesktopBrowserCommand = typeof DesktopBrowserCommand.Type;
+
+/** One authenticated desktop connection can host this environment's browser tabs. */
+export const DesktopBrowserHostConnectInput = Schema.Struct({
+  hostEnvironmentId: TrimmedNonEmptyString,
+});
+export const DesktopBrowserHostStreamEvent = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("connected"), connectionId: Schema.String }),
+  Schema.Struct({ type: Schema.Literal("command"), commandId: Schema.String }),
+]);
+export type DesktopBrowserHostStreamEvent = typeof DesktopBrowserHostStreamEvent.Type;
+export class DesktopBrowserHostError extends Schema.TaggedError<DesktopBrowserHostError>()(
+  "DesktopBrowserHostError",
+  { reason: Schema.Literals(["not-selected", "already-connected", "disconnected"]) },
+) {
+  override get message() {
+    return `Desktop browser host is unavailable (${this.reason}).`;
+  }
+}

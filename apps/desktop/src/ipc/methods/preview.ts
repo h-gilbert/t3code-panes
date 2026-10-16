@@ -1,3 +1,6 @@
+import { DesktopRemoteBrowserCommandInput } from "@t3tools/contracts";
+import * as DesktopBrowserHost from "../../preview/DesktopBrowserHost.ts";
+import * as Stream from "effect/Stream";
 // @effect-diagnostics nodeBuiltinImport:off -- Preserve synchronous browser partition hashing at the Electron boundary.
 import { PreviewAutomationSnapshot } from "@t3tools/contracts";
 import {
@@ -63,6 +66,13 @@ export const installPreviewEventForwarding = Effect.fn(
 )(function* () {
   const electronWindow = yield* ElectronWindow.ElectronWindow;
   const manager = yield* PreviewManager.PreviewManager;
+  const browserHost = yield* DesktopBrowserHost.DesktopBrowserHost;
+  yield* browserHost.remoteEvents.pipe(
+    Stream.runForEach((event) =>
+      electronWindow.sendAll(IpcChannels.PREVIEW_REMOTE_HOST_EVENT_CHANNEL, event),
+    ),
+    Effect.forkScoped,
+  );
   yield* manager.subscribeStateChanges((tabId, state) =>
     electronWindow.sendAll(IpcChannels.PREVIEW_STATE_CHANGE_CHANNEL, tabId, state),
   );
@@ -88,6 +98,34 @@ export const setForwardedShortcuts = DesktopIpc.makeIpcMethod({
     const manager = yield* PreviewManager.PreviewManager;
     yield* manager.setForwardedShortcuts(shortcuts);
   }),
+});
+
+export const connectRemoteHost = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_REMOTE_HOST_CONNECT_CHANNEL,
+  payload: Schema.String,
+  result: Schema.Void,
+  handler: (environmentId) =>
+    Effect.flatMap(DesktopBrowserHost.DesktopBrowserHost, (host) =>
+      host.connectRemote(environmentId),
+    ),
+});
+export const disconnectRemoteHost = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_REMOTE_HOST_DISCONNECT_CHANNEL,
+  payload: Schema.String,
+  result: Schema.Void,
+  handler: (environmentId) =>
+    Effect.flatMap(DesktopBrowserHost.DesktopBrowserHost, (host) =>
+      host.disconnectRemote(environmentId),
+    ),
+});
+export const remoteHostCommand = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_REMOTE_HOST_COMMAND_CHANNEL,
+  payload: DesktopRemoteBrowserCommandInput,
+  result: Schema.Void,
+  handler: ({ environmentId, command }) =>
+    Effect.flatMap(DesktopBrowserHost.DesktopBrowserHost, (host) =>
+      host.remoteCommand(environmentId, command),
+    ),
 });
 
 export const createTab = DesktopIpc.makeIpcMethod({

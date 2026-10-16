@@ -396,6 +396,21 @@ contextBridge.exposeInMainWorld("desktopBridge", {
         profileId,
         browserScope,
       }),
+    connectRemoteHost: (environmentId) =>
+      ipcRenderer.invoke(IpcChannels.PREVIEW_REMOTE_HOST_CONNECT_CHANNEL, environmentId),
+    disconnectRemoteHost: (environmentId) =>
+      ipcRenderer.invoke(IpcChannels.PREVIEW_REMOTE_HOST_DISCONNECT_CHANNEL, environmentId),
+    sendRemoteHostCommand: (input) =>
+      ipcRenderer.invoke(IpcChannels.PREVIEW_REMOTE_HOST_COMMAND_CHANNEL, input),
+    onRemoteHostEvent: (listener) => {
+      const wrapped = (
+        _event: Electron.IpcRendererEvent,
+        input: import("@t3tools/contracts").DesktopRemoteBrowserEvent,
+      ) => listener(input);
+      ipcRenderer.on(IpcChannels.PREVIEW_REMOTE_HOST_EVENT_CHANNEL, wrapped);
+      return () =>
+        ipcRenderer.removeListener(IpcChannels.PREVIEW_REMOTE_HOST_EVENT_CHANNEL, wrapped);
+    },
     getPreviewConfig: (environmentId, profileId, browserScope) =>
       ipcRenderer.invoke(IpcChannels.PREVIEW_GET_CONFIG_CHANNEL, {
         environmentId,

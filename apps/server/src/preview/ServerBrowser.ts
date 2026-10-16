@@ -1,3 +1,4 @@
+import * as ServerSettings from "../serverSettings.ts";
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off globalTimers:off - Playwright callbacks run outside the Effect runtime.
 // Screencasts ignore emulated device scale; real 2x keeps captures sharp.
 // --disable-gpu uses cheaper software compositing while preserving SwiftShader WebGL.
@@ -145,12 +146,18 @@ const isHostSetupError = Schema.is(
   ]),
 );
 
+const DESKTOP_HOST_UNAVAILABLE_MESSAGE =
+  "The selected desktop browser host is offline or has not attached this tab. Open T3 on that computer or change Browser host in settings.";
+
 export class ServerBrowserLaunchError extends Schema.TaggedError<ServerBrowserLaunchError>()(
   "ServerBrowserLaunchError",
   { cause: Schema.Defect() },
 ) {
   override get message(): string {
-    return "The server preview browser could not start.";
+    return this.cause instanceof ServerBrowserPage.ServerBrowserOperationError &&
+      this.cause.message === DESKTOP_HOST_UNAVAILABLE_MESSAGE
+      ? DESKTOP_HOST_UNAVAILABLE_MESSAGE
+      : "The server preview browser could not start.";
   }
 }
 
@@ -484,6 +491,7 @@ const make = Effect.gen(function* () {
   const environment = yield* ServerEnvironment.ServerEnvironment;
   const previewBrowser = yield* PreviewBrowser.PreviewBrowser;
   const desktopChannel = yield* DesktopBrowserChannel.DesktopBrowserChannel;
+  const serverSettings = yield* ServerSettings.ServerSettingsService;
   const runFork = Effect.runForkWith(yield* Effect.context<never>());
   const launchServices = yield* Effect.context<ChildProcessSpawner.ChildProcessSpawner>();
   // The fix every host error names, rendered for how this server was launched.
@@ -714,15 +722,23 @@ const make = Effect.gen(function* () {
    * With a desktop app attached, every tab of this server renders there, so a
    * new tab waits for its `<webview>` instead of launching headless.
    */
-  const desktopRenders = (snapshot: PreviewSessionSnapshot) =>
-    desktopChannel.available
-      ? Effect.runPromise(
-          desktopChannel.awaitAttached(
-            { threadId: snapshot.threadId, tabId: snapshot.tabId },
-            DESKTOP_ATTACH_TIMEOUT,
-          ),
-        )
-      : Promise.resolve(false);
+  const desktopRenders = async (snapshot: PreviewSessionSnapshot) => {
+    const settings = await Effect.runPromise(serverSettings.getSettings);
+    const selected = settings.browserHostEnvironmentId;
+    if (!selected && !desktopChannel.available) return false;
+    const attached = await Effect.runPromise(
+      desktopChannel.awaitAttached(
+        { threadId: snapshot.threadId, tabId: snapshot.tabId },
+        DESKTOP_ATTACH_TIMEOUT,
+      ),
+    );
+    if (selected && !attached)
+      throw new ServerBrowserPage.ServerBrowserOperationError(
+        "PreviewAutomationExecutionError",
+        DESKTOP_HOST_UNAVAILABLE_MESSAGE,
+      );
+    return attached;
+  };
 
   /** Connects to the desktop's page for a tab, which it renders and the server drives. */
   const connectDesktop = async (snapshot: PreviewSessionSnapshot) => {
@@ -975,7 +991,48 @@ const make = Effect.gen(function* () {
     try {
       if (await download.failure()) return;
       await NodeFSP.mkdir(downloadDir(tab), { recursive: true });
-      await download.saveAs(path);
+      const hostSettings = await Effect.runPromise(serverSettings.getSettings);
+      if (
+        tab.desktop &&
+        hostSettings.browserHostEnvironmentId &&
+        hostSettings.browserHostEnvironmentId !==
+          (await Effect.runPromise(environment.getEnvironmentId))
+      ) {
+        const source = await download.path();
+        if (!source) throw new Error("Browser download has no path.");
+        const output = await NodeFSP.open(path, "wx");
+        try {
+          let offset = 0;
+          for (;;) {
+            const chunk = await Effect.runPromise(
+              desktopChannel.operation(tab, {
+                operation: "readDownload",
+                guid: NodePath.basename(source),
+                offset,
+              }),
+            );
+            if (
+              typeof chunk !== "object" ||
+              chunk === null ||
+              !("data" in chunk) ||
+              typeof chunk.data !== "string" ||
+              !("done" in chunk) ||
+              typeof chunk.done !== "boolean"
+            )
+              throw new Error("Invalid browser download response.");
+            const bytes = Buffer.from(chunk.data, "base64");
+            offset += bytes.length;
+            if (offset > DOWNLOAD_MAX_BYTES || (!chunk.done && bytes.length === 0))
+              throw new Error("Invalid browser download size.");
+            await output.writeFile(bytes);
+            if (chunk.done) break;
+          }
+        } finally {
+          await output.close();
+        }
+      } else {
+        await download.saveAs(path);
+      }
       const { size } = await NodeFSP.stat(path);
       if (tab.closing || size > DOWNLOAD_MAX_BYTES) {
         await NodeFSP.rm(path, { force: true });
@@ -1993,7 +2050,11 @@ const make = Effect.gen(function* () {
       }
       case "snapshot": {
         return withScreencastsPaused(tab, () =>
-          ServerBrowserPage.snapshot({ ...tab, renderScale: RENDER_SCALE }),
+          ServerBrowserPage.snapshot({
+            ...tab,
+            renderScale: RENDER_SCALE,
+            timeoutMs: request.timeoutMs,
+          }),
         );
       }
       case "click": {
@@ -2046,7 +2107,9 @@ const make = Effect.gen(function* () {
           desktopChannel.operation(tab, {
             operation: "autofill",
             input: {
-              environmentId: await Effect.runPromise(environment.getEnvironmentId),
+              environmentId:
+                (await Effect.runPromise(serverSettings.getSettings)).browserHostEnvironmentId ??
+                (await Effect.runPromise(environment.getEnvironmentId)),
               profile,
               ...(!browserScope && tab.profileId && tab.profileId !== DEFAULT_BROWSER_PROFILE_ID
                 ? { profileId: tab.profileId }

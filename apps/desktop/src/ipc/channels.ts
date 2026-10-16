@@ -146,3 +146,8 @@ export const RECEIVE_PROVIDER_AUTH_CALLBACK_CHANNEL = "desktop:receive-provider-
 export const CANCEL_PROVIDER_AUTH_CALLBACK_CHANNEL = "desktop:cancel-provider-auth-callback";
 export const TAKE_LEGACY_LOCAL_STORAGE_CHANNEL = "desktop:take-legacy-local-storage";
 export const COMPLETE_LEGACY_LOCAL_STORAGE_CHANNEL = "desktop:complete-legacy-local-storage";
+
+export const PREVIEW_REMOTE_HOST_CONNECT_CHANNEL = "desktop:preview-remote-host-connect";
+export const PREVIEW_REMOTE_HOST_DISCONNECT_CHANNEL = "desktop:preview-remote-host-disconnect";
+export const PREVIEW_REMOTE_HOST_COMMAND_CHANNEL = "desktop:preview-remote-host-command";
+export const PREVIEW_REMOTE_HOST_EVENT_CHANNEL = "desktop:preview-remote-host-event";

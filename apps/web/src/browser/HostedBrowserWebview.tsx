@@ -1,5 +1,9 @@
 "use client";
 
+import { useAtomValue } from "@effect/atom-react";
+import { primaryEnvironmentIdAtom } from "~/state/primaryEnvironment";
+import { useEnvironmentSettings } from "~/hooks/useSettings";
+
 import type {
   DesktopPreviewColorScheme,
   PreviewViewportSetting,
@@ -92,7 +96,21 @@ export function HostedBrowserWebview(props: {
     serverRendering,
   } = props;
   const clientSettingsHydrated = useClientSettingsHydrated();
-  const config = usePreviewWebviewConfig(threadRef.environmentId, profileId, browserScope);
+  const primaryEnvironmentId = useAtomValue(primaryEnvironmentIdAtom);
+  const hostEnvironmentId = useEnvironmentSettings(
+    threadRef.environmentId,
+    (settings) => settings.browserHostEnvironmentId,
+  );
+  const remoteHosted =
+    primaryEnvironmentId !== null &&
+    serverDriven &&
+    hostEnvironmentId === primaryEnvironmentId &&
+    threadRef.environmentId !== primaryEnvironmentId;
+  const config = usePreviewWebviewConfig(
+    remoteHosted ? primaryEnvironmentId! : threadRef.environmentId,
+    profileId,
+    browserScope,
+  );
   const [initialSrc] = useState(() => initialUrl ?? "about:blank");
   const tabLeaseRef = useRef<AcquiredDesktopTab | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -130,14 +148,28 @@ export function HostedBrowserWebview(props: {
     crashRecoveryRef.current = INITIAL_WEBVIEW_CRASH_RECOVERY_STATE;
     const lease = acquireDesktopTab(
       runtimeTabId,
-      serverDriven ? { threadId: threadRef.threadId, tabId } : undefined,
+      serverDriven
+        ? {
+            threadId: threadRef.threadId,
+            tabId,
+            ...(remoteHosted ? { environmentId: threadRef.environmentId } : {}),
+          }
+        : undefined,
     );
     tabLeaseRef.current = lease;
     return () => {
       if (tabLeaseRef.current === lease) tabLeaseRef.current = null;
       lease.release();
     };
-  }, [clientSettingsHydrated, runtimeTabId, serverDriven, tabId, threadRef.threadId]);
+  }, [
+    clientSettingsHydrated,
+    runtimeTabId,
+    serverDriven,
+    tabId,
+    threadRef.threadId,
+    threadRef.environmentId,
+    remoteHosted,
+  ]);
 
   // A server tab looks the way its environment published, once the desktop tab exists.
   useEffect(() => {

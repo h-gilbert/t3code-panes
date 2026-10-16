@@ -1,8 +1,9 @@
+// @effect-diagnostics nodeBuiltinImport:off -- Exercises native ES256 APNs signing.
 import * as NodeCrypto from "node:crypto";
 
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import type { RelayAgentActivityState } from "@t3tools/contracts/relay";
-import * as Encoding from "effect/Encoding";
+import * as Base64Url from "effect/encoding/Base64Url";
 import * as Redacted from "effect/Redacted";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
@@ -81,21 +82,20 @@ describe("self-hosted APNs provider token", () => {
     const [encodedHeader, encodedPayload] = jwt.split(".");
 
     const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
-    expect(decodeJson(Result.getOrThrow(Encoding.decodeBase64UrlString(encodedHeader!)))).toEqual({
+    expect(decodeJson(Result.getOrThrow(Base64Url.decodeString(encodedHeader!)))).toEqual({
       alg: "ES256",
       kid: "KEY1234567",
     });
-    expect(
-      decodeJson(Result.getOrThrow(Encoding.decodeBase64UrlString(encodedPayload!))),
-    ).toMatchObject({
+    expect(decodeJson(Result.getOrThrow(Base64Url.decodeString(encodedPayload!)))).toMatchObject({
       iss: "XJN9V8FD45",
     });
   });
 });
 
 describe("iOS-origin completion notifications", () => {
-  function transition(phase: RelayAgentActivityState["phase"], ios = false) {
+  function transition(phase: RelayAgentActivityState["phase"], ios = false, inputReady = false) {
     return notificationForTransition({
+      inputReady,
       previous: makeEnvironmentAggregate([state("running")], NOW),
       next: makeEnvironmentAggregate([state(phase)], NOW),
       nowMs: NOW,
@@ -123,6 +123,11 @@ describe("iOS-origin completion notifications", () => {
     });
   }
 
+  it("only emits input alerts after the unanswered-question delay has been checked", () => {
+    expect(transition("waiting_for_input")).toBeNull();
+    expect(transition("waiting_for_input", false, true)?.row.phase).toBe("waiting_for_input");
+  });
+
   it("alerts for a completed iOS turn and suppresses all other origins", () => {
     expect(transition("completed", true)?.row.phase).toBe("completed");
     expect(transition("completed", false)).toBeNull();
@@ -142,7 +147,7 @@ describe("iOS-origin completion notifications", () => {
     });
   });
 
-  it.each(["waiting_for_approval", "waiting_for_input", "failed"] as const)(
+  it.each(["waiting_for_approval", "failed"] as const)(
     "retains %s alerts regardless of the submitting client",
     (phase) => {
       expect(transition(phase, false)?.row.phase).toBe(phase);

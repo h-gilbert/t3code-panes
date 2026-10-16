@@ -61,9 +61,15 @@ and the full chat view's worktree controls.
   `preview_upload` and downloads wait for
   `preview_download` (`apps/desktop/src/preview/FileTransfer.ts`). Pickers a person opens
   still get an Open dialog, and their downloads still ask where to save. Files cross
-  machines over HTTP, never the WebSocket.
+  machines over HTTP, never the WebSocket. Shared browser hosts use a private
+  HTTP transfer bound to their authenticated connection; never expose a public
+  CDP endpoint or assume the two hosts share a disk.
 - Keep persistent browser sessions, named profiles, ephemeral sessions, and
   keychain-backed saved logins with the existing autofill/script isolation.
+  An explicitly selected shared desktop host uses that host environment's existing
+  profile partitions. Disconnection must fail rather than launch headless with
+  different logins. Browser proxy settings apply only to preview sessions, with
+  no direct fallback, including for localhost destinations.
 - Keep explicit viewport controls and native guest layering, hidden-preview
   performance protections, host recovery, and navigation focus protection.
   Preserve local paste and context-menu work when integrating desktop changes.

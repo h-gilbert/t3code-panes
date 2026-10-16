@@ -1,3 +1,4 @@
+import * as ServerSettings from "../serverSettings.ts";
 import * as NodeEvents from "node:events";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -189,6 +190,7 @@ const asSession = (providerSessionId: string) => ({
   thread: { ...testThread, providerSessionId },
 });
 const dependencies = Layer.mergeAll(
+  ServerSettings.layerTest(),
   Broker.layer,
   Manager.layer,
   Layer.succeed(ServerEnvironment.ServerEnvironment, {
@@ -202,6 +204,10 @@ const dependencies = Layer.mergeAll(
   Layer.succeed(DesktopChannel.DesktopBrowserChannel, {
     // Only tabs a test marks render on the desktop; the rest stay headless.
     available: true,
+    connectRemote: () => Stream.die("unused"),
+    readRemoteCommand: () => Effect.die("unused"),
+    receiveRemoteEvent: () => Effect.die("unused"),
+    remoteEvent: () => Effect.die("unused"),
     operation: () => Effect.die("Unexpected private desktop operation"),
     awaitAttached: (key) => Effect.sync(() => desktopRenders(key.tabId)),
     detached: Stream.callback<{ threadId: string; tabId: string }>((queue) =>
@@ -375,6 +381,57 @@ it.live.each([
       expect(calls[0]?.at(-1)).toMatchObject({ waitUntil: "commit", timeout: 15_000 });
     }),
   ).pipe(Effect.provide(layer)),
+);
+
+it.live.each(["text", "accessibility", "screenshot"] as const)(
+  "a stalled snapshot $0 read times out without blocking the next action",
+  (stage) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { broker, tabId } = yield* ready;
+        const context = contexts[0]!;
+        const started = Promise.withResolvers<void>();
+        const stalled = () => {
+          started.resolve();
+          return new Promise<never>(() => {});
+        };
+        if (stage === "text") context.page.evaluate.mockImplementationOnce(stalled);
+        else if (stage === "accessibility")
+          context.page.ariaSnapshot.mockImplementationOnce(stalled);
+        else {
+          const send = context.sessions[0]!.send;
+          const original = send.getMockImplementation()!;
+          send.mockImplementation((method, input) =>
+            method === "Page.captureScreenshot" ? stalled() : original(method, input),
+          );
+        }
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        yield* Effect.addFinalizer(() => Effect.sync(() => vi.useRealTimers()));
+        const running = yield* broker
+          .invoke<PreviewAutomationSnapshot>({
+            scope,
+            tabId,
+            operation: "snapshot",
+            input: {},
+            timeoutMs: 100,
+          })
+          .pipe(Effect.flip, Effect.forkScoped);
+        yield* Effect.promise(() => started.promise);
+        yield* Effect.promise(() => vi.advanceTimersByTimeAsync(100));
+        expect(yield* Fiber.join(running)).toMatchObject({
+          _tag: "PreviewAutomationTimeoutError",
+          cause: { detail: { stages: [stage], timeoutMs: 100 } },
+        });
+        // Keep the underlying read unresolved: navigation must still run on this tab.
+        yield* broker.invoke({
+          scope,
+          tabId,
+          operation: "navigate",
+          input: { url: "http://localhost:5173/recovered" },
+        });
+        expect(context.page.url()).toBe("http://localhost:5173/recovered");
+      }),
+    ).pipe(Effect.provide(layer)),
 );
 
 it.live("enforces provider ownership and explicit targets when a session has multiple tabs", () =>
@@ -1593,6 +1650,22 @@ it.live("a desktop page that comes back reconnects without waiting for a viewer"
       // Without a viewer or agent, the server drives the page again, so its URL keeps reaching clients.
       while (desktopConnections.length < 2) yield* Effect.yieldNow;
       expect(desktopConnections).toHaveLength(2);
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.live("does not launch a headless browser when the selected desktop host is unavailable", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const browser = yield* ServerBrowser.ServerBrowser;
+      const manager = yield* Manager.PreviewManager;
+      const settings = yield* ServerSettings.ServerSettingsService;
+      yield* settings.updateSettings({ browserHostEnvironmentId: "mac-host" });
+      const opened = yield* manager.open({ threadId: scope.thread.threadId, runtime: "server" });
+      const error = yield* browser.attachViewer(viewerInput(opened.tabId, true)).pipe(Effect.flip);
+      expect(String(error)).toContain("selected desktop browser host");
+      expect(contexts).toEqual([]);
+      expect(desktopConnections).toEqual([]);
     }),
   ).pipe(Effect.provide(layer)),
 );

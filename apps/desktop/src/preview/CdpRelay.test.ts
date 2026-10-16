@@ -18,6 +18,51 @@ const makeTarget = (
 const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 describe("CDP relay", () => {
+  it("replays existing JavaScript contexts when connecting to an already enabled debugger", async () => {
+    let enabled = true;
+    const written: Array<Record<string, unknown>> = [];
+    const context = { id: 1, name: "", auxData: { isDefault: true, frameId: "GUEST-TARGET" } };
+    const send = vi.fn(async (method: string) => {
+      if (method === "Runtime.disable") enabled = false;
+      if (method === "Runtime.enable" && !enabled) {
+        enabled = true;
+        relay.event("Runtime.executionContextCreated", { context }, undefined);
+      }
+      return {};
+    });
+    const relay = createCdpRelayConnection(makeTarget(send), (raw) =>
+      written.push(JSON.parse(raw)),
+    );
+    relay.receive(JSON.stringify({ id: 1, method: "Target.setAutoAttach" }));
+    await settle();
+    written.length = 0;
+    relay.receive(
+      JSON.stringify({ id: 2, method: "Runtime.enable", sessionId: "t3-preview-page" }),
+    );
+    await settle();
+    expect(written).toEqual([
+      {
+        method: "Runtime.executionContextCreated",
+        params: { context },
+        sessionId: "t3-preview-page",
+      },
+      { id: 2, result: {}, sessionId: "t3-preview-page" },
+    ]);
+    // Repeated enables must not reset the contexts Playwright is now using.
+    relay.receive(
+      JSON.stringify({ id: 3, method: "Runtime.enable", sessionId: "t3-preview-page" }),
+    );
+    await settle();
+    relay.receive(JSON.stringify({ id: 4, method: "Runtime.enable", sessionId: "iframe-session" }));
+    await settle();
+    expect(send.mock.calls).toEqual([
+      ["Runtime.disable", {}, undefined],
+      ["Runtime.enable", {}, undefined],
+      ["Runtime.enable", {}, undefined],
+      ["Runtime.enable", {}, "iframe-session"],
+    ]);
+  });
+
   it("announces only the tab's page, under its real target id", async () => {
     const written: Array<Record<string, unknown>> = [];
     const relay = createCdpRelayConnection(makeTarget(vi.fn()), (raw) =>

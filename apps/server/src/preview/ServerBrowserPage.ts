@@ -182,22 +182,57 @@ export const snapshot = async (input: {
   readonly consoleEntries: ReadonlyArray<PreviewAutomationConsoleEntry>;
   readonly networkEntries: ReadonlyArray<PreviewAutomationNetworkEntry>;
   readonly actionTimeline: PreviewAutomationSnapshot["actionTimeline"];
+  readonly timeoutMs?: number;
 }): Promise<PreviewAutomationSnapshot> => {
   const viewport = input.page.viewportSize() ?? { width: 1280, height: 800 };
   const scale = Math.min(1, MAX_SCREENSHOT_WIDTH / (viewport.width * input.renderScale));
   const state = refsFor(input.page);
   invalidateRefs(input.page);
   const generation = state.generation;
-  const [page, tree, data] = await Promise.all([
-    input.page.evaluate(SNAPSHOT_SCRIPT) as Promise<
-      Pick<
-        PreviewAutomationSnapshot,
-        "url" | "title" | "loading" | "visibleText" | "interactiveElements"
-      >
-    >,
-    input.page.ariaSnapshot({ mode: "ai", boxes: true, timeout: DEFAULT_TIMEOUT_MS }),
-    captureViewport(input.page, input.cdp, { format: "png", scale }),
-  ]);
+  const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const pending = new Set(["text", "accessibility", "screenshot"]);
+  const stage = async <A>(name: string, work: Promise<A>) => {
+    const value = await work;
+    pending.delete(name);
+    return value;
+  };
+  // These are reads, so abandoning them may release the tab's action queue.
+  // Keep ref publication after the deadline race: a late read must not replace
+  // the refs from a newer snapshot. Playwright's evaluate and raw CDP screenshot
+  // calls have no per-call timeout of their own.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(
+          new ServerBrowserOperationError(
+            "PreviewAutomationTimeoutError",
+            "The browser snapshot did not finish before its deadline.",
+            { stages: [...pending], timeoutMs },
+          ),
+        ),
+      timeoutMs,
+    );
+  });
+  const [page, tree, data] = await Promise.race([
+    Promise.all([
+      stage(
+        "text",
+        input.page.evaluate(SNAPSHOT_SCRIPT) as Promise<
+          Pick<
+            PreviewAutomationSnapshot,
+            "url" | "title" | "loading" | "visibleText" | "interactiveElements"
+          >
+        >,
+      ),
+      stage(
+        "accessibility",
+        input.page.ariaSnapshot({ mode: "ai", boxes: true, timeout: timeoutMs }),
+      ),
+      stage("screenshot", captureViewport(input.page, input.cdp, { format: "png", scale })),
+    ]),
+    deadline,
+  ]).finally(() => clearTimeout(timer));
   if (state.generation !== generation) {
     throw new ServerBrowserOperationError(
       "PreviewAutomationExecutionError",

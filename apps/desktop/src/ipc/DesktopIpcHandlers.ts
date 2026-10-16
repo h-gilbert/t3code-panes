@@ -164,6 +164,9 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   for (const previewMethod of PreviewIpc.methods) {
     yield* ipc.handle(previewMethod);
   }
+  yield* ipc.handle(PreviewIpc.connectRemoteHost);
+  yield* ipc.handle(PreviewIpc.disconnectRemoteHost);
+  yield* ipc.handle(PreviewIpc.remoteHostCommand);
   yield* ipc.handleSync(PreviewIpc.getHostWebContentsId);
   yield* ipc.handle(PreviewIpc.relayAutomation);
   yield* ipc.handle(PreviewIpc.respondToAutomationRelay);

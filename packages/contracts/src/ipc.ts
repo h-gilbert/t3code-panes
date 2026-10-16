@@ -1,3 +1,4 @@
+import { DesktopBrowserCommand, DesktopBrowserEvent } from "./desktopBrowser.ts";
 import * as Schema from "effect/Schema";
 import {
   PreviewAutomationClickInput,
@@ -1175,7 +1176,11 @@ export const DesktopPreviewCreateTabInputSchema = Schema.Struct({
   zoomFactor: Schema.optional(Schema.Number.check(Schema.isGreaterThan(0))),
   colorScheme: Schema.optional(DesktopPreviewColorSchemeSchema),
   serverTab: Schema.optional(
-    Schema.Struct({ threadId: TrimmedNonEmptyString, tabId: TrimmedNonEmptyString }),
+    Schema.Struct({
+      threadId: TrimmedNonEmptyString,
+      tabId: TrimmedNonEmptyString,
+      environmentId: Schema.optional(Schema.String),
+    }),
   ),
 });
 
@@ -1183,7 +1188,13 @@ export interface DesktopPreviewTabDefaults {
   readonly zoomFactor?: number | undefined;
   readonly colorScheme?: DesktopPreviewColorScheme | undefined;
   /** A tab of the desktop's own server: the server drives it through the desktop browser channel. */
-  readonly serverTab?: { readonly threadId: string; readonly tabId: string } | undefined;
+  readonly serverTab?:
+    | {
+        readonly threadId: string;
+        readonly tabId: string;
+        readonly environmentId?: string | undefined;
+      }
+    | undefined;
 }
 
 export const DesktopPreviewRegisterWebviewInputSchema = Schema.Struct({
@@ -1469,7 +1480,21 @@ export interface DesktopBridge {
 /** Renderer callback invoked by Electron with a fresh user gesture before display-media capture. */
 export const DESKTOP_PREVIEW_RECORDING_CAPTURE_TRIGGER = "__t3DesktopPreviewRecordingCapture";
 
+export const DesktopRemoteBrowserCommandInput = Schema.Struct({
+  environmentId: Schema.String,
+  command: DesktopBrowserCommand,
+});
+export const DesktopRemoteBrowserEvent = Schema.Struct({
+  environmentId: Schema.String,
+  event: DesktopBrowserEvent,
+});
+export type DesktopRemoteBrowserEvent = typeof DesktopRemoteBrowserEvent.Type;
+
 export interface DesktopPreviewBridge {
+  connectRemoteHost?: (environmentId: string) => Promise<void>;
+  disconnectRemoteHost?: (environmentId: string) => Promise<void>;
+  sendRemoteHostCommand?: (input: typeof DesktopRemoteBrowserCommandInput.Type) => Promise<void>;
+  onRemoteHostEvent?: (listener: (input: DesktopRemoteBrowserEvent) => void) => () => void;
   setForwardedShortcuts?: (shortcuts: ReadonlyArray<PreviewForwardedShortcut>) => Promise<void>;
   createTab: (tabId: string, defaults?: DesktopPreviewTabDefaults) => Promise<void>;
   closeTab: (tabId: string) => Promise<void>;

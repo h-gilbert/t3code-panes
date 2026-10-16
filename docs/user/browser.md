@@ -18,3 +18,24 @@ machine. Files can be up to 50 MiB each, with up to 10 files per upload.
 Your own uploads and downloads still use the usual dialogs. Using the tab
 returns control to you. Uploads work with standard file inputs; pages using
 the File System Access API picker are not supported yet.
+
+## Share a desktop's browser
+
+On the desktop that holds your logins, connect to the remote environment, then
+select that environment in **Settings → Integrations → Browser host** and choose
+this desktop. Agents in that environment use the desktop's browser profiles,
+including their existing logins. Keep the desktop app open and connected.
+Close existing tabs before changing hosts. If the selected host disconnects,
+browser operations fail until it reconnects; they do not switch to another profile.
+
+## Route browser traffic through a proxy
+
+Set **Settings → Integrations → Browser proxy** on the host desktop to a proxy
+URL, such as `socks5://127.0.0.1:1080`. Open a new tab to apply it to browser
+sessions. Other apps and T3's server connections keep their normal routes.
+An unavailable proxy makes pages fail instead of falling back to a direct
+connection. Clear the setting and open a new tab to restore system networking.
+
+The proxy also handles localhost addresses. Through a remote SOCKS proxy,
+`localhost` refers to the proxy machine. To open a development server on your
+Mac, use its reachable network address instead.

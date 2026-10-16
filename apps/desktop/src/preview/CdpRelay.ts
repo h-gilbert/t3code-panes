@@ -69,6 +69,7 @@ export function createCdpRelayConnection(
 ): CdpRelayConnection {
   const send = (message: Record<string, unknown>) => write(JSON.stringify(message));
   let attached = false;
+  let runtimeReset: Promise<unknown> | undefined;
   /**
    * Sessions this relay invented. Extra page sessions (Playwright's
    * `newCDPSession`) all reach the one real debugger session, so each gets the
@@ -159,6 +160,15 @@ export function createCdpRelayConnection(
 
   const pageCommand = (command: CdpCommand): Promise<unknown> => {
     const child = sessions.get(command.sessionId!) === "page" ? undefined : command.sessionId;
+    if (command.method === "Runtime.enable" && command.sessionId === PAGE_SESSION_ID) {
+      // The manager enabled Runtime before this relay existed. Enabling it again
+      // does not replay existing contexts, leaving Playwright's main-world reads
+      // waiting forever. Refresh once per connection, before acknowledging enable.
+      runtimeReset ??= target.send("Runtime.disable", {}, undefined);
+      return runtimeReset.then(() =>
+        target.send("Runtime.enable", command.params ?? {}, undefined),
+      );
+    }
     // The page itself is already running, but its child frames are not:
     // Playwright auto-attaches with waitForDebuggerOnStart, so Chromium pauses
     // every new cross-site iframe and worker until this reaches it. Swallowing

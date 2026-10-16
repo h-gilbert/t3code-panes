@@ -1,10 +1,13 @@
 import type { Session, WebContents } from "electron";
-import { BrowserWindow, session } from "electron";
+import { app, BrowserWindow, session, webContents } from "electron";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Hex from "effect/encoding/Hex";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as DesktopClientSettings from "../settings/DesktopClientSettings.ts";
+import { browserProxyConfig } from "./browserProxy.ts";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as SynchronizedRef from "effect/SynchronizedRef";
@@ -214,6 +217,17 @@ const previewHostWindow = (guest: WebContents | null): BrowserWindow | undefined
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* BrowserSessionMake() {
   const crypto = yield* Crypto.Crypto;
+  const clientSettings = yield* DesktopClientSettings.DesktopClientSettings;
+  const proxiedSessions = new Set<Session>();
+  const protectWebRTC = (_event: Electron.Event, contents: WebContents) => {
+    if (proxiedSessions.has(contents.session))
+      contents.setWebRTCIPHandlingPolicy("disable_non_proxied_udp");
+  };
+  yield* Effect.acquireRelease(
+    Effect.sync(() => app.on("web-contents-created", protectWebRTC)),
+    () => Effect.sync(() => app.off("web-contents-created", protectWebRTC)),
+  );
+  let appliedProxy: string | undefined;
   const electronDialog = yield* ElectronDialog.ElectronDialog;
   const runFork = Effect.runForkWith(yield* Effect.context<never>());
   // One prompt at a time, so a page cannot stack dialogs by looping a deep link.
@@ -291,46 +305,72 @@ export const make = Effect.gen(function* BrowserSessionMake() {
     namespace?: BrowserSessionPartitionNamespace,
   ) {
     const partition = yield* getPartition(scope, persistent, namespace);
-    return yield* SynchronizedRef.modifyEffect(sessionsRef, (sessions) => {
-      const existing = sessions.get(partition);
-      if (existing) return Effect.succeed([existing, sessions] as const);
-      return Effect.try({
-        try: () => {
-          const browserSession = session.fromPartition(partition);
-          // The guest keeps Electron's native User-Agent. Rewriting it in any
-          // form — even variants that keep the Electron token — makes Cloudflare
-          // Turnstile fail its integrity check with error 600010 and recreate
-          // the challenge every few seconds, so logins behind it never complete
-          // (#5002). Re-setting the unchanged native string is harmless, so it
-          // is the rewritten string itself that trips the check.
-          browserSession.setPermissionRequestHandler(
-            (webContents, permission, callback, details) => {
-              if (permission === "openExternal") {
-                confirmOpenExternal(
-                  webContents,
-                  "externalURL" in details ? details.externalURL : undefined,
-                  callback,
-                );
-                return;
+    const saved = yield* clientSettings.get.pipe(
+      Effect.mapError((cause) => new BrowserSessionCreationError({ scope, partition, cause })),
+    );
+    const proxy = Option.getOrUndefined(saved)?.browserProxyUrl ?? "";
+    return yield* SynchronizedRef.modifyEffect(sessionsRef, (sessions) =>
+      Effect.gen(function* () {
+        yield* Effect.tryPromise({
+          try: async () => {
+            const config = browserProxyConfig(proxy);
+            if (appliedProxy === proxy) return;
+            for (const browserSession of sessions.values()) {
+              await browserSession.setProxy(config);
+              await browserSession.closeAllConnections();
+              if (proxy) proxiedSessions.add(browserSession);
+              else proxiedSessions.delete(browserSession);
+              for (const contents of webContents.getAllWebContents()) {
+                if (contents.session === browserSession)
+                  contents.setWebRTCIPHandlingPolicy(proxy ? "disable_non_proxied_udp" : "default");
               }
-              callback(ALLOWED_PREVIEW_PERMISSIONS.has(permission));
-            },
-          );
-          browserSession.setPermissionCheckHandler((_webContents, permission) =>
-            ALLOWED_PREVIEW_PERMISSIONS.has(permission),
-          );
-          const next = new Map(sessions);
-          next.set(partition, browserSession);
-          return [browserSession, next] as const;
-        },
-        catch: (cause) =>
-          new BrowserSessionCreationError({
-            scope,
-            partition,
-            cause,
-          }),
-      });
-    });
+            }
+            appliedProxy = proxy;
+          },
+          catch: (cause) => new BrowserSessionCreationError({ scope, partition, cause }),
+        });
+        const existing = sessions.get(partition);
+        if (existing) return [existing, sessions] as const;
+        return yield* Effect.tryPromise({
+          try: async () => {
+            const browserSession = session.fromPartition(partition);
+            await browserSession.setProxy(browserProxyConfig(proxy));
+            if (proxy) proxiedSessions.add(browserSession);
+            // The guest keeps Electron's native User-Agent. Rewriting it in any
+            // form — even variants that keep the Electron token — makes Cloudflare
+            // Turnstile fail its integrity check with error 600010 and recreate
+            // the challenge every few seconds, so logins behind it never complete
+            // (#5002). Re-setting the unchanged native string is harmless, so it
+            // is the rewritten string itself that trips the check.
+            browserSession.setPermissionRequestHandler(
+              (webContents, permission, callback, details) => {
+                if (permission === "openExternal") {
+                  confirmOpenExternal(
+                    webContents,
+                    "externalURL" in details ? details.externalURL : undefined,
+                    callback,
+                  );
+                  return;
+                }
+                callback(ALLOWED_PREVIEW_PERMISSIONS.has(permission));
+              },
+            );
+            browserSession.setPermissionCheckHandler((_webContents, permission) =>
+              ALLOWED_PREVIEW_PERMISSIONS.has(permission),
+            );
+            const next = new Map(sessions);
+            next.set(partition, browserSession);
+            return [browserSession, next] as const;
+          },
+          catch: (cause) =>
+            new BrowserSessionCreationError({
+              scope,
+              partition,
+              cause,
+            }),
+        });
+      }),
+    );
   });
 
   return BrowserSession.of({

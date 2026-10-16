@@ -952,6 +952,91 @@ function BrowserAutoShowFloatingPreviewSetting({ disabled }: { readonly disabled
  * files, and the answer changes while the app is running (quitting the browser
  * clears `browserRunning`), so a value cached at mount would go stale.
  */
+function BrowserHostSettings() {
+  const settings = useScopedSettings();
+  const update = useUpdateScopedSettings();
+  const primary = usePrimaryEnvironment();
+  const { scope } = useSettingsScope();
+  const canChoose = isElectron && primary !== null && scope.kind === "environment";
+  return (
+    <SettingsRow
+      title="Browser host"
+      description="Use this desktop's saved browser logins for agents in the selected environment. Keep this desktop connected. Close existing tabs before changing hosts."
+      control={
+        <Select
+          value={settings.browserHostEnvironmentId ?? "local"}
+          disabled={!canChoose}
+          onValueChange={(value) => {
+            if (value) update({ browserHostEnvironmentId: value === "local" ? null : value });
+          }}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectPopup>
+            <SelectItem value="local">This environment</SelectItem>
+            {primary && (
+              <SelectItem value={primary.environmentId}>{primary.label} desktop</SelectItem>
+            )}
+            {settings.browserHostEnvironmentId &&
+              settings.browserHostEnvironmentId !== primary?.environmentId && (
+                <SelectItem value={settings.browserHostEnvironmentId}>
+                  Selected desktop (unavailable here)
+                </SelectItem>
+              )}
+          </SelectPopup>
+        </Select>
+      }
+    />
+  );
+}
+
+function BrowserProxySetting() {
+  const proxy = useClientSettings((settings) => settings.browserProxyUrl);
+  const update = useUpdatePrimarySettings();
+  return (
+    <SettingsRow
+      title="Browser proxy"
+      description="Routes only this desktop's browser traffic through a proxy. Use socks5://127.0.0.1:1080 for an SSH tunnel. Open a new tab to apply changes to browser sessions. If the proxy stops, pages fail instead of connecting directly."
+      control={
+        <DraftInput
+          nativeInput
+          value={proxy}
+          placeholder="System network settings"
+          disabled={!isElectron}
+          aria-label="Browser proxy URL"
+          onCommit={(value) => {
+            const trimmed = value.trim();
+            if (trimmed) {
+              try {
+                const url = new URL(trimmed);
+                if (
+                  !["socks5:", "http:", "https:"].includes(url.protocol) ||
+                  !url.hostname ||
+                  !url.port ||
+                  url.username ||
+                  url.password ||
+                  (url.pathname !== "" && url.pathname !== "/") ||
+                  url.search ||
+                  url.hash
+                )
+                  throw new Error("Invalid proxy");
+              } catch {
+                toastManager.add({
+                  type: "error",
+                  title: "Enter a proxy URL with a port and no credentials or path",
+                });
+                return;
+              }
+            }
+            update({ browserProxyUrl: trimmed });
+          }}
+        />
+      }
+    />
+  );
+}
+
 function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
   const userProfiles = useClientSettings((settings) => settings.browserProfiles);
   const defaultProfileId = useClientSettings((settings) => settings.browserDefaultProfileId);
@@ -1536,6 +1621,8 @@ export function IntegrationsSettingsPanel() {
   const previewDefaultsDisabled = !isElectron;
   const previewDefaults = (
     <>
+      <BrowserHostSettings />
+      <BrowserProxySetting />
       <BrowserProfilesSetting disabled={previewDefaultsDisabled} />
       <BrowserViewportSetting disabled={previewDefaultsDisabled} />
       <BrowserZoomSetting disabled={previewDefaultsDisabled} />

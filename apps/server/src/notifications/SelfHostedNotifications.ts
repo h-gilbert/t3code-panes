@@ -25,6 +25,8 @@ import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import * as InputNotificationDelay from "./InputNotificationDelay.ts";
+
 import { readRunClientOrigin } from "./turnClientOrigin.ts";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -215,6 +217,7 @@ export function makeEnvironmentAggregate(
 }
 
 export function notificationForTransition(input: {
+  readonly inputReady?: boolean;
   readonly iosCompletionThreads?: ReadonlySet<ThreadId>;
   readonly previous: RelayAgentActivityAggregateStateType | null;
   readonly next: RelayAgentActivityAggregateStateType | null;
@@ -238,7 +241,7 @@ export function notificationForTransition(input: {
       case "waiting_for_approval":
         return input.registration.device.preferences.notifyOnApproval;
       case "waiting_for_input":
-        return input.registration.device.preferences.notifyOnInput;
+        return input.inputReady === true && input.registration.device.preferences.notifyOnInput;
       case "completed":
       case "failed": {
         const updatedAt = Option.match(DateTime.make(candidate.updatedAt), {
@@ -471,6 +474,7 @@ export const make = Effect.gen(function* () {
     previousThread: RelayAgentActivityState | null,
     nextThread: RelayAgentActivityState | null,
     iosCompletionThreads: ReadonlySet<ThreadId>,
+    readyInputRequestId?: string,
   ) {
     const [registration, credentials, now] = yield* Effect.all([
       getRegistration,
@@ -483,7 +487,16 @@ export const make = Effect.gen(function* () {
       bundleId: registration.device.bundleId ?? credentials.bundleId,
       environment: registration.device.apsEnvironment ?? credentials.environment,
     };
+    // Read the projection after credentials/registration, immediately before APNs.
+    // The timer can be due while the worker still has a response event queued.
+    if (readyInputRequestId !== undefined) {
+      if (!nextThread) return;
+      const current = yield* threads.getThreadShell(nextThread.threadId);
+      if (!InputNotificationDelay.isDue(current, readyInputRequestId, now.epochMilliseconds))
+        return;
+    }
     const notification = notificationForTransition({
+      inputReady: readyInputRequestId !== undefined,
       iosCompletionThreads,
       previous: makeEnvironmentAggregate(
         previousThread ? [previousThread] : [],
@@ -553,8 +566,13 @@ export const make = Effect.gen(function* () {
     });
   });
 
+  const inputDelay = yield* InputNotificationDelay.make(
+    (threadId, requestId): Effect.Effect<void> => worker.enqueue({ threadId, requestId }),
+  );
+
   const publishThreadUnsafe = Effect.fn("SelfHostedNotifications.publishThreadUnsafe")(function* (
     threadId: ThreadId,
+    readyInputRequestId?: string,
   ) {
     if ((yield* readCredentials) === null) return;
     const environmentId = yield* serverEnvironment.getEnvironmentId;
@@ -569,6 +587,18 @@ export const make = Effect.gen(function* () {
       thread,
       project,
     });
+    const inputRequest =
+      Option.isSome(thread) && thread.value.pendingRuntimeRequest?.kind === "user_input"
+        ? thread.value.pendingRuntimeRequest
+        : null;
+    yield* inputDelay.update(
+      threadId,
+      snapshot.state?.phase === "waiting_for_input" ? inputRequest : null,
+    );
+    const inputReady =
+      readyInputRequestId !== undefined &&
+      inputRequest?.id === readyInputRequestId &&
+      snapshot.state?.phase === "waiting_for_input";
     const previousThread = (yield* Ref.get(statesRef)).get(threadId) ?? null;
     const iosCompletionThreads = new Set<ThreadId>();
     if (
@@ -588,17 +618,25 @@ export const make = Effect.gen(function* () {
       return next;
     });
     const next = yield* getAggregateFromRef;
-    if (encodeUnknownJson(previousThread) !== encodeUnknownJson(snapshot.state)) {
-      yield* deliver(next, previousThread, snapshot.state, iosCompletionThreads);
+    if (inputReady || encodeUnknownJson(previousThread) !== encodeUnknownJson(snapshot.state)) {
+      yield* deliver(
+        next,
+        inputReady ? null : previousThread,
+        snapshot.state,
+        iosCompletionThreads,
+        inputReady ? readyInputRequestId : undefined,
+      );
     }
   });
-  const publishThread = (threadId: ThreadId) =>
-    publishThreadUnsafe(threadId).pipe(
+  const publishThread = (threadId: ThreadId, readyInputRequestId?: string) =>
+    publishThreadUnsafe(threadId, readyInputRequestId).pipe(
       Effect.catchCause((cause) =>
         Effect.logWarning("self-hosted notification publish failed", { threadId, cause }),
       ),
     );
-  const worker = yield* makeDrainableWorker(publishThread);
+  const worker = yield* makeDrainableWorker((item: { threadId: ThreadId; requestId?: string }) =>
+    publishThread(item.threadId, item.requestId),
+  );
 
   const publicOperation = <A, E>(
     operation: typeof SelfHostedNotificationOperation.Type,
@@ -610,6 +648,9 @@ export const make = Effect.gen(function* () {
     if ((yield* readCredentials) === null) return;
     const states = yield* readProjectedStates;
     yield* Ref.set(statesRef, states);
+    for (const state of states.values()) {
+      if (state.phase === "waiting_for_input") yield* worker.enqueue({ threadId: state.threadId });
+    }
   });
 
   const start = Effect.fn("SelfHostedNotifications.start")(function* () {
@@ -618,7 +659,7 @@ export const make = Effect.gen(function* () {
       Stream.runForEach(threads.streamDomainEvents, (event: OrchestrationV2DomainEvent) => {
         const threadId = eventThreadId(event);
         return threadId !== null && shouldPublishAgentAwarenessEvent(event)
-          ? worker.enqueue(threadId)
+          ? worker.enqueue({ threadId })
           : Effect.void;
       }),
     );
