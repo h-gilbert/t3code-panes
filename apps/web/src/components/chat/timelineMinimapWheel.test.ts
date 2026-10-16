@@ -19,7 +19,7 @@ function setup() {
     minimap.dispatchEvent(event);
     return event;
   };
-  return { timeline, scrollBy, seen, wheel };
+  return { timeline, minimap, scrollBy, seen, wheel };
 }
 
 describe("forwardWheelToTimeline", () => {
@@ -61,3 +61,24 @@ describe("forwardWheelToTimeline", () => {
     },
   );
 });
+
+it.each([false, true])(
+  "uses native marker scrolling only when the rail overflows: %s",
+  (overflow) => {
+    const { minimap, scrollBy, seen } = setup();
+    const viewport = document.createElement("div");
+    viewport.dataset.minimapScroll = "";
+    Object.defineProperties(viewport, {
+      clientHeight: { value: 160 },
+      scrollHeight: { value: overflow ? 800 : 160 },
+    });
+    const strip = document.createElement("span");
+    viewport.append(strip);
+    minimap.append(viewport);
+    const event = new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: 80 });
+    strip.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(!overflow);
+    expect(scrollBy).toHaveBeenCalledTimes(overflow ? 0 : 1);
+    expect(seen).toHaveLength(overflow ? 0 : 1);
+  },
+);

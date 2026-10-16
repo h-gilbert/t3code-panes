@@ -128,6 +128,10 @@ already contains text. Preserve this when integrating upstream composer changes.
   and multi-environment selection described in `docs/user/project-workspaces.md`.
   Web/desktop thread routes must land in panes. Subagents navigate within the originating pane
   with Back history; project lists exclude them and show running descendant counts on parents.
+  A single running agent opens directly; multiple agents open a menu of their threads.
+  Pane headers omit thread details, terminal and right-panel toggles, and never show the old
+  details popover. Message markers fit the pane height with space at both ends and scroll
+  independently when they overflow, without scrolling the conversation.
   Navigation and settings overlay the mounted panes instead of replacing the workspace.
 - Preserve retained terminal sessions and reconnect behavior described in
   `docs/internals/terminal-runtime.md`.

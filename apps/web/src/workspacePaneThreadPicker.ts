@@ -87,13 +87,22 @@ export function workspaceThreadPickerItemsForProject(
 export function countRunningWorkspaceSubagents(
   threads: readonly EnvironmentThreadShell[],
 ): ReadonlyMap<string, number> {
+  return new Map(
+    Array.from(runningWorkspaceSubagentsByParent(threads), ([key, agents]) => [key, agents.length]),
+  );
+}
+
+/** Running descendants shown by each pane's agent picker, including nested agents. */
+export function runningWorkspaceSubagentsByParent(
+  threads: readonly EnvironmentThreadShell[],
+): ReadonlyMap<string, readonly EnvironmentThreadShell[]> {
   const byKey = new Map(
     threads.map((thread) => [
       scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
       thread,
     ]),
   );
-  const counts = new Map<string, number>();
+  const agentsByParent = new Map<string, EnvironmentThreadShell[]>();
   for (const thread of threads) {
     if (
       thread.archivedAt !== null ||
@@ -111,9 +120,11 @@ export function countRunningWorkspaceSubagents(
       );
       if (seen.has(parentKey)) break;
       seen.add(parentKey);
-      counts.set(parentKey, (counts.get(parentKey) ?? 0) + 1);
+      const agents = agentsByParent.get(parentKey);
+      if (agents) agents.push(thread);
+      else agentsByParent.set(parentKey, [thread]);
       child = byKey.get(parentKey);
     }
   }
-  return counts;
+  return agentsByParent;
 }

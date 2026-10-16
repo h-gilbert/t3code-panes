@@ -1,5 +1,12 @@
 export function forwardWheelToTimeline(event: WheelEvent, timeline: HTMLElement): void {
   if (event.defaultPrevented || event.ctrlKey || event.deltaY === 0) return;
+  const minimap =
+    event.target instanceof Element
+      ? event.target.closest<HTMLElement>("[data-minimap-scroll]")
+      : null;
+  // An overflowing rail owns its wheel, including at its edges. The native
+  // scroll container contains overscroll so it cannot move the conversation.
+  if (minimap && minimap.scrollHeight > minimap.clientHeight) return;
   event.preventDefault();
 
   const forwarded = new WheelEvent("wheel", {

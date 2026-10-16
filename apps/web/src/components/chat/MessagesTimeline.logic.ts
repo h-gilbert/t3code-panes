@@ -290,7 +290,7 @@ export function workEntryIsVisibleInGroup(
 }
 const TIMELINE_MINIMAP_ITEM_SPACING = 8;
 export const TIMELINE_MINIMAP_MIN_ITEMS = 2;
-const TIMELINE_MINIMAP_MAX_HEIGHT_CSS = "calc(100vh - 18rem)";
+const TIMELINE_MINIMAP_MAX_HEIGHT_CSS = "max(0px, calc(100% - 4rem))";
 const TIMELINE_MINIMAP_PERSISTENT_GUTTER = 48;
 
 export interface WorkGroupScrollAnchor {
@@ -354,9 +354,13 @@ export function resolveTimelineIsAtEnd(state: TimelineEndState | undefined): boo
   return contentLength - scroll - scrollLength <= TIMELINE_FOLLOW_REARM_THRESHOLD_PX;
 }
 
+export function resolveTimelineMinimapContentHeight(itemCount: number): number {
+  return Math.max(1, (itemCount - 1) * TIMELINE_MINIMAP_ITEM_SPACING);
+}
+
 export function resolveTimelineMinimapHeightStyle(itemCount: number): string {
-  const naturalHeight = Math.max(1, (itemCount - 1) * TIMELINE_MINIMAP_ITEM_SPACING);
-  return `min(${naturalHeight}px, ${TIMELINE_MINIMAP_MAX_HEIGHT_CSS})`;
+  // Padding keeps the first and last strips inside the scroll viewport.
+  return `min(${resolveTimelineMinimapContentHeight(itemCount) + 8}px, ${TIMELINE_MINIMAP_MAX_HEIGHT_CSS})`;
 }
 
 export function resolveTimelineMinimapTopPercent(index: number, itemCount: number): number {

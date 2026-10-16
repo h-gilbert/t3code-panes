@@ -11809,7 +11809,6 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
                     Parent thread
                   </Button>
                 ) : null}
-                {panelToggleControls}
               </div>,
               paneHeader,
             )
@@ -12428,10 +12427,7 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
               </AlertDialogPopup>
             </AlertDialog>
 
-            <ThreadDetailsPanel
-              {...threadDetailsPanelProps}
-              popoverActive={!embeddedPane || isPaneFocused}
-            />
+            {!embeddedPane ? <ThreadDetailsPanel {...threadDetailsPanelProps} /> : null}
 
             {pullRequestDialogState ? (
               <PullRequestThreadDialog

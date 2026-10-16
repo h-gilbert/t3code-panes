@@ -1,4 +1,3 @@
-import { useRightPanelStore } from "../rightPanelStore";
 // @effect-diagnostics cryptoRandomUUID:off -- Synchronous workspace drag-and-drop allocates local view identities.
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -6,6 +5,7 @@ import {
   scopeProjectRef,
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { canSettle, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
 import { createFileRoute } from "@tanstack/react-router";
@@ -113,7 +113,7 @@ import {
 import { resolveWorkspaceDraftThreadRef } from "../workspacePaneTitle";
 import {
   buildWorkspaceThreadPickerItems,
-  countRunningWorkspaceSubagents,
+  runningWorkspaceSubagentsByParent,
   workspaceThreadPickerItemsForProject,
   type WorkspaceThreadPickerItem,
 } from "../workspacePaneThreadPicker";
@@ -436,7 +436,7 @@ function WorkspacePane({
   style,
   composerHandleRef,
   settleThread,
-  runningSubagentCount,
+  runningSubagents,
 }: {
   readonly workspaceKey: string;
   readonly index: WorkspacePaneIndex;
@@ -449,7 +449,7 @@ function WorkspacePane({
   readonly rearrangeable: boolean;
   readonly style: CSSProperties;
   readonly composerHandleRef: RefObject<ChatComposerHandle | null>;
-  readonly runningSubagentCount: number;
+  readonly runningSubagents: readonly EnvironmentThreadShell[];
   readonly settleThread: ReturnType<typeof useThreadActions>["settleThread"];
 }) {
   const openRelatedThread = useWorkspacePaneStore((state) => state.openRelatedThread);
@@ -795,17 +795,41 @@ function WorkspacePane({
         )}
         <div className="ml-auto flex items-center gap-0.5">
           <div ref={setHeaderControls} className="flex shrink-0 items-center" />
-          {serverThreadRef && runningSubagentCount > 0 ? (
+          {runningSubagents.length === 1 ? (
             <Button
               size="xs"
               variant="ghost"
-              aria-label={`${runningSubagentCount} running subagents`}
-              onClick={() =>
-                useRightPanelStore.getState().setThreadPanelOpen(serverThreadRef, "popover", true)
-              }
+              aria-label={`Open running agent: ${runningSubagents[0]!.title}`}
+              onClick={() => {
+                const agent = runningSubagents[0]!;
+                openRelated(scopeThreadRef(agent.environmentId, agent.id));
+              }}
             >
-              {runningSubagentCount} running
+              1 running
             </Button>
+          ) : runningSubagents.length > 1 ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={<Button size="xs" variant="ghost" />}
+                aria-label={`${runningSubagents.length} running agents`}
+              >
+                {runningSubagents.length} running
+                <ChevronDownIcon className="size-3" aria-hidden />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-72">
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>Running agents</DropdownMenuLabel>
+                  {runningSubagents.map((agent) => (
+                    <DropdownMenuItem
+                      key={scopedThreadKey(scopeThreadRef(agent.environmentId, agent.id))}
+                      onClick={() => openRelated(scopeThreadRef(agent.environmentId, agent.id))}
+                    >
+                      <span className="truncate">{agent.title}</span>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
           ) : null}
           {canGoBack ? (
             <Button
@@ -903,7 +927,7 @@ export function ProjectPaneWorkspace({
 }) {
   const projects = useProjects();
   const threads = useThreadShells();
-  const runningCounts = useMemo(() => countRunningWorkspaceSubagents(threads), [threads]);
+  const runningAgents = useMemo(() => runningWorkspaceSubagentsByParent(threads), [threads]);
   const serverConfigs = useServerConfigs();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -1164,10 +1188,10 @@ export function ProjectPaneWorkspace({
           if (maximizedPaneIndex !== null && maximizedPaneIndex !== index) return null;
           return (
             <WorkspacePane
-              runningSubagentCount={
+              runningSubagents={
                 paneTarget && "threadId" in paneTarget
-                  ? (runningCounts.get(scopedThreadKey(paneTarget)) ?? 0)
-                  : 0
+                  ? (runningAgents.get(scopedThreadKey(paneTarget)) ?? [])
+                  : []
               }
               key={key}
               workspaceKey={workspaceKey}

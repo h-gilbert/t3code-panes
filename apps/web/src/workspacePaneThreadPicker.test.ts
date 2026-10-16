@@ -6,6 +6,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   buildWorkspaceThreadPickerItems,
   countRunningWorkspaceSubagents,
+  runningWorkspaceSubagentsByParent,
   type WorkspaceThreadPickerProject,
   workspaceThreadPickerItemsForProject,
 } from "./workspacePaneThreadPicker";
@@ -117,6 +118,13 @@ describe("subagents in workspace lists", () => {
       child("done", "parent", false),
       fork,
     ];
+    const agentsByParent = runningWorkspaceSubagentsByParent(threads);
+    expect(agentsByParent.get("local:parent")?.map((agent) => agent.id)).toEqual([
+      "agent",
+      "nested",
+    ]);
+    expect(agentsByParent.get("local:agent")?.map((agent) => agent.id)).toEqual(["nested"]);
+    expect(agentsByParent.has("local:fork")).toBe(false);
     const items = buildWorkspaceThreadPickerItems({ threads, projects, paneTargets: [] });
     expect(
       items.map(({ title, runningSubagentCount }) => ({ title, runningSubagentCount })),
@@ -141,6 +149,22 @@ describe("subagents in workspace lists", () => {
     expect(counts.get("local:parent") ?? 0).toBe(0);
     expect(counts.get("remote:parent")).toBe(1);
     expect(counts.has("local:cycle")).toBe(false);
+  });
+
+  it("keeps each menu's agent identities scoped to its parent environment", () => {
+    const local = child("agent", "parent");
+    const remote = { ...child("agent", "parent"), environmentId: EnvironmentId.make("remote") };
+    const agents = runningWorkspaceSubagentsByParent([
+      thread("parent", projectA),
+      local,
+      remote,
+      { ...child("archived", "parent"), archivedAt: "2026-09-02T00:00:00.000Z" },
+      child("done", "parent", false),
+      child("cycle", "cycle"),
+    ]);
+    expect(agents.get("local:parent")).toEqual([local]);
+    expect(agents.get("remote:parent")).toEqual([remote]);
+    expect(agents.has("local:cycle")).toBe(false);
   });
 
   it("counts V2 native child activity without an app-owned run", () => {
