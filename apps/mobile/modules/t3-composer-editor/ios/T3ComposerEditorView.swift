@@ -1129,7 +1129,19 @@ public final class T3ComposerEditorView: ExpoView, UITextViewDelegate, UITextDro
     guard textView.markedTextRange == nil else {
       return
     }
-    textView.typingAttributes = baseAttributes()
+    // Preserve UIKit's text-input attributes and avoid resetting its typing
+    // context for ordinary caret moves. Only strip a chip's attachment and
+    // restore the attributes owned by the composer when they actually differ.
+    let current = textView.typingAttributes
+    var next = current
+    next.removeValue(forKey: .attachment)
+    for (key, value) in baseAttributes() {
+      next[key] = value
+    }
+    guard !(current as NSDictionary).isEqual(to: next) else {
+      return
+    }
+    textView.typingAttributes = next
   }
 
   private func applyTheme() {

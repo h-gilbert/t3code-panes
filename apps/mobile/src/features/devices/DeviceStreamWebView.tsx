@@ -32,7 +32,7 @@ export interface DeviceStreamRef {
 type NativeStreamBridge = {
   readonly ref?: Ref<DeviceStreamRef>;
   readonly onUnauthorized: () => Promise<void>;
-  readonly onInputConnected: (connected: boolean) => Promise<void>;
+  readonly onInputConnected: (connected: boolean, detail?: string) => Promise<void>;
 };
 
 export function DeviceStreamWebView({
@@ -171,7 +171,8 @@ function DeviceStreamDocumentView({
           if (!active.current || failed.current) return;
           const message = deviceStreamMessage(event.nativeEvent.data);
           if (message?.type === "unauthorized") void onUnauthorized();
-          else if (message?.type === "input") void onInputConnected(message.connected);
+          else if (message?.type === "input")
+            void onInputConnected(message.connected, message.detail);
           else if (message?.type === "retry") onRetry();
           else if (message?.type === "status") {
             setStarted(true);

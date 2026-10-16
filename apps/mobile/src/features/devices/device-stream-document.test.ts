@@ -68,6 +68,15 @@ describe("native device stream messages", () => {
       type: "input",
       connected: false,
     });
+    expect(
+      deviceStreamMessage(
+        '{"type":"input","connected":false,"detail":"Simulator input is unavailable"}',
+      ),
+    ).toEqual({
+      type: "input",
+      connected: false,
+      detail: "Simulator input is unavailable",
+    });
     expect(deviceStreamMessage('{"type":"retry"}')).toEqual({ type: "retry" });
   });
 
@@ -83,6 +92,7 @@ describe("native device stream messages", () => {
     '"input"',
     "{}",
     '{"type":"input","connected":"yes"}',
+    '{"type":"input","connected":false,"detail":42}',
     '{"type":"unknown"}',
     '{"type":"status","status":"unknown"}',
     '{"type":"status","status":"error","detail":42}',

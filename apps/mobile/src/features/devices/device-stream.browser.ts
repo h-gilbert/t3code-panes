@@ -142,10 +142,11 @@ export function start(configuration: DeviceStreamConfiguration) {
         image.style.display = "block";
       },
       onUnauthorized: unauthorized,
-      onInputConnected: (connected) => {
+      onInputConnected: (connected, detail) => {
         inputConnected = connected;
+        inputStatus.textContent = detail ?? "Reconnecting device controls...";
         inputStatus.style.display = streaming && !connected ? "block" : "none";
-        post({ type: "input", connected });
+        post({ type: "input", connected, ...(detail ? { detail } : {}) });
       },
     },
   );
