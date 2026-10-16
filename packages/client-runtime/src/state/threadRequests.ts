@@ -107,7 +107,10 @@ export function derivePendingThreadRequests(
       ...(item?.type === "approval_request" && item.options !== undefined
         ? { options: item.options }
         : {}),
-      responseCapability: responseCapability === "live" ? "live" : "not_resumable",
+      responseCapability:
+        responseCapability === "live" || responseCapability === "settings"
+          ? "live"
+          : "not_resumable",
     });
   }
 

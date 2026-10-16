@@ -1129,6 +1129,7 @@ export const OrchestrationV2RuntimeRequest = Schema.Struct({
   responseCapability: Schema.Union([
     Schema.Struct({ type: Schema.Literal("live"), providerSessionId: ProviderSessionId }),
     Schema.Struct({ type: Schema.Literal("message") }),
+    Schema.Struct({ type: Schema.Literal("settings") }),
     Schema.Struct({ type: Schema.Literal("not_resumable"), reason: Schema.String }),
   ]),
   createdAt: Schema.DateTimeUtc,
@@ -3220,6 +3221,14 @@ const OrchestrationV2InternalCommand = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     reason: Schema.optional(Schema.String),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("settings-change.request"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    runId: RunId,
+    requestId: RuntimeRequestId,
+    prompt: Schema.String,
   }),
   /**
    * Records or updates a secret an agent asked the user for. Internal so no

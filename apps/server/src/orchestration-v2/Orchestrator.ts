@@ -22,7 +22,7 @@ import {
   CommandId,
   isProviderNativeSubagentThread,
   MessageId,
-  type NodeId,
+  NodeId,
   type ModelSelection,
   OrchestrationV2Command,
   type OrchestrationV2InternalCommand,
@@ -59,7 +59,7 @@ import {
   RuntimeMode,
   ThreadLinkedPullRequest,
   ThreadId,
-  type TurnItemId,
+  TurnItemId,
 } from "@t3tools/contracts";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
 import {
@@ -488,6 +488,7 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "delegated_task.completion-delivery.dispose":
     case "thread.created.record":
       return command.parentThreadId;
+    case "settings-change.request":
     case "secret_request.record":
       return command.threadId;
     case "thread.fork":
@@ -7341,6 +7342,99 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     },
   );
 
+  const dispatchSettingsChangeRequest = Effect.fn("orchestrationV2.dispatch.settingsChangeRequest")(
+    function* (
+      command: Extract<OrchestrationV2InternalCommand, { type: "settings-change.request" }>,
+      events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+    ) {
+      const projection = yield* projectionStore
+        .getThreadRecords(command.threadId, ["runs", "turnItems"])
+        .pipe(mapDispatchError(command));
+      const run = projection.runs.find((run) => run.id === command.runId);
+      if (!run || run.rootNodeId === null || !["running", "waiting"].includes(run.status)) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: "The run requesting a settings change is no longer active.",
+        });
+      }
+      const now = yield* DateTime.now;
+      const nodeId = NodeId.make(`settings-approval:${command.requestId}`);
+      const base = {
+        threadId: command.threadId,
+        runId: run.id,
+        nodeId,
+        providerInstanceId: run.providerInstanceId,
+        occurredAt: now,
+      };
+      const emitEvent = emit(events, command);
+      yield* emitEvent({
+        ...base,
+        type: "node.updated",
+        payload: {
+          id: nodeId,
+          threadId: command.threadId,
+          runId: run.id,
+          parentNodeId: run.rootNodeId,
+          rootNodeId: run.rootNodeId,
+          kind: "approval_request",
+          status: "waiting",
+          countsForRun: false,
+          providerThreadId: run.providerThreadId,
+          providerTurnId: null,
+          nativeItemRef: null,
+          runtimeRequestId: command.requestId,
+          checkpointScopeId: null,
+          startedAt: now,
+          completedAt: null,
+        },
+      });
+      yield* emitEvent({
+        ...base,
+        type: "runtime-request.updated",
+        payload: {
+          id: command.requestId,
+          nodeId,
+          providerTurnId: null,
+          nativeRequestRef: null,
+          kind: "permission",
+          status: "pending",
+          responseCapability: { type: "settings" },
+          createdAt: now,
+          resolvedAt: null,
+        },
+      });
+      yield* emitEvent({
+        ...base,
+        type: "turn-item.updated",
+        payload: {
+          id: TurnItemId.make(`settings-approval:${command.requestId}`),
+          threadId: command.threadId,
+          runId: run.id,
+          nodeId,
+          providerThreadId: run.providerThreadId,
+          providerTurnId: null,
+          nativeItemRef: null,
+          parentItemId: null,
+          ordinal: yield* nextTurnItemOrdinal(projection),
+          status: "waiting",
+          title: "Change T3 Code settings",
+          startedAt: now,
+          completedAt: null,
+          updatedAt: now,
+          type: "approval_request",
+          requestId: command.requestId,
+          requestKind: "permission",
+          prompt: command.prompt,
+          options: [
+            { decision: "accept", label: "Approve change" },
+            { decision: "decline", label: "Decline" },
+          ],
+        },
+      });
+    },
+  );
+
   const dispatchRuntimeRequestRespond = (
     command: Extract<OrchestrationV2Command, { readonly type: "runtime-request.respond" }>,
     events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
@@ -7372,6 +7466,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           commandId: command.commandId,
           commandType: command.type,
           cause: runtimeRequest.responseCapability.reason,
+        });
+      }
+      if (
+        runtimeRequest.responseCapability.type === "settings" &&
+        !["accept", "decline", "cancel"].includes(command.decision ?? "")
+      ) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: "A settings change requires approval or rejection of this specific request.",
         });
       }
       const providerSessionId =
@@ -10937,6 +11041,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         break;
       case "thread.created.record":
         yield* dispatchCreatedThreadRecord(command, events);
+        break;
+      case "settings-change.request":
+        yield* dispatchSettingsChangeRequest(command, events);
         break;
       case "secret_request.record":
         yield* dispatchSecretRequestRecord(command, events);

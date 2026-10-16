@@ -46,6 +46,13 @@ Settings that are environment-wide stay read-only while a project is selected. W
 targets disagree, a control shows **Mixed** until you choose one value. Appearance, keyboard,
 and other phone-only settings ignore the filter.
 
+## Let an agent change settings
+
+Ask an agent to change a server setting, such as enabling device access. It explains why and
+requests approval in the thread. Review the target environment and proposed changes, then
+approve or decline. Every request requires approval, including in full access mode. Declining
+keeps settings unchanged. Device and browser access changes may require a new turn.
+
 ## Worktree branch names
 
 In **Settings → Source Control → Worktree branch naming**, choose a static prefix,

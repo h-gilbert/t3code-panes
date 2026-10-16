@@ -14,6 +14,14 @@ model is process-local, so two servers sharing SQLite can show saved threads
 while rejecting commands for them. Reconnecting must not silently retire a live
 duplicate and switch to a server with stale command state.
 
+## Agent settings changes
+
+Agents may propose server settings changes through T3, but every proposal needs an
+explicit approval showing the target environment, reason and exact changes. Keep
+this approval in the app, independent of provider approval policies, so full access
+cannot skip it. Approval applies only to the requesting run and the specific change.
+Declined, cancelled or interrupted requests must not write settings.
+
 ## New-thread model
 
 Starring a model sets one shared default model and thinking budget across connected

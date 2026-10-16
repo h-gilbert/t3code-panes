@@ -1,7 +1,11 @@
-import { OrchestratorMcpFailure, type ServerSettings } from "@t3tools/contracts";
+import {
+  OrchestratorMcpFailure,
+  type ServerSettings,
+  type ServerSettingsPatch,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Environment from "../../../environment/ServerEnvironment.ts";
-import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
+import * as AgentSettings from "../../../settings/AgentSettings.ts";
 import * as Settings from "../../../serverSettings.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
@@ -10,6 +14,9 @@ import { EnvironmentToolkit } from "./tools.ts";
 
 export function preferences(settings: ServerSettings) {
   const {
+    enableAgentDeviceAccess,
+    enableDeviceSupport,
+    enableAgentBrowserAccess,
     defaultThreadEnvMode,
     newWorktreesStartFromOrigin,
     enableProviderUpdateChecks,
@@ -18,6 +25,9 @@ export function preferences(settings: ServerSettings) {
   } = settings;
   const characters = Array.from(sourceControlWritingStyle.customInstructions);
   return {
+    enableAgentDeviceAccess,
+    enableDeviceSupport,
+    enableAgentBrowserAccess,
     defaultThreadEnvMode,
     newWorktreesStartFromOrigin,
     enableProviderUpdateChecks,
@@ -40,6 +50,20 @@ const access = Effect.gen(function* () {
     });
   return { ...context, descriptor, settings: yield* Settings.ServerSettingsService };
 });
+const update = (input: { readonly reason: string; readonly patch: ServerSettingsPatch }) =>
+  Effect.gen(function* () {
+    const { scope, caller } = yield* access;
+    yield* McpInvocationContext.requireThreadScope(scope, "Changing settings");
+    if (!caller?.activeRunId) {
+      return yield* new OrchestratorMcpFailure({
+        code: "parent_not_active",
+        message: "Changing settings requires a live T3 thread.",
+      });
+    }
+    const service = yield* AgentSettings.AgentSettings;
+    return yield* service.update({ ...input, threadId: caller.id, runId: caller.activeRunId });
+  });
+
 export const layer = McpToolAccess.toLayer(EnvironmentToolkit, {
   t3_environment_read: McpToolAccess.reads(() =>
     Effect.gen(function* () {
@@ -54,22 +78,8 @@ export const layer = McpToolAccess.toLayer(EnvironmentToolkit, {
       };
     }),
   ),
-  t3_environment_preferences_update: McpToolAccess.writesEnvironment((patch, check) =>
-    Effect.gen(function* () {
-      const scope = yield* McpInvocationContext.McpInvocationContext;
-      const executor = yield* ThreadCommandExecutor.ThreadCommandExecutor;
-      const update = Effect.gen(function* () {
-        // The turn may have ended, or the thread's modes changed, while this waited for the lock.
-        yield* check;
-        const { settings } = yield* access;
-        return preferences(
-          yield* settings.updateSettings(patch).pipe(Effect.mapError(unavailable)),
-        );
-      });
-      // A thread caller serializes with its own turn; a client has no thread to lock.
-      return yield* scope.thread === undefined
-        ? update
-        : executor.withLock(scope.thread.threadId, update);
-    }),
+  t3_environment_preferences_update: McpToolAccess.actsAsCaller(({ reason, ...patch }) =>
+    update({ reason, patch }),
   ),
+  t3_settings_update: McpToolAccess.actsAsCaller(update),
 });
