@@ -4,7 +4,11 @@ import {
   formatComposerContextHref,
   formatComposerContextReference,
 } from "@t3tools/shared/composerContextReferences";
-import { markdownWithHtml, markdownWithWindowsPaths } from "../lib/markdownDocument";
+import {
+  markdownWithHtml,
+  markdownWithTableBreaks,
+  markdownWithWindowsPaths,
+} from "../lib/markdownDocument";
 import { useCallback, useMemo, useState } from "react";
 import { ActionSheetIOS, Platform, Share, StyleSheet, View } from "react-native";
 import {
@@ -141,7 +145,7 @@ function enrichedStyle(
 export function MobileEnrichedMarkdownText(props: SelectableMarkdownTextProps) {
   const { renderImage, resolveImageSource } = props;
   const markdown = useMemo(
-    () => markdownWithWindowsPaths(markdownWithHtml(props.markdown)),
+    () => markdownWithWindowsPaths(markdownWithTableBreaks(markdownWithHtml(props.markdown))),
     [props.markdown],
   );
   const { themeAppearance } = useAppearancePreferences();
@@ -330,6 +334,7 @@ export function MobileEnrichedMarkdownText(props: SelectableMarkdownTextProps) {
             admonitions: true,
           }}
           enableTaskListItemToggle={false}
+          enableCodeBlockWrapToggle
           spoilerOverlay="solid"
           onLinkPress={props.onLinkPress ? ({ url }) => props.onLinkPress?.(url) : undefined}
           onLinkLongPress={onLinkLongPress}
