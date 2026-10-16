@@ -33,6 +33,7 @@ import {
   OrchestrationV2ProviderThread,
   OrchestrationV2ProviderThreadJson,
   OrchestrationV2RpcSchemas,
+  OrchestrationV2RuntimeRequest,
   OrchestrationV2ShellSnapshot,
   OrchestrationV2SubscribeThreadInput,
   OrchestrationV2Subagent,
@@ -1567,4 +1568,19 @@ describe("latestProviderTurnForAttempt", () => {
     expect(latestProviderTurnForAttempt(turns, RunAttemptId.make("goal-attempt"))?.id).toBe("last");
     expect(latestProviderTurnForAttempt(turns, null)).toBeUndefined();
   });
+});
+
+it("encodes app-owned settings approvals for older clients and preserves server routing", () => {
+  const codec = OrchestrationV2RuntimeRequest.fields.responseCapability;
+  const wire = Schema.encodeSync(codec)({ type: "settings" });
+  const oldClient = Schema.Struct({
+    type: Schema.Literal("live"),
+    providerSessionId: Schema.String,
+  });
+  expect(Schema.decodeUnknownSync(oldClient)(wire)).toEqual({
+    type: "live",
+    providerSessionId: "app:settings",
+  });
+  expect(Schema.decodeUnknownSync(codec)(wire)).toEqual({ type: "settings" });
+  expect(Schema.decodeUnknownSync(codec)({ type: "settings" })).toEqual({ type: "settings" });
 });

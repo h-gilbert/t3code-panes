@@ -1127,6 +1127,20 @@ export const OrchestrationV2RuntimeRequest = Schema.Struct({
   ]),
   status: Schema.Literals(["pending", "resolved", "expired", "cancelled"]),
   responseCapability: Schema.Union([
+    // Older clients already know how to answer live approvals. Keep that wire
+    // shape while the server routes this reserved session to its own settings request.
+    Schema.Struct({
+      type: Schema.Literal("live"),
+      providerSessionId: Schema.Literal("app:settings"),
+    }).pipe(
+      Schema.decodeTo(Schema.Struct({ type: Schema.Literal("settings") }), {
+        decode: SchemaGetter.transform(() => ({ type: "settings" as const })),
+        encode: SchemaGetter.transform(() => ({
+          type: "live" as const,
+          providerSessionId: "app:settings" as const,
+        })),
+      }),
+    ),
     Schema.Struct({ type: Schema.Literal("live"), providerSessionId: ProviderSessionId }),
     Schema.Struct({ type: Schema.Literal("message") }),
     Schema.Struct({ type: Schema.Literal("settings") }),
