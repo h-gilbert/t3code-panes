@@ -12,6 +12,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import type { ScopedProjectRef, ScopedThreadRef } from "@t3tools/contracts";
 import {
   ArrowLeftIcon,
+  BotIcon,
   ChevronDownIcon,
   CircleCheckIcon,
   Columns3Icon,
@@ -45,6 +46,7 @@ import {
 } from "../workspacePaneNavigation";
 import { WorkspaceUpdatePill } from "../components/sidebar/SidebarUpdatePill";
 import type { ChatComposerHandle } from "../components/chat/ChatComposer";
+import { ProviderInstanceIcon } from "../components/chat/ProviderInstanceIcon";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { Button } from "../components/ui/button";
 import {
@@ -420,6 +422,29 @@ function WorkspaceDraftPane({
       isPaneFocused={focused}
       composerHandleRef={composerHandleRef}
     />
+  );
+}
+
+function RunningSubagentProviderIcon({ agent }: { readonly agent: EnvironmentThreadShell }) {
+  const serverConfigs = useServerConfigs();
+  const instanceId = agent.runtime?.providerInstanceId ?? agent.modelSelection.instanceId;
+  const provider = serverConfigs
+    .get(agent.environmentId)
+    ?.providers.find((candidate) => candidate.instanceId === instanceId);
+  if (!provider) return <BotIcon className="size-3.5 shrink-0" aria-hidden />;
+  return (
+    <span
+      className="inline-flex shrink-0"
+      role="img"
+      aria-label={provider.displayName ?? provider.driver}
+    >
+      <ProviderInstanceIcon
+        driverKind={provider.driver}
+        displayName={provider.displayName ?? provider.driver}
+        acpRegistryIconUrl={provider.iconUrl}
+        iconClassName="size-3.5"
+      />
+    </span>
   );
 }
 
@@ -805,7 +830,7 @@ function WorkspacePane({
                 openRelated(scopeThreadRef(agent.environmentId, agent.id));
               }}
             >
-              1 running
+              <RunningSubagentProviderIcon agent={runningSubagents[0]!} />1 running
             </Button>
           ) : runningSubagents.length > 1 ? (
             <DropdownMenu>
@@ -824,6 +849,7 @@ function WorkspacePane({
                       key={scopedThreadKey(scopeThreadRef(agent.environmentId, agent.id))}
                       onClick={() => openRelated(scopeThreadRef(agent.environmentId, agent.id))}
                     >
+                      <RunningSubagentProviderIcon agent={agent} />
                       <span className="truncate">{agent.title}</span>
                     </DropdownMenuItem>
                   ))}
