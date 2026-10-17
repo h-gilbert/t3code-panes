@@ -112,6 +112,8 @@ export class DesktopBrowserHost extends Context.Service<
     readonly humanStartedDownload: (source: Electron.WebContents) => boolean;
     /** Points a server tab's download at the server; false for any other download. */
     readonly placeDownload: (source: Electron.WebContents, item: Electron.DownloadItem) => boolean;
+    /** Hidden tabs that must composite a frame for the server. */
+    readonly frameRequests: Stream.Stream<DesktopBrowserTabKey>;
     /** The agent's cursor positions for attached tabs, keyed by their server tab. */
     readonly pointers: Stream.Stream<{
       readonly key: DesktopBrowserTabKey;
@@ -132,6 +134,7 @@ export const make = Effect.gen(function* () {
     readonly x: number;
     readonly y: number;
   }>(16);
+  const frameRequests = yield* PubSub.sliding<DesktopBrowserTabKey>(16);
   const runFork = Effect.runForkWith(yield* Effect.context<never>());
   const tabs = new Map<string, AttachedTab>();
   const emit = (event: DesktopBrowserEventType & { readonly environmentId?: string | undefined }) =>
@@ -294,6 +297,8 @@ export const make = Effect.gen(function* () {
         return;
       }
       if (AGENT_INPUT_COMMAND.test(command.value.message)) tab.agentInputAt = performance.now();
+      if (/"method"\s*:\s*"Page\.captureScreenshot"/.test(command.value.message))
+        runFork(PubSub.publish(frameRequests, tab.key));
       relayFor(tab).receive(command.value.message);
     });
 
@@ -316,6 +321,7 @@ export const make = Effect.gen(function* () {
 
   return DesktopBrowserHost.of({
     pointers: Stream.fromPubSub(pointers),
+    frameRequests: Stream.fromPubSub(frameRequests),
     remoteEvents: Stream.fromPubSub(outbox).pipe(
       Stream.filter((event) => event.environmentId !== undefined),
       Stream.map((event) => ({ environmentId: event.environmentId!, event })),

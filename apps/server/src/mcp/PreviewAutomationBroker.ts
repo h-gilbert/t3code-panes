@@ -403,11 +403,24 @@ const classifyResponseError = (
         ...context,
         ...remoteDiagnostics,
       });
-    case "PreviewAutomationTimeoutError":
+    case "PreviewAutomationTimeoutError": {
+      const detail = error.detail;
+      const reportedStages =
+        typeof detail === "object" &&
+        detail !== null &&
+        "stages" in detail &&
+        Array.isArray(detail.stages)
+          ? detail.stages
+          : [];
+      const stages = (["text", "accessibility", "screenshot"] as const).filter((stage) =>
+        reportedStages.includes(stage),
+      );
       return new PreviewAutomationTimeoutError({
         ...context,
         ...remoteDiagnostics,
+        ...(stages?.length ? { stages } : {}),
       });
+    }
     case "PreviewAutomationControlInterruptedError": {
       const reason = decodeControlReason(error.detail);
       return new PreviewAutomationControlInterruptedError({

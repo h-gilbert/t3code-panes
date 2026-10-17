@@ -57,6 +57,35 @@ const takeEvents = (host: DesktopBrowserHost.DesktopBrowserHost["Service"], coun
   );
 
 describe("DesktopBrowserHost", () => {
+  it.effect("requests frames for hidden captures on local and remote hosts", () =>
+    Effect.gen(function* () {
+      const host = yield* DesktopBrowserHost.make;
+      const remoteKey = { ...key, environmentId: "remote-environment" };
+      host.attach(key, makeDebuggee().tab);
+      host.attach(remoteKey, makeDebuggee().tab);
+      const requests = yield* host.frameRequests.pipe(
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+      yield* Effect.yieldNow;
+      const message = (method: string) =>
+        encodeJson({ id: 1, method, sessionId: "t3-preview-page" });
+      yield* host.handleCommandLine(
+        encodeJson({ type: "cdp", ...key, message: message("DOM.getDocument") }),
+      );
+      yield* host.handleCommandLine(
+        encodeJson({ type: "cdp", ...key, message: message("Page.captureScreenshot") }),
+      );
+      yield* host.remoteCommand(remoteKey.environmentId, {
+        type: "cdp",
+        ...key,
+        message: message("Page.captureScreenshot"),
+      });
+      expect(yield* Fiber.join(requests)).toEqual([key, remoteKey]);
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("announces tabs already attached to a backend that starts later", () =>
     Effect.gen(function* () {
       const host = yield* DesktopBrowserHost.make;

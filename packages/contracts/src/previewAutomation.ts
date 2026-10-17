@@ -1112,11 +1112,12 @@ export class PreviewAutomationTimeoutError extends Schema.TaggedError<PreviewAut
   {
     ...PreviewAutomationRequestErrorFields,
     ...PreviewAutomationOptionalRemoteDiagnosticFields,
+    stages: Schema.optional(Schema.Array(Schema.Literals(["text", "accessibility", "screenshot"]))),
   },
 ) {
   override get message(): string {
     const summary = `Preview automation ${this.operation} timed out after ${this.timeoutMs}ms.`;
-    return summary;
+    return this.stages?.length ? `${summary} Waiting for: ${this.stages.join(", ")}.` : summary;
   }
 }
 

@@ -3347,6 +3347,49 @@ describe("PreviewManager", () => {
     ),
   );
 
+  effectIt.effect("wakes only the matching environment's hidden capture surface", () =>
+    Effect.gen(function* () {
+      const host = yield* DesktopBrowserHost.DesktopBrowserHost;
+      const manager = yield* PreviewManager.PreviewManager;
+      const frames = yield* Queue.unbounded<string>();
+      yield* manager.subscribeFrameRequests((tabId) =>
+        Queue.offer(frames, tabId).pipe(Effect.asVoid),
+      );
+      const lines = yield* Queue.unbounded<string>();
+      yield* host.remoteEvents.pipe(
+        Stream.runForEach((event) => Queue.offer(lines, event.environmentId)),
+        Effect.forkScoped,
+      );
+      yield* Effect.yieldNow;
+      const capturePage = vi.fn(async () => ({
+        toPNG: () => Buffer.from("png"),
+        toJPEG: () => Buffer.from("jpeg"),
+        getSize: () => ({ width: 100, height: 80 }),
+      }));
+      const serverTab = { threadId: "same-thread", tabId: "same-server-tab" };
+      for (const [index, environmentId] of ["remote-a", "remote-b"].entries()) {
+        const wc = Object.assign(makeTestPreviewWebContents(capturePage, 42 + index), {
+          isDevToolsOpened: () => false,
+          getUserAgent: () => "Electron",
+        });
+        fromId.mockReturnValue(wc);
+        yield* manager.createTab(environmentId, { serverTab: { ...serverTab, environmentId } });
+        yield* manager.registerWebview(environmentId, 42 + index);
+        expect(yield* Queue.take(lines)).toBe(environmentId);
+      }
+      yield* host.remoteCommand("remote-b", {
+        type: "cdp",
+        ...serverTab,
+        message: JSON.stringify({
+          id: 1,
+          method: "Page.captureScreenshot",
+          sessionId: "t3-preview-page",
+        }),
+      });
+      expect(yield* Queue.take(frames)).toBe("remote-b");
+    }).pipe(Effect.provide(managerLayer()), Effect.scoped),
+  );
+
   effectIt.effect("tells the server when a tab it renders natively closes", () =>
     Effect.gen(function* () {
       const host = yield* DesktopBrowserHost.DesktopBrowserHost;

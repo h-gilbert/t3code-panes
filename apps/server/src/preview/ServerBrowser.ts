@@ -2049,13 +2049,17 @@ const make = Effect.gen(function* () {
         return { tabId: tab.tabId, colorScheme };
       }
       case "snapshot": {
-        return withScreencastsPaused(tab, () =>
+        const includeImage = (input as { includeImage?: boolean }).includeImage !== false;
+        const capture = () =>
           ServerBrowserPage.snapshot({
             ...tab,
             renderScale: RENDER_SCALE,
             timeoutMs: request.timeoutMs,
-          }),
-        );
+            includeImage,
+          });
+        // Text reads need no compositor or capture lock, including while a previous
+        // image capture is waiting for a frame from a hidden desktop guest.
+        return includeImage ? withScreencastsPaused(tab, capture) : capture();
       }
       case "click": {
         const clickInput = input as PreviewAutomationClickInput;

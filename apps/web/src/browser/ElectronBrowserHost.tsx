@@ -18,6 +18,7 @@ import { previewEnvironment } from "~/state/preview";
 import { useEnvironmentScope } from "~/state/session";
 import { useAtomCommand } from "~/state/use-atom-command";
 
+import { holdFramesForTurn } from "./agentFrameRequests";
 import { readPreviewAnnotationTheme } from "./annotationTheme";
 import { useBrowserDefaults } from "./browserDefaults";
 import { useBrowserPointerStore } from "./browserPointerStore";
@@ -115,6 +116,14 @@ export function ElectronBrowserHost() {
       sessions.map((session) => [session.runtimeTabId, session]),
     );
   }, [sessions]);
+  useEffect(() => {
+    const preview = window.desktopBridge?.preview;
+    if (!preview?.onFrameRequest) return;
+    return preview.onFrameRequest((tabId) => {
+      const source = sessionByRuntimeTabId.current.get(tabId);
+      if (source) holdFramesForTurn(tabId, source.threadRef);
+    });
+  }, []);
   useEffect(() => {
     const preview = window.desktopBridge?.preview;
     if (!preview) return;

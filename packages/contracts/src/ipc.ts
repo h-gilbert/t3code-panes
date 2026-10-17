@@ -1629,6 +1629,8 @@ export interface DesktopPreviewBridge {
     download?: (tabId: string, timeoutMs?: number) => Promise<DesktopPreviewDownloadedFile>;
   };
   onStateChange: (listener: (tabId: string, state: DesktopPreviewTabState) => void) => () => void;
+  /** Keep a hidden server tab drawing for capture without showing or focusing it. */
+  onFrameRequest: (listener: (tabId: string) => void) => () => void;
   onPointerEvent: (listener: (event: DesktopPreviewPointerEvent) => void) => () => void;
   onOpenLink: (listener: (event: DesktopPreviewOpenLinkEvent) => void) => () => void;
 }

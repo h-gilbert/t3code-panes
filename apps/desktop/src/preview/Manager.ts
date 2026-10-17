@@ -492,6 +492,8 @@ const isRecordingInput = Schema.is(DesktopPreviewRecordingInputSchema);
 
 type RecordingInputListener = (event: DesktopPreviewRecordingInputEvent) => Effect.Effect<void>;
 
+type FrameRequestListener = (tabId: string) => Effect.Effect<void>;
+
 type PointerEventListener = (event: DesktopPreviewPointerEvent) => Effect.Effect<void>;
 
 type OpenLinkListener = (event: DesktopPreviewOpenLinkEvent) => Effect.Effect<void>;
@@ -663,6 +665,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   const tabsRef = yield* SynchronizedRef.make<ReadonlyMap<string, PreviewTabState>>(new Map());
   const attachedRef = yield* Ref.make<ReadonlyMap<number, ManagedListeners>>(new Map());
   const listenersRef = yield* Ref.make<ReadonlySet<Listener>>(new Set());
+  const frameRequestListenersRef = yield* Ref.make<ReadonlySet<FrameRequestListener>>(new Set());
   const pointerEventListenersRef = yield* Ref.make<ReadonlySet<PointerEventListener>>(new Set());
   const openLinkListenersRef = yield* Ref.make<ReadonlySet<OpenLinkListener>>(new Set());
   const recordingInputListenersRef = yield* Ref.make<ReadonlySet<RecordingInputListener>>(
@@ -1187,6 +1190,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       | "state-change"
       | "recording-frame"
       | "recording-input"
+      | "frame-request"
       | "pointer-event"
       | "open-link",
     tabId: string,
@@ -3534,7 +3538,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         return;
       }
       if (afterAttach.serverTab) {
-        yield* listenForAgentPointers;
+        yield* listenForAgentSignals;
         browserHost.attach(afterAttach.serverTab, {
           webContents: wc,
           debugger: control.debugger,
@@ -5760,16 +5764,36 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       { discard: true },
     );
   });
-  // Listening starts with the first tab of the desktop's own server.
-  let pointersStarted = false;
-  const listenForAgentPointers = Effect.suspend(() => {
-    if (pointersStarted) return Effect.void;
-    pointersStarted = true;
-    return browserHost.pointers.pipe(
-      Stream.runForEach(emitAgentPointer),
-      Effect.forkIn(parentScope),
-      Effect.asVoid,
+  const emitFrameRequest = Effect.fn("PreviewManager.emitFrameRequest")(function* (key: {
+    readonly environmentId?: string | undefined;
+    readonly threadId: string;
+    readonly tabId: string;
+  }) {
+    const tab = [...(yield* SynchronizedRef.get(tabsRef)).values()].find(
+      (candidate) =>
+        candidate.serverTab?.environmentId === key.environmentId &&
+        candidate.serverTab?.threadId === key.threadId &&
+        candidate.serverTab.tabId === key.tabId,
     );
+    if (!tab) return;
+    yield* Effect.forEach(
+      yield* Ref.get(frameRequestListenersRef),
+      (listener) => deliverEvent("frame-request", tab.tabId, () => listener(tab.tabId)),
+      { discard: true },
+    );
+  });
+  // Listening starts with the first server tab, including remote browser hosts.
+  let agentSignalsStarted = false;
+  const listenForAgentSignals = Effect.suspend(() => {
+    if (agentSignalsStarted) return Effect.void;
+    agentSignalsStarted = true;
+    return Effect.all([
+      browserHost.pointers.pipe(Stream.runForEach(emitAgentPointer), Effect.forkIn(parentScope)),
+      browserHost.frameRequests.pipe(
+        Stream.runForEach(emitFrameRequest),
+        Effect.forkIn(parentScope),
+      ),
+    ]).pipe(Effect.asVoid);
   });
 
   const emitOpenLink = Effect.fn("PreviewManager.emitOpenLink")(function* (
@@ -5803,6 +5827,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       [
         Ref.set(listenersRef, new Set()),
         Ref.set(pointerEventListenersRef, new Set()),
+        Ref.set(frameRequestListenersRef, new Set()),
         Ref.set(openLinkListenersRef, new Set()),
         Ref.set(recordingFrameListenersRef, new Set()),
         Ref.set(recordingInputListenersRef, new Set()),
@@ -5863,6 +5888,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     startRecording,
     closePictureInPicture,
     stopRecording,
+    subscribeFrameRequests: (listener: FrameRequestListener) =>
+      subscribe(frameRequestListenersRef, listener),
     subscribePointerEvents: (listener: PointerEventListener) =>
       subscribe(pointerEventListenersRef, listener),
     subscribeOpenLinks: (listener: OpenLinkListener) => subscribe(openLinkListenersRef, listener),
@@ -6363,6 +6390,9 @@ export class PreviewManager extends Context.Service<
       timeoutMs?: number,
     ) => Effect.Effect<DesktopPreviewDownloadedFile, PreviewManagerError>;
     readonly subscribeStateChanges: (listener: Listener) => Effect.Effect<void, never, Scope.Scope>;
+    readonly subscribeFrameRequests: (
+      listener: FrameRequestListener,
+    ) => Effect.Effect<void, never, Scope.Scope>;
     readonly subscribePointerEvents: (
       listener: PointerEventListener,
     ) => Effect.Effect<void, never, Scope.Scope>;
@@ -6582,6 +6612,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
     automationDownload: operations.automationDownload,
     subscribeStateChanges: operations.subscribeStateChanges,
     subscribePointerEvents: operations.subscribePointerEvents,
+    subscribeFrameRequests: operations.subscribeFrameRequests,
     subscribeOpenLinks: operations.subscribeOpenLinks,
     subscribeRecordingFrames: operations.subscribeRecordingFrames,
     subscribeRecordingInputs: operations.subscribeRecordingInputs,

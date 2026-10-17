@@ -80,6 +80,9 @@ and the full chat view's worktree controls.
   no direct fallback, including for localhost destinations.
 - Keep explicit viewport controls and native guest layering, hidden-preview
   performance protections, host recovery, and navigation focus protection.
+  Hidden desktop guests must temporarily composite behind the app when a server
+  requests capture, then release that activity when the turn ends. Merely disabling
+  throttling or leaving an offscreen guest visible does not produce capture frames.
   Preserve local paste and context-menu work when integrating desktop changes.
 - Every workspace window can host the browser. A webview tag cannot move between
   windows, so each tab belongs to one window in the desktop process. Other windows

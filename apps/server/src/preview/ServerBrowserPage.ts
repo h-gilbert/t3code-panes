@@ -183,6 +183,7 @@ export const snapshot = async (input: {
   readonly networkEntries: ReadonlyArray<PreviewAutomationNetworkEntry>;
   readonly actionTimeline: PreviewAutomationSnapshot["actionTimeline"];
   readonly timeoutMs?: number;
+  readonly includeImage?: boolean;
 }): Promise<PreviewAutomationSnapshot> => {
   const viewport = input.page.viewportSize() ?? { width: 1280, height: 800 };
   const scale = Math.min(1, MAX_SCREENSHOT_WIDTH / (viewport.width * input.renderScale));
@@ -190,7 +191,8 @@ export const snapshot = async (input: {
   invalidateRefs(input.page);
   const generation = state.generation;
   const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const pending = new Set(["text", "accessibility", "screenshot"]);
+  const includeImage = input.includeImage !== false;
+  const pending = new Set(["text", "accessibility", ...(includeImage ? ["screenshot"] : [])]);
   const stage = async <A>(name: string, work: Promise<A>) => {
     const value = await work;
     pending.delete(name);
@@ -229,7 +231,9 @@ export const snapshot = async (input: {
         "accessibility",
         input.page.ariaSnapshot({ mode: "ai", boxes: true, timeout: timeoutMs }),
       ),
-      stage("screenshot", captureViewport(input.page, input.cdp, { format: "png", scale })),
+      includeImage
+        ? stage("screenshot", captureViewport(input.page, input.cdp, { format: "png", scale }))
+        : Promise.resolve(undefined),
     ]),
     deadline,
   ]).finally(() => clearTimeout(timer));
@@ -252,12 +256,16 @@ export const snapshot = async (input: {
     consoleEntries: [...input.consoleEntries],
     networkEntries: [...input.networkEntries],
     actionTimeline: [...input.actionTimeline],
-    screenshot: {
-      mimeType: "image/png",
-      data,
-      width: Math.round(viewport.width * input.renderScale * scale),
-      height: Math.round(viewport.height * input.renderScale * scale),
-    },
+    ...(data === undefined
+      ? {}
+      : {
+          screenshot: {
+            mimeType: "image/png" as const,
+            data,
+            width: Math.round(viewport.width * input.renderScale * scale),
+            height: Math.round(viewport.height * input.renderScale * scale),
+          },
+        }),
   };
 };
 

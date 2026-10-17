@@ -383,6 +383,41 @@ it.live.each([
   ).pipe(Effect.provide(layer)),
 );
 
+it.live("text-only snapshots return refs without attempting a stalled screenshot", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { broker, tabId } = yield* ready;
+      const cdp = contexts[0]!.sessions[0]!;
+      const original = cdp.send.getMockImplementation()!;
+      cdp.send.mockImplementation((method, input) =>
+        method === "Page.captureScreenshot"
+          ? new Promise<never>(() => {})
+          : original(method, input),
+      );
+      cdp.send.mockClear();
+      const snapshot = yield* broker.invoke<PreviewAutomationSnapshot>({
+        scope,
+        tabId,
+        operation: "snapshot",
+        input: { includeImage: false },
+      });
+      expect(snapshot.visibleText).toBe("delete");
+      expect(snapshot.accessibilityTree).toMatch(/\[ref=t3-/);
+      expect(snapshot.screenshot).toBeUndefined();
+      expect(cdp.send.mock.calls.map(([method]) => method)).not.toContain("Page.captureScreenshot");
+      // A subsequent image request still captures normally.
+      cdp.send.mockImplementation(original);
+      const image = yield* broker.invoke<PreviewAutomationSnapshot>({
+        scope,
+        tabId,
+        operation: "snapshot",
+        input: { includeImage: true },
+      });
+      expect(image.screenshot?.data).toBe("ZnJhbWU=");
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
 it.live.each(["text", "accessibility", "screenshot"] as const)(
   "a stalled snapshot $0 read times out without blocking the next action",
   (stage) =>
@@ -420,6 +455,8 @@ it.live.each(["text", "accessibility", "screenshot"] as const)(
         yield* Effect.promise(() => vi.advanceTimersByTimeAsync(100));
         expect(yield* Fiber.join(running)).toMatchObject({
           _tag: "PreviewAutomationTimeoutError",
+          stages: [stage],
+          message: `Preview automation snapshot timed out after 100ms. Waiting for: ${stage}.`,
           cause: { detail: { stages: [stage], timeoutMs: 100 } },
         });
         // Keep the underlying read unresolved: navigation must still run on this tab.
