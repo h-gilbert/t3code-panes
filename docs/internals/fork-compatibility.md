@@ -22,7 +22,7 @@ hero overlays the view. Live-tail size changes keep following active until the u
 
 Conversation folding keeps the first assistant message visible. Changed-file cards remain hidden
 in the conversation; file changes are available through the diff panel. New threads use the saved default model from Settings, with project overrides first;
-explicit model picks in a draft remain intact. The default permission mode remains Auto unless an
+explicit model picks in a draft remain intact. The default permission mode is Full access unless an
 environment or project explicitly overrides it; existing draft choices stay intact. Mobile's default active order follows prompts and completed turns, never streaming
 or tool activity. Explicit manual ordering remains available.
 
