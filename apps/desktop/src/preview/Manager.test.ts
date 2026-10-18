@@ -3390,6 +3390,81 @@ describe("PreviewManager", () => {
     }).pipe(Effect.provide(managerLayer()), Effect.scoped),
   );
 
+  effectIt.effect("delivers server input across the renderer focus guard boundary", () =>
+    Effect.gen(function* () {
+      const manager = yield* PreviewManager.PreviewManager;
+      const host = yield* DesktopBrowserHost.DesktopBrowserHost;
+      const lines = yield* Queue.unbounded<string>();
+      yield* host.events.pipe(
+        Stream.runForEach((line) => Queue.offer(lines, new TextDecoder().decode(line))),
+        Effect.forkScoped,
+      );
+      yield* Effect.yieldNow;
+      const listeners = new Map<string, () => void>();
+      const editor = { tagName: "DIV", isConnected: true, focus: vi.fn() };
+      const document = {
+        activeElement: editor,
+        body: {},
+        addEventListener: (name: string, listener: () => void) => listeners.set(name, listener),
+        removeEventListener: (name: string) => listeners.delete(name),
+      };
+      const world = NodeVM.createContext({ document });
+      const renderer = {
+        ...makeTestHostWebContents(),
+        executeJavaScriptInIsolatedWorld: async (
+          _worldId: number,
+          scripts: ReadonlyArray<{ code: string }>,
+        ) => {
+          // Electron clones the script's completion value back to main. A function
+          // result rejects before mouse-down, even though the guard was installed.
+          return structuredClone(NodeVM.runInContext(scripts[0]!.code, world));
+        },
+      };
+      const delivered: string[] = [];
+      const guest = Object.assign(makeTestPreviewWebContents(vi.fn(), 42, renderer), {
+        getUserAgent: () => "Electron",
+        isDevToolsOpened: () => false,
+      });
+      vi.mocked(guest.debugger.sendCommand).mockImplementation(async (method) => {
+        if (method.startsWith("Input.")) {
+          expect(listeners.has("focusin")).toBe(true);
+          delivered.push(method);
+        }
+        return {};
+      });
+      fromId.mockImplementation((id) => (id === renderer.id ? renderer : guest) as never);
+      const serverTab = { threadId: "thread-1", tabId: "server-tab-1" };
+      yield* manager.createTab("tab-1", { serverTab });
+      yield* manager.registerWebview("tab-1", 42);
+      yield* Queue.take(lines); // The tab has attached before commands arrive.
+      yield* Effect.yieldNow;
+      for (const [id, method] of [
+        "Input.dispatchMouseEvent",
+        "Input.dispatchKeyEvent",
+        "Input.insertText",
+      ].entries()) {
+        yield* host.handleCommandLine(
+          JSON.stringify({
+            type: "cdp",
+            ...serverTab,
+            message: JSON.stringify({
+              id,
+              method,
+              params: { type: "mousePressed" },
+              sessionId: "t3-preview-page",
+            }),
+          }),
+        );
+        expect(JSON.parse(yield* Queue.take(lines))).toMatchObject({
+          type: "cdp",
+          message: expect.any(String),
+        });
+        expect(delivered).toHaveLength(id + 1);
+        expect(listeners.size).toBe(0);
+      }
+    }).pipe(Effect.provide(managerLayer()), Effect.scoped),
+  );
+
   effectIt.effect("tells the server when a tab it renders natively closes", () =>
     Effect.gen(function* () {
       const host = yield* DesktopBrowserHost.DesktopBrowserHost;

@@ -3568,7 +3568,9 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
               const execute = (code: string) =>
                 renderer.executeJavaScriptInIsolatedWorld(1002, [{ code }]);
               await execute(
-                `globalThis[${key}] = (${beginRendererFocusGuard.toString()})(document, ${JSON.stringify(tabId)})`,
+                // The guard's disposer stays in the renderer. Electron cannot clone a
+                // function result back to main, which would abort input dispatch.
+                `globalThis[${key}] = (${beginRendererFocusGuard.toString()})(document, ${JSON.stringify(tabId)}); void 0`,
               );
               try {
                 return await control.debugger.sendCommand(method, params, sessionId);
