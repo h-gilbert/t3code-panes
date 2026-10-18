@@ -11,6 +11,9 @@ import {
 import * as DesktopBrowserChannel from "./DesktopBrowserChannel.ts";
 
 const decodeEvent = Schema.decodeUnknownEffect(DesktopBrowserEvent);
+const decodeEvents = Schema.decodeUnknownEffect(
+  Schema.Array(DesktopBrowserEvent).check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+);
 const prefix = "/api/preview-browser-host";
 
 /**
@@ -31,6 +34,13 @@ export const handler = (channel: DesktopBrowserChannel.DesktopBrowserChannel["Se
       yield* channel.receiveRemoteEvent(lease, event);
       return HttpServerResponse.empty({ status: 204 });
     }
+    if (request.method === "POST" && path === `${prefix}/events`) {
+      const events = yield* request.json.pipe(Effect.flatMap(decodeEvents));
+      yield* Effect.forEach(events, (event) => channel.receiveRemoteEvent(lease, event), {
+        discard: true,
+      });
+      return HttpServerResponse.empty({ status: 204 });
+    }
     if (request.method === "GET" && path.startsWith(`${prefix}/command/`)) {
       const command = yield* channel.readRemoteCommand(
         lease,
@@ -49,5 +59,6 @@ export const routeLayer = HttpRouter.use((router) =>
     const channel = yield* DesktopBrowserChannel.DesktopBrowserChannel;
     yield* router.add("GET", `${prefix}/command/*`, handler(channel));
     yield* router.add("POST", `${prefix}/event`, handler(channel));
+    yield* router.add("POST", `${prefix}/events`, handler(channel));
   }),
 );

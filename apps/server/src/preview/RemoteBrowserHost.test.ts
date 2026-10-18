@@ -113,6 +113,25 @@ it.effect(
         );
       expect((yield* request("event", "wrong", { type: "attached", ...key })).status).toBe(403);
       expect((yield* request("event", lease, { type: "attached", ...key })).status).toBe(204);
+      const otherKey = { threadId: "thread", tabId: "other" };
+      const batch = [
+        { type: "attached", ...otherKey },
+        { type: "detached", ...key },
+        { type: "attached", ...key },
+      ];
+      expect((yield* request("events", "wrong", batch)).status).toBe(403);
+      expect(yield* channel.isAttached(otherKey)).toBe(false);
+      expect((yield* request("events", lease, batch)).status).toBe(204);
+      expect(yield* channel.isAttached(otherKey)).toBe(true);
+      expect(yield* channel.isAttached(key)).toBe(true);
+      const invalidKey = { threadId: "thread", tabId: "invalid-batch" };
+      expect(
+        (yield* request("events", lease, [
+          { type: "attached", ...invalidKey },
+          { type: "unknown" },
+        ])).status,
+      ).toBe(403);
+      expect(yield* channel.isAttached(invalidKey)).toBe(false);
       yield* channel.pointer(key, { phase: "click", x: 1, y: 2 });
       const commandId = yield* Deferred.await(commandReady);
       expect((yield* request(`command/${commandId}`, "wrong")).status).toBe(403);
@@ -128,5 +147,6 @@ it.effect(
       expect((yield* request(`command/${commandId}`, lease)).status).toBe(403);
       yield* Fiber.interrupt(host);
       expect((yield* request("event", lease, { type: "attached", ...key })).status).toBe(403);
+      expect((yield* request("events", lease, batch)).status).toBe(403);
     }).pipe(Effect.scoped, Effect.provide(layer)),
 );

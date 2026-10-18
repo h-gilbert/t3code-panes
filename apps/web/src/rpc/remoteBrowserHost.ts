@@ -15,6 +15,7 @@ import * as Schema from "effect/Schema";
 import { readPreparedConnection } from "~/state/session";
 import { Atom } from "effect/reactivity";
 import { connectionAtomRuntime } from "~/connection/runtime";
+import { createRemoteBrowserEventQueue } from "./remoteBrowserEventQueue";
 
 class RemoteBrowserTransferError extends Data.TaggedError("RemoteBrowserTransferError")<{
   readonly message: string;
@@ -63,25 +64,26 @@ export function remoteBrowserHostAtom(options: {
             if (!response.ok) throw new Error(`Browser host transfer failed (${response.status}).`);
             return body === undefined ? response.json() : undefined;
           };
-          let outgoing = Promise.resolve();
-          const unsubscribe = bridge.onRemoteHostEvent((message) => {
-            if (message.environmentId !== options.environmentId || !connectionId) return;
-            const lease = connectionId;
-            outgoing = outgoing
-              .catch(() => {})
-              .then(() => transfer(lease, "event", message.event))
-              .then(() => undefined);
-            void outgoing.catch(() => {
+          const events = createRemoteBrowserEventQueue(
+            async (batch) => {
+              if (connectionId) await transfer(connectionId, "events", batch);
+            },
+            () => {
               runFork(
                 Deferred.fail(
                   failed,
                   new RemoteBrowserTransferError({ message: "Browser host HTTP transfer failed." }),
                 ),
               );
-            });
+            },
+          );
+          const unsubscribe = bridge.onRemoteHostEvent((message) => {
+            if (message.environmentId !== options.environmentId || !connectionId) return;
+            events.enqueue(message.event);
           });
           yield* Effect.addFinalizer(() =>
             Effect.sync(() => {
+              events.close();
               pending.abort();
               const connected = connectionId !== null;
               connectionId = null;
