@@ -105,6 +105,28 @@ NodeTest.test("migration changes block rollback without changing app or database
   NodeAssert.equal(databaseSchema(f.home).length, 2);
 });
 
+NodeTest.test("schema checks read the current database before the legacy one", (t) => {
+  const home = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-schema-"));
+  t.after(() => NodeFS.rmSync(home, { recursive: true, force: true }));
+  NodeFS.mkdirSync(NodePath.join(home, "userdata"));
+  const migrations = (name, id) => {
+    const db = new NodeSqlite.DatabaseSync(NodePath.join(home, "userdata", name));
+    db.exec("CREATE TABLE effect_sql_migrations (migration_id INTEGER, name TEXT)");
+    db.prepare("INSERT INTO effect_sql_migrations VALUES (?, ?)").run(id, name);
+    db.close();
+  };
+  migrations("state.sqlite", 1);
+  NodeAssert.deepEqual(
+    databaseSchema(home).map(({ id }) => id),
+    [1],
+  );
+  migrations("statev2.sqlite", 61);
+  NodeAssert.deepEqual(
+    databaseSchema(home).map(({ id }) => id),
+    [61],
+  );
+});
+
 NodeTest.test("tampered candidate is rejected before backing up or replacing anything", (t) => {
   const f = fixture(t);
   NodeFS.writeFileSync(NodePath.join(f.candidate, "version"), "tampered");

@@ -105,8 +105,13 @@ export function sourceIdentity(root = repo) {
   };
 }
 
+// The server keeps its migrations in statev2.sqlite; state.sqlite only remains on
+// homes that predate it.
 export function databaseSchema(home) {
-  const file = NodePath.join(home, "userdata", "state.sqlite");
+  const current = NodePath.join(home, "userdata", "statev2.sqlite");
+  const file = NodeFS.existsSync(current)
+    ? current
+    : NodePath.join(home, "userdata", "state.sqlite");
   if (!NodeFS.existsSync(file)) throw new Error(`Existing production database required: ${file}`);
   const db = new NodeSqlite.DatabaseSync(file, { readOnly: true });
   try {
