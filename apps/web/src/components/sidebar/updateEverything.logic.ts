@@ -1,6 +1,7 @@
 import type { ServerUpdateState } from "@t3tools/client-runtime/state/server";
 import type { EnvironmentId, ServerConfig } from "@t3tools/contracts";
 import { cliReleaseChannelOf } from "@t3tools/shared/cliRelease";
+import { isForkReleaseVersion } from "@t3tools/shared/releaseVersion";
 
 import {
   resolveServerSelfUpdateCapability,
@@ -112,6 +113,13 @@ export function collectServerUpdateTargets(
       },
     ];
   });
+}
+
+/** Fork servers download GitHub release archives; desktop apps use their own feed. */
+export function serverUpdateNeedsNpmPublication(
+  target: Pick<ServerUpdateTarget, "selfUpdate" | "targetVersion">,
+): boolean {
+  return target.selfUpdate !== "desktop-managed" && !isForkReleaseVersion(target.targetVersion);
 }
 
 export interface UpdateEverythingSteps {

@@ -17,6 +17,7 @@ import {
   collectServerUpdateTargets,
   describeUpdateEverything,
   runUpdateEverything,
+  serverUpdateNeedsNpmPublication,
 } from "./updateEverything.logic";
 
 /**
@@ -51,13 +52,11 @@ export function useUpdateEverything(localUpdateVersion: string | null) {
   );
   const machines = useAtomValue(machinesAtom);
   const behindServers = collectServerUpdateTargets(machines, targetVersion);
-  // A desktop-managed server installs from its own app's update feed, so only
-  // servers that download t3 from npm wait for npm to publish the version.
-  const needsNpm = behindServers.some((server) => server.selfUpdate !== "desktop-managed");
+  const needsNpm = behindServers.some(serverUpdateNeedsNpmPublication);
   const published = useNpmReleasePublished(needsNpm ? targetVersion : null);
   const servers = published
     ? behindServers
-    : behindServers.filter((server) => server.selfUpdate === "desktop-managed");
+    : behindServers.filter((server) => !serverUpdateNeedsNpmPublication(server));
   const restarts = collectRestartingMachines(machines, servers, localUpdateVersion !== null);
   const providers = useProviderUpdates();
   const updateServer = useServerUpdate();

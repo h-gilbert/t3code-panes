@@ -6,6 +6,7 @@ import {
   collectServerUpdateTargets,
   describeUpdateEverything,
   runUpdateEverything,
+  serverUpdateNeedsNpmPublication,
   type UpdateEverythingMachine,
 } from "./updateEverything.logic";
 
@@ -60,6 +61,30 @@ describe("collectServerUpdateTargets", () => {
       ["service", "0.0.50"],
       ["other-desktop", "0.0.50"],
     ]);
+  });
+});
+
+describe("serverUpdateNeedsNpmPublication", () => {
+  it("keeps fork services eligible while their version is absent from npm", () => {
+    const targets = collectServerUpdateTargets(
+      [machine("fred", "0.0.45-panes.1791926559361", "boot-service")],
+      "0.0.45-panes.1792017010552",
+    );
+
+    expect(targets).toHaveLength(1);
+    expect(targets.filter((target) => !serverUpdateNeedsNpmPublication(target))).toEqual(targets);
+  });
+
+  it("waits for npm for stock servers while desktop servers use their own feed", () => {
+    const targets = collectServerUpdateTargets(
+      [
+        machine("service", "0.0.40", "boot-service"),
+        machine("desktop", "0.0.40", "desktop-managed"),
+      ],
+      "0.0.50",
+    );
+
+    expect(targets.map(serverUpdateNeedsNpmPublication)).toEqual([true, false]);
   });
 });
 
