@@ -24,7 +24,8 @@ the File System Access API picker are not supported yet.
 On the desktop that holds your logins, connect to the remote environment, then
 select that environment in **Settings → Integrations → Browser host** and choose
 this desktop. Agents in that environment use the desktop's browser profiles,
-including their existing logins. Keep the desktop app open and connected.
+including their existing logins. Keep the desktop app open and connected; it can
+be minimized or hidden, but the computer must stay awake.
 Close existing tabs before changing hosts. If the selected host disconnects,
 browser operations fail until it reconnects; they do not switch to another profile.
 

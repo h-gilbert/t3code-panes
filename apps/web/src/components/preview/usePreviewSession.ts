@@ -22,7 +22,7 @@ class PreviewSessionThreadKeyParseError extends Schema.TaggedError<PreviewSessio
   }
 }
 
-const previewSessionSyncAtom = Atom.family((threadKey: string) => {
+export const previewSessionSyncAtom = Atom.family((threadKey: string) => {
   const threadRef = parseScopedThreadKey(threadKey);
   if (threadRef === null) {
     throw new PreviewSessionThreadKeyParseError({ threadKey });

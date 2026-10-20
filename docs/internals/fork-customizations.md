@@ -76,8 +76,13 @@ and the full chat view's worktree controls.
   keychain-backed saved logins with the existing autofill/script isolation.
   An explicitly selected shared desktop host uses that host environment's existing
   profile partitions. Disconnection must fail rather than launch headless with
-  different logins. Browser proxy settings apply only to preview sessions, with
-  no direct fallback, including for localhost destinations.
+  different logins. The host lives in the desktop renderer, so a hidden window
+  must keep its connections: keep Chromium's `IntensiveWakeUpThrottling` disabled
+  (`apps/desktop/src/app/DesktopPreReadyPlatform.ts`), or the heartbeat drops it
+  each minute. The host must also render tabs of threads nobody has open; it follows
+  the hosted environment's preview events in `apps/web/src/browser/RemoteBrowserHosts.tsx`.
+  Browser proxy settings apply only to preview sessions, with no direct fallback,
+  including for localhost destinations.
 - Keep explicit viewport controls and native guest layering, hidden-preview
   performance protections, host recovery, and navigation focus protection.
   Hidden desktop guests must temporarily composite behind the app when a server
