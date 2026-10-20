@@ -5,6 +5,7 @@ import { assert, describe, it } from "@effect/vitest";
 import {
   resolveEarlyLinuxElectronOptions,
   resolveEarlyLinuxPasswordStorePreference,
+  resolveHeartbeatDisableFeaturesSwitch,
   resolveLinuxDisableFeaturesSwitch,
 } from "./DesktopEarlyElectronStartup.ts";
 
@@ -120,6 +121,23 @@ describe("DesktopEarlyElectronStartup", () => {
     });
 
     assert.equal(preference, "gnome-libsecret");
+  });
+
+  describe("resolveHeartbeatDisableFeaturesSwitch", () => {
+    it("disables intensive wake-up throttling and keeps existing disabled features", () => {
+      assert.equal(resolveHeartbeatDisableFeaturesSwitch(null), "IntensiveWakeUpThrottling");
+      assert.equal(
+        resolveHeartbeatDisableFeaturesSwitch("Vulkan"),
+        "Vulkan,IntensiveWakeUpThrottling",
+      );
+    });
+
+    it.each(["IntensiveWakeUpThrottling", "Vulkan, *IntensiveWakeUpThrottling<Trial"])(
+      "leaves %s alone",
+      (disableFeatures) => {
+        assert.isNull(resolveHeartbeatDisableFeaturesSwitch(disableFeatures));
+      },
+    );
   });
 
   describe("resolveLinuxDisableFeaturesSwitch", () => {

@@ -153,6 +153,26 @@ export function resolveLinuxDisableFeaturesSwitch(input: {
     : `${input.disableFeatures},${WAYLAND_COLOR_MANAGER_FEATURE}`;
 }
 
+// After a page has been hidden for five minutes, Chromium aligns its timers to
+// once a minute. The WebSocket heartbeat expects a frame every 15 seconds, so a
+// window left behind a sleeping display dropped every environment connection
+// each minute, and with it the browser host that remote environments use.
+// Ordinary hidden-window throttling, one wake-up per second, still applies.
+const INTENSIVE_WAKE_UP_THROTTLING_FEATURE = "IntensiveWakeUpThrottling";
+
+/**
+ * Returns the merged `--disable-features` value that keeps hidden windows'
+ * heartbeats on time, or null when the feature is already disabled.
+ */
+export function resolveHeartbeatDisableFeaturesSwitch(
+  disableFeatures: string | null,
+): string | null {
+  if (featureListNames(disableFeatures).includes(INTENSIVE_WAKE_UP_THROTTLING_FEATURE)) return null;
+  return disableFeatures === null
+    ? INTENSIVE_WAKE_UP_THROTTLING_FEATURE
+    : `${disableFeatures},${INTENSIVE_WAKE_UP_THROTTLING_FEATURE}`;
+}
+
 export function resolveEarlyLinuxElectronOptions(
   input: EarlyLinuxElectronOptionsInput,
 ): EarlyLinuxElectronOptions {

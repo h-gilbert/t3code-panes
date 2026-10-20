@@ -54,6 +54,15 @@ export const make = Effect.gen(function* () {
   const platform = yield* HostProcess.Platform;
   const homeDirectory = yield* HostProcess.HomeDirectory;
   return yield* Effect.sync((): DesktopPreReadyElectronOptions["Service"] => {
+    // Chromium keeps only the last --disable-features value, so pass the merged
+    // list. The Linux switches below read and extend this value.
+    const heartbeatDisableFeatures =
+      DesktopEarlyElectronStartup.resolveHeartbeatDisableFeaturesSwitch(
+        readCommandLineSwitchValue(Electron.app.commandLine, "disable-features"),
+      );
+    if (heartbeatDisableFeatures !== null) {
+      Electron.app.commandLine.appendSwitch("disable-features", heartbeatDisableFeatures);
+    }
     const linuxPasswordStoreCommandLine =
       platform === "linux"
         ? readCommandLineSwitchValue(Electron.app.commandLine, "password-store")

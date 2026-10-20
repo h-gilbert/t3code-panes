@@ -94,21 +94,21 @@ describe("DesktopPreReadyPlatform", () => {
       switches: { "ozone-platform": "wayland", "disable-features": "Vulkan" },
       hyprlandVersion: "0.48.1",
       hyprlandCommit: "29e2e59fdbab8ed2cc23a20e3c6043d5decb5cdc",
-      expected: [["disable-features", "Vulkan,WaylandWpColorManagerV1"]],
+      expected: "Vulkan,IntensiveWakeUpThrottling,WaylandWpColorManagerV1",
     },
     {
       label: "preserves color management on Hyprland 0.51.0",
       switches: { "ozone-platform": "wayland", "disable-features": "Vulkan" },
       hyprlandVersion: "0.51.0",
       hyprlandCommit: "0123456789abcdef0123456789abcdef01234567",
-      expected: [],
+      expected: "Vulkan,IntensiveWakeUpThrottling",
     },
     {
       label: "preserves color management when Electron resolved X11",
       switches: { "ozone-platform": "x11", "disable-features": "Vulkan" },
       hyprlandVersion: "0.48.1",
       hyprlandCommit: "29e2e59fdbab8ed2cc23a20e3c6043d5decb5cdc",
-      expected: [],
+      expected: "Vulkan,IntensiveWakeUpThrottling",
     },
   ])("$label", ({ switches, hyprlandVersion, hyprlandCommit, expected }) => {
     vi.stubEnv("XDG_CURRENT_DESKTOP", "Hyprland");
@@ -118,6 +118,10 @@ describe("DesktopPreReadyPlatform", () => {
     getSwitchValueMock.mockImplementation(
       (switchName: string) => commandLine.get(switchName) ?? "",
     );
+    // Like Chromium, a switch appended again replaces its earlier value.
+    appendSwitchMock.mockImplementation((switchName: string, value: string) => {
+      commandLine.set(switchName, value);
+    });
     execFileSyncMock.mockReturnValue(
       JSON.stringify({
         commit: hyprlandCommit,
@@ -130,10 +134,12 @@ describe("DesktopPreReadyPlatform", () => {
     return DesktopPreReadyPlatform.make.pipe(
       Effect.provideService(HostProcess.Platform, "linux"),
       Effect.map(() => {
-        const featureSwitches = appendSwitchMock.mock.calls.filter(([name]) =>
-          ["disable-features", "enable-features", "ozone-platform"].includes(name),
+        assert.equal(commandLine.get("disable-features"), expected);
+        assert.isFalse(
+          appendSwitchMock.mock.calls.some(([name]) =>
+            ["enable-features", "ozone-platform"].includes(name),
+          ),
         );
-        assert.deepEqual(featureSwitches, expected);
       }),
       Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
     );
@@ -258,7 +264,9 @@ describe("DesktopPreReadyPlatform", () => {
         });
         assert.deepEqual(events, ["pre-ready", "clerk"]);
         assert.equal(registerSchemesMock.mock.calls.length, 1);
-        assert.equal(appendSwitchMock.mock.calls.length, 0);
+        assert.deepEqual(appendSwitchMock.mock.calls, [
+          ["disable-features", "IntensiveWakeUpThrottling"],
+        ]);
         assert.equal(setDesktopNameMock.mock.calls.length, 0);
       }),
   );
