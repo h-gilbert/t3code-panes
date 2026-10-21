@@ -23,6 +23,20 @@ const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
 
+describe("shared model default compatibility", () => {
+  it("keeps the shared model and reasoning options received from newer servers", () => {
+    const selection = {
+      instanceId: "codex",
+      model: "gpt-6.1-sol",
+      options: [{ id: "reasoningEffort", value: "high" }],
+    };
+    expect(
+      decodeServerSettings({ starredModelSelection: selection }).starredModelSelection,
+    ).toEqual(selection);
+    expect(decodeServerSettings({}).starredModelSelection).toBeNull();
+  });
+});
+
 describe("ServerSettings response streaming", () => {
   it("defaults to paragraph buffering", () => {
     expect(decodeServerSettings({}).responseStreamingMode).toBe("paragraph");

@@ -584,6 +584,11 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     selectedProjectDraft.modelSelection ?? null,
     selectedProject?.id ?? null,
   );
+  const sharedDefaultModelSelection = resolveDefaultableModelSelection(
+    selectedEnvironmentServerConfig,
+    selectedEnvironmentServerConfig?.settings.starredModelSelection ?? null,
+    selectedProject?.id ?? null,
+  );
   const projectDefaultModelSelection = resolveDefaultableModelSelection(
     selectedEnvironmentServerConfig,
     projectSettings.settings.defaultModelSelection,
@@ -599,23 +604,28 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     () =>
       buildModelOptions(
         selectedEnvironmentServerConfig,
-        draftModelSelection ?? projectDefaultModelSelection ?? stickyModelSelection,
+        draftModelSelection ??
+          sharedDefaultModelSelection ??
+          projectDefaultModelSelection ??
+          stickyModelSelection,
         undefined,
         selectedProject?.id ?? null,
       ),
     [
       selectedEnvironmentServerConfig,
       draftModelSelection,
+      sharedDefaultModelSelection,
       projectDefaultModelSelection,
       stickyModelSelection,
       selectedProject?.id,
     ],
   );
 
-  // An unsent draft keeps its explicit pick. Fresh drafts resolve the project
-  // default before the last manual app-wide selection and provider default.
+  // Explicit draft picks stand. Fresh drafts use the shared default before
+  // project defaults and this device's last manual selection, matching desktop.
   const selectedModel = resolveNewTaskModelSelection({
     draftSelection: draftModelSelection,
+    sharedDefaultSelection: sharedDefaultModelSelection,
     projectDefaultSelection: projectDefaultModelSelection,
     stickySelection: stickyModelSelection,
     modelOptions,

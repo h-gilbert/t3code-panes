@@ -377,6 +377,9 @@ const config: ExpoConfig = {
         },
         ios: {
           deploymentTarget: "18.0",
+          // Build Expo's Swift modules with the app's Xcode toolchain.
+          // Precompiled ExpoModulesJSI marks Bool's bridge conformance unavailable on Xcode 27.
+          usePrecompiledModules: false,
           // AppCheckCore 11.3+ includes Swift and needs module maps for these Objective-C dependencies.
           extraPods: [
             { name: "GoogleUtilities", modular_headers: true },

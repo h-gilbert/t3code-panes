@@ -500,6 +500,37 @@ describe("mobile model options", () => {
     expect(resolveDefaultableModelSelection(null, legacy, null)).toBe(legacy);
   });
 
+  it("uses the shared default and its reasoning options before project and device preferences", () => {
+    const shared = {
+      instanceId: ProviderInstanceId.make("codex"),
+      model: "shared-model",
+      options: [{ id: "reasoningEffort", value: "high" }],
+    };
+    const project = { instanceId: ProviderInstanceId.make("claudeAgent"), model: "project-model" };
+    const sticky = { instanceId: ProviderInstanceId.make("codex"), model: "last-used" };
+    const input = {
+      draftSelection: null,
+      sharedDefaultSelection: shared,
+      projectDefaultSelection: project,
+      stickySelection: sticky,
+      modelOptions: [],
+    };
+    expect(resolveNewTaskModelSelection(input)).toBe(shared);
+    expect(resolveNewTaskModelSelection({ ...input, draftSelection: sticky })).toBe(sticky);
+    expect(resolveNewTaskModelSelection({ ...input, sharedDefaultSelection: null })).toBe(project);
+    expect(
+      resolveNewTaskModelSelection({
+        ...input,
+        sharedDefaultSelection: null,
+        projectDefaultSelection: null,
+      }),
+    ).toBe(sticky);
+    // A new shared setting also takes effect after the environment config refreshes.
+    expect(resolveNewTaskModelSelection({ ...input, sharedDefaultSelection: project })).toBe(
+      project,
+    );
+  });
+
   it("resolves new tasks from draft, project, sticky, then provider defaults", () => {
     const draft = { instanceId: ProviderInstanceId.make("codex"), model: "draft" };
     const project = { instanceId: ProviderInstanceId.make("codex"), model: "project" };
