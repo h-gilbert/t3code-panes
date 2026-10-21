@@ -242,10 +242,10 @@ type LinkEnvironmentToCloudRequirements =
   | ManagedRelay.ManagedRelayClient
   | MobileStorage.MobileStorage;
 
-export function linkEnvironmentToCloud(
-  input: LinkEnvironmentToCloudInput,
-): Effect.Effect<void, CloudEnvironmentLinkError, LinkEnvironmentToCloudRequirements> {
-  return Effect.gen(function* () {
+export const linkEnvironmentToCloud = Effect.fn("linkEnvironment.linkEnvironmentToCloud")(
+  function* (
+    input: LinkEnvironmentToCloudInput,
+  ): Effect.fn.Return<void, CloudEnvironmentLinkError, LinkEnvironmentToCloudRequirements> {
     if (!input.connection.bearerToken) {
       return yield* new CloudEnvironmentLinkError({
         message: "Only a locally paired bearer connection can be linked to the cloud.",
@@ -323,8 +323,8 @@ export function linkEnvironmentToCloud(
       .pipe(
         Effect.mapError(cloudEnvironmentLinkError("Could not configure environment relay access.")),
       );
-  });
-}
+  },
+);
 
 export function listCloudEnvironments(input: {
   readonly clerkToken: string;

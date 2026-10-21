@@ -6,6 +6,7 @@ import { beforeEach, vi } from "vite-plus/test";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import { FetchHttpClient } from "effect/http";
 import { ManagedRelay } from "@t3tools/client-runtime/relay";
@@ -415,10 +416,6 @@ describe("makeRelayDeviceRegistrationRequest", () => {
     setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-user-a"));
 
     return Effect.gen(function* () {
-      // Drive the registration directly so the assertion does not depend on the
-      // background queue draining; refreshAgentAwarenessRegistration swallows the
-      // error but must record the failed status so the settings toggles cannot
-      // read as enabled.
       yield* refreshAgentAwarenessRegistration();
       expect(getAgentAwarenessRegistrationStatus()).toBe("failed");
     }).pipe(Effect.provide(layerRelayTest));
@@ -442,8 +439,6 @@ describe("makeRelayDeviceRegistrationRequest", () => {
   });
 
   it.effect("resets a pending status to unknown when relay config is missing", () => {
-    // No relay url configured: registration can neither run nor ever succeed,
-    // so the status must not stick at "pending".
     setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-user-a"));
 
     return Effect.gen(function* () {
@@ -464,8 +459,6 @@ describe("makeRelayDeviceRegistrationRequest", () => {
       yield* runBackgroundOperations();
       expect(getAgentAwarenessRegistrationStatus()).toBe("registered");
 
-      // The relay still holds the accepted registration; a transient refresh
-      // failure must not flip the settings toggles off.
       vi.mocked(loadOrCreateAgentAwarenessDeviceId).mockRejectedValueOnce(
         new Error("transient failure"),
       );
@@ -488,8 +481,6 @@ describe("makeRelayDeviceRegistrationRequest", () => {
       expect(saveAgentAwarenessRegistrationRecord).toHaveBeenCalledTimes(1);
       expect(registrationRecordStore.current).not.toBeNull();
 
-      // Second attempt with an identical payload must skip the relay entirely,
-      // so no new registration record is written.
       vi.mocked(saveAgentAwarenessRegistrationRecord).mockClear();
       yield* refreshAgentAwarenessRegistration();
       expect(getAgentAwarenessRegistrationStatus()).toBe("registered");

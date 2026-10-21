@@ -2,8 +2,10 @@ import type { Root, RootContent } from "mdast";
 import { unified } from "unified";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
+import { remarkKeepWindowsPathDestinations } from "@t3tools/shared/markdownPipeline";
+import { isWindowsAbsolutePath } from "@t3tools/shared/path";
 
-const parser = unified().use(remarkParse).use(remarkGfm);
+const parser = unified().use(remarkParse).use(remarkGfm).use(remarkKeepWindowsPathDestinations);
 export type MarkdownNode = Root | RootContent;
 
 function decodeCodePoint(codePoint: number, entity: string): string {
@@ -123,7 +125,6 @@ export function markdownHtmlContent(content: string): string {
   });
 }
 
-/** Convert parsed HTML fragments only, preserving Markdown code and source around them. */
 export function markdownWithHtml(markdown: string): string {
   if (!/<(?:!--|\/?[a-z])/i.test(markdown)) return markdown;
   const edits: Array<{ start: number; end: number; content: string }> = [];
@@ -134,6 +135,37 @@ export function markdownWithHtml(markdown: string): string {
       if (start !== undefined && end !== undefined)
         edits.push({ start, end, content: markdownHtmlContent(node.value) });
     } else if ("children" in node) node.children.forEach(visit);
+  };
+  visit(parser.parse(markdown));
+  for (const edit of edits.reverse())
+    markdown = markdown.slice(0, edit.start) + edit.content + markdown.slice(edit.end);
+  return markdown;
+}
+
+const INLINE_CODE_SPAN = /`+([^`\r\n]+)`+/g;
+
+export function markdownWithInlineFileLinks(markdown: string, fileLink: RegExp): string {
+  if (![...markdown.matchAll(INLINE_CODE_SPAN)].some(([, code]) => fileLink.test(code!.trim())))
+    return markdown;
+  const edits: Array<{ start: number; end: number; content: string }> = [];
+  const visit = (node: MarkdownNode) => {
+    if (node.type === "inlineCode") {
+      const start = node.position?.start.offset;
+      const end = node.position?.end.offset;
+      const escaped = node.value.replace(/[\\[\]&]/g, "\\$&");
+      if (
+        start !== undefined &&
+        end !== undefined &&
+        fileLink.test(node.value) &&
+        !/[<>]/.test(node.value)
+      )
+        edits.push({
+          start,
+          end,
+          content: `[${escaped}](<${escaped}>)`,
+        });
+    } else if (node.type !== "link" && node.type !== "linkReference" && "children" in node)
+      node.children.forEach(visit);
   };
   visit(parser.parse(markdown));
   for (const edit of edits.reverse())
@@ -205,4 +237,33 @@ export function markdownWithTableBreaks(markdown: string): string {
 
 export function parseMarkdownDocument(markdown: string): Root {
   return parser.parse(markdownWithHtml(markdown));
+}
+
+/** Protect path separators from the native renderer's CommonMark escape decoding. */
+export function markdownWithWindowsPaths(markdown: string): string {
+  if (!markdown.includes("\\")) return markdown;
+  const edits: Array<{ start: number; end: number; value: string }> = [];
+  const visit = (node: MarkdownNode) => {
+    if (
+      (node.type === "link" || node.type === "image" || node.type === "definition") &&
+      isWindowsAbsolutePath(node.url)
+    ) {
+      const start = node.position?.start.offset;
+      const end = node.position?.end.offset;
+      if (start !== undefined && end !== undefined) {
+        const offset = markdown.slice(start, end).lastIndexOf(node.url);
+        if (offset !== -1)
+          edits.push({
+            start: start + offset,
+            end: start + offset + node.url.length,
+            value: node.url.replaceAll("\\", "\\\\"),
+          });
+      }
+    }
+    if ("children" in node) node.children.forEach(visit);
+  };
+  visit(parser.parse(markdown));
+  for (const edit of edits.sort((a, b) => b.start - a.start))
+    markdown = markdown.slice(0, edit.start) + edit.value + markdown.slice(edit.end);
+  return markdown;
 }
