@@ -6,9 +6,9 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   buildWorkspaceThreadPickerItems,
   countRunningWorkspaceSubagents,
+  groupWorkspaceThreadPickerItems,
   runningWorkspaceSubagentsByParent,
   type WorkspaceThreadPickerProject,
-  workspaceThreadPickerItemsForProject,
 } from "./workspacePaneThreadPicker";
 
 const environmentId = EnvironmentId.make("local");
@@ -60,19 +60,30 @@ describe("workspace pane thread picker", () => {
     expect(items.map((item) => item.threadRef.threadId)).toEqual([ThreadId.make("available")]);
   });
 
-  it("scopes the list to a selected project and shows every project without one", () => {
+  it("groups other projects' open threads between the selected project's open and settled threads", () => {
     const items = buildWorkspaceThreadPickerItems({
-      threads: [thread("a", projectA), thread("b", projectB)],
+      threads: [
+        thread("a", projectA),
+        thread("b", projectB),
+        thread("settled-a", projectA),
+        thread("settled-b", projectB),
+      ],
       projects,
       paneTargets: [],
+      settledThreadKeys: new Set([`${environmentId}:settled-a`, `${environmentId}:settled-b`]),
     });
 
-    expect(
-      workspaceThreadPickerItemsForProject(items, "group-a").map((item) => item.title),
-    ).toEqual(["Thread a"]);
-    expect(workspaceThreadPickerItemsForProject(items, null).map((item) => item.title)).toEqual([
-      "Thread a",
-      "Thread b",
+    const groups = groupWorkspaceThreadPickerItems(items, "group-a");
+    expect(groups.openThreads.map((item) => item.title)).toEqual(["Thread a"]);
+    expect(groups.otherOpenThreads.map((item) => item.title)).toEqual(["Thread b"]);
+    expect(groups.settledThreads.map((item) => item.title)).toEqual(["Thread settled-a"]);
+
+    const unfiltered = groupWorkspaceThreadPickerItems(items, null);
+    expect(unfiltered.openThreads.map((item) => item.title)).toEqual(["Thread a", "Thread b"]);
+    expect(unfiltered.otherOpenThreads).toEqual([]);
+    expect(unfiltered.settledThreads.map((item) => item.title)).toEqual([
+      "Thread settled-a",
+      "Thread settled-b",
     ]);
   });
 

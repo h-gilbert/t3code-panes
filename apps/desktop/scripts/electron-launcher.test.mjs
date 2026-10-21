@@ -1,6 +1,8 @@
+import * as NodeEvents from "node:events";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import * as NodeVM from "node:vm";
 
 import { assert, describe, it } from "vite-plus/test";
 
@@ -145,10 +147,69 @@ describe("electron development launcher", () => {
     const development = resolveMacLauncherIconPaths("/runtime", true);
     const production = resolveMacLauncherIconPaths("/runtime", false);
 
-    // The source icons are real repo paths, joined for the host.
     assert.match(development.sourceIconPath, /assets[\\/]dev[\\/]blueprint-macos-1024\.png$/);
     assert.equal(development.generatedIconPath, "/runtime/icon-dev.icns");
     assert.match(production.sourceIconPath, /assets[\\/]prod[\\/]black-macos-1024\.png$/);
     assert.equal(production.generatedIconPath, "/runtime/icon-prod.icns");
   });
+});
+
+it.each([
+  "/tmp/t3-feature.one/apps/desktop",
+  "/tmp/t3-feature.one [two](three)+?^${four}|back\\slash*/apps/desktop",
+])("dev cleanup signals only its owned process tree: %s", async (desktopDir) => {
+  const source = NodeFS.readFileSync(new URL("./dev-electron.mjs", import.meta.url), "utf8");
+  const signals = [];
+  const treeSignals = [];
+  const handlers = new Map();
+  const child = new NodeEvents.EventEmitter();
+  child.pid = 12345;
+  child.kill = (signal) => {
+    signals.push(signal);
+    child.emit("exit", 0, signal);
+  };
+  let exited;
+  const shutdown = new Promise((resolve) => {
+    exited = resolve;
+  });
+  // Other apps, including those whose root matches this one, stay untouched.
+  await NodeVM.runInNewContext(
+    `(async () => { ${source.replace(/^import\s[\s\S]*?;\n/gm, "")} })()`,
+    {
+      NodeChildProcess: {
+        execFileSync: () => undefined,
+        spawnSync: (command, args) => treeSignals.push([command, ...args]),
+        spawn: () => child,
+      },
+      NodeFS: { watch: () => ({ close: () => undefined }) },
+      NodeOS: { platform: () => "linux" },
+      NodePath,
+      desktopDir,
+      resolveDevProtocolClient: () => null,
+      resolveElectronLaunchCommand: (args) => ({ electronPath: "electron", args }),
+      waitForResources: async () => undefined,
+      URL,
+      setTimeout: (fn) => {
+        queueMicrotask(fn);
+        return { unref: () => undefined };
+      },
+      clearTimeout: () => undefined,
+      process: {
+        pid: 23456,
+        env: { VITE_DEV_SERVER_URL: "http://localhost:1234" },
+        execPath: "node",
+        once: (event, handler) => handlers.set(event, handler),
+        exit: exited,
+      },
+    },
+  );
+  assert.deepEqual(treeSignals, []);
+  handlers.get("SIGTERM")();
+  assert.equal(await shutdown, 143);
+  assert.deepEqual(signals, ["SIGTERM"]);
+  assert.deepEqual(treeSignals, [
+    ["pkill", "-TERM", "-P", "12345"],
+    ["pkill", "-TERM", "-P", "23456"],
+    ["pkill", "-KILL", "-P", "23456"],
+  ]);
 });

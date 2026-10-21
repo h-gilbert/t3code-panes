@@ -250,9 +250,9 @@ export function notificationForTransition(input: {
         });
         const enabled =
           candidate.phase === "completed"
-            ? input.registration.device.preferences.notifyOnCompletion ||
-              (input.registration.device.preferences.notifyOnIosCompletion === true &&
-                input.iosCompletionThreads?.has(candidate.threadId) === true)
+            ? (input.registration.device.preferences.notifyOnCompletion ||
+                input.registration.device.preferences.notifyOnIosCompletion === true) &&
+              input.iosCompletionThreads?.has(candidate.threadId) === true
             : input.registration.device.preferences.notifyOnFailure;
         return (
           enabled &&

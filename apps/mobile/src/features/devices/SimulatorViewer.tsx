@@ -4,7 +4,7 @@ import { ActivityIndicator, Modal, Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
 
-import { AppText as Text } from "../../components/AppText";
+import { AppText as Text } from "../../components/ui/AppText";
 import { refreshDeviceHubAccess, useDeviceHubAccess } from "../../state/device";
 import { simulatorStreamUrl } from "./simulatorStreamUrl";
 

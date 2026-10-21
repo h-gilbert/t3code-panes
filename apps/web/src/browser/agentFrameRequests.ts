@@ -8,6 +8,32 @@ import { acquireBrowserSurfaceActivity } from "./browserSurfaceStore";
 
 const leases = new Map<string, () => void>();
 
+/** The subscription owns these leases, including cleanup when the host unmounts. */
+export function createBrowserFrameActivity() {
+  const active = new Map<string, () => void>();
+  return {
+    set(tabId: string, needed: boolean) {
+      if (needed) {
+        if (!active.has(tabId)) active.set(tabId, acquireBrowserSurfaceActivity(tabId));
+      } else {
+        active.get(tabId)?.();
+        active.delete(tabId);
+      }
+    },
+    retain(tabIds: ReadonlySet<string>) {
+      for (const [tabId, release] of active) {
+        if (tabIds.has(tabId)) continue;
+        release();
+        active.delete(tabId);
+      }
+    },
+    dispose() {
+      for (const release of active.values()) release();
+      active.clear();
+    },
+  };
+}
+
 /**
  * Keeps a hidden tab drawing after the server asked for one of its frames, until
  * the thread's turn ends. A tab parked offscreen draws nothing, so an agent's

@@ -93,7 +93,12 @@ describe("self-hosted APNs provider token", () => {
 });
 
 describe("iOS-origin completion notifications", () => {
-  function transition(phase: RelayAgentActivityState["phase"], ios = false, inputReady = false) {
+  function transition(
+    phase: RelayAgentActivityState["phase"],
+    ios = false,
+    inputReady = false,
+    legacyCompletion = false,
+  ) {
     return notificationForTransition({
       inputReady,
       previous: makeEnvironmentAggregate([state("running")], NOW),
@@ -112,7 +117,7 @@ describe("iOS-origin completion notifications", () => {
             notifyOnApproval: true,
             notifyOnInput: true,
             notifyOnFailure: true,
-            notifyOnCompletion: false,
+            notifyOnCompletion: legacyCompletion,
             notifyOnIosCompletion: true,
           },
         },
@@ -131,6 +136,8 @@ describe("iOS-origin completion notifications", () => {
   it("alerts for a completed iOS turn and suppresses all other origins", () => {
     expect(transition("completed", true)?.row.phase).toBe("completed");
     expect(transition("completed", false)).toBeNull();
+    expect(transition("completed", false, false, true)).toBeNull();
+    expect(transition("completed", true, false, true)?.row.phase).toBe("completed");
   });
 
   it("groups ordinary pushes by environment and thread while preserving tap routing", () => {

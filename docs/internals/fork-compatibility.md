@@ -43,14 +43,16 @@ and closing the session. Browser interaction and automation must preserve compos
 Device streams use their own aspect-ratio-aware floating viewer; they must not replace the browser's
 fixed-preview and window restoration behavior.
 
-## Simulator ownership
+## Device lifecycle
 
-T3 refuses to boot a second iOS Simulator on the same host unless the user explicitly requests
-multiple simulators. It may attach to any already-running simulator, including one started directly
-in Apple's Simulator app, and must not shut down another simulator to satisfy the limit. The
-private iOS client can watch a thread's open simulator through the authenticated MJPEG proxy;
-watching does not grant simulator control. Repository iOS build helpers use the Mac's shared build
-lock when present, with at most two Xcode compilation jobs.
+T3 manages device selection, booting, streaming and shutdown through its device hosts.
+Use `device_list`, then `device_open`, and drive the selected device with the exact launcher,
+host configuration and target arguments returned by that call. T3's lifecycle and ownership
+rules determine which devices can run; do not impose a one-simulator limit or preserve an
+older blanket restriction on already-booted simulators. Use `device_screenshot` for captures
+and `device_close` for panel lifecycle. The private iOS client can watch a thread's open
+simulator through the authenticated MJPEG proxy; watching does not grant simulator control.
+Build-host requirements and shared compilation locks still apply to builds.
 
 ## Browser storage
 

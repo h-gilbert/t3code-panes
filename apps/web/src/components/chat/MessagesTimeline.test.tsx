@@ -5,6 +5,7 @@ import {
   CheckpointRef,
   EnvironmentId,
   MessageId,
+  type ServerProvider,
   ProjectId,
   RunId,
   ThreadId,
@@ -27,10 +28,32 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import type { LegendListRef } from "@legendapp/list/react";
 
 const activityTestState = vi.hoisted(() => ({
+  providers: [] as ReadonlyArray<ServerProvider>,
   expanded: false,
   expandedRuns: false,
   subagentTooltips: false,
 }));
+
+vi.mock("../../state/server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../state/server")>();
+  return {
+    ...actual,
+    serverEnvironment: {
+      ...actual.serverEnvironment,
+      providersValueAtom: () => "timeline-test-providers",
+    },
+  };
+});
+vi.mock("@effect/atom-react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@effect/atom-react")>();
+  return {
+    ...actual,
+    useAtomValue: (atom: Parameters<typeof actual.useAtomValue>[0], ...args: unknown[]) =>
+      atom === ("timeline-test-providers" as unknown)
+        ? activityTestState.providers
+        : actual.useAtomValue(atom, ...(args as [])),
+  };
+});
 
 // Expose tooltip contents in the renderer without requiring a browser portal.
 vi.mock("../ui/tooltip", async (importOriginal) => {
@@ -83,6 +106,7 @@ vi.mock("./MessagesTimeline.logic", async (importOriginal) => {
 });
 
 beforeEach(() => {
+  activityTestState.providers = [];
   activityTestState.subagentTooltips = false;
   activityTestState.expanded = false;
   activityTestState.expandedRuns = false;
@@ -507,6 +531,7 @@ describe("MessagesTimeline", () => {
       await act(() => {
         renderer = create(
           <MessagesTimeline
+            emptyPlaceholderInset={0}
             {...buildProps()}
             timelineEntries={[
               {
@@ -552,6 +577,7 @@ describe("MessagesTimeline", () => {
       await act(() => {
         renderer = create(
           <MessagesTimeline
+            emptyPlaceholderInset={0}
             {...buildProps()}
             timelineEntries={[
               {
@@ -635,6 +661,7 @@ describe("MessagesTimeline", () => {
         });
         return (
           <MessagesTimeline
+            emptyPlaceholderInset={0}
             {...props}
             isWorking={toolLifecycleStatus === "inProgress"}
             runningRunId={toolLifecycleStatus === "inProgress" ? runId : null}
@@ -711,6 +738,7 @@ describe("MessagesTimeline", () => {
         await act(() => {
           renderer = create(
             <MessagesTimeline
+              emptyPlaceholderInset={0}
               {...props}
               timelineEntries={[
                 {
@@ -806,6 +834,7 @@ describe("MessagesTimeline", () => {
       navigateManually = () => setLiveFollowEnabled(false);
       return (
         <MessagesTimeline
+          emptyPlaceholderInset={0}
           {...props}
           timelineEntries={[buildUserTimelineEntry("First prompt")]}
           liveFollowEnabled={liveFollowEnabled}
@@ -847,6 +876,7 @@ describe("MessagesTimeline", () => {
     timeline.scrollTop = 1300;
     const render = (held: boolean) => (
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...props}
         timelineEntries={[buildUserTimelineEntry("First prompt")]}
         liveFollowEnabled={!held}
@@ -880,6 +910,7 @@ describe("MessagesTimeline", () => {
       await act(() => {
         renderer = create(
           <MessagesTimeline
+            emptyPlaceholderInset={0}
             {...props}
             timelineEntries={[buildUserTimelineEntry("First prompt")]}
             anchorMessageId={MessageId.make("message-1")}
@@ -902,6 +933,7 @@ describe("MessagesTimeline", () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={[
           buildUserTimelineEntry(
@@ -928,6 +960,7 @@ describe("MessagesTimeline", () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={[
           buildUserTimelineEntry(
@@ -951,6 +984,7 @@ describe("MessagesTimeline", () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={[
           buildUserTimelineEntry(
@@ -970,6 +1004,7 @@ describe("MessagesTimeline", () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={[
           buildUserTimelineEntry(
@@ -991,6 +1026,7 @@ describe("MessagesTimeline", () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={[
           buildAssistantTimelineEntry("<details><summary>More</summary>Details</details>"),
@@ -1007,6 +1043,7 @@ describe("MessagesTimeline", () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={[
           buildAssistantTimelineEntry(
@@ -1034,6 +1071,7 @@ describe("MessagesTimeline", () => {
   it("renders progressive history controls ahead of the bounded timeline", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={[buildUserTimelineEntry("Recent activity")]}
         historyControls={{
@@ -1054,6 +1092,7 @@ describe("MessagesTimeline", () => {
   it("keeps an empty bounded timeline actionable while earlier history loads", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={[]}
         historyControls={{
@@ -1074,10 +1113,19 @@ describe("MessagesTimeline", () => {
     const timelineEntries = [buildUserTimelineEntry("Hello")];
 
     const compactMarkup = renderToStaticMarkup(
-      <MessagesTimeline {...buildProps()} timelineEntries={timelineEntries} />,
+      <MessagesTimeline
+        emptyPlaceholderInset={0}
+        {...buildProps()}
+        timelineEntries={timelineEntries}
+      />,
     );
     const fadedMarkup = renderToStaticMarkup(
-      <MessagesTimeline {...buildProps()} timelineEntries={timelineEntries} topFadeEnabled />,
+      <MessagesTimeline
+        emptyPlaceholderInset={0}
+        {...buildProps()}
+        timelineEntries={timelineEntries}
+        topFadeEnabled
+      />,
     );
 
     expect(compactMarkup).toContain('class="h-3 sm:h-4"');
@@ -1219,6 +1267,7 @@ describe("MessagesTimeline", () => {
     };
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         anchorMessageId={secondEntry.message.id}
         onAnchorReady={onAnchorReady}
@@ -1249,6 +1298,7 @@ describe("MessagesTimeline", () => {
     const firstEntry = buildSnapShotTimelineEntry("data:image/png;base64,iVBORw0KGgo=");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         anchorMessageId={firstEntry.message.id}
         onAnchorReady={onAnchorReady}
@@ -1266,7 +1316,11 @@ describe("MessagesTimeline", () => {
 
   it("does not render SnapShot window details before the preview resolves", () => {
     const markup = renderToStaticMarkup(
-      <MessagesTimeline {...buildProps()} timelineEntries={[buildSnapShotTimelineEntry()]} />,
+      <MessagesTimeline
+        emptyPlaceholderInset={0}
+        {...buildProps()}
+        timelineEntries={[buildSnapShotTimelineEntry()]}
+      />,
     );
 
     expect(markup).toContain("screenshot.png");
@@ -1289,6 +1343,7 @@ describe("MessagesTimeline", () => {
     };
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         anchorMessageId={secondEntry.message.id}
         onAnchorReady={onAnchorReady}
@@ -1320,7 +1375,7 @@ describe("MessagesTimeline", () => {
     };
 
     const markup = renderToStaticMarkup(
-      <MessagesTimeline {...buildProps()} timelineEntries={[entry]} />,
+      <MessagesTimeline emptyPlaceholderInset={0} {...buildProps()} timelineEntries={[entry]} />,
     );
 
     expect(markup).toContain('aria-label="Preview report.pdf"');
@@ -1346,7 +1401,7 @@ describe("MessagesTimeline", () => {
     };
 
     const markup = renderToStaticMarkup(
-      <MessagesTimeline {...buildProps()} timelineEntries={[entry]} />,
+      <MessagesTimeline emptyPlaceholderInset={0} {...buildProps()} timelineEntries={[entry]} />,
     );
 
     expect(markup).toContain('aria-label="Preview report.pdf"');
@@ -1373,7 +1428,7 @@ describe("MessagesTimeline", () => {
     };
 
     const markup = renderToStaticMarkup(
-      <MessagesTimeline {...buildProps()} timelineEntries={[entry]} />,
+      <MessagesTimeline emptyPlaceholderInset={0} {...buildProps()} timelineEntries={[entry]} />,
     );
 
     expect(markup).toContain("report.pdf");
@@ -1400,7 +1455,7 @@ describe("MessagesTimeline", () => {
     };
 
     const markup = renderToStaticMarkup(
-      <MessagesTimeline {...buildProps()} timelineEntries={[entry]} />,
+      <MessagesTimeline emptyPlaceholderInset={0} {...buildProps()} timelineEntries={[entry]} />,
     );
 
     expect(markup).toContain("voice-memo.ogg");
@@ -1414,6 +1469,7 @@ describe("MessagesTimeline", () => {
     const firstEntry = buildUserTimelineEntry("Run the command.");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         isWorking
         activeTurnInProgress
@@ -1467,6 +1523,7 @@ describe("MessagesTimeline", () => {
     expect(
       renderToStaticMarkup(
         <MessagesTimeline
+          emptyPlaceholderInset={0}
           {...buildProps()}
           anchorMessageId={firstEntry.message.id}
           timelineEntries={timelineEntries}
@@ -1480,6 +1537,7 @@ describe("MessagesTimeline", () => {
     expect(
       renderToStaticMarkup(
         <MessagesTimeline
+          emptyPlaceholderInset={0}
           {...buildProps()}
           anchorMessageId={null}
           timelineEntries={timelineEntries}
@@ -1491,6 +1549,7 @@ describe("MessagesTimeline", () => {
     expect(
       renderToStaticMarkup(
         <MessagesTimeline
+          emptyPlaceholderInset={0}
           {...buildProps()}
           anchorMessageId={null}
           liveFollowEnabled={false}
@@ -1503,6 +1562,7 @@ describe("MessagesTimeline", () => {
   it("renders collapse controls for long user messages", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={[buildUserTimelineEntry(buildLongUserMessageText())]}
       />,
@@ -1524,6 +1584,7 @@ describe("MessagesTimeline", () => {
   it("does not render collapse controls for short user messages", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={[buildUserTimelineEntry("Short prompt.")]}
       />,
@@ -1539,6 +1600,7 @@ describe("MessagesTimeline", () => {
     const entry = buildUserTimelineEntry("Review this area");
     const agentMarkup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={[
           {
@@ -1549,7 +1611,7 @@ describe("MessagesTimeline", () => {
       />,
     );
     const userMarkup = renderToStaticMarkup(
-      <MessagesTimeline {...buildProps()} timelineEntries={[entry]} />,
+      <MessagesTimeline emptyPlaceholderInset={0} {...buildProps()} timelineEntries={[entry]} />,
     );
 
     expect(agentMarkup).toContain('data-user-message-attribution="agent"');
@@ -1561,6 +1623,7 @@ describe("MessagesTimeline", () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={[]}
         parentThreadLink={{
@@ -1581,6 +1644,7 @@ describe("MessagesTimeline", () => {
     const entry = buildUserTimelineEntry("Adjust the current turn");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={[
           { ...entry, message: { ...entry.message, inputIntent: "steer" as const } },
@@ -1600,6 +1664,7 @@ describe("MessagesTimeline", () => {
     const runId = RunId.make("run-collapsed-spacing");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={[
           buildUserTimelineEntry("Investigate spacing"),
@@ -1673,6 +1738,7 @@ describe("MessagesTimeline", () => {
     };
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         latestRun={{
           runId,
@@ -1753,6 +1819,7 @@ describe("MessagesTimeline", () => {
     } as never;
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={[
           {
@@ -1781,6 +1848,7 @@ describe("MessagesTimeline", () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={[
           buildUserTimelineEntry(
@@ -1808,6 +1876,7 @@ describe("MessagesTimeline", () => {
   it("renders chips for standalone element-pick context messages", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={[
           buildUserTimelineEntry(
@@ -1834,6 +1903,7 @@ describe("MessagesTimeline", () => {
   it("keeps the copy button for collapsed long user messages", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={[buildUserTimelineEntry(buildLongUserMessageText())]}
       />,
@@ -1847,6 +1917,7 @@ describe("MessagesTimeline", () => {
   it("renders context compaction entries in the normal work log", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={[
           {
@@ -1871,6 +1942,7 @@ describe("MessagesTimeline", () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={[
           {
@@ -1914,7 +1986,7 @@ describe("MessagesTimeline", () => {
 
   it("renders context handoffs as from → to model endpoints instead of the summary", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
-    const providerStatuses = [
+    activityTestState.providers = [
       {
         instanceId: "codex_personal",
         driver: "codex",
@@ -1981,8 +2053,9 @@ describe("MessagesTimeline", () => {
 
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
-        providerStatuses={providerStatuses}
+
         timelineEntries={[
           buildHandoffEntry({
             fromProviderInstanceIds: ["codex_personal"],
@@ -2019,8 +2092,9 @@ describe("MessagesTimeline", () => {
     ] as never;
     const legacyMarkup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
-        providerStatuses={providerStatuses}
+
         runs={legacyRuns}
         timelineEntries={[
           buildHandoffEntry({
@@ -2039,8 +2113,9 @@ describe("MessagesTimeline", () => {
     // provider names.
     const bareMarkup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
-        providerStatuses={providerStatuses}
+
         timelineEntries={[
           buildHandoffEntry({
             fromProviderInstanceIds: ["codex_personal"],
@@ -2058,6 +2133,7 @@ describe("MessagesTimeline", () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={[
           {
@@ -2106,6 +2182,7 @@ describe("MessagesTimeline", () => {
   it("keeps the collapsed summary icon neutral when the group ends in a failure", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={[
           {
@@ -2149,6 +2226,7 @@ describe("MessagesTimeline", () => {
   it("keeps mixed work logs neutral after a later tool call succeeds", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={[
           {
@@ -2253,6 +2331,7 @@ describe("MessagesTimeline", () => {
         await act(() => {
           renderer = create(
             <MessagesTimeline
+              emptyPlaceholderInset={0}
               {...buildProps()}
               onOpenThread={onOpenThread}
               timelineEntries={Array.from({ length: count }, (_, index) => ({
@@ -2370,6 +2449,7 @@ describe("MessagesTimeline", () => {
     } as const;
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         isWorking
         activeTurnInProgress
@@ -2442,6 +2522,7 @@ describe("MessagesTimeline", () => {
     } as const;
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={
           [
@@ -2515,6 +2596,7 @@ describe("MessagesTimeline", () => {
     } as const;
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={
           [
@@ -2563,6 +2645,7 @@ describe("MessagesTimeline", () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={[
           {
@@ -2602,6 +2685,7 @@ describe("MessagesTimeline", () => {
   it("renders review comment contexts as structured cards instead of raw tags", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={[
           {
@@ -2641,6 +2725,7 @@ describe("MessagesTimeline", () => {
   it("renders file review comments as source code instead of diffs", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={[
           {
@@ -2677,6 +2762,7 @@ describe("MessagesTimeline", () => {
   it("collapses settled tool runs behind a generated summary toggle", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={[
           {
@@ -2721,6 +2807,7 @@ describe("MessagesTimeline", () => {
     activityTestState.expanded = true;
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={[
           {
@@ -2760,6 +2847,7 @@ describe("MessagesTimeline", () => {
   it("keeps the red treatment for severe orchestration failures", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         timelineEntries={[
           {
@@ -2818,6 +2906,7 @@ describe("MessagesTimeline", () => {
         await act(() => {
           renderer = create(
             <MessagesTimeline
+              emptyPlaceholderInset={0}
               {...buildProps()}
               timelineEntries={[
                 {
@@ -2874,6 +2963,7 @@ describe("MessagesTimeline", () => {
       await act(() => {
         renderer = create(
           <MessagesTimeline
+            emptyPlaceholderInset={0}
             {...buildProps()}
             timelineEntries={[
               {
@@ -2925,6 +3015,7 @@ describe("fork timeline behavior", () => {
     };
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         compactMinimap
         timelineEntries={[firstEntry, secondEntry]}
@@ -2950,7 +3041,11 @@ describe("fork timeline behavior", () => {
       },
     };
     const markup = renderToStaticMarkup(
-      <MessagesTimeline {...buildProps()} timelineEntries={[first, second]} />,
+      <MessagesTimeline
+        emptyPlaceholderInset={0}
+        {...buildProps()}
+        timelineEntries={[first, second]}
+      />,
     );
 
     expect(markup).toContain('aria-label="Previous turn"');
@@ -2970,6 +3065,7 @@ describe("fork timeline behavior", () => {
         await act(() => {
           renderer = create(
             <MessagesTimeline
+              emptyPlaceholderInset={0}
               {...buildProps()}
               timelineEntries={[
                 {
@@ -3045,6 +3141,7 @@ describe("fork timeline behavior", () => {
     const assistantEntry = buildAssistantTimelineEntry("Done.");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         latestRun={{
           runId,
@@ -3082,6 +3179,7 @@ describe("fork timeline behavior", () => {
     const runId = RunId.make("turn-with-files");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         latestRun={{
           runId,
@@ -3189,33 +3287,13 @@ describe("fork timeline behavior", () => {
       }),
     ).toBe(100);
     expect(
-      resolveTimelineMinimapCurrentIndex({
-        scrollTop: 100,
-        scrollBottom: 500,
-        itemBounds: [
-          { top: 80, height: 20 },
-          { top: 120, height: 20 },
-          { top: 220, height: 20 },
-        ],
-      }),
+      resolveTimelineMinimapCurrentIndex({ visibleStart: 1, visibleEnd: 2, rowIndices: [0, 1, 2] }),
     ).toBe(1);
     expect(
-      resolveTimelineMinimapCurrentIndex({
-        scrollTop: 150,
-        scrollBottom: 200,
-        itemBounds: [
-          { top: 80, height: 20 },
-          { top: 120, height: 20 },
-          { top: 220, height: 20 },
-        ],
-      }),
+      resolveTimelineMinimapCurrentIndex({ visibleStart: 1, visibleEnd: 1, rowIndices: [0, 1, 2] }),
     ).toBe(1);
     expect(
-      resolveTimelineMinimapCurrentIndex({
-        scrollTop: 0,
-        scrollBottom: 50,
-        itemBounds: [{ top: 80, height: 20 }],
-      }),
+      resolveTimelineMinimapCurrentIndex({ visibleStart: 0, visibleEnd: 0, rowIndices: [1] }),
     ).toBeNull();
     expect(resolveTimelineMinimapHasPersistentGutter(832, 768)).toBe(false);
     expect(resolveTimelineMinimapHasPersistentGutter(863, 768)).toBe(false);
@@ -3249,6 +3327,7 @@ describe("fork timeline behavior", () => {
     const firstEntry = buildSnapShotTimelineEntry("data:image/png;base64,iVBORw0KGgo=");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         anchorMessageId={firstEntry.message.id}
         onAnchorReady={onAnchorReady}
@@ -3277,7 +3356,11 @@ describe("fork timeline behavior", () => {
 
   it("does not render window details before the preview URL resolves", () => {
     const markup = renderToStaticMarkup(
-      <MessagesTimeline {...buildProps()} timelineEntries={[buildSnapShotTimelineEntry()]} />,
+      <MessagesTimeline
+        emptyPlaceholderInset={0}
+        {...buildProps()}
+        timelineEntries={[buildSnapShotTimelineEntry()]}
+      />,
     );
 
     expect(markup).toContain("screenshot.png");
@@ -3306,7 +3389,7 @@ describe("fork timeline behavior", () => {
     };
 
     const markup = renderToStaticMarkup(
-      <MessagesTimeline {...buildProps()} timelineEntries={[entry]} />,
+      <MessagesTimeline emptyPlaceholderInset={0} {...buildProps()} timelineEntries={[entry]} />,
     );
 
     expect(markup).toContain('aria-label="Preview report.pdf"');
@@ -3334,7 +3417,7 @@ describe("fork timeline behavior", () => {
     };
 
     const markup = renderToStaticMarkup(
-      <MessagesTimeline {...buildProps()} timelineEntries={[entry]} />,
+      <MessagesTimeline emptyPlaceholderInset={0} {...buildProps()} timelineEntries={[entry]} />,
     );
 
     expect(markup).toContain("<video");
@@ -3361,7 +3444,7 @@ describe("fork timeline behavior", () => {
     };
 
     const markup = renderToStaticMarkup(
-      <MessagesTimeline {...buildProps()} timelineEntries={[entry]} />,
+      <MessagesTimeline emptyPlaceholderInset={0} {...buildProps()} timelineEntries={[entry]} />,
     );
 
     expect(markup).not.toContain("<video");
@@ -3386,7 +3469,7 @@ describe("fork timeline behavior", () => {
     };
 
     const markup = renderToStaticMarkup(
-      <MessagesTimeline {...buildProps()} timelineEntries={[entry]} />,
+      <MessagesTimeline emptyPlaceholderInset={0} {...buildProps()} timelineEntries={[entry]} />,
     );
 
     expect(markup).toContain('aria-label="Preview archive.zip"');
@@ -3394,15 +3477,20 @@ describe("fork timeline behavior", () => {
     expect(markup).not.toContain("<a href=");
   });
 
-  it("glides to the end while a turn is running and snaps otherwise", () => {
+  it("snaps the initial list before a running or idle thread settles", () => {
     const entries = [buildUserTimelineEntry("Hello")];
     const working = renderToStaticMarkup(
-      <MessagesTimeline {...buildProps()} isWorking timelineEntries={entries} />,
+      <MessagesTimeline
+        emptyPlaceholderInset={0}
+        {...buildProps()}
+        isWorking
+        timelineEntries={entries}
+      />,
     );
-    expect(working).toContain('data-maintain-scroll-at-end-animated="true"');
+    expect(working).toContain('data-maintain-scroll-at-end-animated="false"');
 
     const idle = renderToStaticMarkup(
-      <MessagesTimeline {...buildProps()} timelineEntries={entries} />,
+      <MessagesTimeline emptyPlaceholderInset={0} {...buildProps()} timelineEntries={entries} />,
     );
     expect(idle).toContain('data-maintain-scroll-at-end-animated="false"');
   });
@@ -3450,6 +3538,7 @@ describe("fork timeline behavior", () => {
       act(() => {
         renderer = create(
           <MessagesTimeline
+            emptyPlaceholderInset={0}
             {...buildProps()}
             isWorking
             routeThreadKey="env-1:thread-a"
@@ -3457,11 +3546,15 @@ describe("fork timeline behavior", () => {
           />,
         );
       });
+      expect(animatedAttr(renderer)).toBe(false);
+      flushFrame();
+      flushFrame();
       expect(animatedAttr(renderer)).toBe(true);
 
       act(() => {
         renderer.update(
           <MessagesTimeline
+            emptyPlaceholderInset={0}
             {...buildProps()}
             isWorking
             routeThreadKey="env-1:thread-b"
@@ -3487,6 +3580,7 @@ describe("fork timeline behavior", () => {
 
     renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         onLiveTailSizeChange={onLiveTailSizeChange}
         timelineEntries={timelineEntries}
@@ -3497,6 +3591,7 @@ describe("fork timeline behavior", () => {
     onLiveTailSizeChange.mockClear();
     renderToStaticMarkup(
       <MessagesTimeline
+        emptyPlaceholderInset={0}
         {...buildProps()}
         liveFollowEnabled={false}
         onLiveTailSizeChange={onLiveTailSizeChange}

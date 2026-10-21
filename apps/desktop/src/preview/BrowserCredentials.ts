@@ -299,7 +299,7 @@ export const make = Effect.gen(function* BrowserCredentialsMake() {
             ),
           ),
       );
-      const id = (yield* crypto.randomUUIDv4.pipe(Effect.orDie)).replace(/-/g, "");
+      const id = (yield* crypto.randomUUIDv4().pipe(Effect.orDie)).replace(/-/g, "");
       const updatedAt = DateTime.formatIso(yield* DateTime.now);
       return yield* SynchronizedRef.modifyEffect(writeLock, () =>
         Effect.gen(function* () {

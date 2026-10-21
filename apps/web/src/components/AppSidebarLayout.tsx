@@ -137,9 +137,7 @@ function SidebarControl({ hidden }: { readonly hidden: boolean }) {
       toggleSidebar();
     };
 
-    // Capture before focused editors consume commands such as Mod+B for rich-text formatting.
     window.addEventListener("keydown", onKeyDown, true);
-    // A focused desktop browser page forwards the chord as a menu action.
     const unsubscribe = window.desktopBridge?.onMenuAction((action) => {
       if (action === "sidebar.toggle") toggleSidebar();
     });
@@ -152,10 +150,6 @@ function SidebarControl({ hidden }: { readonly hidden: boolean }) {
   if (hidden) return null;
 
   return (
-    // The right-side layout controls carry mr-px (border compensation inside
-    // the panel), so the trigger mirrors it: both clusters sit one extra pixel
-    // off their edge and the titlebar reads symmetric.
-    // The sheet owns its trigger until its closing transition unmounts it.
     <div
       className={cn(
         "pointer-events-none fixed left-[var(--workspace-controls-left)] top-[var(--workspace-controls-top)] z-50 ml-px flex h-[var(--workspace-topbar-height)] items-center",
@@ -167,8 +161,6 @@ function SidebarControl({ hidden }: { readonly hidden: boolean }) {
         <TooltipTrigger
           render={
             <SidebarTrigger
-              // Over the stage artwork the trigger is a control on imagery, like the media
-              // viewer's arrows; that variant positions itself, so the layout is reset here.
               variant={isSidebarVisible && stageBackdropVariant ? "media-navigation" : "ghost"}
               className={cn(
                 "pointer-events-auto",
@@ -186,7 +178,6 @@ function SidebarControl({ hidden }: { readonly hidden: boolean }) {
   );
 }
 
-// Moves through the app's route history like a browser's back/forward buttons.
 function NavigationHistoryShortcuts() {
   const location = useLocation();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -256,14 +247,17 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const location = useLocation();
   const pathname = location.pathname;
   const isOnWorkspace = isWorkspacePath(pathname);
-  const retainedWorkspaceKeyRef = useRef<string | null>(DEFAULT_WORKSPACE_KEY);
+  const [previousWorkspaceKey, setPreviousWorkspaceKey] = useState<string | null>(
+    DEFAULT_WORKSPACE_KEY,
+  );
   const search = location.search as Record<string, unknown>;
-  retainedWorkspaceKeyRef.current = resolveRetainedWorkspaceKey({
+  const nextWorkspaceKey = resolveRetainedWorkspaceKey({
     pathname,
     workspaceSearch: search.workspace,
-    previousWorkspaceKey: retainedWorkspaceKeyRef.current,
+    previousWorkspaceKey,
   });
-  const retainedWorkspaceKey = retainedWorkspaceKeyRef.current ?? DEFAULT_WORKSPACE_KEY;
+  if (nextWorkspaceKey !== previousWorkspaceKey) setPreviousWorkspaceKey(nextWorkspaceKey);
+  const retainedWorkspaceKey = nextWorkspaceKey ?? DEFAULT_WORKSPACE_KEY;
   const threadTarget = useParams({ strict: false, select: resolveThreadRouteTarget });
   const isUtility =
     pathname === "/settings" ||
@@ -272,7 +266,9 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     pathname === "/pull-requests";
   const closeUtility = () =>
     void navigate({ to: "/workspace", search: { workspace: retainedWorkspaceKey } });
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarState, setSidebarState] = useState({ pathname, open: false });
+  const sidebarOpen = sidebarState.pathname === pathname && sidebarState.open;
+  const setSidebarOpen = (open: boolean) => setSidebarState({ pathname, open });
   const handledRouteRef = useRef<string | null>(null);
   useLayoutEffect(() => {
     if (pathname !== "/" && !threadTarget) {
@@ -296,16 +292,12 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     if (threadTarget.kind === "server")
       store.assignThread(retainedWorkspaceKey, threadTarget.threadRef);
     else store.assignDraft(retainedWorkspaceKey, threadTarget.draftId);
-    setSidebarOpen(false);
     void navigate({
       to: "/workspace",
       search: { ...location.search, workspace: retainedWorkspaceKey },
       replace: true,
     });
   }, [threadTarget, retainedWorkspaceKey, navigate, location, pathname]);
-  useEffect(() => {
-    setSidebarOpen(false);
-  }, [pathname]);
   const { isMacosDesktop, isWindowFullscreen } = useDesktopFullscreen();
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();

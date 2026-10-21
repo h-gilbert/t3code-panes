@@ -61,6 +61,7 @@ it.each(["none", "editor", "react"])(
           previousValue: pendingClear === "react" ? "The previous prompt" : previousValue,
           value,
           citationStart: 0,
+          insertedSpaces: { before: false, after: true },
           sourceAnchor: {
             source,
             viewport: document.body,

@@ -15,7 +15,7 @@ import {
   type RelayManagedEndpointProviderKind,
 } from "@t3tools/contracts/relay";
 import { findErrorTraceId } from "@t3tools/client-runtime/errors";
-import { ManagedRelay, relayProtectedErrorMessage } from "@t3tools/client-runtime/relay";
+import { ManagedRelay, relayRequestFailureDetail } from "@t3tools/client-runtime/relay";
 import { makeEnvironmentHttpApiClient } from "@t3tools/client-runtime/rpc";
 
 import type { SavedRemoteConnection } from "../../lib/connection";
@@ -89,10 +89,9 @@ function withDevCause(message: string, cause: unknown): string {
 
 function decodedRelayClientError(message: string) {
   return (cause: ManagedRelay.ManagedRelayClientError) => {
-    const relayError =
-      cause._tag === "ManagedRelayRequestFailedError" ? cause.relayError : undefined;
-    const traceId = cause._tag === "ManagedRelayRequestFailedError" ? cause.traceId : undefined;
-    const detail = relayError ? relayProtectedErrorMessage(relayError) : null;
+    const failed = cause._tag === "ManagedRelayRequestFailedError" ? cause : undefined;
+    const traceId = failed?.traceId;
+    const detail = failed ? relayRequestFailureDetail(failed) : null;
     return new CloudEnvironmentLinkError({
       message: detail ? `${message}: ${detail}` : message,
       cause,
@@ -154,10 +153,10 @@ type LinkEnvironmentToCloudRequirements =
   | ManagedRelay.ManagedRelayClient
   | MobileStorage.MobileStorage;
 
-export function linkEnvironmentToCloud(
-  input: LinkEnvironmentToCloudInput,
-): Effect.Effect<void, CloudEnvironmentLinkError, LinkEnvironmentToCloudRequirements> {
-  return Effect.gen(function* () {
+export const linkEnvironmentToCloud = Effect.fn("linkEnvironment.linkEnvironmentToCloud")(
+  function* (
+    input: LinkEnvironmentToCloudInput,
+  ): Effect.fn.Return<void, CloudEnvironmentLinkError, LinkEnvironmentToCloudRequirements> {
     if (!input.connection.bearerToken) {
       return yield* new CloudEnvironmentLinkError({
         message: "Only a locally paired bearer connection can be linked to the cloud.",
@@ -235,5 +234,5 @@ export function linkEnvironmentToCloud(
       .pipe(
         Effect.mapError(cloudEnvironmentLinkError("Could not configure environment relay access.")),
       );
-  });
-}
+  },
+);

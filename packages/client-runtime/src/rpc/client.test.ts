@@ -6,9 +6,7 @@ import {
   type ServerConfigStreamEvent,
   type ServerLifecycleStreamEvent,
   WS_METHODS,
-  PreviewTabId,
-  ThreadId,
-  type PreviewAutomationStreamEvent,
+  type DesktopBrowserHostStreamEvent,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
@@ -100,26 +98,18 @@ describe("environment RPC", () => {
       const connections: string[] = [];
       let attempts = 0;
       const client = {
-        [WS_METHODS.previewAutomationConnect]: () =>
+        [WS_METHODS.previewDesktopHostConnect]: () =>
           Stream.suspend(() => {
             attempts += 1;
-            const connected: PreviewAutomationStreamEvent = {
+            const connected: DesktopBrowserHostStreamEvent = {
               type: "connected",
               connectionId: `connection-${attempts}`,
             };
             return attempts === 1
               ? Stream.make(connected, {
-                  type: "request",
-                  connectionId: connected.connectionId,
-                  request: {
-                    requestId: "timed-out-action",
-                    operation: "click",
-                    threadId: ThreadId.make("thread-1"),
-                    tabId: PreviewTabId.make("tab-1"),
-                    input: {},
-                    timeoutMs: 1_000,
-                  },
-                } satisfies PreviewAutomationStreamEvent).pipe(
+                  type: "command",
+                  commandId: "timed-out-action",
+                } satisfies DesktopBrowserHostStreamEvent).pipe(
                   Stream.ensuring(Deferred.succeed(firstCompleted, undefined)),
                 )
               : Stream.succeed(connected).pipe(Stream.concat(Stream.never));
@@ -127,13 +117,16 @@ describe("environment RPC", () => {
       } as unknown as WsRpcProtocolClient;
       const { activeSession, supervisor } = yield* makeHarness();
       yield* SubscriptionRef.set(activeSession, Option.some(session(client)));
-      const consumer = yield* subscribe(WS_METHODS.previewAutomationConnect, {
-        clientId: "preview-host",
-        environmentId: TARGET.environmentId,
-      }).pipe(
+      const consumer = yield* subscribe(
+        WS_METHODS.previewDesktopHostConnect,
+        {
+          hostEnvironmentId: TARGET.environmentId,
+        },
+        { retryOnCompletionAfter: 1_000 },
+      ).pipe(
         Stream.runForEach((event) => {
-          if (event.type === "request") {
-            requests.push(event.request.requestId);
+          if (event.type === "command") {
+            requests.push(event.commandId);
             return Effect.void;
           }
           connections.push(event.connectionId);
@@ -159,7 +152,7 @@ describe("environment RPC", () => {
       const completed = yield* Deferred.make<void>();
       let attempts = 0;
       const client = {
-        [WS_METHODS.previewAutomationConnect]: () =>
+        [WS_METHODS.previewDesktopHostConnect]: () =>
           Stream.suspend(() => {
             attempts += 1;
             return Stream.empty.pipe(Stream.ensuring(Deferred.succeed(completed, undefined)));
@@ -167,10 +160,13 @@ describe("environment RPC", () => {
       } as unknown as WsRpcProtocolClient;
       const { activeSession, supervisor } = yield* makeHarness();
       yield* SubscriptionRef.set(activeSession, Option.some(session(client)));
-      const consumer = yield* subscribe(WS_METHODS.previewAutomationConnect, {
-        clientId: "preview-host",
-        environmentId: TARGET.environmentId,
-      }).pipe(
+      const consumer = yield* subscribe(
+        WS_METHODS.previewDesktopHostConnect,
+        {
+          hostEnvironmentId: TARGET.environmentId,
+        },
+        { retryOnCompletionAfter: 1_000 },
+      ).pipe(
         Stream.runDrain,
         Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
         Effect.forkChild,
@@ -191,7 +187,7 @@ describe("environment RPC", () => {
         let oldAttempts = 0;
         let nextAttempts = 0;
         const firstClient = {
-          [WS_METHODS.previewAutomationConnect]: () =>
+          [WS_METHODS.previewDesktopHostConnect]: () =>
             Stream.suspend(() => {
               oldAttempts += 1;
               return (
@@ -209,7 +205,7 @@ describe("environment RPC", () => {
             }),
         } as unknown as WsRpcProtocolClient;
         const nextClient = {
-          [WS_METHODS.previewAutomationConnect]: () =>
+          [WS_METHODS.previewDesktopHostConnect]: () =>
             Stream.suspend(() => {
               nextAttempts += 1;
               return Stream.fromEffect(Deferred.succeed(nextConnected, undefined)).pipe(
@@ -220,10 +216,13 @@ describe("environment RPC", () => {
         } as unknown as WsRpcProtocolClient;
         const { activeSession, supervisor } = yield* makeHarness();
         yield* SubscriptionRef.set(activeSession, Option.some(session(firstClient)));
-        const consumer = yield* subscribe(WS_METHODS.previewAutomationConnect, {
-          clientId: "preview-host",
-          environmentId: TARGET.environmentId,
-        }).pipe(
+        const consumer = yield* subscribe(
+          WS_METHODS.previewDesktopHostConnect,
+          {
+            hostEnvironmentId: TARGET.environmentId,
+          },
+          { retryOnCompletionAfter: 1_000 },
+        ).pipe(
           Stream.runDrain,
           Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
           Effect.forkChild,
@@ -250,7 +249,7 @@ describe("environment RPC", () => {
       const firstQueue = yield* Queue.unbounded<never, Cause.Done>();
       let connections = 0;
       const client = {
-        [WS_METHODS.previewAutomationConnect]: () => {
+        [WS_METHODS.previewDesktopHostConnect]: () => {
           connections += 1;
           if (connections === 1) {
             return Stream.fromEffect(Deferred.succeed(firstConnected, undefined)).pipe(
@@ -271,8 +270,8 @@ describe("environment RPC", () => {
       const { activeSession, supervisor } = yield* makeHarness();
       yield* SubscriptionRef.set(activeSession, Option.some(session(client)));
       const fiber = yield* subscribe(
-        WS_METHODS.previewAutomationConnect,
-        { clientId: "host-1", environmentId: TARGET.environmentId },
+        WS_METHODS.previewDesktopHostConnect,
+        { hostEnvironmentId: TARGET.environmentId },
         { retryOnCompletionAfter: 1_000 },
       ).pipe(
         Stream.runDrain,
@@ -337,9 +336,9 @@ describe("environment RPC", () => {
         Effect.provideService(
           EnvironmentRpcRequestObserver,
           EnvironmentRpcRequestObserver.of({
-            observe: ({ environmentId, method }) =>
+            observe: ({ environmentId, environmentLabel, method }) =>
               Effect.sync(() => {
-                observations.push(`start:${environmentId}:${method}`);
+                observations.push(`start:${environmentId}:${environmentLabel}:${method}`);
                 return Effect.sync(() => {
                   observations.push(`finish:${environmentId}:${method}`);
                 });
@@ -350,7 +349,7 @@ describe("environment RPC", () => {
 
       expect(result).toEqual({ status: "available", version: "2026.6.0" });
       expect(observations).toEqual([
-        `start:${TARGET.environmentId}:${WS_METHODS.cloudGetRelayClientStatus}`,
+        `start:${TARGET.environmentId}:${TARGET.label}:${WS_METHODS.cloudGetRelayClientStatus}`,
         `finish:${TARGET.environmentId}:${WS_METHODS.cloudGetRelayClientStatus}`,
       ]);
     }),
@@ -710,12 +709,10 @@ describe("environment RPC", () => {
       yield* TestClock.adjust("100 millis");
       expect(yield* Queue.take(subscriptions)).toBe(2);
       yield* Queue.take(failures);
-      // The second retry waits 200ms, so 100ms is not enough.
       yield* TestClock.adjust("100 millis");
       expect(Option.isNone(yield* Queue.poll(subscriptions))).toBe(true);
       yield* TestClock.adjust("100 millis");
       expect(yield* Queue.take(subscriptions)).toBe(3);
-      // Attempt 3 delivered a value before failing, so the delay is back to 100ms.
       yield* Queue.take(failures);
       yield* TestClock.adjust("100 millis");
       expect(yield* Queue.take(subscriptions)).toBe(4);

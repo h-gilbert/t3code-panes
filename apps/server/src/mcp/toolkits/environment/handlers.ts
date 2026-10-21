@@ -50,19 +50,21 @@ const access = Effect.gen(function* () {
     });
   return { ...context, descriptor, settings: yield* Settings.ServerSettingsService };
 });
-const update = (input: { readonly reason: string; readonly patch: ServerSettingsPatch }) =>
-  Effect.gen(function* () {
-    const { scope, caller } = yield* access;
-    yield* McpInvocationContext.requireThreadScope(scope, "Changing settings");
-    if (!caller?.activeRunId) {
-      return yield* new OrchestratorMcpFailure({
-        code: "parent_not_active",
-        message: "Changing settings requires a live T3 thread.",
-      });
-    }
-    const service = yield* AgentSettings.AgentSettings;
-    return yield* service.update({ ...input, threadId: caller.id, runId: caller.activeRunId });
-  });
+const update = Effect.fn("EnvironmentTools.update")(function* (input: {
+  readonly reason: string;
+  readonly patch: ServerSettingsPatch;
+}) {
+  const { scope, caller } = yield* access;
+  yield* McpInvocationContext.requireThreadScope(scope, "Changing settings");
+  if (!caller?.activeRunId) {
+    return yield* new OrchestratorMcpFailure({
+      code: "parent_not_active",
+      message: "Changing settings requires a live T3 thread.",
+    });
+  }
+  const service = yield* AgentSettings.AgentSettings;
+  return yield* service.update({ ...input, threadId: caller.id, runId: caller.activeRunId });
+});
 
 export const layer = McpToolAccess.toLayer(EnvironmentToolkit, {
   t3_environment_read: McpToolAccess.reads(() =>

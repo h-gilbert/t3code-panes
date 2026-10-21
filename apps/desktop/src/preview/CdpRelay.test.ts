@@ -18,6 +18,83 @@ const makeTarget = (
 const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 describe("CDP relay", () => {
+  it("keeps overlapping idle-thread captures paintable until both settle", async () => {
+    const first = Promise.withResolvers<unknown>();
+    const second = Promise.withResolvers<unknown>();
+    const activity = vi.fn();
+    const send = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const relay = createCdpRelayConnection(
+      { ...makeTarget(send), setFrameActivity: activity },
+      () => {},
+    );
+    const capture = (id: number) =>
+      relay.receive(
+        JSON.stringify({
+          id,
+          method: "Page.captureScreenshot",
+          sessionId: "t3-preview-page",
+        }),
+      );
+    capture(1);
+    capture(2);
+    expect(activity.mock.calls).toEqual([[true]]);
+    first.resolve({ data: "first" });
+    await settle();
+    expect(activity.mock.calls).toEqual([[true]]);
+    second.reject(new Error("capture failed"));
+    await settle();
+    expect(activity.mock.calls).toEqual([[true], [false]]);
+  });
+
+  it("keeps viewers painting until their screencast stops or detaches", async () => {
+    const activity = vi.fn();
+    const relay = createCdpRelayConnection(
+      { ...makeTarget(async () => ({})), setFrameActivity: activity },
+      () => {},
+    );
+    const command = (method: string, sessionId = "t3-preview-page", params = {}) =>
+      relay.receive(JSON.stringify({ id: 1, method, sessionId, params }));
+    command("Page.startScreencast");
+    command("Page.startScreencast", "viewer-2");
+    await settle();
+    command("Page.stopScreencast");
+    expect(activity.mock.calls).toEqual([[true]]);
+    relay.receive(
+      JSON.stringify({
+        id: 2,
+        method: "Target.detachFromTarget",
+        params: { sessionId: "viewer-2" },
+      }),
+    );
+    await settle();
+    expect(activity.mock.calls).toEqual([[true], [false]]);
+  });
+
+  it("releases painting after failed screencast startup and relay disposal", async () => {
+    const activity = vi.fn();
+    const send = vi.fn().mockRejectedValueOnce(new Error("closed")).mockResolvedValue({});
+    const relay = createCdpRelayConnection(
+      { ...makeTarget(send), setFrameActivity: activity },
+      () => {},
+    );
+    const start = () =>
+      relay.receive(
+        JSON.stringify({
+          id: 1,
+          method: "Page.startScreencast",
+          sessionId: "t3-preview-page",
+        }),
+      );
+    start();
+    await settle();
+    expect(activity.mock.calls).toEqual([[true], [false]]);
+    start();
+    await settle();
+    relay.dispose();
+    relay.dispose();
+    expect(activity.mock.calls).toEqual([[true], [false], [true], [false]]);
+  });
+
   it("replays existing JavaScript contexts when connecting to an already enabled debugger", async () => {
     let enabled = true;
     const written: Array<Record<string, unknown>> = [];
@@ -72,7 +149,6 @@ describe("CDP relay", () => {
     relay.receive(JSON.stringify({ id: 2, method: "Target.createTarget", params: {} }));
     await settle();
     const attach = written.findIndex((message) => message["id"] === 1);
-    // The page is announced right after the auto-attach reply, never before it.
     expect(written.slice(attach, attach + 2)).toEqual([
       { id: 1, result: {} },
       {
@@ -103,7 +179,6 @@ describe("CDP relay", () => {
       JSON.stringify({ id: 5, method: "Page.captureScreenshot", sessionId: "t3-preview-page" }),
     );
     relay.receive(JSON.stringify({ id: 6, method: "DOM.enable", sessionId: "iframe-session" }));
-    // A slow screenshot must not hold up the reply behind it.
     pending[1]!();
     await settle();
     expect(written).toEqual([
@@ -123,7 +198,6 @@ describe("CDP relay", () => {
   it("resumes paused child frames, so cross-site iframes run", async () => {
     const send = vi.fn(async () => ({}));
     const relay = createCdpRelayConnection(makeTarget(send), () => {});
-    // The page's own session is already running; only its children wait.
     relay.receive(
       JSON.stringify({
         id: 1,
@@ -226,7 +300,6 @@ describe("CDP relay downloads", () => {
     );
     await settle();
     expect(directories).toEqual(["/srv/artifacts"]);
-    // The tab's own debugger has no such context, so the id stays here.
     expect(send).toHaveBeenCalledWith(
       "Browser.setDownloadBehavior",
       { behavior: "allowAndName", downloadPath: "/srv/artifacts", eventsEnabled: true },

@@ -1,3 +1,4 @@
+import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
 import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ThreadId } from "@t3tools/contracts";
@@ -167,6 +168,7 @@ const transferLayer = (prefix: string) => {
   const configLayer = ServerConfig.layerTest(process.cwd(), { prefix });
   return Layer.mergeAll(
     configLayer,
+    Layer.mock(Orchestrator.OrchestratorV2)({}),
     WorkspacePaths.layer,
     NativeAppIconResolver.layer.pipe(Layer.provide(configLayer)),
     ServerSecretStore.layer.pipe(Layer.provide(configLayer)),
@@ -187,10 +189,10 @@ describe("stageUploadFile", () => {
       yield* Effect.gen(function* () {
         const staged = yield* stageUploadFile(source);
         expect(staged).toMatchObject({ name: "report.pdf", sizeBytes: 4 });
-        const [, , , token, fileName] = staged.url.split("/");
+        const [, , , token, fileName] = staged.url!.split("/");
         const resolved = yield* resolveAsset(token!, fileName!);
         expect(resolved?.kind).toBe("file");
-        expect(yield* fileSystem.readFileString(resolved!.path)).toBe("pdf!");
+        expect(yield* fileSystem.readFileString(resolved!.path!)).toBe("pdf!");
       }).pipe(Effect.scoped);
 
       expect(yield* fileSystem.readDirectory(config.attachmentsDir)).toEqual([]);

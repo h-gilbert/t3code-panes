@@ -1,14 +1,7 @@
+import { useStableCallback } from "../../hooks/useStableCallback";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { SearchIcon, XIcon } from "lucide-react";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent,
-  type ReactNode,
-} from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import {
   AppearanceSettingsPanel,
@@ -30,7 +23,6 @@ import {
 } from "./settingsLayout";
 import { searchSettings, SETTINGS_SECTION_LABELS, type SettingsSearchItem } from "./settingsSearch";
 import { Button } from "../ui/button";
-import { Input } from "../ui/input";
 import { Kbd } from "../ui/kbd";
 
 function SettingsPageSearch() {
@@ -39,58 +31,52 @@ function SettingsPageSearch() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [activeResultIndex, setActiveResultIndex] = useState(0);
-  const results = useMemo(() => searchSettings(query), [query]);
+  const results = (() => searchSettings(query))();
   const isSearching = query.trim().length > 0;
 
-  const clearSearch = useCallback(() => {
+  const clearSearch = useStableCallback(() => {
     setQuery("");
     setActiveResultIndex(0);
-  }, []);
-  const selectResult = useCallback(
-    (item: SettingsSearchItem) => {
-      const targetId = item.targetId ?? item.id;
+  });
+  const selectResult = useStableCallback((item: SettingsSearchItem) => {
+    const targetId = item.targetId ?? item.id;
+    clearSearch();
+    if (currentHash.replace(/^#/, "") === targetId) {
+      scrollToSettingsTarget(targetId);
+      return;
+    }
+    void navigate({
+      to: "/settings",
+      hash: targetId,
+      replace: true,
+      resetScroll: false,
+      hashScrollIntoView: false,
+    });
+  });
+  const handleKeyDown = useStableCallback((event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Escape" && isSearching) {
+      event.preventDefault();
+      event.stopPropagation();
       clearSearch();
-      if (currentHash.replace(/^#/, "") === targetId) {
-        scrollToSettingsTarget(targetId);
-        return;
-      }
-      void navigate({
-        to: "/settings",
-        hash: targetId,
-        replace: true,
-        resetScroll: false,
-        hashScrollIntoView: false,
-      });
-    },
-    [clearSearch, currentHash, navigate],
-  );
-  const handleKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLInputElement>) => {
-      if (event.key === "Escape" && isSearching) {
-        event.preventDefault();
-        event.stopPropagation();
-        clearSearch();
-        return;
-      }
-      if (results.length === 0) return;
-      if (event.key === "ArrowDown") {
-        event.preventDefault();
-        setActiveResultIndex((index) => (index + 1) % results.length);
-        return;
-      }
-      if (event.key === "ArrowUp") {
-        event.preventDefault();
-        setActiveResultIndex((index) => (index - 1 + results.length) % results.length);
-        return;
-      }
-      if (event.key === "Enter") {
-        event.preventDefault();
-        const result = results[activeResultIndex];
-        if (result) selectResult(result);
-      }
-    },
-    [activeResultIndex, clearSearch, isSearching, results, selectResult],
-  );
+      return;
+    }
+    if (results.length === 0) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveResultIndex((index) => (index + 1) % results.length);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveResultIndex((index) => (index - 1 + results.length) % results.length);
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      const result = results[activeResultIndex];
+      if (result) selectResult(result);
+    }
+  });
 
   useEffect(() => {
     const handleWindowKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -114,12 +100,10 @@ function SettingsPageSearch() {
 
   return (
     <div className="relative z-20">
-      <div className="flex h-10 items-center gap-2 rounded-xl border border-border bg-background px-3 shadow-xs focus-within:ring-2 focus-within:ring-ring">
+      <div className="flex h-10 items-center gap-2 rounded-xl border border-border bg-background px-3 shadow-xs focus-within:ring-2 focus-within:ring-inset focus-within:ring-ring">
         <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
-        <Input
+        <input
           ref={inputRef}
-          nativeInput
-          unstyled
           type="search"
           value={query}
           onChange={(event) => {
@@ -138,7 +122,7 @@ function SettingsPageSearch() {
               ? `settings-page-search-result-${results[activeResultIndex].id}`
               : undefined
           }
-          className="min-w-0 flex-1 [&_[data-slot=input]]:h-auto [&_[data-slot=input]]:p-0"
+          className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-placeholder"
         />
         {isSearching ? (
           <Button

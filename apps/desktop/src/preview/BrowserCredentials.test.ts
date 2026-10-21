@@ -147,7 +147,6 @@ describe("BrowserCredentials", () => {
       files.clear();
       files.set(
         "/state/browser-credentials.json",
-        // @effect-diagnostics-next-line preferSchemaOverJson:off - fixture for the previous persisted document format.
         JSON.stringify({
           version: 2,
           credentials: [

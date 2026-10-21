@@ -6,7 +6,6 @@ import {
   getDisplayModelName,
   getProviderRowLabel,
   getTriggerDisplayModelLabel,
-  type ModelEsque,
 } from "./providerIconUtils";
 import { ComboboxItem } from "../ui/combobox";
 import { Button } from "../ui/button";
@@ -17,18 +16,17 @@ import { cn } from "~/lib/utils";
 import { modelPickerModelKey } from "./modelPickerKeys";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 
+// Rows take the model's fields rather than the picker's item object, and one shared toggle
+// handler, because the picker rebuilds its items on every search keystroke; that keeps memo
+// effective for rows whose content did not change.
 export const ModelListRow = memo(function ModelListRow(props: {
   index: number;
-  model: ModelEsque;
-  /** Instance the model belongs to — the routing key used in combobox values. */
+  slug: string;
+  name: string;
+  shortName?: string | undefined;
+  subProvider?: string | undefined;
   instanceId: ProviderInstanceId;
-  /** Driver kind of the instance — used for the provider icon glyph. */
   driverKind: ProviderDriverKind;
-  /**
-   * Display name to show in the secondary line (provider footer). Usually
-   * the instance's configured `displayName` so custom instances like
-   * "Codex Personal" render with their user-authored label.
-   */
   providerDisplayName: string;
   providerAccentColor?: string | undefined;
   acpRegistryAgentId?: string | undefined;
@@ -45,13 +43,19 @@ export const ModelListRow = memo(function ModelListRow(props: {
   disabledReason?: string | null;
   onToggleFavorite: (anchor: HTMLButtonElement) => void;
 }) {
-  const providerLabel = getProviderRowLabel(props.providerDisplayName, props.model.subProvider);
+  const model = {
+    slug: props.slug,
+    name: props.name,
+    shortName: props.shortName,
+    subProvider: props.subProvider,
+  };
+  const providerLabel = getProviderRowLabel(props.providerDisplayName, props.subProvider);
 
   const row = (
     <ComboboxItem
       hideIndicator
       index={props.index}
-      value={modelPickerModelKey(props.instanceId, props.model.slug)}
+      value={modelPickerModelKey(props.instanceId, props.slug)}
       disabled={Boolean(props.disabledReason)}
       className={cn(
         "group relative w-full !min-w-0 max-w-full cursor-pointer",
@@ -63,7 +67,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
         <div className="flex min-w-0 items-center gap-2">
           <div className="min-w-0 truncate text-xs font-medium leading-snug">
             {getProviderIndependentModelName(
-              props.model,
+              model,
               props.driverKind,
               props.providerDisplayName,
               props.useTriggerLabel || props.preferShortName

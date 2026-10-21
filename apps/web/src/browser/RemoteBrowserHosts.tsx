@@ -2,7 +2,6 @@ import { useAtomMount, useAtomValue } from "@effect/atom-react";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { AuthPreviewOperateScope, type EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { AsyncResult, Atom } from "effect/reactivity";
-import { useMemo } from "react";
 import { useServerConfigs } from "~/state/entities";
 import { primaryEnvironmentIdAtom } from "~/state/primaryEnvironment";
 import { useEnvironmentScope } from "~/state/session";
@@ -75,15 +74,7 @@ function RemoteBrowserHost({
   environmentId: EnvironmentId;
   hostEnvironmentId: EnvironmentId;
 }) {
-  const atom = useMemo(
-    () =>
-      remoteBrowserHostAtom({
-        environmentId,
-        hostEnvironmentId,
-        bridge: previewBridge!,
-      }),
-    [environmentId, hostEnvironmentId],
-  );
+  const atom = remoteBrowserHostAtom({ environmentId, hostEnvironmentId, bridge: previewBridge! });
   useAtomMount(atom);
   return <HostedPreviewThreads environmentId={environmentId} />;
 }

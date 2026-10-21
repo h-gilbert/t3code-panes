@@ -76,11 +76,20 @@ export function buildWorkspaceThreadPickerItems(input: {
   });
 }
 
-export function workspaceThreadPickerItemsForProject(
+export function groupWorkspaceThreadPickerItems(
   items: readonly WorkspaceThreadPickerItem[],
   projectKey: string | null,
-): readonly WorkspaceThreadPickerItem[] {
-  return projectKey === null ? items : items.filter((item) => item.projectKey === projectKey);
+) {
+  const projectItems =
+    projectKey === null ? items : items.filter((item) => item.projectKey === projectKey);
+  return {
+    openThreads: projectItems.filter((item) => item.status === "open"),
+    otherOpenThreads:
+      projectKey === null
+        ? []
+        : items.filter((item) => item.projectKey !== projectKey && item.status === "open"),
+    settledThreads: projectItems.filter((item) => item.status === "settled"),
+  };
 }
 
 /** Counts active descendants under each ancestor using environment-scoped shell identities. */

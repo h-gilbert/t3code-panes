@@ -54,7 +54,8 @@ const shellSnapshotWithSummaries: OrchestrationV2ShellSnapshot = {
       ...v2ThreadShell,
       pendingRuntimeRequest: {
         id: RuntimeRequestId.make("runtime-request-v2"),
-        kind: "command",
+        kind: "user_input",
+        blocking: false,
         createdAt: v2Now,
       },
       latestVisibleMessage: {
@@ -131,6 +132,7 @@ describe("orchestration cache envelopes", () => {
       const [threadShell] = shell.snapshot.threads;
 
       expect(threadShell?.latestVisibleMessage?.text).toBe("Done");
+      expect(threadShell?.pendingRuntimeRequest?.blocking).toBe(false);
       expect(
         threadShell?.latestVisibleMessage === null ||
           threadShell?.latestVisibleMessage === undefined
@@ -161,7 +163,6 @@ describe("orchestration cache envelopes", () => {
   );
 
   it("rejects thread snapshots saved before queued-run items were kept, but not shells", () => {
-    // Version 3 thread windows may have dropped a queued run's items (#16987).
     const staleThread = encodeStoredThreadSnapshotJson({
       schemaVersion: ORCHESTRATION_THREAD_CACHE_SCHEMA_VERSION,
       environmentId,

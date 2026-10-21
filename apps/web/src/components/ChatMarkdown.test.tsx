@@ -18,7 +18,14 @@ import { Button } from "./ui/button";
 import { setMarkdownTaskChecked } from "./files/filePreviewMode";
 
 vi.mock("../hooks/useFileMetadata", () => ({ useFileMetadata: () => null }));
-vi.mock("@effect/atom-react", () => ({ useAtomValue: () => null }));
+vi.mock("@effect/atom-react", () => ({
+  useAtomValue: () => ({
+    pullRequestsEnabled: false,
+    availableEditors: [],
+    revealInFileManagerLabel: null,
+  }),
+  useAtomRefresh: () => () => {},
+}));
 vi.mock("../state/presentation", () => ({
   useEnvironmentPresentation: () => ({ isReady: true, presentation: null }),
 }));
@@ -27,7 +34,10 @@ vi.mock("./chat/MermaidDiagram", () => ({
   // Real Mermaid needs layout APIs jsdom lacks; a rendered diagram is an SVG.
   MermaidDiagram: () => <svg aria-label="Diagram" />,
 }));
-vi.mock("../hooks/useTheme", () => ({ useTheme: () => ({ resolvedTheme: "dark" }) }));
+vi.mock("../hooks/useTheme", () => ({
+  useTheme: () => ({ resolvedTheme: "dark" }),
+  useRenderedAppearance: () => "dark",
+}));
 vi.mock("../hooks/useSettings", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../hooks/useSettings")>();
   const settings = actual.getClientSettings();
@@ -533,7 +543,7 @@ describe("ChatMarkdown streaming", () => {
           currentTarget: {
             checked: true,
             closest: () => ({
-              dataset: { taskMarkerOffset: String(listItem.props["data-task-marker-offset"]) },
+              dataset: { listItemOffset: String(listItem.props["data-list-item-offset"]) },
             }),
           },
         } as unknown as Parameters<typeof onChange>[0]);

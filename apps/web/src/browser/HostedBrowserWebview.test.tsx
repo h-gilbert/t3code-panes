@@ -1,3 +1,6 @@
+vi.mock("./useBrowserLayoutZoomFactor", () => ({
+  useBrowserLayoutZoomFactor: (factor: number) => factor,
+}));
 import {
   DEFAULT_CLIENT_SETTINGS,
   EnvironmentId,

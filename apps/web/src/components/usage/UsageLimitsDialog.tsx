@@ -65,6 +65,18 @@ function UsageLimitsDialogBody() {
 
 function UsageLimitsView() {
   const presentations = useAtomValue(environmentPresentations.presentationsAtom);
+  const providers = useAtomValue(environmentPresentations.providersByEnvironmentAtom);
+  const limitPresentations = new Map(
+    [...presentations].map(([id, entry]) => [
+      id,
+      {
+        ...entry,
+        serverConfig: entry.serverConfig
+          ? { ...entry.serverConfig, providers: providers.get(id) ?? [] }
+          : null,
+      },
+    ]),
+  );
   const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders);
   const [now, setNow] = useState(() => Date.now());
   const [refreshing, setRefreshing] = useState(false);
@@ -103,7 +115,7 @@ function UsageLimitsView() {
           Refresh limits
         </Button>
       </div>
-      <UsageLimitsPooled presentations={presentations} now={now} compact />
+      <UsageLimitsPooled presentations={limitPresentations} now={now} compact />
     </div>
   );
 }

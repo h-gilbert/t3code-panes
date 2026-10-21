@@ -32,12 +32,6 @@ export interface AgentActivityProps {
   readonly activities: ReadonlyArray<AgentActivityRowProps>;
 }
 
-/**
- * Agent work shown by the agent-activity scene. The rows point at
- * seeded showcase threads so the copy matches the thread list, but the phases
- * are staged: the relay that normally derives them is not part of the capture.
- * Rows follow the relay's order: attention first, then running, then finished.
- */
 export const SHOWCASE_AGENT_ACTIVITY_ROWS = [
   { threadId: "pocket-command-center", phase: "waiting_for_approval", minutesAgo: 1 },
   { threadId: "beautiful-boot", phase: "waiting_for_input", minutesAgo: 4 },
@@ -105,7 +99,6 @@ export function buildShowcaseAgentActivity(
   };
 }
 
-/** The alert the relay sends when the hero row starts waiting on the user. */
 export function showcaseAgentAlert(activity: AgentActivityProps) {
   const row = activity.activities[0];
   if (!row) return null;

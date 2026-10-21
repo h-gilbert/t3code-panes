@@ -1,5 +1,6 @@
 import { it as effectIt } from "@effect/vitest";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
@@ -10,6 +11,9 @@ import { TestClock } from "effect/testing";
 import { beforeEach, describe, expect, vi } from "vite-plus/test";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import * as DesktopRendererHistory from "../telemetry/DesktopRendererHistory.ts";
+import * as DesktopBrowserHost from "./DesktopBrowserHost.ts";
+import * as PreviewPasskeys from "./Passkeys.ts";
 import * as BrowserCredentials from "./BrowserCredentials.ts";
 import * as BrowserSession from "./BrowserSession.ts";
 import * as PreviewManager from "./Manager.ts";
@@ -39,6 +43,22 @@ vi.mock("electron", () => ({
 }));
 
 const layer = PreviewManager.layer.pipe(
+  Layer.provideMerge(DesktopBrowserHost.layer),
+  Layer.provideMerge(NodeCrypto.layer),
+  Layer.provideMerge(
+    Layer.succeed(DesktopRendererHistory.DesktopRendererHistory, {
+      register: () => Effect.void,
+      recordMetrics: () => Effect.void,
+      shutdown: Effect.void,
+    }),
+  ),
+  Layer.provideMerge(
+    Layer.mock(PreviewPasskeys.PreviewPasskeys)({
+      bridgeEnabled: false,
+      installSessionHandlers: () => {},
+      attachGuest: () => () => {},
+    }),
+  ),
   Layer.provideMerge(
     Layer.succeed(
       BrowserSession.BrowserSession,
@@ -70,7 +90,7 @@ const layer = PreviewManager.layer.pipe(
     FileSystem.layerNoop({ makeDirectory: () => Effect.void, remove: () => Effect.void }),
   ),
   Layer.provideMerge(Path.layer),
-  Layer.provideMerge(Layer.succeed(HostProcessPlatform, "darwin")),
+  Layer.provideMerge(Layer.succeed(HostProcess.Platform, "darwin")),
 );
 
 const withManager = <A>(
@@ -134,6 +154,7 @@ const makeGuest = (
     getURL: () => "https://example.com",
     getTitle: () => "Example",
     isLoading: () => false,
+    isLoadingMainFrame: () => false,
     isDevToolsOpened: () => false,
     getZoomFactor: () => 1,
     setZoomFactor: vi.fn(),

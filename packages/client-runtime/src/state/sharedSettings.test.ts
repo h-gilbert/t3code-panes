@@ -80,7 +80,10 @@ describe("splitSharedServerPatch", () => {
         ...DEFAULT_SERVER_SETTINGS,
         providerInstances: {
           ...DEFAULT_SERVER_SETTINGS.providerInstances,
-          codex: { ...DEFAULT_SERVER_SETTINGS.providerInstances.codex, enabled: false },
+          [selection.instanceId]: {
+            ...DEFAULT_SERVER_SETTINGS.providerInstances[selection.instanceId],
+            enabled: false,
+          },
         },
       }),
     ).toEqual({});

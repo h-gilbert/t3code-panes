@@ -168,7 +168,6 @@ describe("mobile cloud link environment client", () => {
           linkEnvironmentToCloud({
             clerkToken: "clerk-token",
             connection: savedConnection,
-            liveActivitiesEnabled: true,
           }),
         ).pipe(Effect.flip);
         expect(error).toMatchObject({
@@ -201,7 +200,6 @@ describe("mobile cloud link environment client", () => {
         linkEnvironmentToCloud({
           clerkToken: "clerk-token",
           connection: savedConnection,
-          liveActivitiesEnabled: true,
         }),
       ).pipe(Effect.flip);
       expect(error._tag).toBe("CloudEnvironmentLinkError");
@@ -239,7 +237,6 @@ describe("mobile cloud link environment client", () => {
         linkEnvironmentToCloud({
           clerkToken: "clerk-token",
           connection: savedConnection,
-          liveActivitiesEnabled: true,
         }),
       ).pipe(Effect.flip);
       expect(error).toMatchObject({
@@ -277,7 +274,6 @@ describe("mobile cloud link environment client", () => {
         linkEnvironmentToCloud({
           clerkToken: "clerk-token",
           connection: savedConnection,
-          liveActivitiesEnabled: true,
         }),
       ).pipe(Effect.flip);
       expect(error).toMatchObject({

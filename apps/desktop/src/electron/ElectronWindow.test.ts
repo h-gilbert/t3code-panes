@@ -127,7 +127,7 @@ describe("ElectronWindow", () => {
       if (result._tag === "Some") {
         assert.strictEqual(result.value, window);
       }
-    }).pipe(Effect.provide(TestLayer)),
+    }).pipe(Effect.provide(layerTest)),
   );
 
   it.effect("preserves schema-safe creation context and the Electron cause", () =>

@@ -48,90 +48,89 @@ const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
 
   return AgentSettings.of({
-    update: (input) =>
-      Effect.gen(function* () {
-        if (Object.keys(input.patch).length === 0 || input.reason.trim().length === 0) {
-          return yield* new OrchestratorMcpFailure({
-            code: "invalid_request",
-            message: "Provide settings changes and explain why they are needed.",
-          });
-        }
-        const descriptor = yield* environment.getDescriptor;
-        const id = yield* crypto.randomUUIDv4.pipe(Effect.orDie);
-        const requestId = RuntimeRequestId.make(`settings:${id}`);
-        const afterSequence = yield* threads
-          .getThreadEventSequence(input.threadId)
-          .pipe(Effect.mapError(unavailable));
-        yield* threads
-          .dispatch({
-            type: "settings-change.request",
-            commandId: CommandId.make(`settings:request:${id}`),
-            threadId: input.threadId,
-            runId: input.runId,
-            requestId,
-            prompt: `Change T3 Code settings on ${descriptor.label} (${descriptor.environmentId})?\n\n${input.reason}\n\nProposed changes:\n${encodePatch(input.patch)}\n\nApplies to this environment. Omitted settings are preserved. Access changes may require a new turn.`,
-          })
-          .pipe(Effect.mapError(unavailable));
+    update: Effect.fn("AgentSettings.update")(function* (input) {
+      if (Object.keys(input.patch).length === 0 || input.reason.trim().length === 0) {
+        return yield* new OrchestratorMcpFailure({
+          code: "invalid_request",
+          message: "Provide settings changes and explain why they are needed.",
+        });
+      }
+      const descriptor = yield* environment.getDescriptor;
+      const id = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
+      const requestId = RuntimeRequestId.make(`settings:${id}`);
+      const afterSequence = yield* threads
+        .getThreadEventSequence(input.threadId)
+        .pipe(Effect.mapError(unavailable));
+      yield* threads
+        .dispatch({
+          type: "settings-change.request",
+          commandId: CommandId.make(`settings:request:${id}`),
+          threadId: input.threadId,
+          runId: input.runId,
+          requestId,
+          prompt: `Change T3 Code settings on ${descriptor.label} (${descriptor.environmentId})?\n\n${input.reason}\n\nProposed changes:\n${encodePatch(input.patch)}\n\nApplies to this environment. Omitted settings are preserved. Access changes may require a new turn.`,
+        })
+        .pipe(Effect.mapError(unavailable));
 
-        const close = threads
-          .dispatch({
-            type: "runtime-request.respond",
-            commandId: CommandId.make(`settings:cancel:${id}`),
+      const close = threads
+        .dispatch({
+          type: "runtime-request.respond",
+          commandId: CommandId.make(`settings:cancel:${id}`),
+          threadId: input.threadId,
+          requestId,
+          decision: "cancel",
+        })
+        .pipe(Effect.ignore);
+      return yield* Effect.gen(function* () {
+        const answer = yield* threads
+          .streamStoredEventsFrom({
             threadId: input.threadId,
-            requestId,
-            decision: "cancel",
+            afterSequence,
+            eventType: "runtime-request.updated",
           })
-          .pipe(Effect.ignore);
-        return yield* Effect.gen(function* () {
-          const answer = yield* threads
-            .streamStoredEventsFrom({
-              threadId: input.threadId,
-              afterSequence,
-              eventType: "runtime-request.updated",
-            })
-            .pipe(
-              Stream.map((stored) => stored.event),
-              Stream.filter(
-                (event) =>
-                  event.type === "runtime-request.updated" &&
-                  event.payload.id === requestId &&
-                  event.payload.status !== "pending",
-              ),
-              Stream.runHead,
-              Effect.mapError(unavailable),
-            );
-          if (
-            Option.isNone(answer) ||
-            answer.value.type !== "runtime-request.updated" ||
-            answer.value.payload.status !== "resolved" ||
-            answer.value.payload.decision !== "accept"
-          ) {
-            return { applied: false };
-          }
-          return yield* executor.withLock(
-            input.threadId,
-            Effect.gen(function* () {
-              // A response may race a Stop or a subsequent turn. Approval belongs only to this run.
-              const shell = yield* threads
-                .getThreadShell(input.threadId)
-                .pipe(Effect.mapError(unavailable));
-              if (
-                !shell ||
-                shell.activeRunId !== input.runId ||
-                shell.archivedAt !== null ||
-                shell.deletedAt !== null
-              ) {
-                return yield* new OrchestratorMcpFailure({
-                  code: "parent_not_active",
-                  message: "The run requesting this settings change has ended.",
-                });
-              }
-              yield* settings.updateSettings(input.patch).pipe(Effect.mapError(unavailable));
-              return { applied: true };
-            }),
+          .pipe(
+            Stream.map((stored) => stored.event),
+            Stream.filter(
+              (event) =>
+                event.type === "runtime-request.updated" &&
+                event.payload.id === requestId &&
+                event.payload.status !== "pending",
+            ),
+            Stream.runHead,
+            Effect.mapError(unavailable),
           );
-        }).pipe(Effect.ensuring(close));
-      }),
+        if (
+          Option.isNone(answer) ||
+          answer.value.type !== "runtime-request.updated" ||
+          answer.value.payload.status !== "resolved" ||
+          answer.value.payload.decision !== "accept"
+        ) {
+          return { applied: false };
+        }
+        return yield* executor.withLock(
+          input.threadId,
+          Effect.gen(function* () {
+            // A response may race a Stop or a subsequent turn. Approval belongs only to this run.
+            const shell = yield* threads
+              .getThreadShell(input.threadId)
+              .pipe(Effect.mapError(unavailable));
+            if (
+              !shell ||
+              shell.activeRunId !== input.runId ||
+              shell.archivedAt !== null ||
+              shell.deletedAt !== null
+            ) {
+              return yield* new OrchestratorMcpFailure({
+                code: "parent_not_active",
+                message: "The run requesting this settings change has ended.",
+              });
+            }
+            yield* settings.updateSettings(input.patch).pipe(Effect.mapError(unavailable));
+            return { applied: true };
+          }),
+        );
+      }).pipe(Effect.ensuring(close));
+    }),
   });
 });
 

@@ -8,7 +8,14 @@ const testState = vi.hoisted(() => ({
   imageDimensions: undefined as { width: number; height: number } | undefined,
 }));
 
-vi.mock("@effect/atom-react", () => ({ useAtomValue: () => null }));
+vi.mock("@effect/atom-react", () => ({
+  useAtomValue: () => ({
+    pullRequestsEnabled: false,
+    availableEditors: [],
+    revealInFileManagerLabel: null,
+  }),
+  useAtomRefresh: () => () => {},
+}));
 vi.mock("../assets/assetUrls", () => ({
   useAssetUrlRefresh: () => vi.fn(),
   useAssetUrlState: (_environmentId: unknown, resource: unknown) => {
@@ -22,7 +29,10 @@ vi.mock("../assets/assetUrls", () => ({
     };
   },
 }));
-vi.mock("../hooks/useTheme", () => ({ useTheme: () => ({ resolvedTheme: "dark" }) }));
+vi.mock("../hooks/useTheme", () => ({
+  useTheme: () => ({ resolvedTheme: "dark" }),
+  useRenderedAppearance: () => "dark",
+}));
 vi.mock("../state/use-atom-query-runner", () => ({ useAtomQueryRunner: () => vi.fn() }));
 vi.mock("../state/use-atom-command", () => ({ useAtomCommand: () => vi.fn() }));
 vi.mock("../state/session", async (importOriginal) => ({
@@ -44,6 +54,7 @@ vi.mock("../editorPreferences", () => ({
 vi.mock("~/lib/openPullRequestLink", () => ({
   findProjectOnChangeRequestHost: () => undefined,
   parseChangeRequestUrl: () => null,
+  resolvePullRequestPreviewTarget: () => null,
   useOpenChangeRequestLink: () => vi.fn(),
 }));
 
@@ -69,6 +80,7 @@ function renderFilePreview(cwd: string, relativePath: string): string {
   return renderToStaticMarkup(
     <FileMarkdownPreview
       cwd={cwd}
+      workspaceMutationId={null}
       relativePath={relativePath}
       text="![diagram](images/diagram.png)"
       threadRef={threadRef}

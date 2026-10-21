@@ -18,7 +18,7 @@ vi.mock("./threads", async () => {
       threadShellAtom: Atom.family(() => Atom.make<{ title: string } | null>(null)),
     },
     environmentThreadDetails: {
-      detailAtom: Atom.family(() => Atom.make<{ title: string } | null>(null)),
+      threadAtom: Atom.family(() => Atom.make<{ title: string } | null>(null)),
     },
   };
 });
@@ -51,7 +51,7 @@ describe("pane title subscriptions", () => {
     const shell = environmentThreadShells.threadShellAtom(ref) as Atom.Writable<{
       title: string;
     } | null>;
-    const detail = environmentThreadDetails.detailAtom(ref) as Atom.Writable<{
+    const detail = environmentThreadDetails.threadAtom(ref) as Atom.Writable<{
       title: string;
     } | null>;
     // The chat owns the detail subscription even when the title reads only the shell.
@@ -129,6 +129,8 @@ describe("pane bootstrap subscriptions", () => {
       });
       expect(values).toEqual(Array(9).fill(false));
       const snapshot = {
+        schemaVersion: 2,
+        archivedThreads: [],
         snapshotSequence: 1,
         updatedAt: "2026-09-30T00:00:00Z",
         projects: [],

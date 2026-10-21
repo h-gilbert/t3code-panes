@@ -38,6 +38,10 @@ checkout. Restored pane drafts with an incomplete worktree selection can send in
 the current checkout too. Preserve explicit branch selections, existing worktrees,
 and the full chat view's worktree controls.
 
+In an empty pane with a selected project, keep that project's open threads first,
+open threads from other projects with their project names next, and that project's
+settled threads last.
+
 ## Collaborative browser
 
 - Agent browser automation defaults to background work. Preserve Playwright availability

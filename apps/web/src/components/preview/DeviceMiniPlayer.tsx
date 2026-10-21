@@ -1,5 +1,4 @@
 import { observeResize } from "~/lib/observeResize";
-("use client");
 
 import type { ScopedThreadRef } from "@t3tools/contracts";
 
@@ -7,7 +6,6 @@ import { PanelRightIcon, XIcon } from "lucide-react";
 import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
-  useCallback,
   useLayoutEffect,
   useRef,
   useState,
@@ -85,10 +83,8 @@ export function DeviceMiniPlayer({
   );
   const hostLabel =
     deviceState.hosts.find((host) => host.id === source.hostId)?.label ?? "Device host";
-  const cornerRadius = useCallback(
-    (player: PreviewMiniPlayerSize) => resolveDeviceMiniPlayerCornerRadius(source.platform, player),
-    [source.platform],
-  );
+  const cornerRadius = (player: PreviewMiniPlayerSize) =>
+    resolveDeviceMiniPlayerCornerRadius(source.platform, player);
 
   const openInPanel = () => {
     usePreviewMiniPlayerStore.getState().close(threadRef);

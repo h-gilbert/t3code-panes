@@ -1,3 +1,7 @@
+import { useStableCallback } from "../hooks/useStableCallback";
+import { useEnvironmentThread } from "../state/threads";
+import { useEnvironmentProviders } from "../state/environments";
+import { shouldTypeToFocusComposer } from "../components/chat/composerFocusRedirect";
 // @effect-diagnostics cryptoRandomUUID:off -- Synchronous workspace drag-and-drop allocates local view identities.
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -30,16 +34,15 @@ import {
   XIcon,
 } from "lucide-react";
 import {
-  useCallback,
+  useEffectEvent,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type CSSProperties,
   type RefObject,
 } from "react";
 
-import { ChatViewContent, shouldTypeToFocusComposer } from "../components/ChatView";
+import { ChatViewContent } from "../components/ChatView";
 import {
   WorkspacePaneHeaderContext,
   WorkspacePaneNavigationContext,
@@ -115,8 +118,8 @@ import {
 import { resolveWorkspaceDraftThreadRef } from "../workspacePaneTitle";
 import {
   buildWorkspaceThreadPickerItems,
+  groupWorkspaceThreadPickerItems,
   runningWorkspaceSubagentsByParent,
-  workspaceThreadPickerItemsForProject,
   type WorkspaceThreadPickerItem,
 } from "../workspacePaneThreadPicker";
 import { cn } from "~/lib/utils";
@@ -162,8 +165,10 @@ function EmptyWorkspacePane({
   readonly onSelectThread: (thread: WorkspaceThreadPickerItem) => void;
 }) {
   const projectSelected = selectedProjectKey !== null;
-  const openThreads = threads.filter((thread) => thread.status === "open");
-  const settledThreads = threads.filter((thread) => thread.status === "settled");
+  const { openThreads, otherOpenThreads, settledThreads } = groupWorkspaceThreadPickerItems(
+    threads,
+    selectedProjectKey,
+  );
   const renderThreads = (items: readonly WorkspaceThreadPickerItem[]) =>
     items.map((thread) => (
       <button
@@ -179,7 +184,7 @@ function EmptyWorkspacePane({
         )}
         <span className="min-w-0 flex-1">
           <span className="block truncate text-xs font-medium text-foreground">{thread.title}</span>
-          {!projectSelected ? (
+          {!projectSelected || thread.projectKey !== selectedProjectKey ? (
             <span className="block truncate text-2xs text-muted-foreground">
               {thread.projectName}
             </span>
@@ -259,6 +264,14 @@ function EmptyWorkspacePane({
               {renderThreads(openThreads)}
             </>
           ) : null}
+          {otherOpenThreads.length > 0 ? (
+            <>
+              <p className={cn(EMPTY_PANE_SECTION_LABEL_CLASS, "mt-1 border-t border-border pt-2")}>
+                Open in other projects
+              </p>
+              {renderThreads(otherOpenThreads)}
+            </>
+          ) : null}
           {settledThreads.length > 0 ? (
             <>
               <p className={cn(EMPTY_PANE_SECTION_LABEL_CLASS, "mt-1 border-t border-border pt-2")}>
@@ -267,7 +280,9 @@ function EmptyWorkspacePane({
               {renderThreads(settledThreads)}
             </>
           ) : null}
-          {threads.length === 0 ? (
+          {openThreads.length === 0 &&
+          otherOpenThreads.length === 0 &&
+          settledThreads.length === 0 ? (
             <p className="px-2 py-1.5 text-2xs text-muted-foreground">
               {projectSelected ? "No other open threads in this project." : "No open threads."}
             </p>
@@ -319,10 +334,15 @@ function WorkspaceThreadPane({
   const serverThreadShellExists = useThreadShellExists(threadRef);
   const serverThreadDetailExists = useThreadDetailExists(threadRef);
   const serverThreadStatus = useThreadStatus(threadRef);
+  const unlistedThreadDetail = useEnvironmentThread(
+    serverThreadShellExists ? null : threadRef.environmentId,
+    serverThreadShellExists ? null : threadRef.threadId,
+  );
   const renderState = resolveThreadRouteRenderState({
     bootstrapComplete,
     serverThreadExists: serverThreadShellExists || serverThreadDetailExists,
     serverThreadDeleted: serverThreadStatus === "deleted",
+    unlistedThreadDetail,
     draftThreadExists: false,
   });
   const threadSyncPhase = resolveThreadSyncPhase({
@@ -426,11 +446,11 @@ function WorkspaceDraftPane({
 }
 
 function RunningSubagentProviderIcon({ agent }: { readonly agent: EnvironmentThreadShell }) {
-  const serverConfigs = useServerConfigs();
+  const providers = useEnvironmentProviders();
   const instanceId = agent.runtime?.providerInstanceId ?? agent.modelSelection.instanceId;
-  const provider = serverConfigs
+  const provider = providers
     .get(agent.environmentId)
-    ?.providers.find((candidate) => candidate.instanceId === instanceId);
+    ?.find((candidate) => candidate.instanceId === instanceId);
   if (!provider) return <BotIcon className="size-3.5 shrink-0" aria-hidden />;
   return (
     <span
@@ -483,12 +503,9 @@ function WorkspacePane({
     (state) =>
       (selectProjectWorkspaceLayout(state, workspaceKey).backStacks?.[index]?.length ?? 0) > 0,
   );
-  const openRelated = useCallback(
-    (threadRef: ScopedThreadRef) => {
-      openRelatedThread(workspaceKey, threadRef, index);
-    },
-    [index, openRelatedThread, workspaceKey],
-  );
+  const openRelated = useStableCallback((threadRef: ScopedThreadRef) => {
+    openRelatedThread(workspaceKey, threadRef, index);
+  });
   const focusPane = useWorkspacePaneStore((state) => state.focusPane);
   const clearPane = useWorkspacePaneStore((state) => state.clearPane);
   const setPaneProject = useWorkspacePaneStore((state) => state.setPaneProject);
@@ -507,92 +524,81 @@ function WorkspacePane({
   const draftRequestVersionRef = useRef(0);
   const serverThreadRef = paneTarget && "threadId" in paneTarget ? paneTarget : null;
   const serverThreadShell = useThreadShell(serverThreadRef);
-  const openFreshDraft = useCallback(
-    (projectRef: ScopedProjectRef) => {
-      const requestVersion = ++draftRequestVersionRef.current;
-      const freshDraft = { draftId: newDraftId(), threadId: newThreadId() };
-      void handleNewThread(projectRef, { navigate: false, freshDraft }).then((opened) => {
-        if (draftRequestVersionRef.current === requestVersion && opened) {
-          assignDraft(workspaceKey, opened.draftId, index);
-        }
-      });
-    },
-    [assignDraft, handleNewThread, index, workspaceKey],
-  );
-  const selectProject = useCallback(
-    (projectRef: ScopedProjectRef) => {
-      draftRequestVersionRef.current += 1;
-      const project = projects.find((candidate) =>
-        candidate.memberProjectRefs.some(
-          (member) =>
-            member.environmentId === projectRef.environmentId &&
-            member.projectId === projectRef.projectId,
-        ),
-      );
-      if (!project) {
-        setPendingProjectRef(projectRef);
-        return;
+  const openFreshDraft = useStableCallback((projectRef: ScopedProjectRef) => {
+    const requestVersion = ++draftRequestVersionRef.current;
+    const freshDraft = { draftId: newDraftId(), threadId: newThreadId() };
+    void handleNewThread(projectRef, { navigate: false, freshDraft }).then((opened) => {
+      if (draftRequestVersionRef.current === requestVersion && opened) {
+        assignDraft(workspaceKey, opened.draftId, index);
       }
-      setPendingProjectRef(null);
-      // Choosing a hidden project, including re-adding its directory, puts it
-      // back in the pane project menu.
-      setPickerProjectHidden(project.projectKey, false);
-      setPaneProject(workspaceKey, index, project.projectKey);
-    },
-    [index, projects, setPaneProject, setPickerProjectHidden, workspaceKey],
+    });
+  });
+  const selectProject = useStableCallback((projectRef: ScopedProjectRef) => {
+    draftRequestVersionRef.current += 1;
+    const project = projects.find((candidate) =>
+      candidate.memberProjectRefs.some(
+        (member) =>
+          member.environmentId === projectRef.environmentId &&
+          member.projectId === projectRef.projectId,
+      ),
+    );
+    if (!project) {
+      setPendingProjectRef(projectRef);
+      return;
+    }
+    setPendingProjectRef(null);
+    // Choosing a hidden project, including re-adding its directory, puts it
+    // back in the pane project menu.
+    setPickerProjectHidden(project.projectKey, false);
+    setPaneProject(workspaceKey, index, project.projectKey);
+  });
+  const openProjectPicker = useStableCallback(() =>
+    openCommandPalette({ open: "add-local-project", onProjectSelected: selectProject }),
   );
-  const openProjectPicker = useCallback(
-    () => openCommandPalette({ open: "add-local-project", onProjectSelected: selectProject }),
-    [selectProject],
-  );
-  const selectedProject = useMemo(
-    () => projects.find((project) => project.projectKey === projectKey) ?? null,
-    [projectKey, projects],
-  );
-  const [menuProjects, hiddenMenuProjects] = useMemo(() => {
+  const selectedProject = (() =>
+    projects.find((project) => project.projectKey === projectKey) ?? null)();
+  const [menuProjects, hiddenMenuProjects] = (() => {
     const hiddenKeys = new Set(hiddenPickerProjectKeys);
     return [
       projects.filter((project) => !hiddenKeys.has(project.projectKey)),
       projects.filter((project) => hiddenKeys.has(project.projectKey)),
     ];
-  }, [hiddenPickerProjectKeys, projects]);
-  const pickerThreads = useMemo(
-    () =>
-      workspaceThreadPickerItemsForProject(availableThreads, selectedProject?.projectKey ?? null),
-    [availableThreads, selectedProject?.projectKey],
-  );
-
+  })();
+  const resolvePendingProject = useEffectEvent(() => {
+    if (pendingProjectRef) selectProject(pendingProjectRef);
+  });
+  const pendingProjectReady =
+    pendingProjectRef !== null &&
+    projects.some((project) =>
+      project.memberProjectRefs.some(
+        (member) =>
+          member.environmentId === pendingProjectRef.environmentId &&
+          member.projectId === pendingProjectRef.projectId,
+      ),
+    );
   useEffect(() => {
-    if (pendingProjectRef) {
-      selectProject(pendingProjectRef);
-    }
-  }, [pendingProjectRef, selectProject]);
+    if (pendingProjectReady) resolvePendingProject();
+  }, [pendingProjectReady]);
 
-  const startNewThread = useCallback(
-    (project: SidebarProjectSnapshot) => {
-      const projectRef = scopeProjectRef(project.environmentId, project.id);
-      selectProject(projectRef);
-      openFreshDraft(projectRef);
-    },
-    [openFreshDraft, selectProject],
-  );
-  const openExistingThread = useCallback(
-    (thread: WorkspaceThreadPickerItem) => {
-      draftRequestVersionRef.current += 1;
-      setPaneProject(workspaceKey, index, thread.projectKey);
-      assignThread(workspaceKey, thread.threadRef, index);
-    },
-    [assignThread, index, setPaneProject, workspaceKey],
-  );
-  const handleClearPane = useCallback(() => {
+  const startNewThread = useStableCallback((project: SidebarProjectSnapshot) => {
+    const projectRef = scopeProjectRef(project.environmentId, project.id);
+    selectProject(projectRef);
+    openFreshDraft(projectRef);
+  });
+  const openExistingThread = useStableCallback((thread: WorkspaceThreadPickerItem) => {
+    draftRequestVersionRef.current += 1;
+    setPaneProject(workspaceKey, index, thread.projectKey);
+    assignThread(workspaceKey, thread.threadRef, index);
+  });
+  const handleClearPane = useStableCallback(() => {
     // Invalidate a project selection that is still preparing its draft so it
     // cannot repopulate the pane after the user clears it.
     draftRequestVersionRef.current += 1;
     clearPane(workspaceKey, index);
-  }, [clearPane, index, workspaceKey]);
+  });
   const settleAvailable =
     serverThreadShell !== null && canSettle(serverThreadShell, { now: new Date().toISOString() });
-  const finishThread = useCallback(async () => {
+  const finishThread = useStableCallback(async () => {
     if (!serverThreadRef || settling) return;
     setSettling(true);
     const result = await settleThread(serverThreadRef);
@@ -609,7 +615,7 @@ function WorkspacePane({
       return;
     }
     clearPane(workspaceKey, index);
-  }, [clearPane, index, serverThreadRef, settleThread, settling, workspaceKey]);
+  });
 
   return (
     <section
@@ -929,7 +935,7 @@ function WorkspacePane({
               paneNumber={index + 1}
               projects={menuProjects}
               selectedProjectKey={selectedProject?.projectKey ?? null}
-              threads={pickerThreads}
+              threads={availableThreads}
               onSelectProject={(project) =>
                 selectProject(scopeProjectRef(project.environmentId, project.id))
               }
@@ -953,23 +959,20 @@ export function ProjectPaneWorkspace({
 }) {
   const projects = useProjects();
   const threads = useThreadShells();
-  const runningAgents = useMemo(() => runningWorkspaceSubagentsByParent(threads), [threads]);
+  const runningAgents = (() => runningWorkspaceSubagentsByParent(threads))();
   const serverConfigs = useServerConfigs();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { isMacosDesktop, isWindowFullscreen } = useDesktopFullscreen();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const nowMinute = useNowMinute();
-  const projectGroups = useMemo(
-    () =>
-      buildSidebarProjectSnapshots({
-        projects,
-        settings: projectGroupingSettings,
-        primaryEnvironmentId,
-        resolveEnvironmentLabel: () => null,
-      }),
-    [primaryEnvironmentId, projectGroupingSettings, projects],
-  );
+  const projectGroups = (() =>
+    buildSidebarProjectSnapshots({
+      projects,
+      settings: projectGroupingSettings,
+      primaryEnvironmentId,
+      resolveEnvironmentLabel: () => null,
+    }))();
   const layout = useWorkspacePaneStore((state) =>
     selectProjectWorkspaceLayout(state, workspaceKey),
   );
@@ -993,7 +996,7 @@ export function ProjectPaneWorkspace({
       key: `${workspacePaneRenderKey(paneTarget, index)}:${panes.slice(0, index).filter((target) => target && paneTarget && "threadId" in target && "threadId" in paneTarget && scopedThreadKey(target) === scopedThreadKey(paneTarget)).length}`,
     }))
     .toSorted((left, right) => left.key.localeCompare(right.key));
-  const settledThreadKeys = useMemo(() => {
+  const settledThreadKeys = (() => {
     const now = `${nowMinute}:00.000Z`;
     return new Set(
       threads.flatMap((thread) => {
@@ -1005,30 +1008,27 @@ export function ProjectPaneWorkspace({
         return thread.settledOverride === "settled" ? [threadKey] : [];
       }),
     );
-  }, [nowMinute, serverConfigs, threads]);
-  const availableThreads = useMemo(
-    () =>
-      buildWorkspaceThreadPickerItems({
-        threads,
-        projects: projectGroups,
-        paneTargets: panes,
-        settledThreadKeys,
-      }),
-    [panes, projectGroups, settledThreadKeys, threads],
-  );
-  const paneComposerHandleRefs = useRef(
+  })();
+  const availableThreads = (() =>
+    buildWorkspaceThreadPickerItems({
+      threads,
+      projects: projectGroups,
+      paneTargets: panes,
+      settledThreadKeys,
+    }))();
+  const [paneComposerHandleRefs] = useState(() =>
     Array.from(
       { length: WORKSPACE_PANE_COUNT },
       () => ({ current: null }) as RefObject<ChatComposerHandle | null>,
     ),
-  ).current;
-  const openWorkspaceWindow = useCallback(() => {
+  );
+  const openWorkspaceWindow = useStableCallback(() => {
     const nextWorkspace = window.crypto.randomUUID();
     // Electron routes with hash history, so the workspace id must live in the
     // fragment or the new window falls back to the shared "main" workspace.
     const path = `/workspace?workspace=${encodeURIComponent(nextWorkspace)}`;
     window.open(isElectron ? `/#${path}` : path, "_blank");
-  }, []);
+  });
 
   useEffect(() => {
     if (!active) return;

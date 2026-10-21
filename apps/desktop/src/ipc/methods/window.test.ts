@@ -29,10 +29,12 @@ import * as DesktopIpc from "../DesktopIpc.ts";
 import * as DesktopAppSettings from "../../settings/DesktopAppSettings.ts";
 import {
   getLocalEnvironmentBootstraps,
+  getRelayTelemetryEnabled,
   getWindowFullscreenState,
   pasteAsText,
   pickProjectFavicon,
   probeRemoteEditors,
+  revealWindow,
 } from "./window.ts";
 
 const readyWslConfig: DesktopBackendManager.DesktopBackendStartConfig = {
@@ -109,7 +111,9 @@ describe("getLocalEnvironmentBootstraps", () => {
 
   it.effect("hands out the current window's token to a backend launched with the secret", () =>
     Effect.gen(function* () {
-      const result = yield* getLocalEnvironmentBootstraps.handler();
+      const result = yield* getLocalEnvironmentBootstraps.handler(
+        {} as DesktopIpc.DesktopIpcSyncEvent,
+      );
 
       assert.deepEqual(result, [
         {
@@ -205,6 +209,25 @@ describe("getLocalEnvironmentBootstraps", () => {
   });
 });
 
+describe("getRelayTelemetryEnabled", () => {
+  it.effect("reads the desktop host opt-out before returning the renderer policy", () =>
+    Effect.gen(function* () {
+      assert.isFalse(
+        yield* getRelayTelemetryEnabled.handler({} as DesktopIpc.DesktopIpcSyncEvent).pipe(
+          Effect.provideService(HostProcess.Environment, {
+            T3CODE_TELEMETRY_ENABLED: "false",
+          }),
+        ),
+      );
+      assert.isTrue(
+        yield* getRelayTelemetryEnabled
+          .handler({} as DesktopIpc.DesktopIpcSyncEvent)
+          .pipe(Effect.provideService(HostProcess.Environment, {})),
+      );
+    }),
+  );
+});
+
 describe("getWindowFullscreenState", () => {
   it.effect("reads the native state of the window that sent the request", () => {
     const sender = {} as Electron.WebContents;
@@ -294,6 +317,50 @@ describe("pasteAsText", () => {
     }).pipe(
       Effect.provide(
         Layer.mock(ElectronWindow.ElectronWindow)({ main: Effect.succeed(Option.some(main)) }),
+      ),
+    );
+  });
+});
+
+describe("revealWindow", () => {
+  it.effect("reveals the main window only when it asks", () => {
+    const window = {
+      webContents: { id: 42 },
+      isDestroyed: () => false,
+    } as unknown as Electron.BrowserWindow;
+    const reveal = vi.fn(() => Effect.void);
+    return Effect.gen(function* () {
+      yield* revealWindow.handler(undefined, { sender: { id: 99 } });
+      assert.equal(reveal.mock.calls.length, 0);
+      yield* revealWindow.handler(undefined, { sender: { id: 42 } });
+      assert.deepEqual(reveal.mock.calls, [[window]]);
+    }).pipe(
+      Effect.provide(
+        Layer.mock(ElectronWindow.ElectronWindow)({
+          main: Effect.succeedSome(window),
+          reveal,
+        }),
+      ),
+    );
+  });
+  it.effect("reveals the requesting secondary workspace and ignores it after closing", () => {
+    const closed = vi.fn();
+    const workspace = {
+      webContents: { id: 73 },
+      isDestroyed: () => false,
+      once: (_event: string, listener: () => void) => closed.mockImplementation(listener),
+    } as unknown as Electron.BrowserWindow;
+    registerWorkspaceWindow(workspace);
+    const reveal = vi.fn(() => Effect.void);
+    return Effect.gen(function* () {
+      yield* revealWindow.handler(undefined, { sender: { id: 73 } });
+      assert.deepEqual(reveal.mock.calls, [[workspace]]);
+      closed();
+      yield* revealWindow.handler(undefined, { sender: { id: 73 } });
+      assert.equal(reveal.mock.calls.length, 1);
+    }).pipe(
+      Effect.provide(
+        Layer.mock(ElectronWindow.ElectronWindow)({ main: Effect.succeedNone, reveal }),
       ),
     );
   });

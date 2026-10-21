@@ -31,11 +31,15 @@ const environmentId = EnvironmentId.make("environment-1");
 
 const makeBroker = PreviewAutomationBroker.make.pipe(Effect.provide(NodeServices.layer));
 
-const makeScope = (index: number): McpInvocationContext.McpInvocationScope => ({
+const makeScope = (index: number): McpInvocationContext.McpThreadInvocationScope => ({
   environmentId,
-  threadId: ThreadId.make(`thread-${index}`),
-  providerSessionId: `provider-session-${index}`,
-  providerInstanceId: ProviderInstanceId.make("codex"),
+  thread: {
+    threadId: ThreadId.make(`thread-${index}`),
+    providerSessionId: `provider-session-${index}`,
+    providerInstanceId: ProviderInstanceId.make("codex"),
+  },
+  client: undefined,
+  requestNamespace: `provider-session-${index}`,
   capabilities: new Set(["preview"] as const),
   issuedAt: 1,
 });
@@ -200,7 +204,7 @@ it.effect("releases claims when contending requests are interrupted mid-flight",
           .pipe(Effect.forkScoped);
         yield* Effect.yieldNow;
         expect(yield* broker.readHold({ scope: makeScope(999), tabId })).toMatchObject({
-          providerSessionId: scope.providerSessionId,
+          providerSessionId: scope.thread.providerSessionId,
         });
 
         yield* Fiber.interrupt(driving);

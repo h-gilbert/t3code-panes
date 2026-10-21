@@ -193,7 +193,7 @@ export const make = Effect.gen(function* () {
     SynchronizedRef.modifyEffect(windowsRef, (windows) => {
       const nextWindows = update(windows);
       if (nextWindows === windows) return Effect.succeed([undefined, windows] as const);
-      return crypto.randomUUIDv4.pipe(
+      return crypto.randomUUIDv4().pipe(
         Effect.map((uuid) => uuid.replace(/-/g, "")),
         Effect.mapError(
           (cause) =>

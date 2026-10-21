@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import { cloneElement, isValidElement, type ReactElement } from "react";
 import {
   DEFAULT_UNIFIED_SETTINGS,
   EnvironmentId,
@@ -51,6 +51,7 @@ vi.mock("react", async (importOriginal) => {
   return {
     ...actual,
     useCallback: reactHookHarness.useCallback,
+    useLayoutEffect: () => {},
     useEffect: (effect: () => void) => settingsSearchState.effects.push(effect),
     useMemo: reactHookHarness.useMemo,
     useRef: reactHookHarness.useRef,
@@ -73,12 +74,20 @@ vi.mock("react/compiler-runtime", async () => {
 });
 
 vi.mock("@effect/atom-react", () => ({
-  useAtomValue: () => atoms.providers,
+  useAtomValue: (atom: unknown, selector?: (value: unknown) => unknown) => {
+    const value =
+      atom === "config"
+        ? { environment: { capabilities: { projectProviderInstanceOverrides: true } } }
+        : (atoms.providers ?? []);
+    return selector ? selector(value) : value;
+  },
 }));
 
 vi.mock("../../state/server", () => ({
   EMPTY_SERVER_PROVIDERS: [],
+  providersIgnoringCheckedAtAtom: () => atoms.providersAtom,
   serverEnvironment: {
+    configValueAtom: () => "config",
     providersValueAtom: () => atoms.providersAtom,
     refreshProviders: atoms.refreshProviders,
     updateProvider: atoms.updateProvider,
@@ -180,7 +189,7 @@ function renderPanel(options?: {
   readonly targetInstanceId?: ProviderInstanceId;
 }): ReactElement<Record<string, unknown>> {
   hooks.beginRender();
-  return EnvironmentProviderSettings({
+  const panel = EnvironmentProviderSettings({
     environmentId,
     environmentLabel: "Remote device",
     ...(options?.readOnly === undefined ? {} : { readOnly: options.readOnly }),
@@ -188,6 +197,22 @@ function renderPanel(options?: {
       ? {}
       : { targetInstanceId: options.targetInstanceId }),
   }) as ReactElement<Record<string, unknown>>;
+  // Upstream moved the card callbacks into a row component. Evaluate that
+  // boundary so these routing assertions still exercise the public card actions.
+  function expandRows(node: unknown): unknown {
+    if (Array.isArray(node)) return node.map(expandRows);
+    if (!isValidElement<Record<string, unknown>>(node)) return node;
+    if (typeof node.type === "function" && node.type.name === "ProviderInstanceRow") {
+      return expandRows((node.type as (props: Record<string, unknown>) => unknown)(node.props));
+    }
+    return cloneElement(
+      node,
+      Object.fromEntries(
+        Object.entries(node.props).map(([key, value]) => [key, expandRows(value)]),
+      ),
+    );
+  }
+  return expandRows(panel) as ReactElement<Record<string, unknown>>;
 }
 
 function isRefreshButton(element: ReactElement<Record<string, unknown>>): boolean {

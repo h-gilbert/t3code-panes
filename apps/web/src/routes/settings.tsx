@@ -24,22 +24,11 @@ import {
   validateSettingsRouteSearch,
 } from "../components/settings/settingsScopeNavigation";
 import {
+  SETTINGS_SECTION_ANCHORS,
   getSettingsSearchTargetScope,
   getThreadAutoSettlementSearchAvailability,
   isSettingsSearchScopeAvailable,
 } from "../components/settings/settingsSearch";
-
-const LEGACY_SETTINGS_SECTION_ANCHORS: Readonly<Record<string, string>> = {
-  "/settings/snap-shot": "settings-snap-shot",
-  "/settings/general": "settings-general",
-  "/settings/appearance": "settings-appearance",
-  "/settings/keybindings": "settings-keybindings",
-  "/settings/providers": "settings-providers",
-  "/settings/integrations": "settings-integrations",
-  "/settings/source-control": "settings-source-control",
-  "/settings/connections": "settings-connections",
-  "/settings/archived": "settings-archive",
-};
 
 function RestoreDeviceDefaultsButton({ onRestored }: { onRestored: () => void }) {
   const { changedSettingLabels, restoreDefaults } = useSettingsRestore(onRestored);
@@ -99,12 +88,9 @@ function SettingsScopeBoundary({ pathname, children }: { pathname: string; child
       </SettingsScopeNotice>
     );
   }
-  // Device-local pages ignore the scope entirely; the project page follows
-  // remembered members while a grouping change replaces its URL key.
   if (SETTINGS_DEVICE_ONLY_PATHS.has(pathname) || pathname === "/settings/projects") {
     return children;
   }
-  // Keep the scope sentence on screen so the selection can be changed back.
   if (scope.kind === "unavailable")
     return (
       <SettingsPageContainer>
@@ -205,7 +191,7 @@ export const Route = createFileRoute("/settings")({
       throw redirect({ to: "/pair", replace: true });
     }
 
-    const sectionAnchor = LEGACY_SETTINGS_SECTION_ANCHORS[location.pathname];
+    const sectionAnchor = SETTINGS_SECTION_ANCHORS[location.pathname];
     if (sectionAnchor) {
       throw redirect({
         to: "/settings",

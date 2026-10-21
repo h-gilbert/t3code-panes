@@ -52,6 +52,8 @@ function renderRunningActions(hasSendableContent: boolean) {
       compact: true,
       pendingAction: null,
       isRunning: true,
+      canOperateThread: true,
+      canInterrupt: true,
       showPlanFollowUpPrompt: false,
       promptHasText: hasSendableContent,
       isSendBusy: false,

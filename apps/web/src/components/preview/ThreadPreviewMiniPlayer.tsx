@@ -1,3 +1,5 @@
+import { previewPdfAssetUrl } from "@t3tools/shared/preview";
+import { useEnvironmentHttpBaseUrl } from "~/state/environments";
 import { observeResize } from "~/lib/observeResize";
 import { DeviceMiniPlayer } from "./DeviceMiniPlayer";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
@@ -84,6 +86,7 @@ interface BrowserProps {
 }
 
 function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
+  const httpBaseUrl = useEnvironmentHttpBaseUrl(threadRef.environmentId);
   const [anchorLayout, setAnchorLayout] = useState(0);
   const rootRef = useRef<HTMLElement | null>(null);
   const anchorRef = useRef<HTMLDivElement | null>(null);
@@ -199,12 +202,15 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
   }, [floating, hasPreview, maximized, tabId, threadRef]);
 
   useLayoutEffect(
-    () => () => {
-      if (dragFrameRef.current !== null) cancelAnimationFrame(dragFrameRef.current);
-      dragFrameRef.current = null;
-      pendingPositionRef.current = null;
-      dragRef.current = null;
+    () => {
+      return () => {
+        if (dragFrameRef.current !== null) cancelAnimationFrame(dragFrameRef.current);
+        dragFrameRef.current = null;
+        pendingPositionRef.current = null;
+        dragRef.current = null;
+      };
     },
+    // eslint-disable-next-line react/exhaustive-effect-dependencies -- Changing the surface or its presentation must cancel the previous drag even before another pointer event.
     [tabId, threadRef, floating, maximized],
   );
 
@@ -445,6 +451,11 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
               environmentId={threadRef.environmentId}
               threadId={threadRef.threadId}
               tabId={tabId}
+              pdfUrl={
+                snapshot?.navStatus._tag === "Success"
+                  ? previewPdfAssetUrl(snapshot.navStatus.url, httpBaseUrl)
+                  : null
+              }
               visible
               followSize={!compact}
               controlPosition="bottom"

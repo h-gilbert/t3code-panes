@@ -1,16 +1,9 @@
 /**
- * Presents one preview tab's debugger as a minimal CDP browser endpoint, so
- * the environment server can drive a desktop `<webview>` with the same
- * Playwright engine it uses for headless tabs.
- *
- * Only the tab's own page is reachable. Browser-level commands Playwright sends
- * while connecting are answered here, and every page command goes to the tab's
- * `webContents.debugger`. Electron allows one debugger client per webContents,
- * so the relay shares the attach the preview manager already holds.
+ * Electron allows one debugger client per webContents, so the relay shares the
+ * attach the preview manager already holds.
  */
 
 export interface CdpRelayTarget {
-  /** Sends a command to the tab's page, or to a child session such as an iframe. */
   readonly send: (
     method: string,
     params: Record<string, unknown>,
@@ -22,18 +15,18 @@ export interface CdpRelayTarget {
   readonly title: () => string;
   readonly userAgent: () => string;
   /**
-   * Where the server wants this tab's downloads, named by their CDP guid. The
-   * desktop app and the server it launched share a disk, so the server's
+   * The desktop app and the server it launched share a disk, so the server's
    * Playwright reads the file where it asked for it.
    */
   readonly setDownloadDirectory: (directory: string | null) => void;
+  /** Composite hidden guests only while a capture or viewer needs frames. */
+  readonly setFrameActivity?: (active: boolean) => void;
 }
 
 export interface CdpRelayConnection {
-  /** Feed one message from the server. */
   readonly receive: (raw: string) => void;
-  /** Feed one debugger event from the tab. */
   readonly event: (method: string, params: unknown, sessionId: string | undefined) => void;
+  readonly dispose: () => void;
 }
 
 interface CdpCommand {
@@ -50,12 +43,9 @@ const isCommand = (value: unknown): value is CdpCommand =>
   typeof (value as { method?: unknown }).method === "string";
 
 const BROWSER_CONTEXT_ID = "t3-preview";
-/** Marks an event to send right after a command's reply. */
 const ANNOUNCE = Symbol("announce");
-/** The page's root session id, as Playwright sees it. */
 const PAGE_SESSION_ID = "t3-preview-page";
 
-/** Browser-level commands that only need acknowledging for a page the desktop owns. */
 const ACKNOWLEDGED = new Set([
   "Target.setDiscoverTargets",
   "Browser.grantPermissions",
@@ -70,6 +60,16 @@ export function createCdpRelayConnection(
   const send = (message: Record<string, unknown>) => write(JSON.stringify(message));
   let attached = false;
   let runtimeReset: Promise<unknown> | undefined;
+  let disposed = false;
+  let captures = 0;
+  let frameActivity = false;
+  const screencasts = new Set<string>();
+  const syncFrameActivity = () => {
+    const active = !disposed && (captures > 0 || screencasts.size > 0);
+    if (active === frameActivity) return;
+    frameActivity = active;
+    target.setFrameActivity?.(active);
+  };
   /**
    * Sessions this relay invented. Extra page sessions (Playwright's
    * `newCDPSession`) all reach the one real debugger session, so each gets the
@@ -96,8 +96,6 @@ export function createCdpRelayConnection(
     if (ACKNOWLEDGED.has(command.method)) return {};
     switch (command.method) {
       case "Browser.setDownloadBehavior": {
-        // The tab's debugger reports downloads as Chromium does, so the server
-        // sees them as its own. Only the directory needs the desktop's help.
         const directory = command.params?.["downloadPath"];
         const allowed = command.params?.["behavior"] !== "deny" && typeof directory === "string";
         target.setDownloadDirectory(allowed ? directory : null);
@@ -139,12 +137,13 @@ export function createCdpRelayConnection(
         const sessionId = command.params?.["sessionId"];
         if (typeof sessionId === "string" && sessionId !== PAGE_SESSION_ID)
           sessions.delete(sessionId);
+        if (typeof sessionId === "string") screencasts.delete(sessionId);
+        syncFrameActivity();
         return {};
       }
       case "Target.setAutoAttach": {
         if (attached) return {};
         attached = true;
-        // The page is announced once, right after this reply, as Chromium does.
         const info = await targetInfo();
         return {
           [ANNOUNCE]: {
@@ -160,6 +159,35 @@ export function createCdpRelayConnection(
 
   const pageCommand = (command: CdpCommand): Promise<unknown> => {
     const child = sessions.get(command.sessionId!) === "page" ? undefined : command.sessionId;
+    if (command.method === "Page.captureScreenshot") {
+      captures += 1;
+      syncFrameActivity();
+      return (async () => {
+        try {
+          return await target.send(command.method, command.params ?? {}, child);
+        } finally {
+          captures -= 1;
+          syncFrameActivity();
+        }
+      })();
+    }
+    if (command.method === "Page.startScreencast") {
+      screencasts.add(command.sessionId!);
+      syncFrameActivity();
+      return (async () => {
+        try {
+          return await target.send(command.method, command.params ?? {}, child);
+        } catch (cause) {
+          screencasts.delete(command.sessionId!);
+          syncFrameActivity();
+          throw cause;
+        }
+      })();
+    }
+    if (command.method === "Page.stopScreencast") {
+      screencasts.delete(command.sessionId!);
+      syncFrameActivity();
+    }
     if (command.method === "Runtime.enable" && command.sessionId === PAGE_SESSION_ID) {
       // The manager enabled Runtime before this relay existed. Enabling it again
       // does not replay existing contexts, leaving Playwright's main-world reads
@@ -180,6 +208,11 @@ export function createCdpRelayConnection(
   };
 
   return {
+    dispose: () => {
+      disposed = true;
+      screencasts.clear();
+      syncFrameActivity();
+    },
     receive: (raw) => {
       let command: unknown;
       try {

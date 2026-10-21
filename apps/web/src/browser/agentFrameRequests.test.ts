@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 
-import { holdFramesForTurn } from "./agentFrameRequests";
+import { createBrowserFrameActivity, holdFramesForTurn } from "./agentFrameRequests";
 import { useBrowserSurfaceStore } from "./browserSurfaceStore";
 
 const shell = vi.hoisted(() => ({ atom: null as unknown }));
@@ -64,5 +64,37 @@ describe("holdFramesForTurn", () => {
   it("does not draw for a capture outside a turn", () => {
     holdFramesForTurn("tab-2", threadRef);
     expect(drawing("tab-2")).toBe(0);
+  });
+});
+
+describe("browser capture and viewer activity", () => {
+  it("paints an idle thread only for actual capture or viewer demand", () => {
+    setStatus("idle");
+    const activity = createBrowserFrameActivity();
+    activity.set("viewer-tab", true);
+    activity.set("viewer-tab", true);
+    expect(drawing("viewer-tab")).toBe(1);
+    activity.set("viewer-tab", false);
+    expect(drawing("viewer-tab")).toBe(0);
+    activity.set("viewer-tab", true);
+    activity.retain(new Set(["viewer-tab"]));
+    expect(drawing("viewer-tab")).toBe(1);
+    activity.retain(new Set());
+    expect(drawing("viewer-tab")).toBe(0);
+    activity.set("viewer-tab", true);
+    activity.dispose();
+    expect(drawing("viewer-tab")).toBe(0);
+  });
+
+  it("releases a viewer without releasing the agent's turn lease", () => {
+    setStatus("running");
+    holdFramesForTurn("shared-tab", threadRef);
+    const activity = createBrowserFrameActivity();
+    activity.set("shared-tab", true);
+    expect(drawing("shared-tab")).toBe(2);
+    activity.dispose();
+    expect(drawing("shared-tab")).toBe(1);
+    setStatus("idle");
+    expect(drawing("shared-tab")).toBe(0);
   });
 });

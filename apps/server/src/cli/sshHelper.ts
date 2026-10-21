@@ -1,8 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off
 // @effect-diagnostics globalTimers:off
 // @effect-diagnostics globalDateInEffect:off
-// The helpers mirror the inline Node snippets the SSH launch script used to
-// run, byte for byte in behaviour, so they stay on plain Node APIs.
 import * as NodeFS from "node:fs";
 import * as NodeHttp from "node:http";
 import * as NodeNet from "node:net";
@@ -86,7 +84,6 @@ const probe = (port: number, probeTimeoutMs: number) =>
     request.once("error", () => resolve(false));
   });
 
-/** Exits 0 once the loopback server answers, 1 when the deadline passes first. */
 const waitReady = Command.make("wait-ready", {
   port: Argument.Int("port"),
   timeoutMs: Argument.Int("timeout-ms"),

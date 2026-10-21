@@ -1,3 +1,5 @@
+import { SERVER_EXIT_CODE_STATE_DIR_OWNED } from "@t3tools/contracts";
+import * as Runtime from "effect/Runtime";
 // @effect-diagnostics nodeBuiltinImport:off - SQLite supplies the cross-process OS lock.
 import * as NodeSqlite from "node:sqlite";
 
@@ -13,6 +15,7 @@ export class ServerHomeLockError extends Schema.TaggedError<ServerHomeLockError>
   "ServerHomeLockError",
   { stateDir: Schema.String, detail: Schema.String, cause: Schema.optional(Schema.Defect()) },
 ) {
+  override readonly [Runtime.errorExitCode] = SERVER_EXIT_CODE_STATE_DIR_OWNED;
   override get message(): string {
     return `Cannot start T3 in ${this.stateDir}: ${this.detail}`;
   }
