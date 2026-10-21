@@ -18,6 +18,7 @@ import {
   PreviewAutomationFileTooLargeError,
   PreviewAutomationFileTransferError,
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
+  PREVIEW_UPLOAD_MAX_FILE_BYTES,
   PreviewAutomationRecordingDeadlineExpiredError,
   PreviewAutomationRequestQueueClosedError,
   PreviewAutomationResultTooLargeError,
@@ -370,7 +371,16 @@ const classifyResponseError = (
           detail && "fileName" in detail && typeof detail.fileName === "string"
             ? detail.fileName
             : "The file",
-        maximumBytes: PROVIDER_SEND_TURN_MAX_FILE_BYTES,
+        maximumBytes:
+          detail &&
+          "maximumBytes" in detail &&
+          typeof detail.maximumBytes === "number" &&
+          Number.isSafeInteger(detail.maximumBytes) &&
+          detail.maximumBytes > 0
+            ? detail.maximumBytes
+            : context.operation === "upload"
+              ? PREVIEW_UPLOAD_MAX_FILE_BYTES
+              : PROVIDER_SEND_TURN_MAX_FILE_BYTES,
       });
     }
     case "PreviewAutomationFileTransferError":

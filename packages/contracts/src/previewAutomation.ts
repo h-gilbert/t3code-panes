@@ -726,6 +726,10 @@ export type PreviewAutomationInputResult = typeof PreviewAutomationInputResult.T
 
 export const PREVIEW_FILE_TRANSFER_MAX_FILES = 10;
 export const PREVIEW_FILE_TRANSFER_TIMEOUT_MS = 120_000;
+// Browser uploads use disk-backed files, independently of chat attachment limits.
+export const PREVIEW_UPLOAD_MAX_FILE_BYTES = 1024 * 1024 * 1024;
+export const PREVIEW_UPLOAD_CHUNK_BYTES = 256 * 1024;
+export const PREVIEW_UPLOAD_TIMEOUT_MS = 600_000;
 
 const AbsoluteEnvironmentPath = TrimmedNonEmptyString.check(Schema.isMaxLength(4096)).annotate({
   description: "Absolute path to a file in this agent's environment.",
@@ -737,7 +741,7 @@ export const PreviewAutomationUploadInput = Schema.Struct({
   paths: Schema.Array(AbsoluteEnvironmentPath)
     .check(Schema.isMaxLength(PREVIEW_FILE_TRANSFER_MAX_FILES))
     .annotate({
-      description: `Absolute paths of the files to choose, read from this agent's environment. At most ${PREVIEW_FILE_TRANSFER_MAX_FILES} files of up to 50 MiB each.`,
+      description: `Absolute paths of the files to choose, read from this agent's environment. At most ${PREVIEW_FILE_TRANSFER_MAX_FILES} files of up to 1 GiB each.`,
     }),
   selector: Schema.optional(LegacySelector).annotate({
     description: "Legacy CSS selector for the file input or upload control. Prefer locator.",

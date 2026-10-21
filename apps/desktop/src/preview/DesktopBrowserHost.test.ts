@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off - Stands in for an Electron debugger.
 import { describe, expect, it } from "@effect/vitest";
-import { DesktopBrowserEvent } from "@t3tools/contracts";
+import { DesktopBrowserEvent, type DesktopBrowserPrivateOperation } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Schema from "effect/Schema";
@@ -342,5 +342,105 @@ it.effect("stores remote downloads locally and only transfers registered files",
       ),
     ).toBe(false);
     host.detach(remoteKey);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("selects transferred remote files through CDP and isolates uploads by environment", () =>
+  Effect.gen(function* () {
+    const host = yield* DesktopBrowserHost.make;
+    const received: Array<Record<string, unknown>> = [];
+    const remoteKey = { ...key, environmentId: "remote-upload-host" };
+    const debuggee = makeDebuggee();
+    host.attach(remoteKey, {
+      ...debuggee.tab,
+      send: async (_method, params) => {
+        received.push(params);
+        return {};
+      },
+    });
+    yield* Effect.addFinalizer(() => Effect.sync(() => host.detach(remoteKey)));
+    const operation = (request: DesktopBrowserPrivateOperation) =>
+      Effect.gen(function* () {
+        const reader = yield* host.remoteEvents.pipe(
+          Stream.filter((entry) => entry.event.type === "operationResult"),
+          Stream.take(1),
+          Stream.runCollect,
+          Effect.forkScoped,
+        );
+        yield* Effect.yieldNow;
+        yield* host.remoteCommand(remoteKey.environmentId, {
+          type: "operation",
+          ...key,
+          requestId: "upload",
+          request,
+        });
+        return (yield* Fiber.join(reader))[0]!.event;
+      });
+    const select = (environmentId: string, files: string[]) =>
+      Effect.gen(function* () {
+        const reader = yield* host.remoteEvents.pipe(
+          Stream.filter((entry) => entry.event.type === "cdp"),
+          Stream.take(1),
+          Stream.runCollect,
+          Effect.forkScoped,
+        );
+        yield* Effect.yieldNow;
+        yield* host.remoteCommand(environmentId, {
+          type: "cdp",
+          ...key,
+          message: encodeJson({
+            id: 1,
+            method: "DOM.setFileInputFiles",
+            params: { files, backendNodeId: 7 },
+            sessionId: "t3-preview-page",
+          }),
+        });
+        const event = (yield* Fiber.join(reader))[0]!.event;
+        if (event.type !== "cdp") throw new Error("Expected CDP reply");
+        return JSON.parse(event.message);
+      });
+    const sourcePath = "/remote/TRAIND.aab";
+    expect(
+      yield* operation({
+        operation: "stageUpload",
+        id: "bundle",
+        sourcePath,
+        name: "TRAIND.aab",
+        sizeBytes: 6,
+        offset: 0,
+        data: "YWJj",
+        done: false,
+      }),
+    ).toMatchObject({ result: { writtenBytes: 3 } });
+    expect(yield* select(remoteKey.environmentId, [sourcePath])).toHaveProperty("error");
+    expect(received).toEqual([]);
+    expect(
+      yield* operation({
+        operation: "stageUpload",
+        id: "bundle",
+        sourcePath,
+        name: "TRAIND.aab",
+        sizeBytes: 6,
+        offset: 3,
+        data: "ZGVm",
+        done: true,
+      }),
+    ).toMatchObject({ result: { writtenBytes: 6 } });
+    expect(yield* select(remoteKey.environmentId, [sourcePath])).not.toHaveProperty("error");
+    const [localPath] = received[0]!.files as string[];
+    expect(localPath).not.toBe(sourcePath);
+    expect(yield* Effect.promise(() => NodeFSP.readFile(localPath!, "utf8"))).toBe("abcdef");
+    expect(received[0]!.backendNodeId).toBe(7);
+    const otherKey = { ...key, environmentId: "other-upload-host" };
+    host.attach(otherKey, debuggee.tab);
+    yield* Effect.addFinalizer(() => Effect.sync(() => host.detach(otherKey)));
+    expect(yield* select(otherKey.environmentId, [sourcePath])).toHaveProperty("error");
+    expect(yield* select(remoteKey.environmentId, [localPath!])).toHaveProperty("error");
+    expect(yield* select(remoteKey.environmentId, [])).not.toHaveProperty("error");
+    expect(yield* operation({ operation: "discardUpload", id: "bundle" })).not.toHaveProperty(
+      "error",
+    );
+    expect(yield* select(remoteKey.environmentId, [sourcePath])).toHaveProperty("error");
+    yield* host.disconnectRemote(remoteKey.environmentId);
   }).pipe(Effect.scoped),
 );

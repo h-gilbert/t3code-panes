@@ -14,6 +14,9 @@ import {
   PREVIEW_AUTOMATION_SERVER_OPERATIONS,
   PreviewViewportSetting as PreviewViewportSettingSchema,
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
+  PREVIEW_UPLOAD_CHUNK_BYTES,
+  PREVIEW_UPLOAD_MAX_FILE_BYTES,
+  PREVIEW_UPLOAD_TIMEOUT_MS,
   type PreviewAutomationActionEvent,
   type PreviewAutomationClickInput,
   type PreviewAutomationDialogInput,
@@ -1198,24 +1201,97 @@ const make = Effect.gen(function* () {
         "PreviewAutomationExecutionError",
         `Upload paths must be absolute: ${relative}`,
       );
-    const files = await Promise.all(
-      input.paths.map(async (path) => {
+    const files = input.paths.map((path) => NodePath.resolve(path));
+    const sizes = await Promise.all(
+      files.map(async (path) => {
         const stat = await NodeFSP.stat(path);
-        if (!stat.isFile() || stat.size > PROVIDER_SEND_TURN_MAX_FILE_BYTES)
-          throw new Error(
-            `Upload must be a file smaller than ${PROVIDER_SEND_TURN_MAX_FILE_BYTES} bytes: ${path}`,
+        if (!stat.isFile()) throw new Error("Browser uploads must be regular files.");
+        if (stat.size > PREVIEW_UPLOAD_MAX_FILE_BYTES)
+          throw new ServerBrowserPage.ServerBrowserOperationError(
+            "PreviewAutomationFileTooLargeError",
+            "Browser uploads support files up to 1 GiB each.",
+            { fileName: NodePath.basename(path), maximumBytes: PREVIEW_UPLOAD_MAX_FILE_BYTES },
           );
-        const buffer = await NodeFSP.readFile(path);
-        if (buffer.byteLength > PROVIDER_SEND_TURN_MAX_FILE_BYTES)
-          throw new Error("Upload grew beyond the file limit.");
-        return {
-          name: NodePath.basename(path),
-          mimeType: Option.getOrElse(Mime.getType(path), () => "application/octet-stream"),
-          buffer,
-        };
+        return stat.size;
       }),
     );
-    const result = { tabId: tab.tabId, fileNames: files.map((file) => file.name) };
+    const hostSettings = await Effect.runPromise(serverSettings.getSettings);
+    const remoteDesktop =
+      tab.desktop &&
+      hostSettings.browserHostEnvironmentId &&
+      hostSettings.browserHostEnvironmentId !==
+        (await Effect.runPromise(environment.getEnvironmentId));
+    const staged: string[] = [];
+    try {
+      if (remoteDesktop) {
+        const deadline = Date.now() + PREVIEW_UPLOAD_TIMEOUT_MS;
+        // The remote host writes bounded chunks to disk, then translates the CDP file paths.
+        for (const [index, path] of files.entries()) {
+          const id = NodeCrypto.randomUUID();
+          staged.push(id);
+          const file = await NodeFSP.open(path, "r");
+          try {
+            const buffer = Buffer.alloc(PREVIEW_UPLOAD_CHUNK_BYTES);
+            let offset = 0;
+            for (;;) {
+              if (tab.closing || Date.now() > deadline)
+                throw new Error("Browser upload interrupted.");
+              const { bytesRead } = await file.read(
+                buffer,
+                0,
+                Math.min(buffer.length, sizes[index]! - offset),
+                offset,
+              );
+              if (bytesRead === 0 && offset !== sizes[index])
+                throw new Error("Browser upload file changed during transfer.");
+              const done = offset + bytesRead === sizes[index];
+              const result = await Effect.runPromise(
+                desktopChannel.operation(tab, {
+                  operation: "stageUpload",
+                  id,
+                  sourcePath: path,
+                  name: NodePath.basename(path),
+                  sizeBytes: sizes[index]!,
+                  offset,
+                  data: buffer.subarray(0, bytesRead).toString("base64"),
+                  done,
+                }),
+              );
+              offset += bytesRead;
+              if (
+                typeof result !== "object" ||
+                result === null ||
+                !("writtenBytes" in result) ||
+                result.writtenBytes !== offset
+              )
+                throw new Error("Desktop browser upload failed. Update the desktop app and retry.");
+              if (done) break;
+            }
+          } finally {
+            await file.close();
+          }
+        }
+      }
+      return await chooseUploadFiles(tab, input, files);
+    } catch (cause) {
+      await Promise.all(
+        staged.map((id) =>
+          Effect.runPromise(
+            desktopChannel.operation(tab, { operation: "discardUpload", id }),
+          ).catch(constVoid),
+        ),
+      );
+      throw cause;
+    }
+  };
+
+  const chooseUploadFiles = async (
+    tab: ServerTab,
+    input: PreviewAutomationUploadInput,
+    files: string[],
+  ) => {
+    // File paths avoid Playwright's 50 MiB buffer limit and whole-file memory copies.
+    const result = { tabId: tab.tabId, fileNames: files.map((file) => NodePath.basename(file)) };
     if (await ServerBrowserPage.setInputFiles(tab.page, input, files)) return result;
     const open = tab.fileChooser;
     if (!open)

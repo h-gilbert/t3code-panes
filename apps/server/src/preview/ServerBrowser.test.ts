@@ -11,6 +11,9 @@ import {
   PreviewTabId,
   ProviderInstanceId,
   ThreadId,
+  PREVIEW_UPLOAD_MAX_FILE_BYTES,
+  PREVIEW_UPLOAD_CHUNK_BYTES,
+  type DesktopBrowserPrivateOperation,
   type PreviewAutomationSnapshot,
   type PreviewAutomationStatus,
 } from "@t3tools/contracts";
@@ -239,6 +242,10 @@ const desktopRenders = (tabId: string) => {
 };
 const releasedDesktopTabs: Array<string> = [];
 const desktopConnections: Array<{ endpoint: string; context: ReturnType<typeof makeContext> }> = [];
+const desktopUploadChunks: Extract<DesktopBrowserPrivateOperation, { operation: "stageUpload" }>[] =
+  [];
+let failDesktopUpload = false;
+const discardedUploads: string[] = [];
 const testThread = {
   threadId: ThreadId.make("browser-test-thread"),
   providerSessionId: "agent-a",
@@ -276,7 +283,23 @@ const dependencies = Layer.mergeAll(
     readRemoteCommand: () => Effect.die("unused"),
     receiveRemoteEvent: () => Effect.die("unused"),
     remoteEvent: () => Effect.die("unused"),
-    operation: () => Effect.die("Unexpected private desktop operation"),
+    operation: (_key, request) => {
+      if (request.operation === "stageUpload") {
+        desktopUploadChunks.push(request);
+        return failDesktopUpload
+          ? Effect.fail(
+              new DesktopChannel.DesktopBrowserOperationError({ message: "transfer failed" }),
+            )
+          : Effect.succeed({
+              writtenBytes: request.offset + Buffer.from(request.data, "base64").length,
+            });
+      }
+      if (request.operation === "discardUpload") {
+        discardedUploads.push(request.id);
+        return Effect.void;
+      }
+      return Effect.die("Unexpected private desktop operation");
+    },
     awaitAttached: (key) => Effect.sync(() => desktopRenders(key.tabId)),
     detached: Stream.callback<{ threadId: string; tabId: string }>((queue) =>
       Effect.acquireRelease(
@@ -354,6 +377,9 @@ beforeEach(() => {
   desktopAvailable = false;
   releasedDesktopTabs.length = 0;
   desktopConnections.length = 0;
+  desktopUploadChunks.length = 0;
+  discardedUploads.length = 0;
+  failDesktopUpload = false;
 });
 
 it.live("an expired open still drains its initial navigation before human input", () =>
@@ -2069,22 +2095,110 @@ it.live("an agent answers the page's file picker or sets files on a file input",
       // A single-file picker rejects several files instead of dropping some.
       yield* Effect.flip(upload({ paths: [a, b] }));
       yield* upload({ paths: [a] });
-      expect(setFiles).toHaveBeenCalledExactlyOnceWith(
-        [{ name: "a.csv", mimeType: "text/csv", buffer: Buffer.from("first,record") }],
-        expect.anything(),
-      );
+      expect(setFiles).toHaveBeenCalledExactlyOnceWith([a], expect.anything());
       expect((yield* status).fileChooser).toBeNull();
 
       const setInputFiles = vi.fn(async () => {});
       page.locator.mockReturnValue({ setInputFiles } as never);
       yield* upload({ paths: [b], locator: "input[type=file]" });
       expect(page.locator).toHaveBeenLastCalledWith("input[type=file]");
-      expect(setInputFiles).toHaveBeenCalledWith(
-        [{ name: "b.csv", mimeType: "text/csv", buffer: Buffer.from("second,record") }],
-        expect.anything(),
-      );
+      expect(setInputFiles).toHaveBeenCalledWith([b], expect.anything());
     }),
   ).pipe(Effect.provide(layer)),
+);
+
+it.live.each([false, true])(
+  "uploads a 75 MiB file by path to a local browser (desktop: %s)",
+  (desktop) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        desktopRendersNext = desktop;
+        const { broker, tabId } = yield* ready;
+        const fs = yield* FileSystem.FileSystem;
+        const directory = yield* fs.makeTempDirectoryScoped();
+        const path = `${directory}/TRAIND.aab`;
+        yield* fs.writeFileString(path, "bundle");
+        yield* fs.truncate(path, 75 * 1024 * 1024);
+        const page = desktop ? desktopConnections[0]!.context.page : contexts[0]!.page;
+        const setInputFiles = vi.fn(async () => {});
+        page.locator.mockReturnValue({ setInputFiles } as never);
+        yield* broker.invoke({
+          scope,
+          tabId,
+          operation: "upload",
+          input: { paths: [path], locator: "input[type=file]" },
+        });
+        expect(setInputFiles).toHaveBeenCalledWith([path], expect.anything());
+        expect(desktopUploadChunks).toEqual([]);
+        yield* fs.truncate(path, PREVIEW_UPLOAD_MAX_FILE_BYTES + 1);
+        expect(
+          yield* broker
+            .invoke<void>({
+              scope,
+              tabId,
+              operation: "upload",
+              input: { paths: [path], locator: "input[type=file]" },
+            })
+            .pipe(Effect.flip),
+        ).toMatchObject({
+          _tag: "PreviewAutomationFileTooLargeError",
+          maximumBytes: PREVIEW_UPLOAD_MAX_FILE_BYTES,
+        });
+        expect(setInputFiles).toHaveBeenCalledTimes(1);
+      }),
+    ).pipe(Effect.provide(layer)),
+);
+
+it.live.each([false, true])(
+  "stages remote desktop uploads in bounded chunks and cleans failed transfers (fail: %s)",
+  (fail) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const settings = yield* ServerSettings.ServerSettingsService;
+        yield* settings.updateSettings({ browserHostEnvironmentId: "mac-host" });
+        desktopRendersNext = true;
+        const { broker, tabId } = yield* ready;
+        const fs = yield* FileSystem.FileSystem;
+        const directory = yield* fs.makeTempDirectoryScoped();
+        const path = `${directory}/TRAIND.aab`;
+        yield* fs.writeFileString(path, "bundle");
+        yield* fs.truncate(path, PREVIEW_UPLOAD_CHUNK_BYTES + 3);
+        const setInputFiles = vi.fn(async () => {});
+        desktopConnections[0]!.context.page.locator.mockReturnValue({ setInputFiles } as never);
+        failDesktopUpload = fail;
+        const result = yield* broker
+          .invoke({
+            scope,
+            tabId,
+            operation: "upload",
+            input: { paths: [path], locator: "input[type=file]" },
+          })
+          .pipe(Effect.result);
+        expect(result._tag).toBe(fail ? "Failure" : "Success");
+        expect(desktopUploadChunks[0]).toMatchObject({
+          sourcePath: path,
+          offset: 0,
+          sizeBytes: PREVIEW_UPLOAD_CHUNK_BYTES + 3,
+          done: false,
+        });
+        expect(Buffer.from(desktopUploadChunks[0]!.data, "base64").subarray(0, 6).toString()).toBe(
+          "bundle",
+        );
+        if (fail) {
+          expect(discardedUploads).toEqual([desktopUploadChunks[0]!.id]);
+          expect(setInputFiles).not.toHaveBeenCalled();
+        } else {
+          expect(desktopUploadChunks).toHaveLength(2);
+          expect(desktopUploadChunks[1]).toMatchObject({
+            offset: PREVIEW_UPLOAD_CHUNK_BYTES,
+            data: "AAAA",
+            done: true,
+          });
+          expect(setInputFiles).toHaveBeenCalledWith([path], expect.anything());
+          expect(discardedUploads).toEqual([]);
+        }
+      }),
+    ).pipe(Effect.provide(layer)),
 );
 
 it.live("viewers see the agent's pointer move to its target and click there", () =>
@@ -2195,7 +2309,7 @@ it.live("desktop file pickers stay native outside agent actions and remote contr
       const upload = `${yield* fs.makeTempDirectoryScoped()}/a.csv`;
       yield* fs.writeFileString(upload, "a,b");
       yield* broker.invoke({ scope, tabId, operation: "upload", input: { paths: [upload] } });
-      expect(page.setChooserFiles).toHaveBeenLastCalledWith([file], expect.anything());
+      expect(page.setChooserFiles).toHaveBeenLastCalledWith([upload], expect.anything());
       expect((yield* status()).fileChooser).toBeNull();
       page.openFileChooser();
       expect(page.nativeFileChooser).toHaveBeenCalledTimes(3);

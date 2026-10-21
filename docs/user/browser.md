@@ -13,7 +13,8 @@ selection, including restrictions on copying password fields.
 Ask your agent to upload a file from its machine to a page in the desktop
 browser, or to download a file from that page. The agent handles the transfer
 without opening an Open or Save dialog, including when it runs on a remote
-machine. Files can be up to 50 MiB each, with up to 10 files per upload.
+machine. Uploads support files up to 1 GiB each, with up to 10 files per upload.
+Downloads can be up to 50 MiB each.
 
 Your own uploads and downloads still use the usual dialogs. Using the tab
 returns control to you. Uploads work with standard file inputs; pages using

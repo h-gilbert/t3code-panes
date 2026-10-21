@@ -1,6 +1,10 @@
 import * as Schema from "effect/Schema";
 
-import { PreviewAutomationEvaluateInput } from "./previewAutomation.ts";
+import {
+  PreviewAutomationEvaluateInput,
+  PREVIEW_UPLOAD_CHUNK_BYTES,
+  PREVIEW_UPLOAD_MAX_FILE_BYTES,
+} from "./previewAutomation.ts";
 
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 
@@ -20,8 +24,21 @@ const TabKey = {
   tabId: TrimmedNonEmptyString,
 };
 
-/** Evaluation and autofill stay in the desktop; downloads cross in bounded chunks. */
+/** Evaluation and autofill stay in the desktop; files cross in bounded chunks. */
 export const DesktopBrowserPrivateOperation = Schema.Union([
+  Schema.Struct({
+    operation: Schema.Literal("stageUpload"),
+    id: TrimmedNonEmptyString,
+    sourcePath: TrimmedNonEmptyString,
+    name: TrimmedNonEmptyString,
+    sizeBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).check(
+      Schema.isLessThanOrEqualTo(PREVIEW_UPLOAD_MAX_FILE_BYTES),
+    ),
+    offset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    data: Schema.String.check(Schema.isMaxLength(Math.ceil(PREVIEW_UPLOAD_CHUNK_BYTES / 3) * 4)),
+    done: Schema.Boolean,
+  }),
+  Schema.Struct({ operation: Schema.Literal("discardUpload"), id: TrimmedNonEmptyString }),
   Schema.Struct({
     operation: Schema.Literal("readDownload"),
     guid: TrimmedNonEmptyString,

@@ -8,6 +8,8 @@ import * as Schema from "effect/Schema";
 import {
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   PREVIEW_FILE_TRANSFER_TIMEOUT_MS,
+  PREVIEW_UPLOAD_MAX_FILE_BYTES,
+  PREVIEW_UPLOAD_TIMEOUT_MS,
   PREVIEW_RECORDING_STOP_TIMEOUT_MS,
   PreviewAutomationFileTooLargeError,
   PreviewAutomationFileTransferError,
@@ -221,10 +223,10 @@ export const stageUploadFile = Effect.fn("PreviewToolkit.stageUploadFile")(funct
   if (stat.type !== "File") return yield* unreadable();
   const name = path.basename(filePath);
   const sizeBytes = Number(stat.size);
-  if (sizeBytes > PROVIDER_SEND_TURN_MAX_FILE_BYTES) {
+  if (sizeBytes > PREVIEW_UPLOAD_MAX_FILE_BYTES) {
     return yield* new PreviewAutomationFileTooLargeError({
       fileName: name,
-      maximumBytes: PROVIDER_SEND_TURN_MAX_FILE_BYTES,
+      maximumBytes: PREVIEW_UPLOAD_MAX_FILE_BYTES,
     });
   }
   const extension = attachmentFileExtension(name);
@@ -250,7 +252,7 @@ const uploadFiles = Effect.fn("PreviewToolkit.uploadFiles")(function* (
   return yield* invokeTargeted<PreviewAutomationUploadResult>(
     "upload",
     input,
-    PREVIEW_FILE_TRANSFER_TIMEOUT_MS,
+    PREVIEW_UPLOAD_TIMEOUT_MS,
   );
 }, Effect.scoped);
 

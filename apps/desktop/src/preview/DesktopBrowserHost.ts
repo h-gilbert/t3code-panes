@@ -22,6 +22,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import { createCdpRelayConnection, type CdpRelayConnection } from "./CdpRelay.ts";
+import { BrowserUploads } from "./BrowserUploads.ts";
 
 const encodeEvent = Schema.encodeSync(Schema.fromJsonString(DesktopBrowserEvent));
 const decodeCommand = Schema.decodeUnknownOption(Schema.fromJsonString(DesktopBrowserCommand));
@@ -40,7 +41,10 @@ export interface DesktopBrowserTabDebugger {
   readonly webContents: Electron.WebContents;
   readonly debugger: Electron.Debugger;
   readonly operation: (
-    request: Exclude<DesktopBrowserPrivateOperation, { operation: "readDownload" }>,
+    request: Exclude<
+      DesktopBrowserPrivateOperation,
+      { operation: "readDownload" | "stageUpload" | "discardUpload" }
+    >,
   ) => Promise<unknown>;
   readonly send: (
     method: string,
@@ -59,6 +63,7 @@ interface AttachedTab {
   downloadDirectory: string | null;
   temporaryDirectory: string | null;
   readonly downloads: Set<string>;
+  uploads: BrowserUploads;
   /** The guid CDP gave the download that is about to start. */
   pendingDownloadGuid: string | null;
   agentInputAt: number;
@@ -125,14 +130,16 @@ export const make = Effect.gen(function* () {
     const { webContents, debugger: debuggee } = tab.debuggee;
     const relay: CdpRelayConnection = createCdpRelayConnection(
       {
-        send: (method, params, sessionId) =>
+        send: async (method, params, sessionId) =>
           tab.debuggee.send(
             method,
-            method === "Browser.setDownloadBehavior" &&
-              tab.key.environmentId !== undefined &&
-              tab.downloadDirectory
-              ? { ...params, downloadPath: tab.downloadDirectory }
-              : params,
+            method === "DOM.setFileInputFiles" && tab.key.environmentId !== undefined
+              ? { ...params, files: tab.uploads.resolve(params.files as string[]) }
+              : method === "Browser.setDownloadBehavior" &&
+                  tab.key.environmentId !== undefined &&
+                  tab.downloadDirectory
+                ? { ...params, downloadPath: tab.downloadDirectory }
+                : params,
             sessionId,
           ),
         targetId: () =>
@@ -187,6 +194,7 @@ export const make = Effect.gen(function* () {
     if (!tab) return;
     tabs.delete(id);
     tab.relay?.dispose();
+    void tab.uploads.dispose().catch(() => {});
     if (tab.temporaryDirectory)
       void NodeFSP.rm(tab.temporaryDirectory, { recursive: true, force: true }).catch(() => {});
     tab.debuggee.debugger.off("message", tab.onMessage);
@@ -204,6 +212,7 @@ export const make = Effect.gen(function* () {
       downloadDirectory: null,
       temporaryDirectory: null,
       downloads: new Set(),
+      uploads: new BrowserUploads(),
       pendingDownloadGuid: null,
       agentInputAt: Number.NEGATIVE_INFINITY,
       onMessage: (_event, method, params, sessionId) => {
@@ -229,7 +238,9 @@ export const make = Effect.gen(function* () {
       if (!tab) return;
       if (command.value.type === "operation") {
         const { requestId, request } = command.value;
-        const readDownload = async () => {
+        const performOperation = async () => {
+          if (request.operation === "stageUpload") return tab.uploads.stage(request);
+          if (request.operation === "discardUpload") return tab.uploads.discard(request.id);
           if (request.operation !== "readDownload") return tab.debuggee.operation(request);
           if (
             !tab.temporaryDirectory ||
@@ -255,7 +266,7 @@ export const make = Effect.gen(function* () {
             await file.close();
           }
         };
-        void readDownload().then(
+        void performOperation().then(
           (result) => emit({ type: "operationResult", ...tab.key, requestId, result }),
           (error: unknown) =>
             emit({
@@ -323,6 +334,8 @@ export const make = Effect.gen(function* () {
           if (tab.key.environmentId === environmentId) {
             tab.relay?.dispose();
             tab.relay = null;
+            void tab.uploads.dispose().catch(() => {});
+            tab.uploads = new BrowserUploads();
           }
       }),
     remoteCommand: (environmentId, command) =>
