@@ -35,6 +35,14 @@ export function writeJson(file, value) {
   NodeFS.renameSync(temporary, file);
 }
 
+export function findAppBundle(directory) {
+  const apps = NodeFS.readdirSync(directory, { withFileTypes: true }).filter(
+    (entry) => entry.isDirectory() && entry.name.endsWith(".app"),
+  );
+  if (apps.length !== 1) throw new Error(`Expected one app in the archive at ${directory}.`);
+  return NodePath.join(directory, apps[0].name);
+}
+
 export function withLock(store, work) {
   NodeFS.mkdirSync(store, { recursive: true, mode: 0o700 });
   const lock = NodePath.join(store, "lock");
@@ -260,9 +268,7 @@ function prepare(store) {
   if (archives.length !== 1) throw new Error(`Expected one ZIP artifact in ${directory}.`);
   const unpacked = NodePath.join(directory, "unpacked");
   run("/usr/bin/ditto", ["-x", "-k", NodePath.join(directory, archives[0]), unpacked]);
-  const apps = NodeFS.readdirSync(unpacked).filter((file) => file.endsWith(".app"));
-  if (apps.length !== 1) throw new Error("Expected one app in the archive.");
-  const app = NodePath.join(unpacked, apps[0]);
+  const app = findAppBundle(unpacked);
   const signingIdentity = process.env.T3CODE_LOCAL_SIGNING_IDENTITY?.trim();
   if (signingIdentity) {
     run(

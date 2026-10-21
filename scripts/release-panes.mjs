@@ -21,11 +21,33 @@ import * as NodeURL from "node:url";
 import * as NodeUtil from "node:util";
 
 import { FORK_RELEASE_REPOSITORY } from "../packages/shared/src/releaseVersion.ts";
-import { bundleInfo, run, sourceIdentity, treeDigest, writeJson } from "./promote-desktop.mjs";
+import {
+  bundleInfo,
+  findAppBundle,
+  run,
+  sourceIdentity,
+  treeDigest,
+  writeJson,
+} from "./promote-desktop.mjs";
 
 const repo = NodePath.resolve(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), "..");
 const WORKFLOW = "release-panes.yml";
-const DEFAULT_APP = "/Applications/T3 Code (Alpha).app";
+
+export function installedAppPath(journal, applications = "/Applications") {
+  if (NodeFS.existsSync(journal)) {
+    const recorded = JSON.parse(NodeFS.readFileSync(journal, "utf8")).app;
+    if (typeof recorded === "string" && NodeFS.existsSync(recorded)) return recorded;
+  }
+  const candidates = ["T3 Code (Alpha).app", "T3 Code (Beta).app"]
+    .map((name) => NodePath.join(applications, name))
+    .filter((app) => NodeFS.existsSync(app));
+  if (candidates.length !== 1) {
+    throw new Error(
+      `Expected one installed T3 Code app, found ${candidates.length}. Check the promotion journal or installed Alpha/Beta copies.`,
+    );
+  }
+  return candidates[0];
+}
 
 /** Every fork release is `<upstream core>-panes.<timestamp>`, so newer always sorts higher. */
 export function forkReleaseVersion(desktopPackageVersion, now) {
@@ -104,9 +126,7 @@ export function signingRequirement(identifier, team) {
 function signingPreflight(allowSigningChange) {
   const store = NodePath.join(NodeOS.homedir(), ".t3-promotions");
   const journal = NodePath.join(store, "installation.json");
-  const app = NodeFS.existsSync(journal)
-    ? JSON.parse(NodeFS.readFileSync(journal, "utf8")).app
-    : DEFAULT_APP;
+  const app = installedAppPath(journal);
   const details = NodeChildProcess.spawnSync("/usr/bin/codesign", ["-dvv", "-r-", app], {
     encoding: "utf8",
   });
@@ -293,7 +313,7 @@ function main() {
   if (built.length !== 1) throw new Error(`Expected one ZIP in ${directory}/build.`);
   const unpacked = NodePath.join(directory, "unpacked");
   run("/usr/bin/ditto", ["-x", "-k", NodePath.join(directory, "build", built[0]), unpacked]);
-  const app = NodePath.join(unpacked, "T3 Code (Alpha).app");
+  const app = findAppBundle(unpacked);
   const feed = NodeFS.readFileSync(NodePath.join(app, "Contents/Resources/app-update.yml"), "utf8");
   if (!feed.includes(FORK_RELEASE_REPOSITORY.split("/")[1])) {
     throw new Error("The build has no fork update feed; installed copies would never update.");

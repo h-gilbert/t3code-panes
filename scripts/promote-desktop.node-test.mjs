@@ -11,6 +11,7 @@ import {
   assertSeparatePaths,
   assertStopped,
   databaseSchema,
+  findAppBundle,
   install,
   replaceBundle,
   sourceIdentity,
@@ -19,6 +20,24 @@ import {
   writeJson,
   run,
 } from "./promote-desktop.mjs";
+
+NodeTest.test(
+  "archive discovery accepts Alpha and Beta while rejecting ambiguous contents",
+  (t) => {
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-app-archive-test-"));
+    t.after(() => NodeFS.rmSync(root, { recursive: true, force: true }));
+    NodeFS.writeFileSync(NodePath.join(root, "not-a-bundle.app"), "ignore regular files");
+    NodeAssert.throws(() => findAppBundle(root), /Expected one app/);
+    const alpha = NodePath.join(root, "T3 Code (Alpha).app");
+    const beta = NodePath.join(root, "T3 Code (Beta).app");
+    NodeFS.mkdirSync(alpha);
+    NodeAssert.equal(findAppBundle(root), alpha);
+    NodeFS.mkdirSync(beta);
+    NodeAssert.throws(() => findAppBundle(root), /Expected one app/);
+    NodeFS.rmSync(alpha, { recursive: true });
+    NodeAssert.equal(findAppBundle(root), beta);
+  },
+);
 
 function fixture(t) {
   const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-promotion-test-"));

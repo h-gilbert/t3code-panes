@@ -1,14 +1,57 @@
 import * as NodeAssert from "node:assert/strict";
 import * as NodeTest from "node:test";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 
 import {
   forkReleaseVersion,
+  installedAppPath,
   latestForkReleaseTag,
   latestMacYaml,
   parseSigningIdentities,
   selectSigningIdentity,
   signingRequirement,
 } from "./release-panes.mjs";
+
+function appFixture(t) {
+  const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-release-app-test-"));
+  t.after(() => NodeFS.rmSync(root, { recursive: true, force: true }));
+  return {
+    root,
+    journal: NodePath.join(root, "installation.json"),
+    alpha: NodePath.join(root, "T3 Code (Alpha).app"),
+    beta: NodePath.join(root, "T3 Code (Beta).app"),
+  };
+}
+
+NodeTest.test("release signing uses an existing recorded app even when both names exist", (t) => {
+  const { root, journal, alpha, beta } = appFixture(t);
+  NodeFS.mkdirSync(alpha);
+  NodeFS.mkdirSync(beta);
+  NodeFS.writeFileSync(journal, JSON.stringify({ app: alpha }));
+  NodeAssert.equal(installedAppPath(journal, root), alpha);
+});
+
+NodeTest.test("release signing finds a renamed Beta app without rewriting the old journal", (t) => {
+  const { root, journal, alpha, beta } = appFixture(t);
+  const record = JSON.stringify({ app: alpha, home: "preserve", profile: "preserve" });
+  NodeFS.writeFileSync(journal, record);
+  NodeFS.mkdirSync(beta);
+  NodeAssert.equal(installedAppPath(journal, root), beta);
+  NodeAssert.equal(NodeFS.readFileSync(journal, "utf8"), record);
+});
+
+NodeTest.test("release signing requires one unambiguous fallback installation", (t) => {
+  const { root, journal, alpha, beta } = appFixture(t);
+  NodeAssert.throws(() => installedAppPath(journal, root), /found 0/);
+  NodeFS.mkdirSync(alpha);
+  NodeAssert.equal(installedAppPath(journal, root), alpha);
+  NodeFS.mkdirSync(beta);
+  NodeAssert.throws(() => installedAppPath(journal, root), /found 2/);
+  NodeFS.writeFileSync(journal, JSON.stringify({ app: NodePath.join(root, "missing.app") }));
+  NodeAssert.throws(() => installedAppPath(journal, root), /found 2/);
+});
 
 NodeTest.test("fork release versions keep the upstream core and sort by time", () => {
   NodeAssert.equal(forkReleaseVersion("0.0.44", 1790900000000), "0.0.44-panes.1790900000000");
