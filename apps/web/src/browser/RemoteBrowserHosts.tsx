@@ -13,9 +13,11 @@ import { previewEnvironment } from "~/state/preview";
 
 /**
  * Follows the preview tabs of every thread in an environment this desktop
- * hosts, not only threads on screen, so an agent's new tab gets its webview
- * here while the user looks elsewhere. A followed thread stays synced while
- * this desktop remains the environment's host.
+ * renders browsers for, its own or one that selected it as browser host, not
+ * only threads on screen. Otherwise an agent's tab in a thread nobody has open
+ * never gets a webview and its server falls back to a headless browser, which
+ * sites such as Google refuse to sign in. A followed thread stays synced while
+ * this desktop keeps rendering for the environment.
  */
 const hostedPreviewThreadsAtom = Atom.family((environmentId: EnvironmentId) =>
   Atom.make((get) => {
@@ -40,6 +42,7 @@ export function RemoteBrowserHosts() {
   if (!primary || !previewBridge?.connectRemoteHost) return null;
   return (
     <>
+      <HostedPreviewThreads environmentId={primary} />
       {[...configs]
         .filter(
           ([id, config]) => id !== primary && config.settings.browserHostEnvironmentId === primary,
@@ -53,6 +56,10 @@ export function RemoteBrowserHosts() {
         ))}
     </>
   );
+}
+function HostedPreviewThreads({ environmentId }: { environmentId: EnvironmentId }) {
+  useAtomMount(hostedPreviewThreadsAtom(environmentId));
+  return null;
 }
 function AuthorizedRemoteBrowserHost(props: {
   environmentId: EnvironmentId;
@@ -78,6 +85,5 @@ function RemoteBrowserHost({
     [environmentId, hostEnvironmentId],
   );
   useAtomMount(atom);
-  useAtomMount(hostedPreviewThreadsAtom(environmentId));
-  return null;
+  return <HostedPreviewThreads environmentId={environmentId} />;
 }
