@@ -67,13 +67,15 @@ export function buildWorkspaceThreadPickerItems(input: {
       scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)),
     );
     if (!project) return [];
+    const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+    const paneIndex = paneByThread.get(threadKey) ?? null;
+    const status = input.settledThreadKeys?.has(threadKey) ? "settled" : "open";
+    if (status === "open" && paneIndex !== null) return [];
     return [
       {
         threadRef: scopeThreadRef(thread.environmentId, thread.id),
         title: thread.title,
-        paneIndex:
-          paneByThread.get(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))) ??
-          null,
+        paneIndex,
         environmentLabel:
           input.environmentLabels?.get(thread.environmentId) ?? thread.environmentId,
         updatedAt: thread.updatedAt ?? thread.createdAt,
@@ -82,11 +84,7 @@ export function buildWorkspaceThreadPickerItems(input: {
           runningCounts.get(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))) ?? 0,
         projectKey: project.projectKey,
         projectName: project.displayName,
-        status: input.settledThreadKeys?.has(
-          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-        )
-          ? "settled"
-          : "open",
+        status,
       },
     ];
   });

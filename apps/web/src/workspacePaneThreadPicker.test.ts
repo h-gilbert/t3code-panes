@@ -46,7 +46,7 @@ const projects = [
 ] satisfies WorkspaceThreadPickerProject[];
 
 describe("workspace pane thread picker", () => {
-  it("lists available threads and marks threads already visible in a pane", () => {
+  it("excludes open threads already visible in a pane", () => {
     const items = buildWorkspaceThreadPickerItems({
       threads: [
         thread("available", projectA, { createdAt: "2026-09-03T00:00:00.000Z" }),
@@ -59,8 +59,22 @@ describe("workspace pane thread picker", () => {
 
     expect(items.map((item) => [item.threadRef.threadId, item.paneIndex])).toEqual([
       ["available", null],
-      ["already-open", 0],
     ]);
+  });
+
+  it("makes a thread available again when its pane is cleared", () => {
+    const input = { threads: [thread("a", projectA)], projects };
+    expect(
+      buildWorkspaceThreadPickerItems({
+        ...input,
+        paneTargets: [scopeThreadRef(environmentId, ThreadId.make("a"))],
+      }),
+    ).toEqual([]);
+    expect(
+      buildWorkspaceThreadPickerItems({ ...input, paneTargets: [null] }).map(
+        (item) => item.threadRef.threadId,
+      ),
+    ).toEqual(["a"]);
   });
 
   it("filters project history separately from all open threads and searches across machines", () => {
@@ -91,18 +105,16 @@ describe("workspace pane thread picker", () => {
     });
     const select = (projectKey: string | null, status: "all" | "open" | "settled", query = "") =>
       filterWorkspaceThreadPickerItems(items, { projectKey, status, query });
-    expect(select("group-a", "all")).toHaveLength(3);
+    expect(select("group-a", "all")).toHaveLength(2);
     expect(select("group-a", "settled").map((item) => item.title)).toEqual(["Thread settled-a"]);
-    expect(select(null, "open")).toHaveLength(3);
+    expect(select(null, "open")).toHaveLength(2);
     expect(
       select(null, "open", "  FRED project A ").map((item) => [
         item.environmentLabel,
         item.paneIndex,
       ]),
     ).toEqual([["Fred", null]]);
-    expect(select(null, "open", "Mac").find((item) => item.title === "Thread a")?.paneIndex).toBe(
-      1,
-    );
+    expect(select(null, "open", "Mac").map((item) => item.title)).toEqual(["Thread b"]);
     expect(select("group-b", "all", "Fred")).toEqual([]);
     expect(select(null, "all", "missing")).toEqual([]);
   });
@@ -111,7 +123,7 @@ describe("workspace pane thread picker", () => {
     const items = buildWorkspaceThreadPickerItems({
       threads: [thread("open", projectA), thread("settled", projectA)],
       projects,
-      paneTargets: [],
+      paneTargets: [scopeThreadRef(environmentId, ThreadId.make("settled"))],
       settledThreadKeys: new Set([`${environmentId}:settled`]),
     });
 
