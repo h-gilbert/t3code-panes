@@ -657,7 +657,18 @@ describe("providerMaintenanceRunner", () => {
     ),
   );
 
-  it.effect("records command failure output in provider update state", () =>
+  it.effect.each([
+    { stderr: "permission denied", stdout: "", detail: "permission denied" },
+    {
+      stderr:
+        "Checking installation...\n\u001b[31mError: Could not detect the Codex installation method.\u001b[0m\n\n",
+      stdout: "",
+      detail: "Error: Could not detect the Codex installation method.",
+    },
+    { stderr: "", stdout: "download failed", detail: "download failed" },
+    { stderr: "", stdout: "", detail: "" },
+    { stderr: "x".repeat(500), stdout: "", detail: `${"x".repeat(199)}…` },
+  ])("records command failure details from $detail", ({ stderr, stdout, detail }) =>
     Effect.gen(function* () {
       const { registry } = yield* makeRegistry();
       const updater = yield* makeTestRunner(registry);
@@ -666,14 +677,17 @@ describe("providerMaintenanceRunner", () => {
       const updateState = result.providers[0]?.updateState;
 
       assert.strictEqual(updateState?.status, "failed");
-      assert.strictEqual(updateState?.message, "Update command exited with code 1.");
-      assert.include(updateState?.output ?? "", "permission denied");
+      assert.strictEqual(
+        updateState?.message,
+        ["Update command exited with code 1.", detail].filter(Boolean).join(" "),
+      );
+      if (stderr || stdout) assert.include(updateState?.output ?? "", (stderr || stdout).trim());
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
           layerNonWindowsPlatform,
           layerLatestVersionHttpClient("0.0.0"),
-          layerMockSpawner(() => ({ stderr: "permission denied", code: 1 })),
+          layerMockSpawner(() => ({ stderr, stdout, code: 1 })),
         ),
       ),
     ),

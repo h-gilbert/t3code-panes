@@ -1,6 +1,6 @@
 import { useStableCallback } from "../hooks/useStableCallback";
 import { useEnvironmentThread } from "../state/threads";
-import { useEnvironmentProviders } from "../state/environments";
+import { useEnvironmentIdentities, useEnvironmentProviders } from "../state/environments";
 import { shouldTypeToFocusComposer } from "../components/chat/composerFocusRedirect";
 // @effect-diagnostics cryptoRandomUUID:off -- Synchronous workspace drag-and-drop allocates local view identities.
 import { useAtomValue } from "@effect/atom-react";
@@ -24,10 +24,7 @@ import {
   Grid2X2Icon,
   GripVerticalIcon,
   Maximize2Icon,
-  MessageSquareIcon,
   Minimize2Icon,
-  MonitorUpIcon,
-  PlusIcon,
   RotateCcwIcon,
   Rows3Icon,
   SquareArrowOutUpRightIcon,
@@ -42,6 +39,7 @@ import {
   type RefObject,
 } from "react";
 
+import { EmptyWorkspacePane } from "../components/EmptyWorkspacePane";
 import { ChatViewContent } from "../components/ChatView";
 import {
   WorkspacePaneHeaderContext,
@@ -118,7 +116,6 @@ import {
 import { resolveWorkspaceDraftThreadRef } from "../workspacePaneTitle";
 import {
   buildWorkspaceThreadPickerItems,
-  groupWorkspaceThreadPickerItems,
   runningWorkspaceSubagentsByParent,
   type WorkspaceThreadPickerItem,
 } from "../workspacePaneThreadPicker";
@@ -136,161 +133,6 @@ function hasWorkspacePaneDrag(dataTransfer: DataTransfer): boolean {
 function workspacePaneRenderKey(target: WorkspacePaneTarget | null, index: number): string {
   if (target === null) return `empty:${index}`;
   return "draftId" in target ? `draft:${target.draftId}` : `thread:${scopedThreadKey(target)}`;
-}
-
-const EMPTY_PANE_SECTION_LABEL_CLASS =
-  "px-2 pb-1 pt-1 text-3xs font-medium uppercase tracking-wide text-muted-foreground";
-const EMPTY_PANE_ROW_CLASS =
-  "flex min-h-9 w-full items-center gap-2 rounded px-2 py-1.5 text-left outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring";
-const EMPTY_PANE_COLUMN_CLASS =
-  "flex max-h-44 min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-y-auto rounded-md border border-border bg-muted/20 p-1 text-left @lg/empty-pane:max-h-80";
-
-function EmptyWorkspacePane({
-  paneNumber,
-  projects,
-  selectedProjectKey,
-  threads,
-  onSelectProject,
-  onAddProject,
-  onNewThread,
-  onSelectThread,
-}: {
-  readonly paneNumber: number;
-  readonly projects: readonly SidebarProjectSnapshot[];
-  readonly selectedProjectKey: string | null;
-  readonly threads: readonly WorkspaceThreadPickerItem[];
-  readonly onSelectProject: (project: SidebarProjectSnapshot) => void;
-  readonly onAddProject: () => void;
-  readonly onNewThread: (project: SidebarProjectSnapshot) => void;
-  readonly onSelectThread: (thread: WorkspaceThreadPickerItem) => void;
-}) {
-  const projectSelected = selectedProjectKey !== null;
-  const { openThreads, otherOpenThreads, settledThreads } = groupWorkspaceThreadPickerItems(
-    threads,
-    selectedProjectKey,
-  );
-  const renderThreads = (items: readonly WorkspaceThreadPickerItem[]) =>
-    items.map((thread) => (
-      <button
-        key={`${thread.threadRef.environmentId}:${thread.threadRef.threadId}`}
-        type="button"
-        className={EMPTY_PANE_ROW_CLASS}
-        onClick={() => onSelectThread(thread)}
-      >
-        {thread.status === "settled" ? (
-          <CircleCheckIcon className="size-3.5 shrink-0 text-muted-foreground/70" aria-hidden />
-        ) : (
-          <MessageSquareIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-        )}
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-xs font-medium text-foreground">{thread.title}</span>
-          {!projectSelected || thread.projectKey !== selectedProjectKey ? (
-            <span className="block truncate text-2xs text-muted-foreground">
-              {thread.projectName}
-            </span>
-          ) : null}
-        </span>
-        {thread.runningSubagentCount > 0 ? (
-          <span className="shrink-0 text-2xs text-muted-foreground">
-            {thread.runningSubagentCount} running
-          </span>
-        ) : null}
-      </button>
-    ));
-
-  return (
-    <div className="@container/empty-pane flex min-h-0 flex-1 flex-col items-center justify-center gap-2 overflow-hidden bg-background px-4 py-4 text-center">
-      <MonitorUpIcon className="size-6 text-muted-foreground/60" aria-hidden />
-      <p className="text-sm font-medium text-foreground">Pane {paneNumber}</p>
-      <p className="max-w-64 text-xs leading-5 text-muted-foreground">
-        {projectSelected
-          ? "Start a new thread or resume one from this project."
-          : "Choose a project, or resume any open thread."}
-      </p>
-      <div className="mt-1 flex min-h-0 w-full max-w-2xl flex-col gap-2 @lg/empty-pane:flex-row">
-        <div className={EMPTY_PANE_COLUMN_CLASS}>
-          <p className={EMPTY_PANE_SECTION_LABEL_CLASS}>Projects</p>
-          {projects.map((project) => (
-            <div
-              key={project.projectKey}
-              className={cn(
-                "flex items-center rounded pr-1",
-                project.projectKey === selectedProjectKey && "bg-foreground/[0.08]",
-              )}
-            >
-              <button
-                type="button"
-                className={cn(EMPTY_PANE_ROW_CLASS, "min-w-0 flex-1")}
-                aria-label={`Show threads in ${project.displayName}`}
-                aria-pressed={project.projectKey === selectedProjectKey}
-                onClick={() => onSelectProject(project)}
-              >
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-xs font-medium text-foreground">
-                    {project.displayName}
-                  </span>
-                  <span className="block truncate text-2xs text-muted-foreground">
-                    {project.workspaceRoot}
-                  </span>
-                </span>
-              </button>
-              <Button
-                variant="ghost-muted"
-                size="icon-xs"
-                aria-label={`New thread in ${project.displayName}`}
-                title={`New thread in ${project.displayName}`}
-                onClick={() => onNewThread(project)}
-              >
-                <PlusIcon aria-hidden />
-              </Button>
-            </div>
-          ))}
-          <button
-            type="button"
-            className={cn(EMPTY_PANE_ROW_CLASS, "text-xs text-muted-foreground")}
-            onClick={onAddProject}
-          >
-            <FolderOpenIcon className="size-3.5 shrink-0" aria-hidden />
-            Add project or directory…
-          </button>
-        </div>
-        <div className={EMPTY_PANE_COLUMN_CLASS}>
-          <p className={EMPTY_PANE_SECTION_LABEL_CLASS}>Threads</p>
-          {openThreads.length > 0 ? (
-            <>
-              <p className={cn(EMPTY_PANE_SECTION_LABEL_CLASS, "mt-1 border-t border-border pt-2")}>
-                Open
-              </p>
-              {renderThreads(openThreads)}
-            </>
-          ) : null}
-          {otherOpenThreads.length > 0 ? (
-            <>
-              <p className={cn(EMPTY_PANE_SECTION_LABEL_CLASS, "mt-1 border-t border-border pt-2")}>
-                Open in other projects
-              </p>
-              {renderThreads(otherOpenThreads)}
-            </>
-          ) : null}
-          {settledThreads.length > 0 ? (
-            <>
-              <p className={cn(EMPTY_PANE_SECTION_LABEL_CLASS, "mt-1 border-t border-border pt-2")}>
-                Settled
-              </p>
-              {renderThreads(settledThreads)}
-            </>
-          ) : null}
-          {openThreads.length === 0 &&
-          otherOpenThreads.length === 0 &&
-          settledThreads.length === 0 ? (
-            <p className="px-2 py-1.5 text-2xs text-muted-foreground">
-              {projectSelected ? "No other open threads in this project." : "No open threads."}
-            </p>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function WorkspacePaneThreadTitle({ threadRef }: { readonly threadRef: ScopedThreadRef }) {
@@ -587,7 +429,7 @@ function WorkspacePane({
   });
   const openExistingThread = useStableCallback((thread: WorkspaceThreadPickerItem) => {
     draftRequestVersionRef.current += 1;
-    setPaneProject(workspaceKey, index, thread.projectKey);
+    if (thread.paneIndex === null) setPaneProject(workspaceKey, index, thread.projectKey);
     assignThread(workspaceKey, thread.threadRef, index);
   });
   const handleClearPane = useStableCallback(() => {
@@ -709,7 +551,9 @@ function WorkspacePane({
             <TooltipPopup side="bottom">Drag onto another pane to swap</TooltipPopup>
           </Tooltip>
         ) : null}
-        {projects.length === 0 ? (
+        {paneTarget === null ? (
+          <span className="px-1 text-muted-foreground">Pane {index + 1}</span>
+        ) : projects.length === 0 ? (
           <button
             type="button"
             className="flex h-5 min-w-0 max-w-[45%] items-center gap-1.5 truncate rounded px-1.5 text-left text-2xs text-foreground outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
@@ -814,9 +658,11 @@ function WorkspacePane({
             </DropdownMenuContent>
           </DropdownMenu>
         )}
-        <span className="mx-1 shrink-0 text-border" aria-hidden>
-          /
-        </span>
+        {paneTarget ? (
+          <span className="mx-1 shrink-0 text-border" aria-hidden>
+            /
+          </span>
+        ) : null}
         {paneTarget && "threadId" in paneTarget ? (
           <WorkspacePaneThreadTitle threadRef={paneTarget} />
         ) : paneTarget ? (
@@ -932,8 +778,13 @@ function WorkspacePane({
             />
           ) : (
             <EmptyWorkspacePane
-              paneNumber={index + 1}
               projects={menuProjects}
+              hiddenProjects={hiddenMenuProjects}
+              onShowAll={() => setPaneProject(workspaceKey, index, null)}
+              onHideProject={(project) => {
+                setPickerProjectHidden(project.projectKey, true);
+                if (project.projectKey === projectKey) setPaneProject(workspaceKey, index, null);
+              }}
               selectedProjectKey={selectedProject?.projectKey ?? null}
               threads={availableThreads}
               onSelectProject={(project) =>
@@ -958,6 +809,7 @@ export function ProjectPaneWorkspace({
   readonly active?: boolean;
 }) {
   const projects = useProjects();
+  const environments = useEnvironmentIdentities();
   const threads = useThreadShells();
   const runningAgents = (() => runningWorkspaceSubagentsByParent(threads))();
   const serverConfigs = useServerConfigs();
@@ -1013,7 +865,10 @@ export function ProjectPaneWorkspace({
     buildWorkspaceThreadPickerItems({
       threads,
       projects: projectGroups,
-      paneTargets: panes,
+      paneTargets: panes.slice(0, paneCount),
+      environmentLabels: new Map(
+        environments.map((environment) => [environment.environmentId, environment.label]),
+      ),
       settledThreadKeys,
     }))();
   const [paneComposerHandleRefs] = useState(() =>

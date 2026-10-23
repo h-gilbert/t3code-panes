@@ -6,7 +6,11 @@ import {
 } from "@t3tools/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 
-import { isSidebarSubagentThread, sortThreadsForSidebar } from "./components/Sidebar.logic";
+import {
+  isSidebarSubagentThread,
+  resolveSidebarThreadStatus,
+  sortThreadsForSidebar,
+} from "./components/Sidebar.logic";
 import type { WorkspacePaneTarget } from "./workspacePaneStore";
 
 export interface WorkspaceThreadPickerProject {
@@ -22,6 +26,10 @@ export interface WorkspaceThreadPickerItem {
   readonly projectName: string;
   readonly status: "open" | "settled";
   readonly runningSubagentCount: number;
+  readonly paneIndex: number | null;
+  readonly environmentLabel: string;
+  readonly updatedAt: string;
+  readonly activity: ReturnType<typeof resolveSidebarThreadStatus>;
 }
 
 export function buildWorkspaceThreadPickerItems(input: {
@@ -29,12 +37,14 @@ export function buildWorkspaceThreadPickerItems(input: {
   readonly projects: readonly WorkspaceThreadPickerProject[];
   readonly paneTargets: readonly (WorkspacePaneTarget | null)[];
   readonly settledThreadKeys?: ReadonlySet<string>;
+  readonly environmentLabels?: ReadonlyMap<string, string>;
 }): WorkspaceThreadPickerItem[] {
-  const openThreadKeys = new Set(
-    input.paneTargets.flatMap((target) =>
-      target && "threadId" in target ? [scopedThreadKey(target)] : [],
-    ),
-  );
+  const paneByThread = new Map<string, number>();
+  input.paneTargets.forEach((target, index) => {
+    if (target && "threadId" in target && !paneByThread.has(scopedThreadKey(target))) {
+      paneByThread.set(scopedThreadKey(target), index);
+    }
+  });
   const projectByRef = new Map(
     input.projects.flatMap((project) =>
       project.memberProjectRefs.map(
@@ -46,11 +56,10 @@ export function buildWorkspaceThreadPickerItems(input: {
   const runningCounts = countRunningWorkspaceSubagents(input.threads);
   return sortThreadsForSidebar(
     input.threads.filter((thread) => {
-      if (thread.archivedAt !== null || isSidebarSubagentThread(thread)) return false;
-      const threadRef = scopeThreadRef(thread.environmentId, thread.id);
-      return (
-        !openThreadKeys.has(scopedThreadKey(threadRef)) &&
-        projectByRef.has(scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)))
+      if (thread.archivedAt !== null || thread.deletedAt != null || isSidebarSubagentThread(thread))
+        return false;
+      return projectByRef.has(
+        scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)),
       );
     }),
   ).flatMap((thread) => {
@@ -62,6 +71,13 @@ export function buildWorkspaceThreadPickerItems(input: {
       {
         threadRef: scopeThreadRef(thread.environmentId, thread.id),
         title: thread.title,
+        paneIndex:
+          paneByThread.get(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))) ??
+          null,
+        environmentLabel:
+          input.environmentLabels?.get(thread.environmentId) ?? thread.environmentId,
+        updatedAt: thread.updatedAt ?? thread.createdAt,
+        activity: resolveSidebarThreadStatus(thread),
         runningSubagentCount:
           runningCounts.get(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))) ?? 0,
         projectKey: project.projectKey,
@@ -76,20 +92,21 @@ export function buildWorkspaceThreadPickerItems(input: {
   });
 }
 
-export function groupWorkspaceThreadPickerItems(
+export function filterWorkspaceThreadPickerItems(
   items: readonly WorkspaceThreadPickerItem[],
-  projectKey: string | null,
+  filter: {
+    readonly projectKey: string | null;
+    readonly status: "all" | "open" | "settled";
+    readonly query: string;
+  },
 ) {
-  const projectItems =
-    projectKey === null ? items : items.filter((item) => item.projectKey === projectKey);
-  return {
-    openThreads: projectItems.filter((item) => item.status === "open"),
-    otherOpenThreads:
-      projectKey === null
-        ? []
-        : items.filter((item) => item.projectKey !== projectKey && item.status === "open"),
-    settledThreads: projectItems.filter((item) => item.status === "settled"),
-  };
+  const terms = filter.query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  return items.filter((item) => {
+    if (filter.projectKey !== null && item.projectKey !== filter.projectKey) return false;
+    if (filter.status !== "all" && item.status !== filter.status) return false;
+    const text = `${item.title} ${item.projectName} ${item.environmentLabel}`.toLowerCase();
+    return terms.every((term) => text.includes(term));
+  });
 }
 
 /** Counts active descendants under each ancestor using environment-scoped shell identities. */

@@ -61,8 +61,10 @@ import {
   enrichProviderSnapshotWithVersionAdvisory,
   makeCachedProviderMaintenanceResolution,
   makePackageManagedProviderMaintenanceResolver,
+  makeProviderMaintenanceCapabilities,
   normalizeCommandPath,
   resolveProviderMaintenanceCapabilitiesEffect,
+  type ProviderMaintenanceResolutionContext,
 } from "@t3tools/provider-core/server/maintenanceResolver";
 import {
   haveProviderSnapshotSettingsChanged,
@@ -94,7 +96,7 @@ function isCodexStandaloneCommandPath(commandPath: string): boolean {
  * runs against `sharedHomePath` rather than the instance's effective home.
  */
 function makeCodexMaintenanceResolver(sharedHomePath: string) {
-  return makePackageManagedProviderMaintenanceResolver({
+  const packageManagedResolver = makePackageManagedProviderMaintenanceResolver({
     provider: DRIVER_KIND,
     npmPackageName: "@openai/codex",
     nativeUpdate: {
@@ -103,6 +105,31 @@ function makeCodexMaintenanceResolver(sharedHomePath: string) {
       env: { CODEX_HOME: sharedHomePath },
     },
   });
+  return {
+    resolve: Effect.fn("resolveCodexMaintenance")(function* (
+      context: ProviderMaintenanceResolutionContext | null,
+    ) {
+      // Daemon packages are not recognized by `codex update`, including when
+      // ~/.local/bin/codex is a symlink into the managed release directory.
+      if (
+        context &&
+        [context.resolvedCommandPath, context.realCommandPath].some((commandPath) =>
+          normalizeCommandPath(commandPath).includes("/packages/app-server-daemon/"),
+        )
+      ) {
+        return makeProviderMaintenanceCapabilities({
+          provider: DRIVER_KIND,
+          packageName: "@openai/codex",
+          updateExecutable: context.resolvedCommandPath,
+          updateArgs: ["app-server", "daemon", "update"],
+          updateLockKey: "codex-native",
+          platform: context.platform,
+          env: { CODEX_HOME: sharedHomePath },
+        });
+      }
+      return yield* packageManagedResolver.resolve(context);
+    }),
+  };
 }
 
 export type CodexDriverEnv =

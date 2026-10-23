@@ -308,20 +308,38 @@ it.layer(layerTest)("CodexDriver", (it) => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect.skipIf(windowsHost)(
-    "runs the standalone updater against the shared home, not the shadow home",
-    () =>
-      Effect.gen(function* () {
+  it.effect.each([
+    { installation: "standalone", symlink: false, args: ["update"] },
+    { installation: "app-server-daemon", symlink: false, args: ["app-server", "daemon", "update"] },
+    { installation: "app-server-daemon", symlink: true, args: ["app-server", "daemon", "update"] },
+  ])(
+    "updates $installation with symlink=$symlink against the shared home",
+    ({ installation, symlink, args }, context) => {
+      if (windowsHost) context.skip();
+      return Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const tempDir = yield* fs
           .makeTempDirectoryScoped({ prefix: "t3-codex-driver-" })
           .pipe(Effect.flatMap((directory) => fs.realPath(directory)));
         const sharedHome = NodePath.join(tempDir, "codex-home");
         const shadowHome = NodePath.join(tempDir, "codex-shadow");
-        const binaryPath = NodePath.join(sharedHome, "packages", "standalone", "bin", "codex");
-        yield* fs.makeDirectory(NodePath.dirname(binaryPath), { recursive: true });
-        yield* fs.writeFileString(binaryPath, "#!/bin/sh\n");
-        yield* fs.chmod(binaryPath, 0o755);
+        const installedBinary = NodePath.join(
+          sharedHome,
+          "packages",
+          installation,
+          "releases",
+          "0.164.0",
+          "bin",
+          "codex",
+        );
+        yield* fs.makeDirectory(NodePath.dirname(installedBinary), { recursive: true });
+        yield* fs.writeFileString(installedBinary, "#!/bin/sh\n");
+        yield* fs.chmod(installedBinary, 0o755);
+        const binaryPath = symlink ? NodePath.join(tempDir, "bin", "codex") : installedBinary;
+        if (symlink) {
+          yield* fs.makeDirectory(NodePath.dirname(binaryPath), { recursive: true });
+          yield* fs.symlink(installedBinary, binaryPath);
+        }
 
         const instance = yield* CodexDriver.create({
           instanceId: ProviderInstanceId.make("codex-shadow"),
@@ -339,14 +357,15 @@ it.layer(layerTest)("CodexDriver", (it) => {
         const capabilities = yield* instance.snapshot.resolveMaintenance();
         expect(capabilities.update).toMatchObject({
           executable: binaryPath,
-          args: ["update"],
+          args,
           lockKey: "codex-native",
           env: { CODEX_HOME: sharedHome },
         });
       }).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, noSpawn),
         Effect.scoped,
-      ),
+      );
+    },
   );
 
   it.effect("stays manual-only when the configured executable does not exist", () =>

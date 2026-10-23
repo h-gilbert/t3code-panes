@@ -247,7 +247,14 @@ function failureMessage(result: ProviderMaintenanceCommandResult): string {
     return "Update timed out.";
   }
   if (result.exitCode !== null && result.exitCode !== 0) {
-    return `Update command exited with code ${result.exitCode}.`;
+    const lines = (result.stderr.trim() || result.stdout.trim())
+      .split(/\r\n|\r|\n/)
+      .map(toProgressLine)
+      .filter((line) => line !== null);
+    const detail = lines.find((line) => /\berror\b/i.test(line)) ?? lines.at(-1);
+    return [`Update command exited with code ${result.exitCode}.`, detail]
+      .filter(Boolean)
+      .join(" ");
   }
   return "Update command failed.";
 }

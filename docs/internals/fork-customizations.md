@@ -38,9 +38,11 @@ checkout. Restored pane drafts with an incomplete worktree selection can send in
 the current checkout too. Preserve explicit branch selections, existing worktrees,
 and the full chat view's worktree controls.
 
-In an empty pane with a selected project, keep that project's open threads first,
-open threads from other projects with their project names next, and that project's
-settled threads last.
+Empty panes use one project and thread browser, without a duplicate header picker.
+Selecting a project shows its open threads and settled history; All open threads
+spans connected projects and environments. Keep search, project hiding and
+restoration, and new-thread creation available. Threads already visible in another
+pane remain listed with their pane number; selecting one focuses that pane.
 
 ## Collaborative browser
 

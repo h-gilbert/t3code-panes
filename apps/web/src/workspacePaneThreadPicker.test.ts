@@ -6,7 +6,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   buildWorkspaceThreadPickerItems,
   countRunningWorkspaceSubagents,
-  groupWorkspaceThreadPickerItems,
+  filterWorkspaceThreadPickerItems,
   runningWorkspaceSubagentsByParent,
   type WorkspaceThreadPickerProject,
 } from "./workspacePaneThreadPicker";
@@ -46,7 +46,7 @@ const projects = [
 ] satisfies WorkspaceThreadPickerProject[];
 
 describe("workspace pane thread picker", () => {
-  it("lists non-archived threads that are not assigned to another pane", () => {
+  it("lists available threads and marks threads already visible in a pane", () => {
     const items = buildWorkspaceThreadPickerItems({
       threads: [
         thread("available", projectA, { createdAt: "2026-09-03T00:00:00.000Z" }),
@@ -57,34 +57,54 @@ describe("workspace pane thread picker", () => {
       paneTargets: [scopeThreadRef(environmentId, ThreadId.make("already-open"))],
     });
 
-    expect(items.map((item) => item.threadRef.threadId)).toEqual([ThreadId.make("available")]);
+    expect(items.map((item) => [item.threadRef.threadId, item.paneIndex])).toEqual([
+      ["available", null],
+      ["already-open", 0],
+    ]);
   });
 
-  it("groups other projects' open threads between the selected project's open and settled threads", () => {
+  it("filters project history separately from all open threads and searches across machines", () => {
+    const remoteId = EnvironmentId.make("remote");
     const items = buildWorkspaceThreadPickerItems({
       threads: [
         thread("a", projectA),
         thread("b", projectB),
         thread("settled-a", projectA),
-        thread("settled-b", projectB),
+        { ...thread("a", projectA), environmentId: remoteId },
       ],
-      projects,
-      paneTargets: [],
-      settledThreadKeys: new Set([`${environmentId}:settled-a`, `${environmentId}:settled-b`]),
+      projects: [
+        {
+          ...projects[0]!,
+          memberProjectRefs: [
+            ...projects[0]!.memberProjectRefs,
+            { environmentId: remoteId, projectId: projectA },
+          ],
+        },
+        projects[1]!,
+      ],
+      paneTargets: [null, scopeThreadRef(environmentId, ThreadId.make("a"))],
+      settledThreadKeys: new Set([`${environmentId}:settled-a`]),
+      environmentLabels: new Map([
+        [environmentId, "Mac"],
+        [remoteId, "Fred"],
+      ]),
     });
-
-    const groups = groupWorkspaceThreadPickerItems(items, "group-a");
-    expect(groups.openThreads.map((item) => item.title)).toEqual(["Thread a"]);
-    expect(groups.otherOpenThreads.map((item) => item.title)).toEqual(["Thread b"]);
-    expect(groups.settledThreads.map((item) => item.title)).toEqual(["Thread settled-a"]);
-
-    const unfiltered = groupWorkspaceThreadPickerItems(items, null);
-    expect(unfiltered.openThreads.map((item) => item.title)).toEqual(["Thread a", "Thread b"]);
-    expect(unfiltered.otherOpenThreads).toEqual([]);
-    expect(unfiltered.settledThreads.map((item) => item.title)).toEqual([
-      "Thread settled-a",
-      "Thread settled-b",
-    ]);
+    const select = (projectKey: string | null, status: "all" | "open" | "settled", query = "") =>
+      filterWorkspaceThreadPickerItems(items, { projectKey, status, query });
+    expect(select("group-a", "all")).toHaveLength(3);
+    expect(select("group-a", "settled").map((item) => item.title)).toEqual(["Thread settled-a"]);
+    expect(select(null, "open")).toHaveLength(3);
+    expect(
+      select(null, "open", "  FRED project A ").map((item) => [
+        item.environmentLabel,
+        item.paneIndex,
+      ]),
+    ).toEqual([["Fred", null]]);
+    expect(select(null, "open", "Mac").find((item) => item.title === "Thread a")?.paneIndex).toBe(
+      1,
+    );
+    expect(select("group-b", "all", "Fred")).toEqual([]);
+    expect(select(null, "all", "missing")).toEqual([]);
   });
 
   it("marks settled threads without removing them from the picker", () => {
