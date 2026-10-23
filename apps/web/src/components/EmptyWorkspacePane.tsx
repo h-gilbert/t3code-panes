@@ -1,7 +1,6 @@
 import { useState } from "react";
 import {
   CircleCheckIcon,
-  FolderIcon,
   FolderPlusIcon,
   LayersIcon,
   MoreHorizontalIcon,
@@ -19,6 +18,7 @@ import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "./ui/tooltip";
 import { Input } from "./ui/input";
+import { ProjectFavicon } from "./ProjectFavicon";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -78,10 +78,14 @@ export function EmptyWorkspacePane({
     openCount++;
     openCountByProject.set(thread.projectKey, (openCountByProject.get(thread.projectKey) ?? 0) + 1);
   }
-  const matchingProjects = projects.filter((project) =>
-    `${project.displayName} ${project.workspaceRoot}`
-      .toLowerCase()
-      .includes(projectQuery.trim().toLowerCase()),
+  const scratchProjects = [...projects, ...hiddenProjects].filter((project) => project.isScratch);
+  const hideableProjects = hiddenProjects.filter((project) => !project.isScratch);
+  const matchingProjects = projects.filter(
+    (project) =>
+      !project.isScratch &&
+      `${project.displayName} ${project.workspaceRoot}`
+        .toLowerCase()
+        .includes(projectQuery.trim().toLowerCase()),
   );
   const scoped = threads.filter((thread) =>
     allProjects ? thread.status === "open" : thread.projectKey === selectedProjectKey,
@@ -110,6 +114,59 @@ export function EmptyWorkspacePane({
     setFilter("all");
     onShowAll();
   };
+  const renderProject = (project: SidebarProjectSnapshot) => (
+    <div
+      key={project.projectKey}
+      className={cn(
+        "group flex shrink-0 items-center rounded-md @lg/thread-browser:w-full",
+        project.projectKey === selectedProjectKey && "bg-primary/10 text-primary",
+      )}
+    >
+      <Tooltip>
+        <TooltipTrigger
+          render={<button type="button" />}
+          className={cn(ROW, "min-w-0 flex-1")}
+          aria-label={`Show threads in ${project.displayName}`}
+          aria-pressed={project.projectKey === selectedProjectKey}
+          onClick={() => chooseProject(project)}
+        >
+          <ProjectFavicon project={project} className="size-4 shrink-0" />
+          <span className="truncate text-xs font-medium">{project.displayName}</span>
+          <span className="ml-auto text-2xs tabular-nums text-muted-foreground">
+            {openCountByProject.get(project.projectKey) ?? 0}
+          </span>
+        </TooltipTrigger>
+        <TooltipPopup>
+          {project.displayName}
+          <br />
+          {project.workspaceRoot}
+        </TooltipPopup>
+      </Tooltip>
+      <Button
+        variant="ghost-muted"
+        size="icon-micro"
+        aria-label={`New thread in ${project.displayName}`}
+        onClick={() => onNewThread(project)}
+      >
+        <PlusIcon aria-hidden />
+      </Button>
+      {!project.isScratch ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={<Button variant="ghost-muted" size="icon-micro" />}
+            aria-label={`Actions for ${project.displayName}`}
+          >
+            <MoreHorizontalIcon aria-hidden />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuItem onClick={() => onHideProject(project)}>
+              Hide project from this list
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
+    </div>
+  );
   const renderThreads = (items: readonly WorkspaceThreadPickerItem[]) =>
     items.map((thread) => {
       const activity = ACTIVITY[thread.activity];
@@ -183,20 +240,21 @@ export function EmptyWorkspacePane({
               Projects
             </span>
             <div className="flex items-center gap-1">
-              {hiddenProjects.length > 0 ? (
+              {hideableProjects.length > 0 ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger
                     render={<Button variant="ghost-muted" size="icon-xs" />}
-                    aria-label={`Hidden projects (${hiddenProjects.length})`}
+                    aria-label={`Hidden projects (${hideableProjects.length})`}
                   >
                     <MoreHorizontalIcon aria-hidden />
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start">
-                    {hiddenProjects.map((project) => (
+                    {hideableProjects.map((project) => (
                       <DropdownMenuItem
                         key={project.projectKey}
                         onClick={() => chooseProject(project)}
                       >
+                        <ProjectFavicon project={project} className="size-4 shrink-0" />
                         Show {project.displayName}
                       </DropdownMenuItem>
                     ))}
@@ -224,7 +282,7 @@ export function EmptyWorkspacePane({
               onChange={(event) => setProjectQuery(event.target.value)}
             />
           </div>
-          <div className="flex gap-1 overflow-x-auto px-2 pb-2 @lg/thread-browser:min-h-0 @lg/thread-browser:flex-1 @lg/thread-browser:flex-col @lg/thread-browser:overflow-y-auto @lg/thread-browser:overflow-x-hidden">
+          <div className="flex shrink-0 flex-wrap gap-1 px-2 pb-2 @lg/thread-browser:flex-col @lg/thread-browser:flex-nowrap">
             <button
               type="button"
               className={cn(
@@ -241,58 +299,11 @@ export function EmptyWorkspacePane({
               </span>
               <span className="text-2xs tabular-nums text-muted-foreground">{openCount}</span>
             </button>
-            <div className="hidden mx-2 my-1 border-t border-border @lg/thread-browser:block" />
-            {matchingProjects.map((project) => (
-              <div
-                key={project.projectKey}
-                className={cn(
-                  "group flex shrink-0 items-center rounded-md @lg/thread-browser:w-full",
-                  project.projectKey === selectedProjectKey && "bg-primary/10 text-primary",
-                )}
-              >
-                <Tooltip>
-                  <TooltipTrigger
-                    render={<button type="button" />}
-                    className={cn(ROW, "min-w-0 flex-1")}
-                    aria-label={`Show threads in ${project.displayName}`}
-                    aria-pressed={project.projectKey === selectedProjectKey}
-                    onClick={() => chooseProject(project)}
-                  >
-                    <FolderIcon className="size-3.5 shrink-0 opacity-60" aria-hidden />
-                    <span className="truncate text-xs font-medium">{project.displayName}</span>
-                    <span className="ml-auto text-2xs tabular-nums text-muted-foreground">
-                      {openCountByProject.get(project.projectKey) ?? 0}
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipPopup>
-                    {project.displayName}
-                    <br />
-                    {project.workspaceRoot}
-                  </TooltipPopup>
-                </Tooltip>
-                <Button
-                  variant="ghost-muted"
-                  size="icon-micro"
-                  aria-label={`New thread in ${project.displayName}`}
-                  onClick={() => onNewThread(project)}
-                >
-                  <PlusIcon aria-hidden />
-                </Button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    render={<Button variant="ghost-muted" size="icon-micro" />}
-                    aria-label={`Actions for ${project.displayName}`}
-                  >
-                    <MoreHorizontalIcon aria-hidden />
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start">
-                    <DropdownMenuItem onClick={() => onHideProject(project)}>
-                      Hide project from this list
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            ))}
+            {scratchProjects.map(renderProject)}
+          </div>
+          <div className="hidden mx-4 border-t border-border @lg/thread-browser:block" />
+          <div className="flex gap-1 overflow-x-auto px-2 py-2 @lg/thread-browser:min-h-0 @lg/thread-browser:flex-1 @lg/thread-browser:flex-col @lg/thread-browser:overflow-y-auto @lg/thread-browser:overflow-x-hidden">
+            {matchingProjects.map(renderProject)}
             {matchingProjects.length === 0 && projectQuery ? (
               <p className="px-2 py-3 text-xs text-muted-foreground">No matching projects.</p>
             ) : null}

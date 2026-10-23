@@ -40,6 +40,7 @@ import {
 } from "react";
 
 import { EmptyWorkspacePane } from "../components/EmptyWorkspacePane";
+import { ProjectFavicon } from "../components/ProjectFavicon";
 import { ChatViewContent } from "../components/ChatView";
 import {
   WorkspacePaneHeaderContext,
@@ -573,6 +574,9 @@ function WorkspacePane({
               }
               aria-label={`Change project for pane ${index + 1}`}
             >
+              {selectedProject ? (
+                <ProjectFavicon project={selectedProject} className="size-3 shrink-0" />
+              ) : null}
               <span className="truncate">{selectedProject?.displayName ?? "Choose project"}</span>
               <ChevronDownIcon className="size-3 shrink-0 text-muted-foreground" aria-hidden />
             </DropdownMenuTrigger>
@@ -599,6 +603,7 @@ function WorkspacePane({
                       setPickerProjectHidden(project.projectKey, true);
                     }}
                   >
+                    <ProjectFavicon project={project} className="size-4 shrink-0" />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate">{project.displayName}</span>
                       <span className="block truncate text-2xs text-muted-foreground">
@@ -635,6 +640,7 @@ function WorkspacePane({
                           selectProject(scopeProjectRef(project.environmentId, project.id))
                         }
                       >
+                        <ProjectFavicon project={project} className="size-4 shrink-0" />
                         <span className="min-w-0 flex-1">
                           <span className="block truncate">{project.displayName}</span>
                           <span className="block truncate text-2xs text-muted-foreground">
