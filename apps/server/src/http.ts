@@ -254,18 +254,35 @@ export const layerBrowserApiCors = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig.ServerConfig;
     const devOrigin = config.devUrl?.origin;
-    // Credentialed dev requests need explicit Vite/Electron origins; packaged desktop uses the default wildcard.
-    return HttpRouter.cors({
-      ...(devOrigin
-        ? {
-            allowedOrigins: [devOrigin, ...DESKTOP_RENDERER_ORIGINS, ...config.devAllowedOrigins],
-            credentials: true,
-          }
-        : {}),
+    const options = {
       allowedMethods: browserApiCorsAllowedMethods,
       allowedHeaders: browserApiCorsAllowedHeaders,
       maxAge: 600,
+    };
+    if (devOrigin) {
+      return HttpRouter.cors({
+        ...options,
+        allowedOrigins: [devOrigin, ...DESKTOP_RENDERER_ORIGINS, ...config.devAllowedOrigins],
+        credentials: true,
+      });
+    }
+    // Packaged desktop uses the local session cookie. Only its known origins may
+    // receive credentialed CORS; hosted clients still use bearer/DPoP headers.
+    const desktopCors = HttpMiddleware.cors({
+      ...options,
+      allowedOrigins: DESKTOP_RENDERER_ORIGINS,
+      credentials: true,
     });
+    const publicCors = HttpMiddleware.cors(options);
+    return HttpRouter.middleware(
+      (httpEffect) =>
+        Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) =>
+          (DESKTOP_RENDERER_ORIGINS.some((origin) => origin === request.headers.origin)
+            ? desktopCors
+            : publicCors)(httpEffect),
+        ),
+      { global: true },
+    );
   }),
 );
 

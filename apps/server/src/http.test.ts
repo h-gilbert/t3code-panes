@@ -94,6 +94,47 @@ describe("MCP app asset responses", () => {
 });
 
 describe("browser API CORS", () => {
+  it.each(["t3code://app", "t3code-dev://app"])(
+    "allows desktop session cookies from %s in packaged servers",
+    async (origin) => {
+      const layerRoute = Layer.effectDiscard(
+        Effect.gen(function* () {
+          const router = yield* HttpRouter.HttpRouter;
+          yield* router.add(
+            "GET",
+            "/api/auth/session",
+            HttpServerResponse.json({ authenticated: true }),
+          );
+        }),
+      );
+      const layerApp = Layer.merge(layerRoute, ServerHttp.layerBrowserApiCors).pipe(
+        Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "http-desktop-cors-test-" })),
+        Layer.provide(NodeServices.layer),
+      );
+      const { handler, dispose } = HttpRouter.toWebHandler(layerApp, { disableLogger: true });
+      try {
+        for (const method of ["GET", "OPTIONS"]) {
+          const response = await handler(
+            new Request("http://127.0.0.1:3773/api/auth/session", {
+              method,
+              credentials: "include",
+              headers: {
+                origin,
+                ...(method === "OPTIONS" ? { "access-control-request-method": "GET" } : {}),
+              },
+            }),
+          );
+          expect(response.status).toBe(method === "OPTIONS" ? 204 : 200);
+          expect(response.headers.get("access-control-allow-origin")).toBe(origin);
+          expect(response.headers.get("access-control-allow-credentials")).toBe("true");
+          expect(response.headers.get("vary")).toContain("Origin");
+        }
+      } finally {
+        await dispose();
+      }
+    },
+  );
+
   it("accepts protocol negotiation with authenticated browser headers", async () => {
     const layerRoute = Layer.effectDiscard(
       Effect.gen(function* () {
@@ -125,6 +166,7 @@ describe("browser API CORS", () => {
 
       expect(response.status).toBe(204);
       expect(response.headers.get("access-control-allow-origin")).toBe("*");
+      expect(response.headers.get("access-control-allow-credentials")).toBeNull();
       const allowedHeaders = new Set(
         (response.headers.get("access-control-allow-headers") ?? "")
           .split(",")
