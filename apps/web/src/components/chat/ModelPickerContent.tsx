@@ -1,7 +1,5 @@
-import { useStableCallback } from "../../hooks/useStableCallback";
 import {
   ANTIGRAVITY_DEFAULT_MODEL,
-  type ModelSelection,
   type ProviderInstanceId,
   type EnvironmentId,
   type ProviderDriverKind,
@@ -25,7 +23,6 @@ import {
 } from "react";
 import { ChevronRightIcon } from "lucide-react";
 import { ModelListRow } from "./ModelListRow";
-import { DefaultModelThinkingBudgetPicker } from "./DefaultModelThinkingBudgetPicker";
 import { ModelPickerSidebar } from "./ModelPickerSidebar";
 import { getProviderStatusMessage, hasProviderSetup } from "./ProviderStatusBanner";
 import {
@@ -51,8 +48,9 @@ import {
   resolveShortcutCommand,
   shortcutLabelForCommand,
 } from "../../keybindings";
-import { useSettingsTarget, useUpdateSettingsTarget } from "~/hooks/useSettings";
+import { useSettingsTarget } from "~/hooks/useSettings";
 import { usePrimaryEnvironmentId } from "~/state/environments";
+import { announce } from "~/lib/announce";
 import { cn } from "~/lib/utils";
 import { getVirtualizedScrollFadeClassName } from "../ui/scroll-area";
 import { TooltipProvider } from "../ui/tooltip";
@@ -245,8 +243,6 @@ function ModelPickerProviderNotices({
   );
 }
 
-// Owns the list's measured height and scroll fades, which change on every scroll and
-// resize without touching the picker's model lists.
 function ModelPickerList({
   listRef,
   itemKeys,
@@ -274,9 +270,8 @@ function ModelPickerList({
     setShowBottomScrollFade(maxScrollOffset - scrollElement.scrollTop > 1);
   };
 
-  // Keyed by content: a new disabled-reason closure rebuilds an identical key array.
+  // Disabled-reason closures rebuild identical key arrays; compare contents.
   const itemListKey = JSON.stringify(itemKeys);
-  // A new list starts from the top until the measurement below lands.
   const [fadesResetFor, setFadesResetFor] = useState(itemListKey);
   if (fadesResetFor !== itemListKey) {
     setFadesResetFor(itemListKey);
@@ -331,7 +326,7 @@ function ModelPickerList({
   );
 }
 
-// Capture phase, so model and provider shortcuts win over the composer underneath.
+// Capture gives picker shortcuts priority over the composer.
 function WindowKeyDownListener({ onKeyDown }: { onKeyDown: (event: KeyboardEvent) => void }) {
   const handleKeyDown = useEffectEvent(onKeyDown);
   useEffect(() => {
@@ -372,8 +367,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     onOpenProviderSetup,
   } = props;
   const [searchQuery, setSearchQuery] = useState("");
-  const [budgetSelection, setBudgetSelection] = useState<ModelSelection | null>(null);
-  const [budgetAnchor, setBudgetAnchor] = useState<HTMLButtonElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const modelListRef = useRef<LegendListRef | null>(null);
   const pickerContentRef = useRef<HTMLDivElement>(null);
@@ -450,7 +443,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   );
   const serverKeybindings = useAtomValue(primaryServerKeybindingsAtom);
   const keybindings = providedKeybindings ?? serverKeybindings;
-  const updateSettings = useUpdateSettingsTarget(settingsEnvironmentId);
   const [searchHeight, setSearchHeight] = useState(0);
 
   const focusSearchInput = () => {
@@ -494,26 +486,26 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     modelSlug: string,
     instanceId: ProviderInstanceId,
     additive = false,
-  ) => {
+  ): string | null => {
     if (getModelDisabledReason?.(instanceId, modelSlug)) {
-      return;
+      return null;
     }
     const options = modelOptionsByInstance.get(instanceId);
     if (!options) {
-      return;
+      return null;
     }
     const entry = instanceEntries.find((candidate) => candidate.instanceId === instanceId);
     if (!entry) {
-      return;
+      return null;
     }
     const resolvedModel = resolveSelectableModel(entry.driverKind, modelSlug, options);
-    if (resolvedModel) {
-      if (additive && onToggleModel) {
-        onToggleModel(instanceId, resolvedModel);
-      } else {
-        onInstanceModelChange(instanceId, resolvedModel);
-      }
+    if (!resolvedModel) return null;
+    if (additive && onToggleModel) {
+      onToggleModel(instanceId, resolvedModel);
+    } else {
+      onInstanceModelChange(instanceId, resolvedModel);
     }
+    return resolvedModel;
   };
 
   const modelJumpShortcutContext = {
@@ -527,7 +519,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
 
   const entryByInstanceId = new Map(instanceEntries.map((entry) => [entry.instanceId, entry]));
   const matchesLockedProvider = (
-    entry: Pick<ProviderInstanceEntry, "driverKind" | "continuationGroupKey">,
+    entry: Pick<ProviderInstanceEntry, "driverKind"> & {
+      continuationGroupKey?: string | undefined;
+    },
   ): boolean => {
     if (lockedProvider === null) return true;
     if (entry.driverKind !== lockedProvider) return false;
@@ -719,18 +713,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     return notice ? [{ instanceId: entry.instanceId, notice }] : [];
   });
 
-  const toggleFavorite = useStableCallback(
-    (instanceId: ProviderInstanceId, model: string, anchor: HTMLButtonElement) => {
-      const selection =
-        defaultModel?.instanceId === instanceId && defaultModel.model === model
-          ? defaultModel
-          : { instanceId, model };
-      setBudgetAnchor(anchor);
-      setBudgetSelection(selection);
-      updateSettings({ starredModelSelection: selection });
-    },
-  );
-
   // The first selectable models get the numbered jump shortcuts, in list order.
   const modelJumpModelKeys = visibleModels
     .filter((model) => !getModelDisabledReason?.(model.instanceId, model.slug))
@@ -787,6 +769,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       event.stopPropagation();
       const next = adjacentModelPickerProvider({
         entries: sidebarInstanceEntries,
+        includeFavorites: false,
         selectedInstanceId,
         direction: command === "modelPicker.nextProvider" ? 1 : -1,
         disabledInstanceIds: lockedDisabledInstanceIds,
@@ -794,6 +777,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       });
       setSearchQuery("");
       handleSelectInstance(next);
+      announce(
+        next === "favorites" ? "Favorites" : (entryByInstanceId.get(next)?.displayName ?? next),
+        "model-picker",
+      );
       return;
     }
     const jumpIndex = modelPickerJumpIndexFromCommand(command ?? "");
@@ -811,29 +798,16 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     if (!model) {
       return;
     }
-    handleModelSelect(model.slug, model.instanceId);
+    const selectedSlug = handleModelSelect(model.slug, model.instanceId);
+    if (selectedSlug === null) return;
+    const name = flatModels.find(
+      (item) => item.slug === selectedSlug && item.instanceId === model.instanceId,
+    )?.name;
+    announce(`Model: ${name ?? selectedSlug}`, "model-picker");
   };
 
   return (
     <TooltipProvider delay={0}>
-      {budgetSelection ? (
-        <DefaultModelThinkingBudgetPicker
-          model={entryByInstanceId
-            .get(budgetSelection.instanceId)
-            ?.snapshot.models.find((model) => model.slug === budgetSelection.model)}
-          selection={budgetSelection}
-          anchor={budgetAnchor}
-          open
-          onOpenChange={(open) => {
-            if (!open) setBudgetSelection(null);
-          }}
-          onChange={(selection) => updateSettings({ starredModelSelection: selection })}
-          onClear={() => {
-            updateSettings({ starredModelSelection: null });
-            setBudgetSelection(null);
-          }}
-        />
-      ) : null}
       <WindowKeyDownListener onKeyDown={onWindowKeyDown} />
       <div
         ref={pickerContentRef}
@@ -1016,7 +990,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                     providerAccentColor={model.instanceAccentColor}
                     acpRegistryAgentId={model.acpRegistryAgentId}
                     acpRegistryIconUrl={model.acpRegistryIconUrl}
-                    isFavorite={favoritesSet.has(providerModelKey(model.instanceId, model.slug))}
                     isSelected={
                       selectedModelKeys !== undefined
                         ? selectedModelKeySet.has(modelKey)
@@ -1030,9 +1003,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                     unavailable={model.isUnavailable === true}
                     jumpLabel={modelJumpLabelByKey.get(modelKey) ?? null}
                     disabledReason={disabledReason}
-                    onToggleFavorite={(anchor) =>
-                      toggleFavorite(model.instanceId, model.slug, anchor)
-                    }
                   />
                 );
               }}

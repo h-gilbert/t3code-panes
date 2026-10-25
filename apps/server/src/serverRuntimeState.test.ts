@@ -4,12 +4,9 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
-import * as References from "effect/References";
 import * as Runtime from "effect/Runtime";
-import * as Schema from "effect/Schema";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import { renderBootServicePlist, renderBootServiceUnit } from "./cloud/bootService.ts";
@@ -18,8 +15,15 @@ import { SERVICE_LAUNCHER_CONTEXT_ENV } from "./cloud/serviceProtocol.ts";
 import * as ProcessRunner from "./processRunner.ts";
 import * as ServerOwnership from "./serverOwnership.ts";
 import * as ServerRuntimeState from "./serverRuntimeState.ts";
+import * as Logger from "effect/Logger";
+import * as References from "effect/References";
+import * as Schema from "effect/Schema";
 
 const isServerRuntimeStateError = Schema.is(ServerRuntimeState.ServerRuntimeStateError);
+interface CapturedLog {
+  readonly message: unknown;
+  readonly annotations: Readonly<Record<string, unknown>>;
+}
 
 const startBesideBootService = Effect.fn("test.startBesideBootService")(function* (input: {
   readonly platform: "darwin" | "linux";
@@ -132,11 +136,6 @@ const startBesideBootService = Effect.fn("test.startBesideBootService")(function
   return { result, t3Home };
 });
 
-interface CapturedLog {
-  readonly message: unknown;
-  readonly annotations: Readonly<Record<string, unknown>>;
-}
-
 describe("server ownership", () => {
   // An empty home, so no boot service unit installed on this machine is read.
   const layerOwnership = Layer.mergeAll(
@@ -206,8 +205,8 @@ describe("server ownership", () => {
       const state = yield* makeState;
       yield* ServerRuntimeState.persistServerRuntimeState({
         path: statePath,
-        // @effect-diagnostics-next-line globalDateInEffect:off - Legacy identity uses the real process start time, not TestClock.
-        state: { ...state, startedAt: new Date().toISOString() },
+        // Any record time after this process started proves the PID was not reused.
+        state: { ...state, startedAt: "2100-01-01T00:00:00.000Z" },
       });
       const refused = yield* Effect.scoped(ServerOwnership.acquireServerOwnership(statePath)).pipe(
         Effect.flip,

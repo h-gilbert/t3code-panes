@@ -454,10 +454,7 @@ function startPendingDeviceRegistration(): void {
       runtime.runPromiseExit(registerDevice(next.input, generation)),
     );
     if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-      // A transient failure on a later refresh (e.g. token rotation) leaves
-      // the prior accepted registration intact on the relay, so an already
-      // registered device stays "registered" rather than flipping the
-      // settings toggles off.
+      // Refresh failures leave the relay's accepted registration intact; preserve registered status.
       if (registrationStatus !== "registered") {
         setRegistrationStatus("failed");
       }

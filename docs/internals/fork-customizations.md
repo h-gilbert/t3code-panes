@@ -24,10 +24,11 @@ Declined, cancelled or interrupted requests must not write settings.
 
 ## New-thread model
 
-Starring a model sets one shared default model and thinking budget across connected
+Selecting the shared default in Settings sets one model and thinking budget across connected
 environments. It takes precedence over project and environment defaults, including
 when reusing an empty draft or switching projects. Explicit model picks in a draft
-remain intact. The star opens the budget popup; clearing the star restores project
+remain intact. Pane model pickers only select the current thread model; shared default
+controls belong in Settings. Clearing the shared default restores project
 and environment defaults. Do not reintroduce a favorites list or a hard-coded
 new-thread model. The shared Codex fallback model is Sol, and the provider prefers
 GPT-6 Sol over Astra and older Sol when available.
@@ -148,11 +149,15 @@ already contains text. Preserve this when integrating upstream composer changes.
   details popover. Message markers fit the pane height with space at both ends and scroll
   independently when they overflow, without scrolling the conversation.
   Navigation and settings overlay the mounted panes instead of replacing the workspace.
+  Settings use upstream's section routes and modal sidebar, with the fork's custom controls.
+  Opening or dismissing Settings must retain pane drafts and scroll positions.
 - Preserve retained terminal sessions and reconnect behavior described in
   `docs/internals/terminal-runtime.md`.
 - Preserve the separate private iOS branch and its normal push notifications for approval, input,
   failure, and completion of turns submitted from iOS. Web/desktop completions stay quiet, with no Live Activities or Dynamic Island integration. Follow
-  `docs/operations/local-ios-updates.md` and its existing policy checks.
+  `docs/operations/local-ios-updates.md` and its existing policy checks. Send the private
+  `ios` origin only when the destination advertises `iosTurnOrigin`; older servers reject
+  that value, so use `mobile` and keep routine completion alerts silent there.
 - Updating source does not authorize replacing or restarting the installed app.
   Follow `docs/operations/fork-releases.md` for an authorized release and
   `docs/operations/local-desktop-promotion.md` for a requested one-off local install.

@@ -1,10 +1,7 @@
+import { hasConnectCliAuthConfig } from "./connectCliAuth";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import {
-  buildConnectCliClerkAuthorizeUrl,
-  connectCliSignInRedirectUrl,
-  hasConnectCliAuthConfig,
-} from "./connectCliAuth";
+import { buildConnectCliClerkAuthorizeUrl, connectCliSignInRedirectUrl } from "./connectCliAuth";
 
 const TEST_PUBLISHABLE_KEY = `pk_test_${btoa("witty-mole-42.clerk.accounts.dev$")}`;
 

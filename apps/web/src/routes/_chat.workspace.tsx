@@ -13,7 +13,7 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { canSettle, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
 import { createFileRoute } from "@tanstack/react-router";
-import type { ScopedProjectRef, ScopedThreadRef } from "@t3tools/contracts";
+import type { EnvironmentId, ScopedProjectRef, ScopedThreadRef } from "@t3tools/contracts";
 import {
   ArrowLeftIcon,
   BotIcon,
@@ -89,6 +89,9 @@ import { primaryServerKeybindingsAtom } from "../state/server";
 import { useClientSettings } from "../hooks/useSettings";
 import { useDesktopFullscreen } from "../hooks/useDesktopFullscreen";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
+import { useScratchProject } from "../hooks/useScratchProject";
+import { useLogicalProjectEnvironments } from "../hooks/useLogicalProjectEnvironments";
+import { EnvironmentMachineIcon } from "../components/EnvironmentMachineIcon";
 import { useNowMinute } from "../hooks/useNowMinute";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { selectProjectGroupingSettings } from "../logicalProject";
@@ -99,6 +102,7 @@ import {
 } from "../composerDraftStore";
 import {
   buildSidebarProjectSnapshots,
+  resolveSidebarProjectScopeKey,
   type SidebarProjectSnapshot,
 } from "../sidebarProjectGrouping";
 import {
@@ -359,6 +363,11 @@ function WorkspacePane({
   const hiddenPickerProjectKeys = useWorkspacePaneStore((state) => state.hiddenPickerProjectKeys);
   const setPickerProjectHidden = useWorkspacePaneStore((state) => state.setPickerProjectHidden);
   const handleNewThread = useNewThreadHandler();
+  const { openScratchProject } = useScratchProject();
+  const scratchEnvironments = useLogicalProjectEnvironments(
+    projects.find((project) => project.isScratch) ?? null,
+    true,
+  );
   const [pendingProjectRef, setPendingProjectRef] = useState<ScopedProjectRef | null>(null);
   const [settling, setSettling] = useState(false);
   const [draggingPane, setDraggingPane] = useState(false);
@@ -403,8 +412,8 @@ function WorkspacePane({
   const [menuProjects, hiddenMenuProjects] = (() => {
     const hiddenKeys = new Set(hiddenPickerProjectKeys);
     return [
-      projects.filter((project) => !hiddenKeys.has(project.projectKey)),
-      projects.filter((project) => hiddenKeys.has(project.projectKey)),
+      projects.filter((project) => project.isScratch || !hiddenKeys.has(project.projectKey)),
+      projects.filter((project) => !project.isScratch && hiddenKeys.has(project.projectKey)),
     ];
   })();
   const resolvePendingProject = useEffectEvent(() => {
@@ -423,11 +432,19 @@ function WorkspacePane({
     if (pendingProjectReady) resolvePendingProject();
   }, [pendingProjectReady]);
 
-  const startNewThread = useStableCallback((project: SidebarProjectSnapshot) => {
-    const projectRef = scopeProjectRef(project.environmentId, project.id);
-    selectProject(projectRef);
-    openFreshDraft(projectRef);
-  });
+  const startNewThread = useStableCallback(
+    async (project: SidebarProjectSnapshot | null, environmentId?: EnvironmentId) => {
+      const requestVersion = ++draftRequestVersionRef.current;
+      const destination =
+        (!project || project.isScratch) && environmentId
+          ? await openScratchProject(environmentId)
+          : project;
+      if (!destination || draftRequestVersionRef.current !== requestVersion) return;
+      const projectRef = scopeProjectRef(destination.environmentId, destination.id);
+      selectProject(projectRef);
+      openFreshDraft(projectRef);
+    },
+  );
   const openExistingThread = useStableCallback((thread: WorkspaceThreadPickerItem) => {
     draftRequestVersionRef.current += 1;
     if (thread.paneIndex === null) setPaneProject(workspaceKey, index, thread.projectKey);
@@ -583,48 +600,118 @@ function WorkspacePane({
             <DropdownMenuContent align="start" className="w-72">
               <DropdownMenuGroup>
                 <DropdownMenuLabel>Project for this pane</DropdownMenuLabel>
-                {menuProjects.map((project) => (
-                  <DropdownMenuItem
-                    key={project.projectKey}
-                    className="group"
-                    render={
-                      <div
-                        className={
-                          project.projectKey === projectKey ? "bg-foreground/[0.08]" : undefined
-                        }
-                      />
-                    }
-                    onClick={() =>
-                      selectProject(scopeProjectRef(project.environmentId, project.id))
-                    }
-                    onKeyDown={(event) => {
-                      if (event.key !== "Delete" && event.key !== "Backspace") return;
-                      event.preventDefault();
-                      setPickerProjectHidden(project.projectKey, true);
-                    }}
-                  >
-                    <ProjectFavicon project={project} className="size-4 shrink-0" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate">{project.displayName}</span>
-                      <span className="block truncate text-2xs text-muted-foreground">
-                        {project.workspaceRoot}
-                      </span>
-                    </span>
-                    <button
-                      type="button"
-                      tabIndex={-1}
-                      className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground group-data-highlighted:opacity-100 pointer-coarse:opacity-100"
-                      aria-label={`Hide ${project.displayName} from this list`}
-                      onClick={(event) => {
+                {!menuProjects.some((project) => project.isScratch) ? (
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger>No project</DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent>
+                      <DropdownMenuGroup>
+                        <DropdownMenuLabel>New thread on</DropdownMenuLabel>
+                        {scratchEnvironments.map((environment) => (
+                          <DropdownMenuItem
+                            key={environment.environmentId}
+                            disabled={environment.disabledReason !== undefined}
+                            onClick={() => void startNewThread(null, environment.environmentId)}
+                          >
+                            <EnvironmentMachineIcon
+                              kind={environment.machine}
+                              className="size-4 shrink-0"
+                            />
+                            {environment.label}
+                            {environment.disabledReason ? (
+                              <span className="text-muted-foreground">
+                                {environment.disabledReason}
+                              </span>
+                            ) : null}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuGroup>
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                ) : null}
+                {menuProjects.map((project) =>
+                  project.isScratch ? (
+                    <DropdownMenuSub key={project.projectKey}>
+                      <DropdownMenuSubTrigger>
+                        <ProjectFavicon project={project} className="size-4 shrink-0" />
+                        {project.displayName}
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent>
+                        <DropdownMenuGroup>
+                          <DropdownMenuItem
+                            onClick={() =>
+                              selectProject(scopeProjectRef(project.environmentId, project.id))
+                            }
+                          >
+                            Browse threads
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuLabel>New thread on</DropdownMenuLabel>
+                          {scratchEnvironments.map((environment) => (
+                            <DropdownMenuItem
+                              key={environment.environmentId}
+                              disabled={environment.disabledReason !== undefined}
+                              onClick={() =>
+                                void startNewThread(project, environment.environmentId)
+                              }
+                            >
+                              <EnvironmentMachineIcon
+                                kind={environment.machine}
+                                className="size-4 shrink-0"
+                              />
+                              {environment.label}
+                              {environment.disabledReason ? (
+                                <span className="text-muted-foreground">
+                                  {environment.disabledReason}
+                                </span>
+                              ) : null}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuGroup>
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                  ) : (
+                    <DropdownMenuItem
+                      key={project.projectKey}
+                      className="group"
+                      render={
+                        <div
+                          className={
+                            project.projectKey === projectKey ? "bg-foreground/[0.08]" : undefined
+                          }
+                        />
+                      }
+                      onClick={() =>
+                        selectProject(scopeProjectRef(project.environmentId, project.id))
+                      }
+                      onKeyDown={(event) => {
+                        if (event.key !== "Delete" && event.key !== "Backspace") return;
                         event.preventDefault();
-                        event.stopPropagation();
                         setPickerProjectHidden(project.projectKey, true);
                       }}
                     >
-                      <XIcon className="size-3" aria-hidden />
-                    </button>
-                  </DropdownMenuItem>
-                ))}
+                      <ProjectFavicon project={project} className="size-4 shrink-0" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate">{project.displayName}</span>
+                        <span className="block truncate text-2xs text-muted-foreground">
+                          {project.workspaceRoot}
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground group-data-highlighted:opacity-100 pointer-coarse:opacity-100"
+                        aria-label={`Hide ${project.displayName} from this list`}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setPickerProjectHidden(project.projectKey, true);
+                        }}
+                      >
+                        <XIcon className="size-3" aria-hidden />
+                      </button>
+                    </DropdownMenuItem>
+                  ),
+                )}
               </DropdownMenuGroup>
               <DropdownMenuSeparator />
               {hiddenMenuProjects.length > 0 ? (
@@ -797,6 +884,7 @@ function WorkspacePane({
                 selectProject(scopeProjectRef(project.environmentId, project.id))
               }
               onAddProject={openProjectPicker}
+              scratchEnvironments={scratchEnvironments}
               onNewThread={startNewThread}
               onSelectThread={openExistingThread}
             />
@@ -828,6 +916,7 @@ export function ProjectPaneWorkspace({
     buildSidebarProjectSnapshots({
       projects,
       settings: projectGroupingSettings,
+      groupScratchProjects: true,
       primaryEnvironmentId,
       resolveEnvironmentLabel: () => null,
     }))();
@@ -1084,7 +1173,11 @@ export function ProjectPaneWorkspace({
               workspaceKey={workspaceKey}
               index={index}
               paneTarget={paneTarget}
-              projectKey={projectKeys[index] ?? null}
+              projectKey={resolveSidebarProjectScopeKey({
+                groups: projectGroups,
+                key: projectKeys[index] ?? null,
+                settings: projectGroupingSettings,
+              })}
               projects={projectGroups}
               availableThreads={availableThreads}
               focused={active && focusedPaneIndex === index}

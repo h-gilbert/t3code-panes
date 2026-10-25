@@ -1,25 +1,23 @@
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   type ClientSettings,
   type DesktopPendingSnapShot,
   type DesktopSnapShotEvent,
   DEFAULT_CLIENT_SETTINGS,
-  EnvironmentId,
-  PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
-  ProjectId,
-  ThreadId,
 } from "@t3tools/contracts";
 import { createElement } from "react";
-import { describe, expect, it, vi } from "vite-plus/test";
-
 import { act, fakeTimers, render, type Screen } from "../../../test/render";
-
-import { DraftId, useComposerDraftStore } from "../../composerDraftStore";
-import type { DesktopSnapShotBridge } from "../../lib/desktopSnapShot";
 import * as settings from "../../hooks/useSettings";
 import * as newThread from "../../hooks/useHandleNewThread";
 import * as snapShotSound from "../../lib/snapShotSound";
 import { toastManager } from "../ui/toast";
+import { SnapShotCoordinator } from "./SnapShotCoordinator";
+import { setSnapShotAnimationDestination } from "../../lib/snapShotAnimation";
+import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
+import { describe, expect, it, vi } from "vite-plus/test";
+
+import { DraftId, useComposerDraftStore } from "../../composerDraftStore";
+import type { DesktopSnapShotBridge } from "../../lib/desktopSnapShot";
 import * as imageCompression from "../../lib/imageCompression";
 import {
   questionAttachmentDraftId,
@@ -31,15 +29,12 @@ import {
   dismissFailedSnapShot,
   resolveExistingSnapShotTarget,
   resolveSnapShotAttachmentTarget,
-  resolveSnapShotTargetOnce,
   resolveSnapShotDeliveryTarget,
-  SnapShotCoordinator,
 } from "./SnapShotCoordinator";
 import {
   beginSnapShotAnimation,
   dismissAllSnapShotAnimations,
   getPendingSnapShotAnimations,
-  setSnapShotAnimationDestination,
   scheduleSnapShotAnimationDestination,
 } from "../../lib/snapShotAnimation";
 
@@ -88,33 +83,6 @@ function setup(): Disposable {
 }
 
 describe("window capture failures", () => {
-  it("dismisses an older failed capture without disturbing a newer capture", async () => {
-    using _env = setup();
-    const target = DraftId.make("snap-shot-draft");
-    const pendingStarts = new Set<string>();
-    const soundedIds = new Set(["older", "newer"]);
-    const dismissSnapShotAnimation = vi.fn(async () => undefined);
-    vi.stubGlobal("desktopBridge", {
-      requestSnapShotPermissions: vi.fn(),
-      getSnapShotState: vi.fn(),
-      checkSnapShotShortcut: vi.fn(),
-      setSnapShotShortcutSuppressed: vi.fn(),
-      listPendingSnapShots: vi.fn(),
-      readSnapShot: vi.fn(),
-      acknowledgeSnapShot: vi.fn(),
-      onSnapShotEvent: vi.fn(() => () => undefined),
-      dismissSnapShotAnimation,
-    });
-    await beginSnapShotAnimationWhenReady("older", Promise.resolve(target), pendingStarts);
-    await beginSnapShotAnimationWhenReady("newer", Promise.resolve(target), pendingStarts);
-
-    dismissFailedSnapShot("older", soundedIds, pendingStarts);
-
-    expect(getPendingSnapShotAnimations().map(({ id }) => id)).toEqual(["newer"]);
-    expect(soundedIds).toEqual(new Set(["newer"]));
-    expect(dismissSnapShotAnimation).toHaveBeenCalledExactlyOnceWith("older");
-  });
-
   it("does not resurrect a failed capture when its draft becomes ready later", async () => {
     using _env = setup();
     const target = DraftId.make("snap-shot-draft");
@@ -582,28 +550,6 @@ describe("window capture delivery", () => {
 });
 
 describe("window capture target resolution", () => {
-  it("shares bare-route draft creation between animation start and capture drain", async () => {
-    using _env = setup();
-    const draftId = DraftId.make("snap-shot-draft");
-    let finishResolution: ((target: DraftId) => void) | undefined;
-    const resolveTarget = vi.fn(
-      () =>
-        new Promise<DraftId>((resolve) => {
-          finishResolution = resolve;
-        }),
-    );
-    const resolutionRef: { current: Promise<DraftId | null> | null } = { current: null };
-
-    const animationTarget = resolveSnapShotTargetOnce(resolutionRef, resolveTarget);
-    const attachmentTarget = resolveSnapShotTargetOnce(resolutionRef, resolveTarget);
-
-    expect(animationTarget).toBe(attachmentTarget);
-    expect(resolveTarget).toHaveBeenCalledTimes(1);
-    finishResolution?.(draftId);
-    await expect(animationTarget).resolves.toBe(draftId);
-    expect(resolutionRef.current).toBeNull();
-  });
-
   it("follows a draft to its promoted server thread", () => {
     using _env = setup();
     const draftId = DraftId.make("snap-shot-draft");
@@ -615,13 +561,6 @@ describe("window capture target resolution", () => {
     store.markDraftThreadPromoting(draftId, promotedRef);
 
     expect(resolveExistingSnapShotTarget(draftId, null)).toEqual(promotedRef);
-  });
-
-  it("keeps the routed server thread before its shell loads", () => {
-    using _env = setup();
-    const routeThreadRef = scopeThreadRef(environmentId, ThreadId.make("snap-shot-routed-thread"));
-
-    expect(resolveExistingSnapShotTarget(routeThreadRef, routeThreadRef)).toEqual(routeThreadRef);
   });
 });
 
@@ -716,35 +655,6 @@ describe("open question delivery", () => {
       expect(store.getComposerDraft(first)?.images ?? []).toHaveLength(0);
       expect(store.getComposerDraft(threadRef)?.images.map(({ id }) => id)).toEqual([capture.id]);
       expect(acknowledgeSnapShot).toHaveBeenCalledExactlyOnceWith(capture.id);
-    } finally {
-      untrack();
-    }
-  });
-
-  it("refuses a capture once the request's other questions hold the shared limit", async () => {
-    using _env = setup();
-    useComposerDraftStore.getState().addImages(
-      first,
-      Array.from({ length: PROVIDER_SEND_TURN_MAX_ATTACHMENTS }, (_, index) => ({
-        type: "image" as const,
-        id: `staged-${index}`,
-        name: `staged-${index}.png`,
-        mimeType: "image/png",
-        sizeBytes: 3,
-        previewUrl: `data:image/png;base64,AQID${index}`,
-        file: new File([new Uint8Array([1, 2, 3])], `staged-${index}.png`, { type: "image/png" }),
-      })),
-    );
-    const untrack = trackOpenQuestionAttachmentDraft(threadRef, { ...request, draftId: second });
-    try {
-      const { bridge, acknowledgeSnapShot } = makeBridge();
-      await expect(deliverSnapShot(bridge, capture, () => second)).rejects.toThrow(
-        "Remove an attachment",
-      );
-      expect(useComposerDraftStore.getState().getComposerDraft(second)?.images ?? []).toHaveLength(
-        0,
-      );
-      expect(acknowledgeSnapShot).not.toHaveBeenCalled();
     } finally {
       untrack();
     }

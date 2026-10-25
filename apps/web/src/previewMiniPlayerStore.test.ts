@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
   browserMiniPlayerSource,
-  type PreviewMiniPlayerSource,
   selectThreadPreviewMiniPlayer,
   selectThreadPreviewMiniPlayerTabId,
   usePreviewMiniPlayerStore,
@@ -14,13 +13,6 @@ const refA = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("thread-A"))
 const refB = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("thread-B"));
 const tabA = browserMiniPlayerSource("tab-a");
 const tabB = browserMiniPlayerSource("tab-b");
-const pixel: PreviewMiniPlayerSource = {
-  kind: "device",
-  hostId: "nucbox",
-  deviceId: "emulator-5580",
-  platform: "android",
-  name: "Pixel",
-};
 
 beforeEach(() => {
   usePreviewMiniPlayerStore.setState({ byThreadKey: {} });

@@ -1,5 +1,3 @@
-"use client";
-
 import {
   PREVIEW_VIEWPORT_MAX_AREA,
   PREVIEW_VIEWPORT_MAX_DIMENSION,
@@ -7,7 +5,7 @@ import {
   type PreviewViewportSetting,
 } from "@t3tools/contracts";
 import { PREVIEW_VIEWPORT_PRESETS, resolvePreviewViewport } from "@t3tools/shared/previewViewport";
-import { Link2, Smartphone, Unlink2 } from "lucide-react";
+import { Link2, Smartphone, Unlink2, X } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "~/components/ui/button";
@@ -365,19 +363,20 @@ export function BrowserDeviceToolbar({
       >
         <ScreenRotationIcon />
       </Button>
-      <Button
-        variant="ghost"
-        size="xs"
-        type="button"
-        aria-label="Fill available space"
-        className="sticky right-0 ml-auto"
-        disabled={pending}
-        onClick={() => {
-          apply({ _tag: "fill" }, null);
-        }}
-      >
-        Fill
-      </Button>
+      <span className="sticky right-0 ml-auto flex bg-background/95">
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          type="button"
+          aria-label="Close device toolbar"
+          disabled={pending}
+          onClick={() => {
+            apply({ _tag: "fill" }, null);
+          }}
+        >
+          <X />
+        </Button>
+      </span>
     </div>
   );
 }

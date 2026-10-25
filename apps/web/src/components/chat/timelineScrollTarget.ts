@@ -28,6 +28,17 @@ export function isTimelineScrollTarget(
   return true;
 }
 
+export function isTimelineScrollbarTarget(
+  event: Pick<PointerEvent, "target" | "clientX">,
+  timeline: HTMLElement,
+): boolean {
+  if (event.target !== timeline || timeline.scrollHeight <= timeline.clientHeight) return false;
+  const contentLeft = timeline.getBoundingClientRect().left + timeline.clientLeft;
+  return getComputedStyle(timeline).direction === "rtl"
+    ? event.clientX < contentLeft
+    : event.clientX >= contentLeft + timeline.clientWidth;
+}
+
 // Sandboxed iframe gestures are invisible to the parent; only their chained scroll arrives.
 export function createUpwardScrollDetector(initial: { top: number; height: number }) {
   let baseline = initial;

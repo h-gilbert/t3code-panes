@@ -96,7 +96,7 @@ it.effect.each(AuthMcpClientAccess.literals)(
           .pipe(Effect.flip);
         expect(httpError._tag).toBe("ServerAuthInvalidCredentialError");
         const wsError = yield* auth
-          .authenticateWebSocketUpgrade(bearerRequest(issued.token))
+          .authenticateWebSocketUpgrade(bearerRequest(issued.token), "rpc")
           .pipe(Effect.flip);
         expect(wsError._tag).toBe("ServerAuthInvalidCredentialError");
         expect(yield* auth.revokeSession(issued.sessionId)).toBe(true);

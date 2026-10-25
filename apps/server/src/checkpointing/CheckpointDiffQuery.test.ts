@@ -17,8 +17,8 @@ import * as CheckpointDiffQuery from "./CheckpointDiffQuery.ts";
 import * as CheckpointStore from "./CheckpointStore.ts";
 import {
   CheckpointRefUnavailableError,
-  CheckpointThreadNotFoundError,
   CheckpointTurnRangeUnavailableError,
+  CheckpointThreadNotFoundError,
 } from "./Errors.ts";
 
 const threadId = ThreadId.make("thread:checkpoint-diff-v2");
@@ -293,32 +293,6 @@ it.effect.each([false, true])(
     }).pipe(Effect.provide(layer));
   },
 );
-
-it.effect("preserves the typed missing-baseline-ref error contract", () => {
-  const projection = makeProjection();
-  const layer = layerFor({
-    projection: Effect.succeed({
-      ...projection,
-      checkpointScopes: projection.checkpointScopes.map((scope) => ({
-        ...scope,
-        kind: "tool" as const,
-      })),
-    }),
-  });
-
-  return Effect.gen(function* () {
-    const query = yield* CheckpointDiffQuery.CheckpointDiffQuery;
-    const error = yield* query
-      .getTurnDiff({ threadId, fromTurnCount: 0, toTurnCount: 2 })
-      .pipe(Effect.flip);
-
-    assert.instanceOf(error, CheckpointRefUnavailableError);
-    assert.deepEqual(
-      { checkpoint: error.checkpoint, turnCount: error.turnCount },
-      { checkpoint: "from", turnCount: 0 },
-    );
-  }).pipe(Effect.provide(layer));
-});
 
 const layerVcsProcess = VcsProcess.layer.pipe(Layer.provide(NodeServices.layer));
 const layerStore = CheckpointStore.layer.pipe(

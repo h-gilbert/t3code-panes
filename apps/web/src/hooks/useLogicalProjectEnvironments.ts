@@ -16,11 +16,6 @@ import { useProjects } from "../state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import { useClientSettings } from "./useSettings";
 
-/**
- * The environments a project (or a scratch draft) can move between. It reads only the
- * environment, project and grouping inputs, so the list keeps its identity while the thread
- * streams and the chat chrome it feeds can skip those renders.
- */
 export function useLogicalProjectEnvironments(
   activeProject: EnvironmentProject | null,
   scratchDraft: boolean,
@@ -30,16 +25,21 @@ export function useLogicalProjectEnvironments(
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
 
-  if (!activeProject) return [];
+  if (!activeProject && !scratchDraft) return [];
   const environmentById = new Map(
     environments.map((environment) => [environment.environmentId, environment]),
   );
   const envs: EnvironmentOption[] = [];
-  const pushEnvironment = (environmentId: EnvironmentId, projectId: ProjectId | null) => {
+  const pushEnvironment = (
+    environmentId: EnvironmentId,
+    projectId: ProjectId | null,
+    disabledReason?: string,
+  ) => {
     const environment = environmentById.get(environmentId) ?? null;
     envs.push({
       environmentId,
       projectId,
+      ...(disabledReason ? { disabledReason } : {}),
       label: environment?.label ?? environmentId,
       isPrimary: environmentId === primaryEnvironmentId,
       machine: resolveEnvironmentMachineKind(environment?.serverConfig ?? null),
@@ -51,18 +51,24 @@ export function useLogicalProjectEnvironments(
         environment.connection.phase,
         environment.serverConfig,
       );
-      if (scratchRoot === null && environment.environmentId !== activeProject.environmentId)
-        continue;
       const scratchProject =
-        environment.environmentId === activeProject.environmentId
+        environment.environmentId === activeProject?.environmentId
           ? activeProject
           : allProjects.find(
               (p) =>
                 p.environmentId === environment.environmentId && isScratchProject(p, scratchRoot),
             );
-      pushEnvironment(environment.environmentId, scratchProject?.id ?? null);
+      pushEnvironment(
+        environment.environmentId,
+        scratchProject?.id ?? null,
+        environment.connection.phase !== "connected"
+          ? "Offline"
+          : scratchRoot === null
+            ? "Unavailable"
+            : undefined,
+      );
     }
-  } else {
+  } else if (activeProject) {
     const logicalKey = deriveLogicalProjectKeyFromSettings(activeProject, projectGroupingSettings);
     const seen = new Set<string>();
     for (const p of allProjects) {

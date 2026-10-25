@@ -29,12 +29,12 @@ import * as DesktopIpc from "../DesktopIpc.ts";
 import * as DesktopAppSettings from "../../settings/DesktopAppSettings.ts";
 import {
   getLocalEnvironmentBootstraps,
-  getRelayTelemetryEnabled,
   getWindowFullscreenState,
   pasteAsText,
   pickProjectFavicon,
-  probeRemoteEditors,
   revealWindow,
+  getRelayTelemetryEnabled,
+  probeRemoteEditors,
 } from "./window.ts";
 
 const readyWslConfig: DesktopBackendManager.DesktopBackendStartConfig = {

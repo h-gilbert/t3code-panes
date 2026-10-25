@@ -95,6 +95,8 @@ function isSameKeybindingRule(left: KeybindingRule, right: KeybindingRule): bool
   );
 }
 
+const SETTINGS_SHORTCUT_MIGRATION = "panes.settings.open:mod+shift+s";
+
 const LATE_DEFAULT_KEYBINDINGS: ReadonlyArray<{
   readonly id: string;
   readonly alongside: KeybindingRule;
@@ -467,10 +469,14 @@ const make = Effect.gen(function* () {
       const configExists = yield* readConfigExists;
       if (!configExists) {
         yield* writeConfigAtomically(DEFAULT_KEYBINDINGS);
-        if (pendingLateDefaults.length > 0) {
+        if (
+          pendingLateDefaults.length > 0 ||
+          !appliedMigrationIds.has(SETTINGS_SHORTCUT_MIGRATION)
+        ) {
           yield* recordAppliedMigrations([
             ...appliedMigrationIds,
             ...LATE_DEFAULT_KEYBINDINGS.map((late) => late.id),
+            SETTINGS_SHORTCUT_MIGRATION,
           ]);
         }
         yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
@@ -489,7 +495,32 @@ const make = Effect.gen(function* () {
         yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
         return;
       }
-      const customConfig = runtimeConfig.keybindings;
+      let customConfig = runtimeConfig.keybindings;
+      if (!appliedMigrationIds.has(SETTINGS_SHORTCUT_MIGRATION)) {
+        // This fork reassigns its former settle shortcut without replacing other custom bindings.
+        const previousRule = {
+          key: "mod+shift+s",
+          command: "thread.settle",
+          when: "!terminalFocus",
+        } as const;
+        const hasSettingsShortcut = customConfig.some((rule) => rule.command === "settings.open");
+        const migrated = customConfig.flatMap((rule): KeybindingRule[] =>
+          isSameKeybindingRule(rule, previousRule)
+            ? hasSettingsShortcut
+              ? []
+              : [{ ...rule, command: "settings.open" }]
+            : [rule],
+        );
+        if (
+          migrated.some((rule, index) => rule !== customConfig[index]) ||
+          migrated.length !== customConfig.length
+        ) {
+          yield* writeConfigAtomically(migrated);
+          customConfig = migrated;
+        }
+        appliedMigrationIds.add(SETTINGS_SHORTCUT_MIGRATION);
+        yield* recordAppliedMigrations([...appliedMigrationIds]);
+      }
       const existingCommands = new Set(customConfig.map((entry) => entry.command));
       const missingDefaults: KeybindingRule[] = [];
       const shortcutConflictWarnings: Array<{
@@ -548,8 +579,7 @@ const make = Effect.gen(function* () {
         }
       }
 
-      // Keep only defaults that fit, before persisted rules so existing
-      // custom shortcuts retain priority when their conditions overlap.
+      // Put defaults before persisted rules so custom shortcuts win overlapping conditions.
       const availableSlots = Math.max(0, MAX_KEYBINDINGS_COUNT - customConfig.length);
       const defaultsToAppend = missingDefaults.slice(0, availableSlots);
       const skippedDefaults = missingDefaults.slice(availableSlots);
@@ -594,8 +624,7 @@ const make = Effect.gen(function* () {
 
     const revalidateAndEmitSafely = revalidateAndEmit.pipe(Effect.ignoreCause({ log: true }));
 
-    // Editors emit multiple events per save (truncate, write, rename) and
-    // `fs.watch` can fire before the content has been flushed to disk.
+    // Saves emit multiple events; fs.watch may fire before content is flushed.
     const debouncedKeybindingsEvents = fs.watch(keybindingsConfigDir).pipe(
       Stream.filter((event) => {
         return (

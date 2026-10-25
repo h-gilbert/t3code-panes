@@ -112,11 +112,7 @@ interface PendingRequest {
   readonly context: PreviewAutomationRequestErrorContext;
 }
 
-/**
- * It lives exactly as long as the connection it names: `connectionId`/`queue`
- * identity is what makes a lease valid, so a disconnected or replaced host is
- * dropped on the next lookup.
- */
+/** A lease belongs to this exact connectionId/queue; replacing the host invalidates it. */
 interface HostAssignment {
   readonly clientId: ClientConnection["clientId"];
   readonly connectionId: ClientConnection["connectionId"];
@@ -239,11 +235,7 @@ const selectorDiagnosticsFromInput = (
   return {};
 };
 
-/**
- * One agent: a provider session on one thread. Codex and OpenCode run every
- * thread of a provider instance in one session, so the session alone would
- * share one current tab, tab budget, and tab ownership across chats.
- */
+/** Codex/OpenCode share sessions across threads; include thread id to isolate tabs and ownership. */
 const hostAssignmentKey = (scope: McpInvocationContext.McpThreadInvocationScope): string =>
   `${scope.environmentId}\u0000${scope.thread.providerSessionId}\u0000${scope.thread.threadId}`;
 
@@ -318,6 +310,14 @@ function remoteDetailKind(detail: unknown): RemoteDetailKind {
       return "object";
   }
 }
+
+const readRemoteTimeoutMs = (detail: unknown): number | undefined => {
+  if (typeof detail !== "object" || detail === null || !("timeoutMs" in detail)) return undefined;
+  const timeoutMs = detail.timeoutMs;
+  return typeof timeoutMs === "number" && Number.isInteger(timeoutMs) && timeoutMs > 0
+    ? timeoutMs
+    : undefined;
+};
 
 const isFileActionReason = Schema.is(PreviewAutomationFileActionReason);
 /** Enough for a browser's own error line, such as a refused connection and its URL. */
@@ -420,9 +420,13 @@ const classifyResponseError = (
       const stages = (["text", "accessibility", "screenshot"] as const).filter((stage) =>
         reportedStages.includes(stage),
       );
+      const remoteTimeoutMs = readRemoteTimeoutMs(error.detail);
       return new PreviewAutomationTimeoutError({
         ...context,
         ...remoteDiagnostics,
+        ...(remoteTimeoutMs === undefined
+          ? {}
+          : { timeoutMs: Math.min(context.timeoutMs, remoteTimeoutMs) }),
         ...(stages?.length ? { stages } : {}),
       });
     }
@@ -537,8 +541,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
     completeStream = false,
   ) {
     if (completeStream) {
-      // Discard this generation's commands and complete the RPC stream so a
-      // responsive desktop can re-register after a timeout eviction.
+      // Close the evicted generation's RPC stream so a responsive desktop can re-register.
       yield* Queue.clear(queue);
       yield* Queue.end(queue);
     } else {
@@ -860,8 +863,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
     });
     const awaitResponse = Effect.fn("PreviewAutomationBroker.awaitResponse")(function* () {
       const offered = yield* SynchronizedRef.modifyEffect(state, (current) => {
-        // A route can outlive its generation while another request evicts it.
-        // Serialize the live-generation check and offer with queue closure.
+        // Serialize generation checks and offers with queue closure; routes can outlive eviction.
         if (
           current.clients.get(connection.clientId)?.queue !== connection.queue ||
           !current.pending.has(requestId)

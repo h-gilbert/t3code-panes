@@ -13,7 +13,7 @@ import { create, type ReactTestRenderer } from "react-test-renderer";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { getSyntaxHighlighterPromise } from "../lib/syntaxHighlighting";
-import { GitHubIcon } from "./Icons";
+import { getSourceControlPresentationForKind } from "../sourceControlPresentation";
 import { Button } from "./ui/button";
 import { setMarkdownTaskChecked } from "./files/filePreviewMode";
 
@@ -100,6 +100,21 @@ import ChatMarkdown, {
   hasMarkdownFilePrimaryAction,
   shouldUseMarkdownFileBrowserPrimaryAction,
 } from "./ChatMarkdown";
+
+function spyOnStreamChunks(highlighter: Awaited<ReturnType<typeof getSyntaxHighlighterPromise>>) {
+  const enqueue = vi.fn<(chunk: string) => void>();
+  const createStreamTokenizer = highlighter.createStreamTokenizer.bind(highlighter);
+  vi.spyOn(highlighter, "createStreamTokenizer").mockImplementation((...args) => {
+    const tokenizer = createStreamTokenizer(...args);
+    const originalEnqueue = tokenizer.enqueue.bind(tokenizer);
+    vi.spyOn(tokenizer, "enqueue").mockImplementation((chunk) => {
+      enqueue(chunk);
+      return originalEnqueue(chunk);
+    });
+    return tokenizer;
+  });
+  return enqueue;
+}
 
 function codeButton(renderer: ReactTestRenderer, label: string) {
   const button = renderer.root
@@ -280,7 +295,8 @@ describe("ChatMarkdown favicon privacy", () => {
         renderer!.update(markdown("https://github.com/pingdotgg/t3code/pull/1"));
       });
       expect(renderer!.root.findAllByType("img")).toHaveLength(0);
-      expect(renderer!.root.findAllByType(GitHubIcon)).toHaveLength(1);
+      const { Icon } = getSourceControlPresentationForKind("github");
+      expect(renderer!.root.findAllByType(Icon)).toHaveLength(1);
     } finally {
       await act(async () => {
         renderer?.unmount();
@@ -362,7 +378,7 @@ describe("ChatMarkdown streaming", () => {
 
   it("does not retokenize completed lines when streaming finishes", async () => {
     const highlighter = await getSyntaxHighlighterPromise("typescript");
-    const highlight = vi.spyOn(highlighter, "codeToHast");
+    const highlight = spyOnStreamChunks(highlighter);
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     let renderer: ReactTestRenderer | undefined;
     const text = "```typescript\nconst completed = 1;\nconst current = 2;";
@@ -370,12 +386,12 @@ describe("ChatMarkdown streaming", () => {
       await act(async () => {
         renderer = create(<ChatMarkdown cwd="/tmp/project" text={text} isStreaming />);
       });
-      expect(highlight).toHaveBeenCalled();
+      expect(highlight).toHaveBeenCalledWith(expect.stringContaining("const completed"));
       highlight.mockClear();
       await act(async () => {
         renderer!.update(<ChatMarkdown cwd="/tmp/project" text={text + "\n```"} />);
       });
-      expect(highlight.mock.calls.every(([code]) => !code.includes("const completed"))).toBe(true);
+      expect(highlight).not.toHaveBeenCalled();
     } finally {
       await act(async () => renderer?.unmount());
       vi.unstubAllGlobals();
@@ -385,11 +401,11 @@ describe("ChatMarkdown streaming", () => {
 
   it("recovers highlighting after a failed fence changes without resetting its controls", async () => {
     const highlighter = await getSyntaxHighlighterPromise("text");
-    const codeToHast = highlighter.codeToHast.bind(highlighter);
+    const codeToTokens = highlighter.codeToTokens.bind(highlighter);
     let fail = true;
-    vi.spyOn(highlighter, "codeToHast").mockImplementation((...args) => {
+    vi.spyOn(highlighter, "codeToTokens").mockImplementation((...args) => {
       if (fail) throw new Error("Temporary highlighter failure");
-      return codeToHast(...args);
+      return codeToTokens(...args);
     });
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -429,7 +445,7 @@ describe("ChatMarkdown streaming", () => {
 
   it("preserves code controls and details without highlighting an unchanged fence again", async () => {
     const highlighter = await getSyntaxHighlighterPromise("text");
-    const highlight = vi.spyOn(highlighter, "codeToHast");
+    const highlight = spyOnStreamChunks(highlighter);
     const writeText = vi.fn(async (_text: string) => {});
     vi.stubGlobal("navigator", { clipboard: { writeText } });
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -886,15 +902,28 @@ describe("ChatMarkdown heading levels", () => {
       />,
     );
 
-    expect(html).toContain('<h1 id="user-content-top" aria-level="4">Top</h1>');
-    expect(html).toContain('<h2 id="user-content-section" aria-level="5">Section</h2>');
-    expect(html).toContain('<h6 id="user-content-fine-print" aria-level="6">Fine print</h6>');
+    const document = new DOMParser().parseFromString(html, "text/html");
+    expect(
+      [...document.querySelectorAll("h1, h2, h6")].map((heading) => ({
+        tag: heading.tagName,
+        id: heading.id,
+        level: heading.getAttribute("aria-level"),
+        text: heading.textContent,
+      })),
+    ).toEqual([
+      { tag: "H1", id: "user-content-top", level: "4", text: "Top" },
+      { tag: "H2", id: "user-content-section", level: "5", text: "Section" },
+      { tag: "H6", id: "user-content-fine-print", level: "6", text: "Fine print" },
+    ]);
   });
 
   it("leaves heading levels alone when the markdown is not nested", () => {
     const html = renderToStaticMarkup(<ChatMarkdown cwd="/tmp/project" text="# Top" />);
 
-    expect(html).toContain('<h1 id="user-content-top">Top</h1>');
+    const heading = new DOMParser().parseFromString(html, "text/html").querySelector("h1");
+    expect(heading?.id).toBe("user-content-top");
+    expect(heading?.textContent).toBe("Top");
+    expect(heading?.hasAttribute("aria-level")).toBe(false);
   });
 });
 

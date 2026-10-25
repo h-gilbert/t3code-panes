@@ -68,16 +68,13 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
       : []),
     ...availableEnvironments.map((env) => ({
       value: environmentValue(env.environmentId),
-      label: env.label,
+      label: env.disabledReason ? `${env.label} · ${env.disabledReason}` : env.label,
     })),
     ...(onAddToMachine ? [{ value: ADD_MACHINE_VALUE, label: "Add to another machine" }] : []),
   ];
 
-  // The static label carries the xs control's height (h-7 sm:h-6) as well as
-  // its padding: the composer context strip has no min-height of its own, and
-  // the glass seam joining it to the composer assumes a fixed strip height, so
-  // a shorter label would drag the seam out of line whenever this label is the
-  // only thing in the strip.
+  // Match the xs control's height and padding: the composer strip has no min-height,
+  // and its glass seam assumes that height even when this label is the only control.
   if (envLocked || (onEnvironmentChange === undefined && onAddToMachine === undefined)) {
     const lockedRow = (
       <span
@@ -170,12 +167,17 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
             <SelectItem
               key={env.environmentId}
               value={environmentValue(env.environmentId)}
-              disabled={onEnvironmentChange === undefined && env.environmentId !== environmentId}
+              disabled={
+                env.disabledReason !== undefined ||
+                (onEnvironmentChange === undefined && env.environmentId !== environmentId)
+              }
             >
               <span className="inline-flex items-center gap-1.5">
                 <EnvironmentMachineIcon kind={env.machine} className="size-3" />
                 {env.label}
-                {env.projectId === null ? (
+                {env.disabledReason ? (
+                  <span className="text-muted-foreground">{env.disabledReason}</span>
+                ) : env.projectId === null ? (
                   <span className="text-muted-foreground">Set up</span>
                 ) : null}
               </span>

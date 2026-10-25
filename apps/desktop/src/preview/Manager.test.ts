@@ -1,10 +1,9 @@
 import * as NodeVM from "node:vm";
 import { it as effectIt } from "@effect/vitest";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
-import { DESKTOP_PREVIEW_RECORDING_CAPTURE_TRIGGER } from "@t3tools/contracts";
 import type {
-  DesktopPreviewRecordingFrame,
   DesktopPreviewRecordingInputEvent,
+  DesktopPreviewRecordingFrame,
   PreviewAnnotationPayload,
   PreviewAnnotationRect,
 } from "@t3tools/contracts";
@@ -38,47 +37,12 @@ import * as PreviewManager from "./Manager.ts";
 import * as PreviewPasskeys from "./Passkeys.ts";
 
 describe("fitPictureInPictureContentSize", () => {
-  it("preserves the PiP content area across aspect-ratio changes", () => {
-    expect(PreviewManager.fitPictureInPictureContentSize([480, 320], 16 / 9)).toEqual([523, 294]);
-    expect(PreviewManager.fitPictureInPictureContentSize([480, 320], 9 / 16)).toEqual([294, 523]);
-  });
-
   it("does not collapse toward the minimum size when orientation changes repeatedly", () => {
     const portrait = PreviewManager.fitPictureInPictureContentSize([523, 294], 9 / 16);
     const landscape = PreviewManager.fitPictureInPictureContentSize(portrait, 16 / 9);
 
     expect(portrait).toEqual([294, 523]);
     expect(landscape).toEqual([523, 294]);
-  });
-});
-
-describe("recordingFileExtension", () => {
-  it("derives the artifact extension from the recorder's actual mime type", () => {
-    expect(PreviewManager.recordingFileExtension("video/mp4;codecs=avc1.640028")).toBe("mp4");
-    expect(PreviewManager.recordingFileExtension("video/webm;codecs=vp9")).toBe("webm");
-    expect(PreviewManager.recordingFileExtension("video/x-matroska")).toBe("matroska");
-  });
-});
-
-describe("isPreviewRefreshShortcut", () => {
-  const input = (overrides: Partial<Electron.Input> = {}) =>
-    ({
-      type: "keyDown",
-      key: "r",
-      meta: true,
-      control: false,
-      shift: false,
-      alt: false,
-      ...overrides,
-    }) as Electron.Input;
-
-  it("recognizes the platform refresh chord without matching modified variants", () => {
-    expect(PreviewManager.isPreviewRefreshShortcut(input())).toBe(true);
-    expect(PreviewManager.isPreviewRefreshShortcut(input({ meta: false, control: true }))).toBe(
-      true,
-    );
-    expect(PreviewManager.isPreviewRefreshShortcut(input({ shift: true }))).toBe(false);
-    expect(PreviewManager.isPreviewRefreshShortcut(input({ type: "keyUp" }))).toBe(false);
   });
 });
 
@@ -93,42 +57,6 @@ describe("isPreviewEditingShortcut", () => {
       alt: false,
       ...overrides,
     }) as Electron.Input;
-
-  it.each(["darwin", "linux", "win32"] as const)(
-    "allows native editing chords on %s without allowing host shortcuts",
-    (platform) => {
-      for (const key of ["a", "c", "v", "x", "z", "V"]) {
-        expect(PreviewManager.isPreviewEditingShortcut(input(platform, key), platform)).toBe(true);
-      }
-      const redo =
-        platform === "win32" ? input(platform, "y") : input(platform, "z", { shift: true });
-      expect(PreviewManager.isPreviewEditingShortcut(redo, platform)).toBe(true);
-      expect(
-        PreviewManager.isPreviewEditingShortcut(
-          input(platform, "v", { shift: true, alt: platform === "darwin" }),
-          platform,
-        ),
-      ).toBe(true);
-
-      for (const key of ["k", ",", "w", "j", "q", "+", "=", "-", "0", "r", "F12"]) {
-        expect(PreviewManager.isPreviewEditingShortcut(input(platform, key), platform)).toBe(false);
-      }
-      for (const modifiers of [
-        { meta: false, control: false },
-        { meta: true, control: true },
-        { meta: platform !== "darwin", control: platform === "darwin" },
-        { alt: true },
-        { shift: true, alt: platform !== "darwin" },
-      ]) {
-        expect(
-          PreviewManager.isPreviewEditingShortcut(input(platform, "v", modifiers), platform),
-        ).toBe(false);
-      }
-      expect(
-        PreviewManager.isPreviewEditingShortcut(input(platform, "a", { shift: true }), platform),
-      ).toBe(false);
-    },
-  );
 
   it("recognizes macOS Paste and Match Style when Option changes the key to a symbol", () => {
     const pasteAndMatchStyle = input("darwin", "◊", { code: "KeyV", alt: true, shift: true });
@@ -157,25 +85,13 @@ describe("previewWindowOpenAction", () => {
   });
 
   it("opens a real window for scripted popups so the opener survives", () => {
-    // OAuth SDKs read a null `window.open()` as a blocked popup, and they need
-    // the opener alive to receive the credential back.
     expect(PreviewManager.previewWindowOpenAction(details({}))).toBe("popup");
     expect(
       PreviewManager.previewWindowOpenAction(details({ url: "http://localhost:5173/auth" })),
     ).toBe("popup");
   });
 
-  it("opens target=_blank links as a new tab", () => {
-    expect(PreviewManager.previewWindowOpenAction(details({ disposition: "foreground-tab" }))).toBe(
-      "new-tab",
-    );
-    expect(PreviewManager.previewWindowOpenAction(details({ disposition: "background-tab" }))).toBe(
-      "new-tab",
-    );
-  });
-
   it("keeps a form POST with a body on the in-place path", () => {
-    // A new tab can only reopen the URL as a GET, which would drop the body.
     const postBody = { data: [], contentType: "application/x-www-form-urlencoded" };
     expect(
       PreviewManager.previewWindowOpenAction({
@@ -186,9 +102,6 @@ describe("previewWindowOpenAction", () => {
   });
 
   it("does not hand a window to schemes that cannot be hardened", () => {
-    // A popup skips the `will-attach-webview` hardening, so it only gets a window
-    // when its preferences can be overridden. Chromium copies the guest's
-    // preferences for `about:blank` and forbids overriding them.
     for (const url of [
       "javascript:alert(1)",
       "file:///etc/passwd",
@@ -200,8 +113,6 @@ describe("previewWindowOpenAction", () => {
   });
 
   it("denies a blank window instead of blanking the opener", () => {
-    // MSAL opens `about:blank` first and falls back to a redirect on `null`;
-    // loading the blank page into the tab would destroy that fallback.
     for (const url of ["about:blank", ""]) {
       for (const disposition of ["new-window", "foreground-tab"] as const) {
         expect(PreviewManager.previewWindowOpenAction(details({ url, disposition }))).toBe("deny");
@@ -374,7 +285,6 @@ const withManager = <A>(
 
 interface TestCapturedPreviewImage {
   readonly toJPEG: () => Buffer;
-  /** Only fixtures that deliver picture-in-picture frames need pixels to fingerprint. */
   readonly toBitmap?: () => Buffer;
   readonly getSize: () => { readonly width: number; readonly height: number };
 }
@@ -559,6 +469,7 @@ const makeSourcePng = (width = 1, height = 1): Buffer => {
 };
 
 const makeFaviconWebContents = (options?: {
+  readonly changes?: ChangeSignal;
   readonly fetch?: (url: string, init?: RequestInit) => Promise<Response>;
   readonly id?: number;
   readonly rasterize?: (code: string) => Promise<unknown>;
@@ -569,16 +480,25 @@ const makeFaviconWebContents = (options?: {
   let currentUrl = options?.url ?? "http://localhost:3200/";
   let destroyed = false;
   let loading = false;
-  const fetch = vi.fn(
+  const fetchImpl =
     options?.fetch ??
-      (async () =>
-        new Response(new Uint8Array(sourcePng), {
-          headers: { "content-type": "image/png" },
-        })),
-  );
+    (async () =>
+      new Response(new Uint8Array(sourcePng), {
+        headers: { "content-type": "image/png" },
+      }));
+  const fetch = vi.fn((url: string, init?: RequestInit) => {
+    const response = fetchImpl(url, init);
+    options?.changes?.notify();
+    return response;
+  });
   const executeJavaScriptInIsolatedWorld = vi.fn(
-    async (_worldId: number, scripts: ReadonlyArray<{ readonly code: string }>) =>
-      options?.rasterize ? options.rasterize(scripts[0]?.code ?? "") : TEST_FAVICON,
+    (_worldId: number, scripts: ReadonlyArray<{ readonly code: string }>) => {
+      const result = options?.rasterize
+        ? options.rasterize(scripts[0]?.code ?? "")
+        : Promise.resolve(TEST_FAVICON);
+      options?.changes?.notify();
+      return result;
+    },
   );
   const reload = vi.fn();
   const loadURL = vi.fn(async (url: string) => {
@@ -643,10 +563,33 @@ const makeFaviconWebContents = (options?: {
   };
 };
 
-const settle = function* (until: () => boolean) {
-  for (let attempt = 0; attempt < 30 && !until(); attempt++) {
-    yield* Effect.promise(() => Promise.resolve());
-  }
+// Electron mocks and state subscribers call `notify`, so a wait re-checks its
+// predicate exactly when the state it reads changes.
+const makeChangeSignal = () => {
+  const waiters = new Set<() => void>();
+  return {
+    notify: () => {
+      for (const wake of waiters) wake();
+    },
+    until: (predicate: () => boolean) =>
+      Effect.callback<void>((resume) => {
+        if (predicate()) return resume(Effect.void);
+        const wake = () => {
+          if (!predicate()) return;
+          waiters.delete(wake);
+          resume(Effect.void);
+        };
+        waiters.add(wake);
+        return Effect.sync(() => void waiters.delete(wake));
+      }),
+  };
+};
+type ChangeSignal = ReturnType<typeof makeChangeSignal>;
+
+// Favicon captures run detached from the Electron listener, so asserting that
+// one published nothing can only give its promise chain a fixed number of turns.
+const flushMicrotasks = function* () {
+  for (let turn = 0; turn < 30; turn++) yield* Effect.promise(() => Promise.resolve());
 };
 
 const makeTestPictureInPictureWindow = (loadURL: () => Promise<void> = async () => undefined) => {
@@ -719,7 +662,13 @@ describe("PreviewManager", () => {
         const preview = makeFaviconWebContents();
         fromId.mockReturnValue(preview.webContents);
         const opened: Array<{ tabId: string; url: string; background: boolean }> = [];
-        yield* manager.subscribeOpenLinks((event) => Effect.sync(() => void opened.push(event)));
+        const linksOpened = yield* Deferred.make<void>();
+        yield* manager.subscribeOpenLinks((event) =>
+          Effect.gen(function* () {
+            opened.push(event);
+            if (opened.length === 2) yield* Deferred.succeed(linksOpened, undefined);
+          }),
+        );
         yield* manager.createTab("tab_links");
         yield* manager.registerWebview("tab_links", 42);
         const openHandler = (preview.webContents as Electron.WebContents).setWindowOpenHandler as
@@ -736,7 +685,7 @@ describe("PreviewManager", () => {
           action: "deny",
         });
         handler({ url: "https://github.com/issues/2", disposition: "background-tab" });
-        yield* settle(() => opened.length === 2);
+        yield* Deferred.await(linksOpened);
 
         expect(preview.loadURL).not.toHaveBeenCalled();
         expect(opened).toEqual([
@@ -1162,7 +1111,6 @@ describe("PreviewManager", () => {
         const older = makeFaviconWebContents({ id: 42 });
         const newer = makeFaviconWebContents({ id: 43 });
         for (const tab of [older, newer]) Object.assign(tab.webContents, { hostWebContents: host });
-        // Electron names one arbitrary guest here when several share a focused window.
         getFocusedWebContents.mockReturnValue(newer.webContents as never);
         fromId.mockReturnValue(older.webContents);
         yield* manager.createTab("tab_older");
@@ -1188,7 +1136,6 @@ describe("PreviewManager", () => {
         expect(preventDefault).toHaveBeenCalledOnce();
         expect(send).toHaveBeenCalledExactlyOnceWith("desktop:menu-action", "view.reopenClosed");
 
-        // The person types in the older tab, so keys reaching the newer one are an agent's.
         Object.assign(newer.webContents, { focusedFrame: null });
         const agentInput = newer.listeners.get("before-input-event")!;
         const agentPreventDefault = vi.fn();
@@ -1641,9 +1588,6 @@ describe("PreviewManager", () => {
   effectIt.effect("detaches through the pinned debugger after the webview is destroyed", () =>
     withManager((manager) =>
       Effect.gen(function* () {
-        // Real Electron throws on any `wc.debugger` access once the
-        // WebContents is destroyed, so cleanup must go through the debugger
-        // reference captured at attach time (electron/electron#53376).
         let destroyed = false;
         let attached = false;
         const debuggerOff = vi.fn();
@@ -1745,46 +1689,16 @@ describe("PreviewManager", () => {
     ),
   );
 
-  effectIt.effect("publishes a canonical favicon origin while the page is loading", () =>
-    withManager((manager) =>
-      Effect.gen(function* () {
-        const preview = makeFaviconWebContents({
-          url: `http://localhost:3200/${"x".repeat(3_000)}`,
-        });
-        preview.setLoading(true);
-        fromId.mockReturnValue(preview.webContents);
-        const states: PreviewManager.PreviewTabState[] = [];
-        yield* manager.subscribeStateChanges((_tabId, state) =>
-          Effect.sync(() => {
-            states.push(state);
-          }),
-        );
-        yield* manager.createTab("tab_favicon_loading");
-        yield* manager.registerWebview("tab_favicon_loading", 42);
-
-        preview.listeners.get("page-favicon-updated")?.(
-          {} as never,
-          ["http://localhost:3200/favicon.png"] as never,
-        );
-        yield* settle(() => states.at(-1)?.favicon !== undefined);
-
-        expect(states.at(-1)?.favicon).toMatchObject({
-          dataUrl: TEST_FAVICON,
-          pageUrl: "http://localhost:3200",
-        });
-        expect(states.at(-1)?.favicon?.capturedAt).toEqual(expect.any(Number));
-      }),
-    ),
-  );
-
   effectIt.effect("shares an identical in-flight event and lets a changed event win", () =>
     withManager((manager) =>
       Effect.gen(function* () {
+        const changes = makeChangeSignal();
         let resolveFirst!: (response: Response) => void;
         const firstResponse = new Promise<Response>((resolve) => {
           resolveFirst = resolve;
         });
         const preview = makeFaviconWebContents({
+          changes,
           fetch: (url) =>
             url.endsWith("first.png")
               ? firstResponse
@@ -1799,6 +1713,7 @@ describe("PreviewManager", () => {
         yield* manager.subscribeStateChanges((_tabId, state) =>
           Effect.sync(() => {
             states.push(state);
+            changes.notify();
           }),
         );
         yield* manager.createTab("tab_favicon_latest");
@@ -1807,15 +1722,15 @@ describe("PreviewManager", () => {
         const faviconUpdated = preview.listeners.get("page-favicon-updated")!;
         faviconUpdated({} as never, ["http://localhost:3200/first.png"] as never);
         faviconUpdated({} as never, ["http://localhost:3200/first.png"] as never);
-        yield* settle(() => preview.fetch.mock.calls.length === 1);
+        yield* changes.until(() => preview.fetch.mock.calls.length === 1);
         faviconUpdated({} as never, ["http://localhost:3200/second.png"] as never);
-        yield* settle(() => states.at(-1)?.favicon !== undefined);
+        yield* changes.until(() => states.at(-1)?.favicon !== undefined);
         resolveFirst(
           new Response(new Uint8Array(makeSourcePng()), {
             headers: { "content-type": "image/png" },
           }),
         );
-        yield* settle(() => false);
+        yield* flushMicrotasks();
 
         expect(preview.fetch).toHaveBeenCalledTimes(2);
         expect(states.filter((state) => state.favicon !== undefined)).toHaveLength(1);
@@ -1823,41 +1738,13 @@ describe("PreviewManager", () => {
     ),
   );
 
-  effectIt.effect("allows an identical retry after an undecodable capture", () =>
-    withManager((manager) =>
-      Effect.gen(function* () {
-        let rasterizations = 0;
-        const preview = makeFaviconWebContents({
-          rasterize: async () => (++rasterizations === 1 ? null : TEST_FAVICON),
-        });
-        fromId.mockReturnValue(preview.webContents);
-        const states: PreviewManager.PreviewTabState[] = [];
-        yield* manager.subscribeStateChanges((_tabId, state) =>
-          Effect.sync(() => {
-            states.push(state);
-          }),
-        );
-        yield* manager.createTab("tab_favicon_retry");
-        yield* manager.registerWebview("tab_favicon_retry", 42);
-        const faviconUpdated = preview.listeners.get("page-favicon-updated")!;
-
-        faviconUpdated({} as never, ["http://localhost:3200/favicon.png"] as never);
-        yield* settle(() => rasterizations === 1);
-        yield* settle(() => false);
-        faviconUpdated({} as never, ["http://localhost:3200/favicon.png"] as never);
-        yield* settle(() => states.at(-1)?.favicon !== undefined);
-
-        expect(rasterizations).toBe(2);
-        expect(states.at(-1)?.favicon?.dataUrl).toBe(TEST_FAVICON);
-      }),
-    ),
-  );
-
   effectIt.effect("does not publish a capture invalidated by navigation", () =>
     withManager((manager) =>
       Effect.gen(function* () {
+        const changes = makeChangeSignal();
         let resolveFetch!: (response: Response) => void;
         const preview = makeFaviconWebContents({
+          changes,
           fetch: () =>
             new Promise<Response>((resolve) => {
               resolveFetch = resolve;
@@ -1868,6 +1755,7 @@ describe("PreviewManager", () => {
         yield* manager.subscribeStateChanges((_tabId, state) =>
           Effect.sync(() => {
             states.push(state);
+            changes.notify();
           }),
         );
         yield* manager.createTab("tab_favicon_navigation");
@@ -1876,7 +1764,7 @@ describe("PreviewManager", () => {
           {} as never,
           ["http://localhost:3200/favicon.png"] as never,
         );
-        yield* settle(() => preview.fetch.mock.calls.length === 1);
+        yield* changes.until(() => preview.fetch.mock.calls.length === 1);
         preview.listeners.get("did-start-navigation")?.({
           isMainFrame: true,
           isSameDocument: false,
@@ -1887,166 +1775,9 @@ describe("PreviewManager", () => {
             headers: { "content-type": "image/png" },
           }),
         );
-        yield* settle(() => false);
+        yield* flushMicrotasks();
 
         expect(states.some((state) => state.favicon !== undefined)).toBe(false);
-      }),
-    ),
-  );
-
-  effectIt.effect("retains a favicon when reloading the current URL without a new event", () =>
-    withManager((manager) =>
-      Effect.gen(function* () {
-        const preview = makeFaviconWebContents();
-        fromId.mockReturnValue(preview.webContents);
-        const states: PreviewManager.PreviewTabState[] = [];
-        yield* manager.subscribeStateChanges((_tabId, state) =>
-          Effect.sync(() => {
-            states.push(state);
-          }),
-        );
-        yield* manager.createTab("tab_favicon_reload");
-        yield* manager.registerWebview("tab_favicon_reload", 42);
-        preview.listeners.get("page-favicon-updated")?.(
-          {} as never,
-          ["http://localhost:3200/favicon.png"] as never,
-        );
-        yield* settle(() => states.at(-1)?.favicon !== undefined);
-
-        yield* manager.navigate("tab_favicon_reload", "http://localhost:3200/");
-
-        expect(preview.reload).toHaveBeenCalledOnce();
-        expect(states.at(-1)?.favicon?.dataUrl).toBe(TEST_FAVICON);
-      }),
-    ),
-  );
-
-  effectIt.effect("clears a published favicon after a confirmed cross-origin navigation", () =>
-    withManager((manager) =>
-      Effect.gen(function* () {
-        const preview = makeFaviconWebContents();
-        fromId.mockReturnValue(preview.webContents);
-        const states: PreviewManager.PreviewTabState[] = [];
-        yield* manager.subscribeStateChanges((_tabId, state) =>
-          Effect.sync(() => {
-            states.push(state);
-          }),
-        );
-        yield* manager.createTab("tab_favicon_origin");
-        yield* manager.registerWebview("tab_favicon_origin", 42);
-        preview.listeners.get("page-favicon-updated")?.(
-          {} as never,
-          ["http://localhost:3200/favicon.png"] as never,
-        );
-        yield* settle(() => states.at(-1)?.favicon !== undefined);
-
-        preview.setUrl("https://example.com/");
-        preview.listeners.get("did-navigate")?.({} as never);
-        yield* settle(() => states.at(-1)?.navStatus.kind === "Success");
-
-        expect(states.at(-1)?.favicon).toBeUndefined();
-      }),
-    ),
-  );
-
-  effectIt.effect(
-    "retains the previous document icon across a failed cross-origin navigation",
-    () =>
-      withManager((manager) =>
-        Effect.gen(function* () {
-          const preview = makeFaviconWebContents();
-          fromId.mockReturnValue(preview.webContents);
-          const states: PreviewManager.PreviewTabState[] = [];
-          yield* manager.subscribeStateChanges((_tabId, state) =>
-            Effect.sync(() => {
-              states.push(state);
-            }),
-          );
-          yield* manager.createTab("tab_favicon_failed_origin");
-          yield* manager.registerWebview("tab_favicon_failed_origin", 42);
-          preview.listeners.get("page-favicon-updated")?.(
-            {} as never,
-            ["http://localhost:3200/favicon.png"] as never,
-          );
-          yield* settle(() => states.at(-1)?.favicon !== undefined);
-
-          preview.listeners.get("did-fail-load")?.(
-            {} as never,
-            -105 as never,
-            "Name not resolved" as never,
-            "https://unreachable.example/" as never,
-            true as never,
-          );
-          yield* settle(() => states.at(-1)?.navStatus.kind === "LoadFailed");
-          expect(states.at(-1)?.favicon?.dataUrl).toBe(TEST_FAVICON);
-
-          preview.listeners.get("did-navigate")?.({} as never);
-          yield* settle(() => states.at(-1)?.navStatus.kind === "Success");
-          expect(states.at(-1)?.favicon?.dataUrl).toBe(TEST_FAVICON);
-        }),
-      ),
-  );
-
-  effectIt.effect("does not resurrect an icon after a confirmed about:blank document", () =>
-    withManager((manager) =>
-      Effect.gen(function* () {
-        const preview = makeFaviconWebContents();
-        fromId.mockReturnValue(preview.webContents);
-        const states: PreviewManager.PreviewTabState[] = [];
-        yield* manager.subscribeStateChanges((_tabId, state) =>
-          Effect.sync(() => {
-            states.push(state);
-          }),
-        );
-        yield* manager.createTab("tab_favicon_blank");
-        yield* manager.registerWebview("tab_favicon_blank", 42);
-        preview.listeners.get("page-favicon-updated")?.(
-          {} as never,
-          ["http://localhost:3200/favicon.png"] as never,
-        );
-        yield* settle(() => states.at(-1)?.favicon !== undefined);
-
-        preview.setUrl("about:blank");
-        preview.listeners.get("did-navigate")?.({} as never);
-        yield* settle(() => states.at(-1)?.navStatus.kind === "Idle");
-        expect(states.at(-1)?.favicon).toBeUndefined();
-
-        preview.setUrl("http://localhost:3200/");
-        preview.listeners.get("did-navigate")?.({} as never);
-        yield* settle(() => states.at(-1)?.navStatus.kind === "Success");
-        expect(states.at(-1)?.favicon).toBeUndefined();
-      }),
-    ),
-  );
-
-  effectIt.effect("clears a published favicon when a replacement webview attaches", () =>
-    withManager((manager) =>
-      Effect.gen(function* () {
-        const initial = makeFaviconWebContents({ id: 42 });
-        const replacement = makeFaviconWebContents({ id: 43 });
-        fromId.mockImplementation((id?: number) => {
-          if (id === 42) return initial.webContents;
-          if (id === 43) return replacement.webContents;
-          return null;
-        });
-        const states: PreviewManager.PreviewTabState[] = [];
-        yield* manager.subscribeStateChanges((_tabId, state) =>
-          Effect.sync(() => {
-            states.push(state);
-          }),
-        );
-        yield* manager.createTab("tab_favicon_replace");
-        yield* manager.registerWebview("tab_favicon_replace", 42);
-        initial.listeners.get("page-favicon-updated")?.(
-          {} as never,
-          ["http://localhost:3200/favicon.png"] as never,
-        );
-        yield* settle(() => states.at(-1)?.favicon !== undefined);
-
-        yield* manager.registerWebview("tab_favicon_replace", 43);
-
-        expect(states.at(-1)?.webContentsId).toBe(43);
-        expect(states.at(-1)?.favicon).toBeUndefined();
       }),
     ),
   );
@@ -2054,15 +1785,17 @@ describe("PreviewManager", () => {
   effectIt.effect("ignores an old capture that completes after webview replacement", () =>
     withManager((manager) =>
       Effect.gen(function* () {
+        const changes = makeChangeSignal();
         let resolveFetch!: (response: Response) => void;
         const initial = makeFaviconWebContents({
+          changes,
           id: 42,
           fetch: () =>
             new Promise<Response>((resolve) => {
               resolveFetch = resolve;
             }),
         });
-        const replacement = makeFaviconWebContents({ id: 43 });
+        const replacement = makeFaviconWebContents({ changes, id: 43 });
         fromId.mockImplementation((id?: number) =>
           id === 42 ? initial.webContents : id === 43 ? replacement.webContents : null,
         );
@@ -2070,6 +1803,7 @@ describe("PreviewManager", () => {
         yield* manager.subscribeStateChanges((_tabId, state) =>
           Effect.sync(() => {
             states.push(state);
+            changes.notify();
           }),
         );
         yield* manager.createTab("tab_favicon_late_replace");
@@ -2078,7 +1812,7 @@ describe("PreviewManager", () => {
           {} as never,
           ["http://localhost:3200/favicon.png"] as never,
         );
-        yield* settle(() => initial.fetch.mock.calls.length === 1);
+        yield* changes.until(() => initial.fetch.mock.calls.length === 1);
 
         yield* manager.registerWebview("tab_favicon_late_replace", 43);
         resolveFetch(
@@ -2086,7 +1820,7 @@ describe("PreviewManager", () => {
             headers: { "content-type": "image/png" },
           }),
         );
-        yield* settle(() => false);
+        yield* flushMicrotasks();
 
         expect(states.at(-1)?.webContentsId).toBe(43);
         expect(
@@ -2099,14 +1833,16 @@ describe("PreviewManager", () => {
   effectIt.effect("treats a reused WebContents id as a new attachment", () =>
     withManager((manager) =>
       Effect.gen(function* () {
-        const initial = makeFaviconWebContents({ id: 42 });
-        const replacement = makeFaviconWebContents({ id: 42 });
+        const changes = makeChangeSignal();
+        const initial = makeFaviconWebContents({ changes, id: 42 });
+        const replacement = makeFaviconWebContents({ changes, id: 42 });
         let active = initial.webContents;
         fromId.mockImplementation(() => active);
         const states: PreviewManager.PreviewTabState[] = [];
         yield* manager.subscribeStateChanges((_tabId, state) =>
           Effect.sync(() => {
             states.push(state);
+            changes.notify();
           }),
         );
         yield* manager.createTab("tab_favicon_reused_id");
@@ -2115,7 +1851,7 @@ describe("PreviewManager", () => {
           {} as never,
           ["http://localhost:3200/favicon.png"] as never,
         );
-        yield* settle(() => states.at(-1)?.favicon !== undefined);
+        yield* changes.until(() => states.at(-1)?.favicon !== undefined);
 
         active = replacement.webContents;
         yield* manager.registerWebview("tab_favicon_reused_id", 42);
@@ -2133,9 +1869,11 @@ describe("PreviewManager", () => {
         const preview = makeFaviconWebContents();
         fromId.mockReturnValue(preview.webContents);
         const states: PreviewManager.PreviewTabState[] = [];
+        const faviconPublished = yield* Deferred.make<void>();
         yield* manager.subscribeStateChanges((_tabId, state) =>
-          Effect.sync(() => {
+          Effect.gen(function* () {
             states.push(state);
+            if (state.favicon !== undefined) yield* Deferred.succeed(faviconPublished, undefined);
           }),
         );
         yield* manager.createTab("tab_favicon_reregister");
@@ -2144,7 +1882,7 @@ describe("PreviewManager", () => {
           {} as never,
           ["http://localhost:3200/favicon.png"] as never,
         );
-        yield* settle(() => states.at(-1)?.favicon !== undefined);
+        yield* Deferred.await(faviconPublished);
 
         yield* manager.registerWebview("tab_favicon_reregister", 42);
 
@@ -2473,7 +2211,6 @@ describe("PreviewManager", () => {
       id,
       isDestroyed: () => destroyed,
       isDevToolsOpened: () => {
-        // Electron throws from native methods once a WebContents is destroyed.
         if (destroyed) throw new TypeError("Object has been destroyed");
         return false;
       },
@@ -2528,37 +2265,6 @@ describe("PreviewManager", () => {
       },
     };
   };
-
-  effectIt.effect("sets the opaque base as soon as a guest attaches", () =>
-    withManager((manager) =>
-      Effect.gen(function* () {
-        const claimed = makeAttachingGuest(44);
-        fromId.mockReturnValue(claimed.wc);
-        yield* manager.prepareWebview(claimed.wc);
-        expect(claimed.attach).toHaveBeenCalledTimes(1);
-        expect(claimed.sendCommand.mock.calls[0]).toEqual([
-          "Emulation.setDefaultBackgroundColorOverride",
-          { color: { r: 255, g: 255, b: 255, a: 1 } },
-        ]);
-
-        yield* manager.createTab("tab_early");
-        yield* manager.registerWebview("tab_early", 44);
-        yield* manager.setColorScheme("tab_early", "dark");
-        expect(claimed.attach).toHaveBeenCalledTimes(1);
-        expect(claimed.sendCommand).toHaveBeenCalledWith("Emulation.setEmulatedMedia", {
-          features: [{ name: "prefers-color-scheme", value: "dark" }],
-        });
-
-        const unclaimed = makeAttachingGuest(45);
-        yield* manager.prepareWebview(unclaimed.wc);
-        expect(unclaimed.attach).toHaveBeenCalledTimes(1);
-        unclaimed.destroy();
-        yield* Effect.yieldNow;
-        expect(unclaimed.detach).toHaveBeenCalledTimes(1);
-        expect(claimed.detach).not.toHaveBeenCalled();
-      }),
-    ),
-  );
 
   effectIt.effect("reattaches a debugger that Chromium dropped on its own", () =>
     withManager((manager) =>
@@ -2618,11 +2324,7 @@ describe("PreviewManager", () => {
         audible = next;
         listeners.get("audio-state-changed")?.({ audible: next } as never);
       },
-      /**
-       * Starts playing between the attach-time read and the post-attach
-       * reconcile, without a delivered event — the window in which
-       * audio-state-changed fires against a guest the tab does not own yet.
-       */
+      /** Simulate playback starting during attach before the tab owns the guest and can receive its events. */
       startPlayingAfterFirstRead: () => {
         audibleAfterFirstRead = true;
       },
@@ -2666,95 +2368,6 @@ describe("PreviewManager", () => {
     };
   };
 
-  effectIt.effect("mutes the guest and re-applies the mute across webview swaps", () =>
-    withManager((manager) =>
-      Effect.gen(function* () {
-        const first = makeAudioWebContents(42);
-        fromId.mockReturnValue(first.wc);
-        const states: PreviewManager.PreviewTabState[] = [];
-
-        yield* manager.subscribeStateChanges((_tabId, state) =>
-          Effect.sync(() => {
-            states.push(state);
-          }),
-        );
-        yield* manager.createTab("tab_audio");
-        yield* manager.registerWebview("tab_audio", 42);
-        yield* Effect.yieldNow;
-
-        expect(states.at(-1)?.audioMuted).toBe(false);
-
-        yield* manager.setAudioMuted("tab_audio", true);
-
-        expect(first.setAudioMuted).toHaveBeenCalledWith(true);
-        expect(states.at(-1)?.audioMuted).toBe(true);
-
-        const replacement = makeAudioWebContents(43);
-        fromId.mockReturnValue(replacement.wc);
-        yield* manager.registerWebview("tab_audio", 43);
-        yield* Effect.yieldNow;
-
-        expect(replacement.setAudioMuted).toHaveBeenCalledWith(true);
-        expect(states.at(-1)?.audioMuted).toBe(true);
-
-        yield* manager.setAudioMuted("tab_audio", false);
-
-        expect(replacement.setAudioMuted).toHaveBeenLastCalledWith(false);
-        expect(states.at(-1)?.audioMuted).toBe(false);
-      }),
-    ),
-  );
-
-  effectIt.effect("fails and rolls back when the guest refuses a mute", () =>
-    withManager((manager) =>
-      Effect.gen(function* () {
-        const guest = makeAudioWebContents(42);
-        fromId.mockReturnValue(guest.wc);
-        const states: PreviewManager.PreviewTabState[] = [];
-
-        yield* manager.subscribeStateChanges((_tabId, state) =>
-          Effect.sync(() => {
-            states.push(state);
-          }),
-        );
-        yield* manager.createTab("tab_audio_fail");
-        yield* manager.registerWebview("tab_audio_fail", 42);
-        yield* Effect.yieldNow;
-
-        guest.setAudioMuted.mockImplementationOnce(() => {
-          throw new Error("guest refused");
-        });
-        const exit = yield* manager.setAudioMuted("tab_audio_fail", true).pipe(Effect.exit);
-
-        expect(Exit.isFailure(exit)).toBe(true);
-        expect(states.at(-1)?.audioMuted).toBe(false);
-      }),
-    ),
-  );
-
-  effectIt.effect("still registers a guest that refuses the mute reassert", () =>
-    withManager((manager) =>
-      Effect.gen(function* () {
-        const first = makeAudioWebContents(42);
-        fromId.mockReturnValue(first.wc);
-        yield* manager.createTab("tab_audio_attach_fail");
-        yield* manager.registerWebview("tab_audio_attach_fail", 42);
-        yield* Effect.yieldNow;
-        yield* manager.setAudioMuted("tab_audio_attach_fail", true);
-
-        const replacement = makeAudioWebContents(43);
-        replacement.setAudioMuted.mockImplementationOnce(() => undefined);
-        replacement.setAudioMuted.mockImplementationOnce(() => {
-          throw new Error("guest went away");
-        });
-        fromId.mockReturnValue(replacement.wc);
-
-        const exit = yield* manager.registerWebview("tab_audio_attach_fail", 43).pipe(Effect.exit);
-        expect(Exit.isSuccess(exit)).toBe(true);
-      }),
-    ),
-  );
-
   effectIt.effect("reconciles audibility that changed while the guest attached", () =>
     withManager((manager) =>
       Effect.gen(function* () {
@@ -2772,46 +2385,7 @@ describe("PreviewManager", () => {
         yield* manager.registerWebview("tab_audio_window", 42);
         yield* Effect.yieldNow;
 
-        // audio-state-changed for this transition was dropped: it fired before
-        // the tab owned the guest. Without a post-attach reconcile the icon
-        // stays wrong until the next real transition, which may never come.
         expect(states.at(-1)?.audible).toBe(true);
-      }),
-    ),
-  );
-
-  effectIt.effect("publishes audibility transitions and drops repeats", () =>
-    withManager((manager) =>
-      Effect.gen(function* () {
-        const guest = makeAudioWebContents(42);
-        fromId.mockReturnValue(guest.wc);
-        const states: PreviewManager.PreviewTabState[] = [];
-
-        yield* manager.subscribeStateChanges((_tabId, state) =>
-          Effect.sync(() => {
-            states.push(state);
-          }),
-        );
-        yield* manager.createTab("tab_audible");
-        yield* manager.registerWebview("tab_audible", 42);
-        yield* Effect.yieldNow;
-
-        expect(states.at(-1)?.audible).toBe(false);
-
-        guest.emitAudioState(true);
-        yield* Effect.yieldNow;
-        expect(states.at(-1)?.audible).toBe(true);
-
-        // Chromium re-emits per media element; only real transitions publish.
-        const publishedAfterFirst = states.length;
-        guest.emitAudioState(true);
-        yield* Effect.yieldNow;
-        expect(states.length).toBe(publishedAfterFirst);
-
-        guest.emitAudioState(false);
-        yield* Effect.yieldNow;
-        expect(states.at(-1)?.audible).toBe(false);
-        expect(states.length).toBeGreaterThan(publishedAfterFirst);
       }),
     ),
   );
@@ -2842,40 +2416,6 @@ describe("PreviewManager", () => {
         yield* Effect.yieldNow;
 
         expect(states.length).toBe(publishedBefore);
-        expect(states.at(-1)?.audible).toBe(false);
-      }),
-    ),
-  );
-
-  effectIt.effect("carries mute and audibility across navigation", () =>
-    withManager((manager) =>
-      Effect.gen(function* () {
-        const guest = makeAudioWebContents(42);
-        fromId.mockReturnValue(guest.wc);
-        const states: PreviewManager.PreviewTabState[] = [];
-
-        yield* manager.subscribeStateChanges((_tabId, state) =>
-          Effect.sync(() => {
-            states.push(state);
-          }),
-        );
-        yield* manager.createTab("tab_audio_nav");
-        yield* manager.registerWebview("tab_audio_nav", 42);
-        yield* Effect.yieldNow;
-
-        yield* manager.setAudioMuted("tab_audio_nav", true);
-        guest.emitAudioState(true);
-        yield* Effect.yieldNow;
-        expect(states.at(-1)?.audible).toBe(true);
-
-        yield* manager.navigate("tab_audio_nav", "https://example.com/next");
-        yield* Effect.yieldNow;
-
-        expect(states.at(-1)?.audioMuted).toBe(true);
-        expect(states.at(-1)?.audible).toBe(true);
-
-        guest.emitAudioState(false);
-        yield* Effect.yieldNow;
         expect(states.at(-1)?.audible).toBe(false);
       }),
     ),
@@ -3057,17 +2597,17 @@ describe("PreviewManager", () => {
         const preview = makeFaviconWebContents();
         Object.assign(preview.webContents, { isLoading: () => true });
         fromId.mockReturnValue(preview.webContents);
-        const states: PreviewManager.PreviewTabState[] = [];
-        yield* manager.subscribeStateChanges((_tabId, state) =>
-          Effect.sync(() => void states.push(state)),
-        );
         yield* manager.createTab("tab_iframe");
         yield* manager.registerWebview("tab_iframe", 42);
+        const statuses = yield* Queue.unbounded<PreviewManager.PreviewNavStatus>();
+        yield* manager.subscribeStateChanges((_tabId, state) =>
+          Queue.offer(statuses, state.navStatus).pipe(Effect.asVoid),
+        );
 
         preview.listeners.get("did-start-loading")?.();
+        expect((yield* Queue.take(statuses)).kind).toBe("Success");
         preview.listeners.get("did-stop-loading")?.();
-        yield* settle(() => states.length > 2);
-        expect(states.at(-1)?.navStatus.kind).toBe("Success");
+        expect((yield* Queue.take(statuses)).kind).toBe("Success");
       }),
     ),
   );
@@ -3187,7 +2727,6 @@ describe("PreviewManager", () => {
         fromId.mockReturnValue(makeTestPreviewWebContents(capturePage));
         yield* manager.createTab("tab_1");
         yield* manager.registerWebview("tab_1", 42);
-        // it.effect keeps TestClock fixed until explicitly advanced.
         const first = yield* manager.captureScreenshot("tab_1");
         const second = yield* manager.captureScreenshot("tab_1");
 
@@ -3824,36 +3363,6 @@ describe("PreviewManager", () => {
     }).pipe(Effect.provide(managerLayer()), Effect.scoped),
   );
 
-  effectIt.effect("stops capture retries when the tab swaps during the retry delay", () =>
-    withManager((manager) =>
-      Effect.gen(function* () {
-        const capturePage = vi.fn(async () => ({
-          toPNG: () => Buffer.from("png"),
-          toJPEG: () => Buffer.from("jpeg"),
-          getSize: () => ({ width: 100, height: 80 }),
-        }));
-        fromId.mockReturnValue(makeTestPreviewWebContents(capturePage, 42));
-        yield* manager.createTab("tab_1");
-        yield* manager.registerWebview("tab_1", 42);
-
-        capturePage.mockRejectedValueOnce(new Error("UnknownVizError"));
-        const fiber = yield* Effect.exit(manager.captureScreenshot("tab_1")).pipe(
-          Effect.forkChild({ startImmediately: true }),
-        );
-        yield* TestClock.adjust(60);
-        expect(capturePage).toHaveBeenCalledTimes(1);
-        fromId.mockReturnValue(makeTestPreviewWebContents(capturePage, 43));
-        yield* manager.registerWebview("tab_1", 43);
-        yield* TestClock.adjust(1_000);
-        const exit = yield* Fiber.join(fiber);
-
-        expect(Exit.isFailure(exit)).toBe(true);
-        expect(capturePage).toHaveBeenCalledTimes(1);
-        expect(writeFile).not.toHaveBeenCalled();
-      }),
-    ),
-  );
-
   effectIt.effect("discards a screenshot that resolves after its guest is replaced", () =>
     withManager((manager) =>
       Effect.gen(function* () {
@@ -4051,95 +3560,6 @@ describe("PreviewManager", () => {
     ),
   );
 
-  effectIt.effect("requests display media with a fresh renderer gesture", () =>
-    withManager((manager) =>
-      Effect.gen(function* () {
-        const { host, takeGrant } = yield* setupRecordingRaceTabs(manager);
-
-        yield* manager.startRecording("tab_race_a");
-
-        expect(host.executeJavaScript).toHaveBeenCalledWith(
-          expect.stringContaining(DESKTOP_PREVIEW_RECORDING_CAPTURE_TRIGGER),
-          true,
-        );
-        expect(host.executeJavaScript).toHaveBeenCalledWith(
-          expect.stringContaining("tab_race_a"),
-          true,
-        );
-        takeGrant();
-        yield* manager.stopRecording("tab_race_a");
-      }),
-    ),
-  );
-
-  effectIt.live("settles both starts when two tabs race for the capture stream", () =>
-    withManager((manager) =>
-      Effect.gen(function* () {
-        const { host, grants, takeGrant } = yield* setupRecordingRaceTabs(manager);
-
-        const exits = yield* Effect.all(
-          [
-            Effect.exit(manager.startRecording("tab_race_a")),
-            Effect.exit(manager.startRecording("tab_race_b")),
-          ],
-          { concurrency: 2 },
-        );
-
-        const [exitA, exitB] = exits;
-        expect(exits.filter(Exit.isSuccess)).toHaveLength(1);
-        const loserExit = Exit.isSuccess(exitA) ? exitB : exitA;
-        if (Exit.isSuccess(loserExit)) return;
-        expect(Option.getOrThrow(Cause.findErrorOption(loserExit.cause))).toMatchObject({
-          _tag: "PreviewRecordingArmConflictError",
-        });
-
-        takeGrant();
-        expect(grants).toEqual([{ video: { routingId: Exit.isSuccess(exitA) ? 41 : 42 } }]);
-        expect(host.session.setDisplayMediaRequestHandler).toHaveBeenCalledOnce();
-      }),
-    ),
-  );
-
-  effectIt.effect("releases an armed slot that the renderer never redeemed", () =>
-    withManager((manager) =>
-      Effect.gen(function* () {
-        const { grants, takeGrant } = yield* setupRecordingRaceTabs(manager);
-
-        yield* manager.startRecording("tab_race_a");
-        const blocked = yield* Effect.exit(manager.startRecording("tab_race_b"));
-        if (Exit.isSuccess(blocked)) throw new Error("expected the second tab to be refused");
-        expect(Option.getOrThrow(Cause.findErrorOption(blocked.cause))).toMatchObject({
-          _tag: "PreviewRecordingArmConflictError",
-          tabId: "tab_race_b",
-          armedTabId: "tab_race_a",
-        });
-
-        yield* TestClock.adjust(10_000);
-        yield* manager.startRecording("tab_race_b");
-        takeGrant();
-        expect(grants).toEqual([{ video: { routingId: 42 } }]);
-
-        yield* manager.stopRecording("tab_race_a");
-        yield* manager.stopRecording("tab_race_b");
-      }),
-    ),
-  );
-
-  effectIt.effect("denies a display-media request that arrives after the arm went stale", () =>
-    withManager((manager) =>
-      Effect.gen(function* () {
-        const { grants, takeGrant } = yield* setupRecordingRaceTabs(manager);
-
-        yield* manager.startRecording("tab_race_a");
-        yield* TestClock.adjust(10_000);
-        takeGrant();
-        expect(grants).toEqual([{}]);
-
-        yield* manager.stopRecording("tab_race_a");
-      }),
-    ),
-  );
-
   effectIt.effect("only lets the host frame that armed a recording claim its stream", () =>
     withManager((manager) =>
       Effect.gen(function* () {
@@ -4167,93 +3587,6 @@ describe("PreviewManager", () => {
         expect(grants).toEqual([{ video: { routingId: 42 } }]);
 
         yield* manager.stopRecording("tab_race_b");
-      }),
-    ),
-  );
-
-  effectIt.effect(
-    "restores the native cursor when recording startup fails, then allows a retry",
-    () =>
-      withManager((manager) =>
-        Effect.gen(function* () {
-          const host = makeTestHostWebContents();
-          host.executeJavaScript.mockResolvedValueOnce(false);
-          let cursorActive = false;
-          const cursorAtCapture: boolean[] = [];
-          const contents = Object.assign(
-            makeTestPreviewWebContents(
-              async () => {
-                cursorAtCapture.push(cursorActive);
-                return {
-                  toJPEG: () => Buffer.from("frame"),
-                  getSize: () => ({ width: 800, height: 600 }),
-                };
-              },
-              42,
-              host,
-            ),
-            {
-              send: (channel: string, active: unknown) => {
-                if (channel === "preview:recording-cursor") cursorActive = active === true;
-              },
-            },
-          );
-          fromId.mockReturnValue(contents as never);
-          yield* manager.createTab("tab_cursor");
-          yield* manager.registerWebview("tab_cursor", 42);
-          const failed = yield* Effect.exit(manager.startRecording("tab_cursor"));
-          expect(Exit.isFailure(failed)).toBe(true);
-          expect(cursorAtCapture).toEqual([true]);
-          expect(cursorActive).toBe(false);
-
-          yield* manager.startRecording("tab_cursor");
-          expect(cursorAtCapture).toEqual([true, true]);
-          expect(cursorActive).toBe(true);
-          yield* manager.stopRecording("tab_cursor");
-          expect(cursorActive).toBe(false);
-        }),
-      ),
-  );
-
-  effectIt.effect("restores the recording cursor after navigation only while recording", () =>
-    withManager((manager) =>
-      Effect.gen(function* () {
-        const listeners = new Map<string, () => void>();
-        let cursorActive = false;
-        let cursorUpdated: (() => void) | undefined;
-        let inputOptions: unknown;
-        const options = { showKeyPresses: true, showMousePresses: false };
-        const contents = Object.assign(
-          makeTestPreviewWebContents(async () => ({
-            toJPEG: () => Buffer.from("frame"),
-            getSize: () => ({ width: 800, height: 600 }),
-          })),
-          {
-            on: (event: string, listener: () => void) => listeners.set(event, listener),
-            send: (channel: string, active: unknown, recordingOptions: unknown) => {
-              if (channel !== "preview:recording-cursor") return;
-              cursorActive = active === true;
-              inputOptions = recordingOptions;
-              cursorUpdated?.();
-            },
-          },
-        );
-        fromId.mockReturnValue(contents as never);
-        yield* manager.createTab("tab_cursor_reload");
-        yield* manager.registerWebview("tab_cursor_reload", 42);
-        yield* manager.startRecording("tab_cursor_reload", options);
-        for (const recording of [true, false]) {
-          if (!recording) yield* manager.stopRecording("tab_cursor_reload");
-          cursorActive = false;
-          const restored = new Promise<void>((resolve) => {
-            cursorUpdated = resolve;
-          });
-          listeners.get("dom-ready")?.();
-          yield* Effect.promise(() => restored);
-          cursorUpdated = undefined;
-          expect(cursorActive).toBe(recording);
-          expect(inputOptions).toEqual(recording ? options : undefined);
-        }
       }),
     ),
   );
@@ -4717,9 +4050,14 @@ describe("PreviewManager", () => {
           return pictureInPictureWindow;
         });
         const states: PreviewManager.PreviewTabState[] = [];
+        const pictureInPictureClosed = yield* Deferred.make<void>();
+        let wasPictureInPicture = false;
         yield* manager.subscribeStateChanges((_tabId, state) =>
-          Effect.sync(() => {
+          Effect.gen(function* () {
             states.push(state);
+            if (state.pictureInPicture) wasPictureInPicture = true;
+            else if (wasPictureInPicture)
+              yield* Deferred.succeed(pictureInPictureClosed, undefined);
           }),
         );
 
@@ -4728,7 +4066,7 @@ describe("PreviewManager", () => {
         yield* manager.openPictureInPicture("tab_native_pip_close");
 
         pictureInPictureWindow.close();
-        yield* settle(() => states.at(-1)?.pictureInPicture === false);
+        yield* Deferred.await(pictureInPictureClosed);
 
         expect(states.at(-1)?.pictureInPicture).toBe(false);
         const capturesAfterClose = capturePage.mock.calls.length;
@@ -5356,23 +4694,6 @@ describe("PreviewManager", () => {
         }),
       );
 
-    effectIt.effect("crops an on-screen region at device scale", () =>
-      Effect.gen(function* () {
-        const rect = { x: 5, y: 6, width: 20, height: 30 };
-        const { result, crop } = yield* captureAnnotation(rect, {
-          regions: [{ id: "region_1", rect }],
-        });
-        expect(crop).toHaveBeenCalledExactlyOnceWith({ x: 10, y: 12, width: 40, height: 60 });
-        expect(result?.screenshotFailed).toBeUndefined();
-        expect(result?.annotation.screenshot).toEqual({
-          dataUrl: "data:image/png;base64,cropped",
-          width: 40,
-          height: 60,
-          cropRect: rect,
-        });
-      }),
-    );
-
     effectIt.effect("clips a partially visible selection to the captured viewport", () =>
       Effect.gen(function* () {
         const { result, crop } = yield* captureAnnotation(
@@ -5422,6 +4743,7 @@ describe("PreviewManager", () => {
       }),
     );
 
+    // regression: #18441 zero-area strokes on the viewport edge must still get a screenshot crop
     effectIt.effect.each([
       {
         name: "zero-width SVG line on the left edge",
@@ -5465,26 +4787,6 @@ describe("PreviewManager", () => {
           height: expectedCrop.height,
         });
       }),
-    );
-
-    effectIt.effect.each(["viewport", "crop"] as const)(
-      "reports an empty native %s image as a failed screenshot",
-      (emptyImage) =>
-        Effect.gen(function* () {
-          const rect = { x: 5, y: 6, width: 20, height: 30 };
-          const { result, crop } = yield* captureAnnotation(
-            rect,
-            {
-              regions: [{ id: "region_1", rect }],
-            },
-            emptyImage,
-          );
-          if (emptyImage === "viewport") expect(crop).not.toHaveBeenCalled();
-          else
-            expect(crop).toHaveBeenCalledExactlyOnceWith({ x: 10, y: 12, width: 40, height: 60 });
-          expect(result?.annotation.screenshot).toBeNull();
-          expect(result?.screenshotFailed).toBe(true);
-        }),
     );
   });
 

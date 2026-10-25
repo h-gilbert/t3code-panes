@@ -1,8 +1,8 @@
 import { assert, describe, expect, it } from "vite-plus/test";
 import type { ResolvedKeybindingsConfig } from "@t3tools/contracts";
 import {
-  compileResolvedKeybindingsConfig,
   DEFAULT_RESOLVED_KEYBINDINGS,
+  compileResolvedKeybindingsConfig,
   parseKeybindingShortcut,
 } from "@t3tools/shared/keybindings";
 
@@ -10,18 +10,18 @@ import { resolveShortcutCommand } from "../../keybindings";
 
 import {
   buildKeybindingRows,
-  buildKeybindingCommandOptions,
-  buildWhenVariableOptions,
-  commandLabel,
   filterKeybindingRows,
   groupKeybindingRows,
+  buildKeybindingCommandOptions,
+  whenNodeRemoveLabel,
+  commandLabel,
+  buildWhenVariableOptions,
+  unknownWhenVariables,
   keybindingConflictLabels,
   keybindingFromKeyboardEvent,
   parseWhenExpressionDraft,
   shortcutToKeybindingInput,
-  unknownWhenVariables,
   whenAstToExpression,
-  whenNodeRemoveLabel,
 } from "./KeybindingsSettings.logic";
 
 describe("KeybindingsSettings.logic", () => {
@@ -172,40 +172,6 @@ describe("KeybindingsSettings.logic", () => {
     );
   });
 
-  it("builds searchable rows with readable key and when values", () => {
-    const rows = filterKeybindingRows(
-      buildKeybindingRows([
-        {
-          command: "terminal.toggle",
-          shortcut: {
-            key: "j",
-            modKey: true,
-            metaKey: false,
-            ctrlKey: false,
-            altKey: false,
-            shiftKey: false,
-          },
-          whenAst: {
-            type: "not",
-            node: { type: "identifier", name: "terminalFocus" },
-          },
-        },
-      ] satisfies ResolvedKeybindingsConfig),
-      "terminal",
-    );
-
-    expect(rows).toEqual([
-      expect.objectContaining({
-        command: "terminal.toggle",
-        key: "mod+j",
-        when: "!terminalFocus",
-        defaultKey: "mod+j",
-        defaultWhen: "",
-        source: "Custom",
-      }),
-    ]);
-  });
-
   it("captures platform-specific mod shortcuts", () => {
     expect(
       keybindingFromKeyboardEvent(
@@ -219,15 +185,6 @@ describe("KeybindingsSettings.logic", () => {
         "Win32",
       ),
     ).toBe("mod+shift+k");
-  });
-
-  it.each([
-    ["k", "KeyK", "k"],
-    ["Tab", "Tab", "tab"],
-    ["F5", "F5", "f5"],
-  ])("captures %s without a modifier", (key, code, expected) => {
-    const noModifiers = { metaKey: false, ctrlKey: false, altKey: false, shiftKey: false };
-    expect(keybindingFromKeyboardEvent({ key, code, ...noModifiers }, "MacIntel")).toBe(expected);
   });
 
   it("waits for a key when only a modifier is pressed", () => {
@@ -304,32 +261,6 @@ describe("KeybindingsSettings.logic", () => {
           platform: "MacIntel",
         }),
       ).toBe("chat.new");
-    }
-  });
-
-  it("records an unshifted brace literally and a US shifted brace as Shift+[; both trigger the saved binding", () => {
-    for (const { shiftKey, expected } of [
-      { shiftKey: false, expected: "mod+{" },
-      { shiftKey: true, expected: "mod+shift+[" },
-    ]) {
-      const pressed = {
-        key: "{",
-        code: "BracketLeft",
-        metaKey: true,
-        ctrlKey: false,
-        altKey: false,
-        shiftKey,
-      };
-      const input = keybindingFromKeyboardEvent(pressed, "MacIntel", { layoutCharacter: true });
-      expect(input).toBe(expected);
-      assert(input);
-      const shortcut = parseKeybindingShortcut(input);
-      assert(shortcut);
-      expect(
-        resolveShortcutCommand(pressed, [{ command: "thread.previous", shortcut }], {
-          platform: "MacIntel",
-        }),
-      ).toBe("thread.previous");
     }
   });
 

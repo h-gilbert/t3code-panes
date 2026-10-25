@@ -1,6 +1,10 @@
 import { useState } from "react";
+import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentOption } from "./BranchToolbar.logic";
+import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import {
   CircleCheckIcon,
+  MessageSquareDashedIcon,
   FolderPlusIcon,
   LayersIcon,
   MoreHorizontalIcon,
@@ -23,6 +27,9 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuGroup,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./ui/menu";
 
@@ -33,6 +40,7 @@ const ACTIVITY = {
   working: { label: "Running", dot: "bg-primary" },
   approval: { label: "Needs approval", dot: "bg-warning" },
   input: { label: "Needs input", dot: "bg-warning" },
+  request: { label: "Guest request", dot: "bg-guest" },
   failed: { label: "Failed", dot: "bg-destructive" },
   limited: { label: "Usage limit", dot: "bg-warning" },
   waiting: { label: "Waiting", dot: "bg-muted-foreground" },
@@ -49,6 +57,7 @@ export function EmptyWorkspacePane({
   onHideProject,
   onAddProject,
   onNewThread,
+  scratchEnvironments,
   onSelectThread,
 }: {
   readonly projects: readonly SidebarProjectSnapshot[];
@@ -59,7 +68,11 @@ export function EmptyWorkspacePane({
   readonly onShowAll: () => void;
   readonly onHideProject: (project: SidebarProjectSnapshot) => void;
   readonly onAddProject: () => void;
-  readonly onNewThread: (project: SidebarProjectSnapshot) => void;
+  readonly scratchEnvironments: readonly EnvironmentOption[];
+  readonly onNewThread: (
+    project: SidebarProjectSnapshot | null,
+    environmentId?: EnvironmentId,
+  ) => void;
   readonly onSelectThread: (thread: WorkspaceThreadPickerItem) => void;
 }) {
   const [projectQuery, setProjectQuery] = useState("");
@@ -78,7 +91,7 @@ export function EmptyWorkspacePane({
     openCount++;
     openCountByProject.set(thread.projectKey, (openCountByProject.get(thread.projectKey) ?? 0) + 1);
   }
-  const scratchProjects = [...projects, ...hiddenProjects].filter((project) => project.isScratch);
+  const scratchProject = [...projects, ...hiddenProjects].find((project) => project.isScratch);
   const hideableProjects = hiddenProjects.filter((project) => !project.isScratch);
   const matchingProjects = projects.filter(
     (project) =>
@@ -114,6 +127,84 @@ export function EmptyWorkspacePane({
     setFilter("all");
     onShowAll();
   };
+  const scratchEnvironmentItems = (project: SidebarProjectSnapshot | null) => (
+    <>
+      {" "}
+      {scratchEnvironments.map((environment) => (
+        <DropdownMenuItem
+          key={environment.environmentId}
+          disabled={environment.disabledReason !== undefined}
+          onClick={() => onNewThread(project, environment.environmentId)}
+        >
+          <EnvironmentMachineIcon kind={environment.machine} className="size-4 shrink-0" />
+          {environment.label}
+          {environment.disabledReason ? (
+            <span className="text-muted-foreground">{environment.disabledReason}</span>
+          ) : null}
+        </DropdownMenuItem>
+      ))}
+    </>
+  );
+  const renderScratchProject = (project: SidebarProjectSnapshot | null) => (
+    <div
+      key="scratch"
+      className="group flex shrink-0 items-center rounded-md @lg/thread-browser:w-full"
+    >
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={<button type="button" />}
+          className={cn(
+            ROW,
+            "min-w-0 flex-1",
+            project?.projectKey === selectedProjectKey && "bg-primary/10 text-primary",
+          )}
+          aria-label="No project"
+        >
+          <MessageSquareDashedIcon className="size-4 shrink-0" aria-hidden />
+          <span className="truncate text-xs font-medium">No project</span>
+          <span className="ml-auto text-2xs tabular-nums text-muted-foreground">
+            {project ? (openCountByProject.get(project.projectKey) ?? 0) : 0}
+          </span>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start">
+          {project ? (
+            <>
+              <DropdownMenuItem onClick={() => chooseProject(project)}>
+                Browse threads
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          ) : null}
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>New thread on</DropdownMenuLabel>
+            {scratchEnvironmentItems(project)}
+          </DropdownMenuGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {newThreadButton(project, true)}
+    </div>
+  );
+  const newThreadButton = (project: SidebarProjectSnapshot | null, iconOnly = false) => {
+    const button = (
+      <Button
+        variant={iconOnly ? "ghost-muted" : "default"}
+        size={iconOnly ? "icon-micro" : "compact"}
+        aria-label={`New thread in ${project?.displayName ?? "No project"}`}
+        {...(project && !project.isScratch ? { onClick: () => onNewThread(project) } : {})}
+      >
+        <PlusIcon aria-hidden />
+        {iconOnly ? null : project ? "New thread" : "No project"}
+      </Button>
+    );
+    return !project || project.isScratch ? (
+      <DropdownMenu>
+        <DropdownMenuTrigger render={button} />
+        <DropdownMenuContent align="start">{scratchEnvironmentItems(project)}</DropdownMenuContent>
+      </DropdownMenu>
+    ) : (
+      button
+    );
+  };
   const renderProject = (project: SidebarProjectSnapshot) => (
     <div
       key={project.projectKey}
@@ -142,14 +233,7 @@ export function EmptyWorkspacePane({
           {project.workspaceRoot}
         </TooltipPopup>
       </Tooltip>
-      <Button
-        variant="ghost-muted"
-        size="icon-micro"
-        aria-label={`New thread in ${project.displayName}`}
-        onClick={() => onNewThread(project)}
-      >
-        <PlusIcon aria-hidden />
-      </Button>
+      {newThreadButton(project, true)}
       {!project.isScratch ? (
         <DropdownMenu>
           <DropdownMenuTrigger
@@ -299,7 +383,7 @@ export function EmptyWorkspacePane({
               </span>
               <span className="text-2xs tabular-nums text-muted-foreground">{openCount}</span>
             </button>
-            {scratchProjects.map(renderProject)}
+            {renderScratchProject(scratchProject ?? null)}
           </div>
           <div className="hidden mx-4 border-t border-border @lg/thread-browser:block" />
           <div className="flex gap-1 overflow-x-auto px-2 py-2 @lg/thread-browser:min-h-0 @lg/thread-browser:flex-1 @lg/thread-browser:flex-col @lg/thread-browser:overflow-y-auto @lg/thread-browser:overflow-x-hidden">
@@ -321,12 +405,7 @@ export function EmptyWorkspacePane({
                   : `${scoped.filter((thread) => thread.status === "open").length} open · ${scoped.filter((thread) => thread.status === "settled").length} settled`}
               </p>
             </div>
-            {selected ? (
-              <Button size="compact" onClick={() => onNewThread(selected)}>
-                <PlusIcon aria-hidden />
-                New thread
-              </Button>
-            ) : null}
+            {selected ? newThreadButton(selected) : null}
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-4 pb-3 @lg/thread-browser:px-5">
             <div className="min-w-32 flex-1">

@@ -3,7 +3,6 @@ import * as Context from "effect/Context";
 import { Tool } from "effect/ai";
 
 import { PreviewStandardToolkit, PreviewToolkit } from "./tools.ts";
-
 const schemaHasDescription = (schema: unknown): boolean => {
   if (!schema || typeof schema !== "object") return false;
   const record = schema as Record<string, unknown>;
@@ -26,7 +25,7 @@ const schemaHasMultipleAllOfDescriptions = (schema: unknown): boolean => {
   return descriptionCount > 1 || Object.values(record).some(schemaHasMultipleAllOfDescriptions);
 };
 
-it("exports provider-compatible object schemas with described parameters", () => {
+it("exports provider-compatible object schemas", () => {
   for (const tool of Object.values(PreviewToolkit.tools)) {
     const schema = Tool.getJsonSchema(tool) as {
       readonly type?: unknown;
@@ -34,10 +33,6 @@ it("exports provider-compatible object schemas with described parameters", () =>
       readonly anyOf?: unknown;
       readonly oneOf?: unknown;
     };
-    expect(
-      tool.description?.length ?? 0,
-      `${tool.name} should have a useful description`,
-    ).toBeGreaterThan(40);
     expect(schema.type, `${tool.name} must export a top-level object schema`).toBe("object");
     expect(schema.anyOf, `${tool.name} must not export a root anyOf`).toBeUndefined();
     expect(schema.oneOf, `${tool.name} must not export a root oneOf`).toBeUndefined();

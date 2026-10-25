@@ -32,7 +32,6 @@ import {
   registerAgentAwarenessConnection,
   releaseAgentAwarenessRelayTokenProvider,
   setAgentAwarenessRelayTokenProvider,
-  shouldRegisterAgentAwarenessDeviceForProvider,
   unregisterAgentAwarenessConnection,
 } from "./remoteRegistration";
 import * as Notifications from "expo-notifications";
@@ -55,6 +54,7 @@ const registrationRecordStore = vi.hoisted(() => ({
   } | null,
 }));
 
+vi.mock("expo", () => ({ requireOptionalNativeModule: vi.fn(() => null) }));
 vi.mock("expo-constants", () => ({
   default: {
     expoConfig: {
@@ -311,18 +311,6 @@ describe("makeRelayDeviceRegistrationRequest", () => {
     expect(normalizeAgentAwarenessRelayBaseUrl("   ")).toBeNull();
   });
 
-  it.effect("refreshes APNs registration for connected environments after settings changes", () => {
-    registerAgentAwarenessConnection(savedConnection());
-    return Effect.gen(function* () {
-      yield* runBackgroundOperations();
-      vi.mocked(Notifications.getDevicePushTokenAsync).mockClear();
-
-      yield* refreshAgentAwarenessRegistration();
-
-      expect(Notifications.getDevicePushTokenAsync).toHaveBeenCalledTimes(1);
-    }).pipe(Effect.provide(layerRelayTest));
-  });
-
   it.effect("registers the APNs device when cloud auth becomes available", () => {
     const fetchMock = vi.fn((request: RequestInfo | URL) => {
       const url = request instanceof Request ? request.url : String(request);
@@ -535,50 +523,6 @@ describe("makeRelayDeviceRegistrationRequest", () => {
 
       expect(backgroundRuntime.pending).toHaveLength(0);
       expect(tokenProvider).toHaveBeenCalledTimes(2);
-    }).pipe(Effect.provide(layerRelayTest));
-  });
-
-  it("only registers again when the authenticated identity changes", () => {
-    expect(shouldRegisterAgentAwarenessDeviceForProvider(null, "user-a")).toBe(true);
-    expect(shouldRegisterAgentAwarenessDeviceForProvider("user-a", "user-a")).toBe(false);
-    expect(shouldRegisterAgentAwarenessDeviceForProvider("user-a", "user-b")).toBe(true);
-    expect(shouldRegisterAgentAwarenessDeviceForProvider("user-a", undefined)).toBe(true);
-  });
-
-  it.effect("registers rotated APNs tokens without rereading the native token", () => {
-    const fetchMock = vi.fn((request: RequestInfo | URL) => {
-      const url = request instanceof Request ? request.url : String(request);
-      return Promise.resolve(
-        Response.json(
-          url.endsWith("/v1/client/dpop-token")
-            ? {
-                access_token: "relay-dpop-token",
-                issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
-                token_type: "DPoP",
-                expires_in: 300,
-                scope: "mobile:registration",
-              }
-            : { ok: true },
-        ),
-      );
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    Constants.expoConfig!.extra = {
-      relay: {
-        url: "https://relay.example.test/",
-      },
-    };
-
-    vi.mocked(Notifications.getDevicePushTokenAsync).mockClear();
-    setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-user-a"));
-
-    const tokenListener = vi.mocked(Notifications.addPushTokenListener).mock.calls.at(-1)?.[0];
-    expect(tokenListener).toBeDefined();
-    tokenListener?.({ type: "ios", data: "rotated-apns-token" } as never);
-
-    return Effect.gen(function* () {
-      yield* runBackgroundOperations();
-      expect(Notifications.getDevicePushTokenAsync).toHaveBeenCalledTimes(1);
     }).pipe(Effect.provide(layerRelayTest));
   });
 

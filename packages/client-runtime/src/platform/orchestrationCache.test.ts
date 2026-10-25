@@ -1,14 +1,13 @@
 import { describe, expect, it } from "@effect/vitest";
 import {
-  CommandId,
   EnvironmentId,
-  MessageId,
   EventId,
   TurnItemId,
+  CommandId,
+  MessageId,
   RuntimeRequestId,
   type OrchestrationV2ShellSnapshot,
 } from "@t3tools/contracts";
-import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -24,19 +23,23 @@ import {
   v2Now,
   v2Projection,
   v2ShellSnapshot,
-  v2ThreadShell,
   v2ThreadId,
+  v2ThreadShell,
 } from "../state/orchestrationV2TestFixtures.ts";
 
 import { applyOrchestrationV2ProjectionEvent } from "../state/orchestrationV2Projection.ts";
 
-const environmentId = EnvironmentId.make("environment-cache-test");
+import * as DateTime from "effect/DateTime";
+
 const StoredShellSnapshotJson = Schema.fromJsonString(StoredOrchestrationShellSnapshot);
+
+const encodeStoredShellSnapshotJson = Schema.encodeSync(StoredShellSnapshotJson);
+const decodeStoredShellSnapshotJson = Schema.decodeUnknownSync(StoredShellSnapshotJson);
+
+const environmentId = EnvironmentId.make("environment-cache-test");
 const StoredThreadSnapshotJson = Schema.fromJsonString(StoredOrchestrationThreadSnapshot);
 const encodeStoredShellSnapshot = Schema.encodeSync(StoredOrchestrationShellSnapshot);
 const decodeStoredShellSnapshotSync = Schema.decodeUnknownSync(StoredOrchestrationShellSnapshot);
-const encodeStoredShellSnapshotJson = Schema.encodeSync(StoredShellSnapshotJson);
-const decodeStoredShellSnapshotJson = Schema.decodeUnknownSync(StoredShellSnapshotJson);
 const encodeStoredThreadSnapshotJson = Schema.encodeSync(StoredThreadSnapshotJson);
 const decodeStoredThreadSnapshotJson = Schema.decodeUnknownSync(StoredThreadSnapshotJson);
 
@@ -162,14 +165,20 @@ describe("orchestration cache envelopes", () => {
     }),
   );
 
-  it("rejects thread snapshots saved before queued-run items were kept, but not shells", () => {
-    const staleThread = encodeStoredThreadSnapshotJson({
+  it("rejects thread snapshots saved before human history was bounded, but not shells", () => {
+    const currentThread = encodeStoredThreadSnapshotJson({
       schemaVersion: ORCHESTRATION_THREAD_CACHE_SCHEMA_VERSION,
       environmentId,
       threadId: v2ThreadId,
       snapshot: { snapshotSequence: 4, projection: v2Projection },
-    }).replace(`"schemaVersion":${ORCHESTRATION_THREAD_CACHE_SCHEMA_VERSION}`, `"schemaVersion":3`);
-    expect(() => decodeStoredThreadSnapshotJson(staleThread)).toThrow();
+    });
+    for (const staleVersion of [3, 4]) {
+      const staleThread = currentThread.replace(
+        `"schemaVersion":${ORCHESTRATION_THREAD_CACHE_SCHEMA_VERSION}`,
+        `"schemaVersion":${staleVersion}`,
+      );
+      expect(() => decodeStoredThreadSnapshotJson(staleThread)).toThrow();
+    }
     const shell = encodeStoredShellSnapshot({
       schemaVersion: ORCHESTRATION_CACHE_SCHEMA_VERSION,
       environmentId,

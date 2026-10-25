@@ -1,16 +1,5 @@
-import type { PreviewViewportSetting } from "@t3tools/contracts";
-/**
- * In-memory PreviewManager implementation.
- *
- * Sessions are keyed by `(threadId, tabId)`; a single thread can host
- * multiple tabs (browser-style). `open` always creates a new tab — tab
- * lifecycle is owned by the renderer.
- *
- * Events are published via Effect's `PubSub`, so subscriber failures are
- * isolated from the publishing call (a closed WS subscriber queue cannot
- * fail an in-progress `navigate()`).
- */
 import {
+  type PreviewViewportSetting,
   type PreviewCloseInput,
   type PreviewEvent,
   type PreviewError,
@@ -26,7 +15,20 @@ import {
   FILL_PREVIEW_VIEWPORT,
   PreviewSessionLookupError,
   type PreviewSessionSnapshot,
+  PreviewControlRequiredError,
 } from "@t3tools/contracts";
+/**
+ * In-memory PreviewManager implementation.
+ *
+ * Sessions are keyed by `(threadId, tabId)`; a single thread can host
+ * multiple tabs (browser-style). `open` always creates a new tab — tab
+ * lifecycle is owned by the renderer.
+ *
+ * Events are published via Effect's `PubSub`, so subscriber failures are
+ * isolated from the publishing call (a closed WS subscriber queue cannot
+ * fail an in-progress `navigate()`).
+ */
+
 import {
   isPreviewUrlNormalizationError,
   newPreviewTabId,
@@ -41,7 +43,6 @@ import * as PubSub from "effect/PubSub";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as SynchronizedRef from "effect/SynchronizedRef";
-import { PreviewControlRequiredError } from "@t3tools/contracts";
 
 export class PreviewManager extends Context.Service<
   PreviewManager,
@@ -190,10 +191,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
   const eventsPubSub = yield* PubSub.unbounded<PreviewEvent>();
   const events: Stream.Stream<PreviewEvent> = Stream.fromPubSub(eventsPubSub);
 
-  /**
-   * The event is published INSIDE the lock so observers see events in the same
-   * order as the underlying state transitions.
-   */
+  /** Publish inside the lock to preserve state-transition order. */
   const mutateExistingSession = <R, E>(
     threadId: string,
     tabId: string,

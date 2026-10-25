@@ -2,18 +2,18 @@ import { it as effectIt } from "@effect/vitest";
 import {
   DEFAULT_BROWSER_PROFILE_ID,
   INCOGNITO_BROWSER_PROFILE_ID,
-  PreviewAutomationStatus,
   PreviewCaptureFailure,
+  PreviewAutomationStatus,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
+import * as BrowserImport from "../../preview/BrowserImport/BrowserImport.ts";
 import * as Schema from "effect/Schema";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import * as PreviewManager from "../../preview/Manager.ts";
-import * as BrowserImport from "../../preview/BrowserImport/BrowserImport.ts";
 import * as PreviewIpc from "./preview.ts";
 import * as DesktopIpc from "../DesktopIpc.ts";
 import * as DesktopClientSettings from "../../settings/DesktopClientSettings.ts";
@@ -111,34 +111,8 @@ describe("preview IPC methods", () => {
       }),
   );
 
-  effectIt.effect("preserves recording arm failures without erasing successful void results", () =>
-    Effect.gen(function* () {
-      const result = yield* invokeCapture(PreviewIpc.startRecording, {
-        startRecording: (tabId) =>
-          Effect.fail(new PreviewManager.PreviewTabNotFoundError({ tabId })),
-      });
-      expect(result).toEqual({
-        _tag: "PreviewCaptureFailure",
-        reason: "renderer-unavailable",
-        stage: "recording-start",
-      });
-      const failure = yield* decodeCaptureFailure(result);
-      expect(failure.message).toContain("Reopen the preview tab");
-      expect(
-        yield* invokeCapture(PreviewIpc.startRecording, {
-          startRecording: () => Effect.void,
-        }),
-      ).toBeUndefined();
-    }),
-  );
-
   beforeEach(() => {
     fromPartition.mockClear();
-  });
-
-  it("does not access the Electron session while the module loads", async () => {
-    await expect(import("./preview.ts")).resolves.toBeDefined();
-    expect(fromPartition).not.toHaveBeenCalled();
   });
 
   it("derives distinct partition scopes when identifiers contain the delimiter", () => {

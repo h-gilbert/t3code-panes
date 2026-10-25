@@ -5,6 +5,10 @@ import { describe, expect, it } from "vite-plus/test";
 
 describe("chat timeline composer layout", () => {
   it("reserves layout space for the docked composer instead of overlaying the timeline", () => {
+    const follow = NodeFS.readFileSync(
+      new URL("./chat/useTimelineFollow.ts", import.meta.url),
+      "utf8",
+    );
     const source = NodeFS.readFileSync(new URL("./ChatView.tsx", import.meta.url), "utf8");
 
     expect(source).toContain('data-chat-composer-layout={isDraftHeroState ? undefined : "true"}');
@@ -13,11 +17,11 @@ describe("chat timeline composer layout", () => {
     // Matched loosely: the timeline takes this either as a JSX attribute or
     // through a conditional prop spread, and only the wiring matters here.
     expect(source).toMatch(/onLiveTailSizeChange[:=]\s*scheduleActiveTimelineEndReveal/);
-    expect(source).toMatch(/animated: false,\s+viewPosition: 0,/);
-    expect(source).toContain(
+    expect(follow).toMatch(/animated: false,\s+viewPosition: 0,/);
+    expect(follow).toContain(
       "showScrollDebouncer.current.cancel();\n    setShowScrollToBottom(false);",
     );
-    expect(source).toContain("style={{ bottom: 4 }}");
+    expect(source).toContain("bottom={4}");
     expect(source).not.toContain("contentInsetEndAdjustment=");
   });
 });

@@ -30,6 +30,8 @@ vi.mock("./shell", async () => {
     snapshot: Option.none(),
     status: "empty",
     error: Option.none(),
+    generation: 0,
+    removedAt: new Map(),
   };
   return {
     environmentShell: { stateValueAtom: Atom.family(() => Atom.make(initial)) },
@@ -99,6 +101,8 @@ const EMPTY_SHELL_STATE: EnvironmentShellState = {
   snapshot: Option.none(),
   status: "empty",
   error: Option.none(),
+  generation: 0,
+  removedAt: new Map(),
 };
 
 describe("pane bootstrap subscriptions", () => {

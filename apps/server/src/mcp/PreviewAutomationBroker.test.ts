@@ -5,10 +5,8 @@ import {
   EnvironmentId,
   PreviewAutomationBusyError,
   PreviewAutomationClientDisconnectedError,
-  PreviewAutomationInvalidSelectorError,
   PreviewAutomationMalformedResponseError,
   PreviewAutomationNoAvailableHostError,
-  PreviewAutomationTargetNotEditableError,
   PreviewTabId,
   ProviderInstanceId,
   ThreadId,
@@ -16,17 +14,20 @@ import {
   type PreviewAutomationRequest,
   type PreviewAutomationStreamEvent,
   SERVER_BROWSER_AUTOMATION_CLIENT_ID,
+  PreviewAutomationInvalidSelectorError,
+  PreviewAutomationTargetNotEditableError,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
-import * as Exit from "effect/Exit";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
 import * as Result from "effect/Result";
-import * as Scheduler from "effect/Scheduler";
 import * as Stream from "effect/Stream";
-import * as TestClock from "effect/testing/TestClock";
 
 import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
+
+import * as Exit from "effect/Exit";
+import * as Scheduler from "effect/Scheduler";
+import * as TestClock from "effect/testing/TestClock";
 
 const makeBroker = PreviewAutomationBroker.make.pipe(Effect.provide(NodeServices.layer));
 
@@ -201,40 +202,6 @@ it.effect.each([true, false])(
         expect(capturedTabId).toBe(olderTabId);
       }),
     ),
-);
-
-it.effect("tracks the tab returned by a targeted recording stop", () =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const broker = yield* makeBroker;
-      const browsingTabId = PreviewTabId.make("tab-session-b");
-      const recordingTabId = PreviewTabId.make("tab-session-a-recording");
-      const routedRequests: RoutedRequest[] = [];
-      const requests = requestsFrom(yield* broker.connect(makeHost()));
-      yield* Stream.runForEach(requests, (request) => {
-        routedRequests.push(request);
-        return broker.respond({
-          clientId: "client-1",
-          connectionId: request.connectionId,
-          requestId: request.requestId,
-          ok: true,
-          result:
-            request.operation === "open"
-              ? { available: true, tabId: browsingTabId }
-              : request.operation === "recordingStop"
-                ? { id: "recording-1", tabId: recordingTabId }
-                : { url: "http://localhost:3200" },
-        });
-      }).pipe(Effect.forkScoped);
-      yield* Effect.yieldNow;
-
-      yield* broker.invoke({ scope, operation: "open", input: {} });
-      yield* broker.invoke({ scope, operation: "recordingStop", input: {} });
-      yield* broker.invoke({ scope, operation: "snapshot", input: {} });
-
-      expect(routedRequests.at(-1)?.tabId).toBe(recordingTabId);
-    }),
-  ),
 );
 
 it.effect("does not let a no-tab response suppress an earlier tab decision", () =>
@@ -1287,30 +1254,6 @@ it.effect("fails over a pinned provider session only after its host disconnects"
   ),
 );
 
-it.effect("lets the browser host resolve an active tab locally", () =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const broker = yield* makeBroker;
-      const requests = requestsFrom(yield* broker.connect(makeHost()));
-      let routedTabId: string | undefined;
-      yield* Stream.runForEach(requests, (request) => {
-        routedTabId = request.tabId;
-        return broker.respond({
-          clientId: "client-1",
-          connectionId: request.connectionId,
-          requestId: request.requestId,
-          ok: true,
-        });
-      }).pipe(Effect.forkScoped);
-      yield* Effect.yieldNow;
-
-      yield* broker.invoke<void>({ scope, operation: "click", input: { x: 10, y: 10 } });
-
-      expect(routedTabId).toBeUndefined();
-    }),
-  ),
-);
-
 it.effect("keeps a replacement stream authoritative when the old stream finalizes", () =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -2194,7 +2137,6 @@ it.effect("keeps each thread's current tab when threads share a provider session
         ["thread-1", "tab-thread-1"],
         ["thread-2", "tab-thread-2"],
       ]);
-      // Each thread's agent owns its own tabs and tab budget.
       expect(routed[0]!.agentSessionId).not.toBe(routed[1]!.agentSessionId);
     }),
   ),

@@ -1,9 +1,9 @@
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { shouldBlockThreadArchive } from "./useThreadActions";
 import {
   navigateAfterThreadDeletion,
+  shouldBlockThreadArchive,
   requestThreadUnpinConfirmation,
   ThreadArchiveBlockedError,
 } from "./useThreadActions";

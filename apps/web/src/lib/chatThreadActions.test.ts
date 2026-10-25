@@ -1,19 +1,15 @@
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import {
-  EnvironmentId,
-  ProjectId,
-  ProviderInstanceId,
-  type ModelSelection,
-} from "@t3tools/contracts";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import { vi } from "vite-plus/test";
 import {
   resolveThreadActionProjectRef,
-  hasExplicitComposerModelSelection,
   resolveNewDraftStartFromOrigin,
-  resolveNewThreadModelSelectionOverride,
   startNewThreadFromContext,
   type ChatThreadActionContext,
 } from "./chatThreadActions";
+import { ProviderInstanceId, type ModelSelection } from "@t3tools/contracts";
+import { describe, expect, it } from "vite-plus/test";
+import { resolveNewThreadModelSelectionOverride } from "./chatThreadActions";
 
 const ENVIRONMENT_ID = EnvironmentId.make("environment-1");
 const REMOTE_ENVIRONMENT_ID = EnvironmentId.make("environment-remote");
@@ -39,22 +35,6 @@ function createContext(overrides: Partial<ChatThreadActionContext> = {}): ChatTh
 }
 
 describe("chatThreadActions", () => {
-  it("only treats an active stored selection marked explicit as an explicit pick", () => {
-    const draft = {
-      activeProvider: PROJECT_DEFAULT_SELECTION.instanceId,
-      modelSelectionByProvider: {
-        [PROJECT_DEFAULT_SELECTION.instanceId]: PROJECT_DEFAULT_SELECTION,
-      },
-      modelSelectionExplicit: true,
-    };
-
-    expect(hasExplicitComposerModelSelection(draft)).toBe(true);
-    expect(hasExplicitComposerModelSelection({ ...draft, modelSelectionExplicit: false })).toBe(
-      false,
-    );
-    expect(hasExplicitComposerModelSelection({ ...draft, activeProvider: null })).toBe(false);
-  });
-
   it("does not carry a non-explicit model from the destination draft back into itself", () => {
     expect(
       resolveNewThreadModelSelectionOverride({

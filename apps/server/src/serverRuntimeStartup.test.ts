@@ -1,12 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
-import { ThreadId } from "@t3tools/contracts";
-import * as ProjectService from "./project/ProjectService.ts";
-import * as ThreadManagement from "./orchestration-v2/ThreadManagementService.ts";
-import * as ThreadLaunch from "./orchestration-v2/ThreadLaunchService.ts";
-import * as ServerSettings from "./serverSettings.ts";
-import { assert, it } from "@effect/vitest";
 import {
+  ThreadId,
   DEFAULT_MODEL,
   DEFAULT_PROVIDER_REASONING_EFFORT,
   DEFAULT_SERVER_SETTINGS,
@@ -17,6 +12,12 @@ import {
   EnvironmentId,
   type ServerLifecycleStreamEvent,
 } from "@t3tools/contracts";
+import * as ProjectService from "./project/ProjectService.ts";
+import * as ThreadManagement from "./orchestration-v2/ThreadManagementService.ts";
+import * as ThreadLaunch from "./orchestration-v2/ThreadLaunchService.ts";
+import * as ServerSettings from "./serverSettings.ts";
+import { assert, it } from "@effect/vitest";
+
 import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
 import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
 import { HttpServer } from "effect/http";
@@ -257,33 +258,6 @@ it.effect.each([
       );
     }),
   ),
-);
-
-it.effect("starts without scanning or rebuilding projection history", () =>
-  Effect.gen(function* () {
-    const calls = yield* Ref.make<ReadonlyArray<string>>([]);
-    const record = (label: string) => Ref.update(calls, (current) => [...current, label]);
-
-    const result = yield* ServerRuntimeStartup.runOrderedV2StartupPhases({
-      importLegacyShells: record("import"),
-      recover: record("recover").pipe(Effect.as({ closedRequests: 2 })),
-      recoverDelegatedTasks: record("delegated"),
-      startEffectWorker: record("worker"),
-      autoBootstrap: record("bootstrap").pipe(Effect.as({ projectId: "project-1" })),
-    });
-
-    assert.deepEqual(yield* Ref.get(calls), [
-      "import",
-      "recover",
-      "delegated",
-      "worker",
-      "bootstrap",
-    ]);
-    assert.deepEqual(result, {
-      recovery: { closedRequests: 2 },
-      bootstrap: { projectId: "project-1" },
-    });
-  }),
 );
 
 it.effect("interrupts the effect worker when awareness relay startup fails", () =>

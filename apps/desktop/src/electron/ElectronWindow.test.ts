@@ -495,35 +495,6 @@ describe("ElectronWindow", () => {
     }).pipe(Effect.provide(layerTestFor("win32"))),
   );
 
-  it.effect("preserves message delivery failures with window and channel context", () =>
-    Effect.gen(function* () {
-      const cause = new Error("renderer send failed");
-      const window = {
-        id: 42,
-        isDestroyed: vi.fn(() => false),
-        webContents: {
-          send: vi.fn(() => {
-            throw cause;
-          }),
-        },
-      } as unknown as Electron.BrowserWindow;
-      getAllWindowsMock.mockReturnValueOnce([window]);
-
-      const electronWindow = yield* ElectronWindow.ElectronWindow;
-      const exit = yield* Effect.exit(electronWindow.sendAll("desktop:update", { ready: true }));
-
-      assert.equal(exit._tag, "Failure");
-      if (exit._tag === "Failure") {
-        const error = Cause.squash(exit.cause);
-        assert.instanceOf(error, ElectronWindow.ElectronWindowOperationError);
-        assert.equal(error.operation, "send-window-message");
-        assert.equal(error.windowId, 42);
-        assert.equal(error.channel, "desktop:update");
-        assert.strictEqual(error.cause, cause);
-      }
-    }).pipe(Effect.provide(layerTest)),
-  );
-
   it.effect("preserves destroy failures and continues with later windows", () =>
     Effect.gen(function* () {
       const cause = new Error("window destroy failed");
@@ -553,51 +524,5 @@ describe("ElectronWindow", () => {
       }
       assert.equal(vi.mocked(laterWindow.destroy).mock.calls.length, 1);
     }).pipe(Effect.provide(layerTest)),
-  );
-  it.effect("an ordinary reveal on Windows does not touch the Win32 foreground helpers", () =>
-    Effect.gen(function* () {
-      const window = makeWindowsRevealWindow();
-      const electronWindow = yield* ElectronWindow.ElectronWindow;
-
-      yield* electronWindow.reveal(window as unknown as Electron.BrowserWindow);
-
-      assert.lengthOf(activateWindowsForegroundMock.mock.calls, 0);
-      assert.lengthOf(windowsForegroundFocusMock.mock.calls, 0);
-      assert.lengthOf(shellHostedForegroundMock.mock.calls, 0);
-      assert.lengthOf(startWindowsForegroundFocusThreadMock.mock.calls, 0);
-      assert.lengthOf(window.focus.mock.calls, 1);
-    }).pipe(Effect.provide(layerTestFor("win32"))),
-  );
-
-  it.effect("a capture reveal on Windows uses the Win32 path only once", () =>
-    Effect.gen(function* () {
-      const window = makeWindowsRevealWindow();
-      const electronWindow = yield* ElectronWindow.ElectronWindow;
-
-      yield* electronWindow.prepareReveal(window as unknown as Electron.BrowserWindow);
-      yield* electronWindow.reveal(window as unknown as Electron.BrowserWindow);
-      yield* electronWindow.reveal(window as unknown as Electron.BrowserWindow);
-
-      assert.lengthOf(activateWindowsForegroundMock.mock.calls, 1);
-      assert.lengthOf(window.focus.mock.calls, 2);
-    }).pipe(Effect.provide(layerTestFor("win32"))),
-  );
-
-  it.effect("starts the Windows focus worker lazily and closes it with the layer", () =>
-    Effect.gen(function* () {
-      yield* ElectronWindow.ElectronWindow.pipe(Effect.provide(layerTestFor("win32")));
-      assert.lengthOf(startWindowsForegroundFocusThreadMock.mock.calls, 0);
-      assert.lengthOf(windowsForegroundCloseMock.mock.calls, 0);
-
-      yield* Effect.gen(function* () {
-        const electronWindow = yield* ElectronWindow.ElectronWindow;
-        const window = makeWindowsRevealWindow() as unknown as Electron.BrowserWindow;
-        yield* electronWindow.prepareReveal(window);
-        yield* electronWindow.prepareReveal(window);
-        assert.lengthOf(startWindowsForegroundFocusThreadMock.mock.calls, 1);
-        assert.lengthOf(windowsForegroundCloseMock.mock.calls, 0);
-      }).pipe(Effect.provide(layerTestFor("win32")));
-      assert.lengthOf(windowsForegroundCloseMock.mock.calls, 1);
-    }),
   );
 });

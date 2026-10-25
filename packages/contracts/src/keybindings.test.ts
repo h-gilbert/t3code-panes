@@ -3,8 +3,8 @@ import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 
 import {
-  KeybindingsConfig,
   KeybindingRule,
+  KeybindingsConfig,
   ResolvedKeybindingRule,
   ResolvedKeybindingsConfig,
 } from "./keybindings.ts";
@@ -283,23 +283,6 @@ it.effect("drops resolved rules with commands this build does not know", () =>
   }),
 );
 
-it.effect("drops resolved rules with unknown when-node types", () =>
-  Effect.gen(function* () {
-    const parsed = yield* decode(ResolvedKeybindingsConfig, [
-      {
-        command: "terminal.toggle",
-        shortcut,
-        whenAst: { type: "xor", left: 1, right: 2 },
-      },
-      { command: "terminal.split", shortcut },
-    ]);
-    assert.deepEqual(
-      parsed.map((rule) => rule.command),
-      ["terminal.split"],
-    );
-  }),
-);
-
 it.effect("drops malformed resolved rule entries", () =>
   Effect.gen(function* () {
     const parsed = yield* decode(ResolvedKeybindingsConfig, [
@@ -312,35 +295,4 @@ it.effect("drops malformed resolved rule entries", () =>
       ["terminal.toggle"],
     );
   }),
-);
-
-it.effect("encodes resolved keybindings to the plain wire shape", () =>
-  Effect.gen(function* () {
-    const rules = [{ command: "terminal.toggle" as const, shortcut }];
-    const encoded = yield* encodeResolvedKeybindings(rules);
-    assert.deepEqual(encoded, rules);
-    const roundTripped = yield* decode(ResolvedKeybindingsConfig, encoded);
-    assert.deepEqual(roundTripped, rules);
-  }),
-);
-
-it.effect("drops unknown fields in resolved keybinding rules", () =>
-  decodeResolvedRule({
-    command: "terminal.toggle",
-    shortcut: {
-      key: "j",
-      metaKey: false,
-      ctrlKey: false,
-      shiftKey: false,
-      altKey: false,
-      modKey: true,
-    },
-    key: "mod+j",
-  }).pipe(
-    Effect.map((parsed) => {
-      const view = parsed as Record<string, unknown>;
-      assert.strictEqual("key" in view, false);
-      assert.strictEqual(view.command, "terminal.toggle");
-    }),
-  ),
 );

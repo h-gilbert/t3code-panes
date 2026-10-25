@@ -1,4 +1,13 @@
+import { ensureInlineContextReferences } from "../lib/composerContextReferences";
+import { terminalContextReference } from "../lib/composerContextRecords";
 import {
+  boundAttachmentIds,
+  snapshotComposerSend,
+  planComposerTurn,
+  withMessageContext,
+  deriveAvailableRevertTurnCounts,
+  deriveWorkspaceMutationId,
+  makeThreadErrorSetter,
   findRecordedWorktreeSetup,
   isThreadWokeUnseen,
   mergeDirectPreviewAnnotation,
@@ -51,7 +60,6 @@ import type { Thread, TurnDiffSummary } from "../types";
 import { makeThreadFixture, makeThreadProjectionFixture } from "../test-fixtures";
 import {
   agentControlledBrowserCloseConfirmation,
-  ENVIRONMENT_RECONNECT_WARNING_GRACE_MS,
   getAntigravitySendBlockReason,
   resolveBackgroundDraftWorkspaceOptions,
   resolveComposerInteractionMode,
@@ -93,14 +101,12 @@ import {
   reconcileMountedTerminalThreadIds,
   resolveTerminalWorktreePath,
   resolveDraftPromotionNavigationTarget,
-  resolveEffectiveInteractionMode,
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
   startNewThreadForProject,
   shouldShowBranchMismatchBanner,
   shouldResumeTimelineFollowForComposerInput,
   shouldShowPlanFollowUpPrompt,
-  shouldWriteThreadErrorToCurrentServerThread,
   waitForRevertedMessage,
   prepareRevertedMessageAttachments,
 } from "./ChatView.logic";
@@ -234,24 +240,24 @@ describe("resolveDraftPromotionNavigationTarget", () => {
   });
 });
 
-describe("resolveEffectiveInteractionMode", () => {
+describe("interaction mode settings", () => {
   it("forces build mode when legacy plan mode is disabled", () => {
     expect(
-      resolveEffectiveInteractionMode({
+      resolveComposerInteractionMode({
         planModeEnabled: false,
-        composerInteractionMode: "plan",
-        threadInteractionMode: "plan",
-      }),
+        provider: { showInteractionModeToggle: true },
+        interactionMode: "plan",
+      }).interactionMode,
     ).toBe("default");
   });
 
   it("uses the saved mode while legacy plan mode is enabled", () => {
     expect(
-      resolveEffectiveInteractionMode({
+      resolveComposerInteractionMode({
         planModeEnabled: true,
-        composerInteractionMode: null,
-        threadInteractionMode: "plan",
-      }),
+        provider: { showInteractionModeToggle: true },
+        interactionMode: "plan",
+      }).interactionMode,
     ).toBe("plan");
   });
 });
@@ -579,25 +585,42 @@ describe("reconcileMountedTerminalThreadIds", () => {
   });
 });
 
-describe("shouldWriteThreadErrorToCurrentServerThread", () => {
-  it("requires the environment, route thread, and target thread to match", () => {
-    const routeThreadRef = { environmentId, threadId };
-
-    expect(
-      shouldWriteThreadErrorToCurrentServerThread({
-        serverThread: { environmentId, id: threadId },
-        routeThreadRef,
-        targetThreadId: threadId,
-      }),
-    ).toBe(true);
-    expect(
-      shouldWriteThreadErrorToCurrentServerThread({
-        serverThread: null,
-        routeThreadRef,
-        targetThreadId: threadId,
-      }),
-    ).toBe(false);
-  });
+describe("makeThreadErrorSetter", () => {
+  it.each([
+    { serverThreadRef: { environmentId, threadId }, server: true },
+    { serverThreadRef: null, server: false },
+    {
+      serverThreadRef: { environmentId: EnvironmentId.make("other-environment"), threadId },
+      server: false,
+    },
+    {
+      serverThreadRef: { environmentId, threadId: ThreadId.make("other-thread") },
+      server: false,
+    },
+  ])(
+    "keeps thread errors with the matching environment and route: $server",
+    ({ serverThreadRef, server }) => {
+      const setServerErrors = vi.fn();
+      const setDraftErrors = vi.fn();
+      const setError = makeThreadErrorSetter({
+        routeThreadRef: { environmentId, threadId },
+        routeThreadKey: "environment-local:thread-1",
+        draftId: null,
+        serverThreadRef,
+        setLocalServerErrorsByThreadKey: setServerErrors,
+        setLocalDraftErrorsByDraftId: setDraftErrors,
+      });
+      setError(threadId, "Provider failed");
+      const update = (server ? setServerErrors : setDraftErrors).mock.calls[0]![0];
+      expect(update({})).toEqual({
+        [server ? "environment-local:thread-1" : threadId]: {
+          message: "Provider failed",
+          at: expect.any(Number),
+        },
+      });
+      expect(server ? setDraftErrors : setServerErrors).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("startNewThreadForProject", () => {
@@ -1344,7 +1367,7 @@ describe("environment reconnect warning grace", () => {
     const showWarning = vi.fn();
 
     scheduleEnvironmentReconnectWarning(showWarning);
-    vi.advanceTimersByTime(ENVIRONMENT_RECONNECT_WARNING_GRACE_MS - 1);
+    vi.advanceTimersByTime(2_000 - 1);
     expect(showWarning).not.toHaveBeenCalled();
 
     vi.advanceTimersByTime(1);
@@ -1357,7 +1380,7 @@ describe("environment reconnect warning grace", () => {
 
     const cancel = scheduleEnvironmentReconnectWarning(showWarning);
     cancel();
-    vi.advanceTimersByTime(ENVIRONMENT_RECONNECT_WARNING_GRACE_MS);
+    vi.advanceTimersByTime(2_000);
 
     expect(showWarning).not.toHaveBeenCalled();
   });
@@ -2604,5 +2627,216 @@ describe("isThreadWokeUnseen", () => {
   it("hides settled threads and unparseable wake times", () => {
     expect(isThreadWokeUnseen({ ...base, settled: true })).toBe(false);
     expect(isThreadWokeUnseen({ ...base, wokeAt: "not a date" })).toBe(false);
+  });
+});
+
+describe("snapshotComposerSend", () => {
+  const expired = {
+    id: "ctx-expired",
+    threadId,
+    terminalId: "default",
+    terminalLabel: "Terminal 1",
+    lineStart: 4,
+    lineEnd: 4,
+    text: "",
+    createdAt: now,
+  };
+  const live = { ...expired, id: "ctx-live", text: "pnpm test", lineStart: 9, lineEnd: 9 };
+
+  it("drops expired terminal contexts from the contexts and from the prompt", () => {
+    const snapshot = snapshotComposerSend({
+      prompt: ensureInlineContextReferences("run", [
+        terminalContextReference(expired),
+        terminalContextReference(live),
+      ]),
+      images: [],
+      files: [],
+      terminalContexts: [expired, live],
+      sendableTerminalContexts: [live],
+      previewAnnotations: [],
+      reviewComments: [],
+      threadContexts: [],
+    });
+
+    expect(snapshot.terminalContexts).toEqual([live]);
+    expect(snapshot.messageText).toBe(
+      ensureInlineContextReferences("run", [terminalContextReference(live)]).trim(),
+    );
+  });
+});
+
+describe("planComposerTurn", () => {
+  const base = {
+    messageText: "hello",
+    sendQueuesBehindSetup: false,
+    isServerThread: false,
+    activeMessageCount: 0,
+    sendEnvMode: "worktree" as const,
+    worktreePath: null,
+    activeThreadBranch: "main",
+    resumeCompactionTokens: null,
+    keepFullHistory: false,
+    phase: "ready" as const,
+    dispatchMode: "auto" as const,
+  };
+
+  it("prepares a worktree from the selected branch on a new thread", () => {
+    expect(planComposerTurn(base)).toMatchObject({
+      missingWorktreeBaseBranch: false,
+      baseBranchForWorktree: "main",
+      shouldQueueBehindActiveRun: false,
+    });
+  });
+
+  it("refuses a new worktree without a base branch", () => {
+    expect(planComposerTurn({ ...base, activeThreadBranch: null })).toMatchObject({
+      missingWorktreeBaseBranch: true,
+      baseBranchForWorktree: null,
+    });
+  });
+
+  it("queues behind a compaction of a stale session, except for /compact itself", () => {
+    const stale = { ...base, resumeCompactionTokens: 120_000 };
+    for (const messageText of ["hello", "/compactfoo"]) {
+      expect(planComposerTurn({ ...stale, messageText })).toMatchObject({
+        compactBeforeSend: true,
+        turnDispatchMode: "queue",
+        shouldQueueBehindActiveRun: true,
+      });
+    }
+    for (const messageText of ["/COMPACT", "/compact keep the API notes", "/compact\n  tests"]) {
+      expect(planComposerTurn({ ...stale, messageText })).toMatchObject({
+        compactBeforeSend: false,
+        turnDispatchMode: "auto",
+        shouldQueueBehindActiveRun: false,
+      });
+    }
+  });
+
+  it("queues behind a running turn only when asked to", () => {
+    const running = {
+      ...base,
+      isServerThread: true,
+      activeMessageCount: 3,
+      phase: "running" as const,
+    };
+    expect(planComposerTurn({ ...running, dispatchMode: "queue" }).shouldQueueBehindActiveRun).toBe(
+      true,
+    );
+    expect(planComposerTurn({ ...running, dispatchMode: "steer" })).toMatchObject({
+      shouldQueueBehindActiveRun: false,
+      baseBranchForWorktree: null,
+    });
+  });
+});
+
+describe("withMessageContext", () => {
+  const context = { records: [] } as unknown as NonNullable<
+    Parameters<typeof withMessageContext>[0]["context"]
+  >;
+
+  it("sends the context inline when the server supports it", () => {
+    expect(withMessageContext({ text: "hi", context, supportsInlineMessageContext: true })).toEqual(
+      { text: "hi", context },
+    );
+  });
+
+  it("folds the context into the text for older servers", () => {
+    const result = withMessageContext({ text: "hi", context, supportsInlineMessageContext: false });
+    expect(result.context).toBeUndefined();
+    expect(result.text).toContain("hi");
+  });
+
+  it("sends the text alone without context", () => {
+    expect(
+      withMessageContext({ text: "hi", context: undefined, supportsInlineMessageContext: false }),
+    ).toEqual({ text: "hi" });
+  });
+});
+
+describe("boundAttachmentIds", () => {
+  it("prefers the uploaded id and falls back to the local one", () => {
+    expect(
+      boundAttachmentIds([{ id: "upload-1" }, {}], [{ id: "local-1" }, { id: "local-2" }]),
+    ).toEqual(["upload-1", "local-2"]);
+  });
+});
+
+describe("deriveAvailableRevertTurnCounts", () => {
+  const providerThreadId = ProviderThreadId.make("provider-thread");
+  const otherProviderThreadId = ProviderThreadId.make("other-provider-thread");
+
+  function projection(input: { readonly providerSessionId: ProviderSessionId | null }) {
+    const base = makeThreadProjectionFixture();
+    const run = (ordinal: number) => ({
+      id: RunId.make(`run-${ordinal}`),
+      ordinal,
+      activeAttemptId: `attempt-${ordinal}`,
+    });
+    const turn = (ordinal: number, attempt: number, threadId: ProviderThreadId) => ({
+      id: `turn-${attempt}-${ordinal}`,
+      runAttemptId: `attempt-${attempt}`,
+      ordinal,
+      providerThreadId: threadId,
+    });
+    return {
+      ...base,
+      thread: { ...base.thread, activeProviderThreadId: providerThreadId },
+      providerThreads: [
+        {
+          id: providerThreadId,
+          providerInstanceId: base.thread.modelSelection.instanceId,
+          providerSessionId: input.providerSessionId,
+        },
+      ],
+      runs: [run(1), run(2), run(3)],
+      attempts: [1, 2, 3].map((ordinal) => ({ id: `attempt-${ordinal}`, providerTurnId: null })),
+      // Run 2's latest turn moved to another provider thread, so its checkpoint cannot restore
+      // this conversation.
+      providerTurns: [
+        turn(1, 1, providerThreadId),
+        turn(1, 2, providerThreadId),
+        turn(2, 2, otherProviderThreadId),
+        turn(1, 3, providerThreadId),
+      ],
+    } as unknown as ReturnType<typeof makeThreadProjectionFixture>;
+  }
+
+  it("offers the thread start and runs whose latest turn is on the active provider thread", () => {
+    const available = deriveAvailableRevertTurnCounts(
+      projection({ providerSessionId: ProviderSessionId.make("session") }),
+    );
+    expect([...available].toSorted()).toEqual([0, 1, 3]);
+  });
+
+  it("offers nothing without a provider session to rewind", () => {
+    expect(deriveAvailableRevertTurnCounts(projection({ providerSessionId: null })).size).toBe(0);
+    expect(deriveAvailableRevertTurnCounts(null).size).toBe(0);
+  });
+});
+
+describe("deriveWorkspaceMutationId", () => {
+  const item = (id: string, type: string, status: string) =>
+    ({
+      item: { id: TurnItemId.make(id), type, status },
+    }) as unknown as OrchestrationV2ProjectedTurnItem;
+
+  it("keys on the latest finished command or file change and the latest checkpoint", () => {
+    expect(
+      deriveWorkspaceMutationId(
+        [
+          item("edit", "file_change", "completed"),
+          item("reply", "assistant_message", "completed"),
+          item("command", "command_execution", "running"),
+        ],
+        "2026-01-01T00:00:00.000Z",
+      ),
+    ).toBe(JSON.stringify(["edit", "2026-01-01T00:00:00.000Z"]));
+  });
+
+  it("is null before anything could have touched the workspace", () => {
+    expect(deriveWorkspaceMutationId([item("reply", "assistant_message", "completed")], null)).toBe(
+      null,
+    );
   });
 });

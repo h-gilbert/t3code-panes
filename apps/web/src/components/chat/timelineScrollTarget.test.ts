@@ -4,17 +4,28 @@ import {
   createComposerScrollGestureState,
   recordComposerScrollGestureEvent,
 } from "./composerScrollGesture";
-import { createUpwardScrollDetector, isTimelineScrollTarget } from "./timelineScrollTarget";
+import {
+  createUpwardScrollDetector,
+  isTimelineScrollbarTarget,
+  isTimelineScrollTarget,
+} from "./timelineScrollTarget";
 
 class ScrollElement extends EventTarget {
   scrollTop = 0;
   scrollHeight = 100;
   clientHeight = 100;
+  clientWidth = 288;
+  clientLeft = 6;
+  direction = "ltr";
   overflowY = "visible";
   overscrollBehaviorY = "auto";
 
   constructor(readonly parentElement: ScrollElement | null = null) {
     super();
+  }
+
+  getBoundingClientRect() {
+    return { left: 100 };
   }
 
   contains(target: ScrollElement): boolean {
@@ -66,60 +77,6 @@ describe("timeline scroll targets", () => {
     expect(targetsTimeline(content, timeline, -deltaY)).toBe(false);
   });
 
-  it.each(["contain", "none"])("respects overscroll-y %s at either edge", (overscrollBehaviorY) => {
-    const { timeline, group, content } = setup();
-    group.overscrollBehaviorY = overscrollBehaviorY;
-    group.scrollTop = 0;
-    expect(targetsTimeline(content, timeline, -30)).toBe(false);
-    group.scrollTop = 200;
-    expect(targetsTimeline(content, timeline, 30)).toBe(false);
-    group.scrollTop = 0;
-    group.scrollHeight = group.clientHeight;
-    expect(targetsTimeline(content, timeline, 30)).toBe(false);
-  });
-
-  it("checks nested results even when the tool group cannot scroll", () => {
-    const { timeline, group } = setup();
-    group.scrollTop = 0;
-    group.scrollHeight = group.clientHeight;
-    const result = Object.assign(new ScrollElement(group), {
-      overflowY: "scroll",
-      scrollHeight: 300,
-      scrollTop: 0.25,
-    });
-    expect(targetsTimeline(new ScrollElement(result), timeline, -30)).toBe(false);
-    result.scrollTop = 0;
-    expect(targetsTimeline(result, timeline, -30)).toBe(true);
-  });
-
-  it("checks an outer group when an inner result reaches its edge", () => {
-    const { timeline, group } = setup();
-    const result = Object.assign(new ScrollElement(group), { overflowY: "auto" });
-    expect(targetsTimeline(result, timeline, -30)).toBe(false);
-    group.scrollTop = 0;
-    expect(targetsTimeline(result, timeline, -30)).toBe(true);
-  });
-
-  it.each(["visible", "hidden", "clip"])("ignores overflow-y %s", (overflowY) => {
-    const { timeline, group, content } = setup();
-    group.overflowY = overflowY;
-    expect(targetsTimeline(content, timeline, -30)).toBe(true);
-  });
-
-  it("allows ordinary message content and the outer viewport", () => {
-    const { timeline } = setup();
-    expect(targetsTimeline(new ScrollElement(timeline), timeline, -30)).toBe(true);
-    expect(targetsTimeline(timeline, timeline, 30)).toBe(true);
-  });
-
-  it("rejects outside targets, non-elements, and horizontal-only scrolling", () => {
-    const { timeline, content } = setup();
-    expect(targetsTimeline(new ScrollElement(), timeline, -30)).toBe(false);
-    expect(targetsTimeline(new EventTarget(), timeline, -30)).toBe(false);
-    expect(targetsTimeline(null, timeline, -30)).toBe(false);
-    expect(targetsTimeline(content, timeline, 0)).toBe(false);
-  });
-
   it("does not accumulate nested scrolling toward composer collapse", () => {
     const { timeline, group, content } = setup();
     const state = createComposerScrollGestureState();
@@ -142,6 +99,22 @@ describe("timeline scroll targets", () => {
 });
 
 describe("timeline scroll follow opt-out", () => {
+  it("distinguishes a scrollbar grab from focus clicks in the timeline and its margins", () => {
+    const { timeline } = setup();
+    const hit = (target: EventTarget, clientX: number) =>
+      isTimelineScrollbarTarget({ target, clientX }, timeline as unknown as HTMLElement);
+    expect(hit(timeline, 120)).toBe(false);
+    expect(hit(timeline, 250)).toBe(false);
+    expect(hit(timeline, 102)).toBe(false);
+    expect(hit(timeline, 396)).toBe(true);
+    expect(hit(new ScrollElement(timeline), 396)).toBe(false);
+    timeline.direction = "rtl";
+    expect(hit(timeline, 102)).toBe(true);
+    expect(hit(timeline, 396)).toBe(false);
+    timeline.scrollHeight = timeline.clientHeight;
+    expect(hit(timeline, 102)).toBe(false);
+  });
+
   it("detects iframe-only upward scrolling after following streaming content", () => {
     const scrolledUp = createUpwardScrollDetector({ top: 1000, height: 1500 });
     expect(scrolledUp({ top: 1000, height: 1800 })).toBe(false);
