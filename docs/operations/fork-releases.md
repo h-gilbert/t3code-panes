@@ -23,6 +23,12 @@ from the installed app's team, and attaches it with its
 `SHA256SUMS`, and publishes the release. Updaters only read published releases, so no machine sees
 half a release. The command waits for the workflow unless given `--no-wait`.
 
+If `~/.t3-promotions` is on an external drive, set `T3CODE_RELEASE_SOURCE_ROOT`
+to a temporary directory on the Mac's internal drive. The source checkout and
+dependency links can then reuse the internal package cache, while release
+artifacts remain in `~/.t3-promotions`. The helper removes its temporary worktree
+after building.
+
 Before building, the command checks valid keychain identities, signs a temporary executable,
 and verifies it against the installed app's update requirement. It prefers the installed
 certificate when valid, otherwise a unique replacement from the same team. Use

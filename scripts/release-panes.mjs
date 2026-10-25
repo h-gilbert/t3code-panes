@@ -266,7 +266,9 @@ function main() {
   const tag = `v${version}`;
   const store = NodePath.join(NodeOS.homedir(), ".t3-promotions");
   const directory = NodePath.join(store, `release-${stamp}`);
-  const worktree = NodePath.join(directory, "source");
+  const worktree = process.env.T3CODE_RELEASE_SOURCE_ROOT
+    ? NodePath.resolve(process.env.T3CODE_RELEASE_SOURCE_ROOT, `release-${stamp}`)
+    : NodePath.join(directory, "source");
   NodeFS.mkdirSync(directory, { recursive: true, mode: 0o700 });
   console.log(`Building ${version} from ${sha.slice(0, 10)}, signed by ${signing.identity.name}…`);
 
