@@ -11,6 +11,7 @@ import {
   assertSeparatePaths,
   assertStopped,
   databaseSchema,
+  snapshotDatabase,
   findAppBundle,
   install,
   replaceBundle,
@@ -89,23 +90,36 @@ function fixture(t) {
 }
 
 NodeTest.test(
-  "installation backs up app and state; rollback keeps work created after installation",
+  "installation replaces only the app; rollback keeps work created after installation",
   (t) => {
     const f = fixture(t);
-    install(f.store, f.values, false, f.operations);
+    const operations = {
+      ...f.operations,
+      copy: (source, target) => {
+        NodeAssert.notEqual(source, f.home);
+        NodeAssert.notEqual(source, f.profile);
+        f.operations.copy(source, target);
+      },
+    };
+    install(f.store, f.values, false, operations);
     const journal = JSON.parse(
       NodeFS.readFileSync(NodePath.join(f.store, "installation.json"), "utf8"),
     );
     NodeAssert.equal(NodeFS.readFileSync(NodePath.join(f.app, "version"), "utf8"), "new");
     NodeAssert.equal(NodeFS.readFileSync(NodePath.join(journal.backup, "version"), "utf8"), "old");
     NodeAssert.equal(
-      NodeFS.readFileSync(NodePath.join(journal.stateBackup, "profile/pane-state"), "utf8"),
+      NodeFS.readFileSync(NodePath.join(f.profile, "pane-state"), "utf8"),
       "custom panes",
+    );
+    NodeAssert.equal(journal.databaseBackup, null);
+    NodeAssert.equal(
+      NodeFS.readdirSync(f.store).some((name) => name.startsWith("state-")),
+      false,
     );
     const db = new NodeSqlite.DatabaseSync(f.database);
     db.exec("INSERT INTO work VALUES ('new work')");
     db.close();
-    install(f.store, {}, true, f.operations);
+    install(f.store, {}, true, operations);
     NodeAssert.equal(NodeFS.readFileSync(NodePath.join(f.app, "version"), "utf8"), "old");
     const current = new NodeSqlite.DatabaseSync(f.database, { readOnly: true });
     NodeAssert.equal(current.prepare("SELECT count(*) AS count FROM work").get().count, 2);
@@ -351,20 +365,99 @@ NodeTest.test("no-launch leaves the verified replacement closed", (t) => {
   });
 });
 
-NodeTest.test("backup failure leaves the installed app untouched", (t) => {
+NodeTest.test("staging failure leaves the installed app untouched", (t) => {
   const f = fixture(t);
   NodeAssert.throws(
     () =>
       install(f.store, f.values, false, {
         ...f.operations,
         copy: (source, target) => {
-          if (source === f.home) throw new Error("backup failed");
+          if (source === f.candidate) throw new Error("staging failed");
           f.operations.copy(source, target);
         },
       }),
-    /backup failed/,
+    /staging failed/,
   );
   NodeAssert.equal(NodeFS.readFileSync(NodePath.join(f.app, "version"), "utf8"), "old");
+});
+
+NodeTest.test("database snapshots include WAL data and replace only the previous snapshot", (t) => {
+  const f = fixture(t);
+  const db = new NodeSqlite.DatabaseSync(f.database);
+  t.after(() => db.close());
+  db.exec("PRAGMA journal_mode=WAL; INSERT INTO work VALUES ('committed WAL work')");
+  const destination = NodePath.join(f.store, "database-backup.sqlite");
+  NodeFS.writeFileSync(destination, "previous snapshot");
+  snapshotDatabase(f.home, destination);
+  const snapshot = new NodeSqlite.DatabaseSync(destination, { readOnly: true });
+  t.after(() => snapshot.close());
+  NodeAssert.equal(snapshot.prepare("SELECT count(*) AS count FROM work").get().count, 2);
+  NodeAssert.equal(NodeFS.statSync(destination).mode & 0o777, 0o600);
+  NodeAssert.equal(
+    NodeFS.readdirSync(f.store).some((name) => name.endsWith(".tmp")),
+    false,
+  );
+});
+
+NodeTest.test("requested database snapshot survives migration changes blocking rollback", (t) => {
+  const f = fixture(t);
+  install(f.store, { ...f.values, "backup-database": true }, false, f.operations);
+  const db = new NodeSqlite.DatabaseSync(f.database);
+  db.exec("INSERT INTO effect_sql_migrations (migration_id, name) VALUES (44, 'new schema')");
+  db.close();
+  NodeAssert.throws(() => install(f.store, {}, true, f.operations), /migrations changed/);
+  const snapshot = new NodeSqlite.DatabaseSync(NodePath.join(f.store, "database-backup.sqlite"), {
+    readOnly: true,
+  });
+  t.after(() => snapshot.close());
+  NodeAssert.equal(
+    snapshot.prepare("SELECT count(*) AS count FROM effect_sql_migrations").get().count,
+    1,
+  );
+});
+
+NodeTest.test("failed database snapshot preserves the previous snapshot", (t) => {
+  const f = fixture(t);
+  const destination = NodePath.join(f.store, "database-backup.sqlite");
+  NodeFS.writeFileSync(destination, "previous snapshot");
+  NodeFS.writeFileSync(f.database, "invalid database");
+  NodeAssert.throws(() => snapshotDatabase(f.home, destination), /not a database/);
+  NodeAssert.equal(NodeFS.readFileSync(destination, "utf8"), "previous snapshot");
+  NodeAssert.equal(
+    NodeFS.readdirSync(f.store).some((name) => name.endsWith(".tmp")),
+    false,
+  );
+});
+
+NodeTest.test("successful subsequent installation retains just its immediate previous app", (t) => {
+  const f = fixture(t);
+  install(f.store, f.values, false, f.operations);
+  const first = JSON.parse(
+    NodeFS.readFileSync(NodePath.join(f.store, "installation.json"), "utf8"),
+  );
+  install(f.store, {}, true, f.operations);
+  const second = JSON.parse(
+    NodeFS.readFileSync(NodePath.join(f.store, "installation.json"), "utf8"),
+  );
+  NodeAssert.equal(NodeFS.existsSync(first.backup), false);
+  NodeAssert.equal(NodeFS.readFileSync(NodePath.join(second.backup, "version"), "utf8"), "new");
+});
+
+NodeTest.test("modified previous app backups are preserved", (t) => {
+  const f = fixture(t);
+  install(f.store, f.values, false, f.operations);
+  const first = JSON.parse(
+    NodeFS.readFileSync(NodePath.join(f.store, "installation.json"), "utf8"),
+  );
+  NodeFS.writeFileSync(NodePath.join(first.backup, "extra"), "keep this");
+  NodeFS.writeFileSync(NodePath.join(f.candidate, "version"), "next");
+  writeJson(NodePath.join(f.store, "candidate.json"), {
+    app: f.candidate,
+    digest: treeDigest(f.candidate),
+    info: f.operations.bundleInfo(f.candidate),
+  });
+  install(f.store, f.values, false, f.operations);
+  NodeAssert.equal(NodeFS.readFileSync(NodePath.join(first.backup, "extra"), "utf8"), "keep this");
 });
 
 NodeTest.test("another update after promotion prevents rollback", (t) => {
