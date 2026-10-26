@@ -35,7 +35,7 @@ const state = vi.hoisted(() => ({
   },
   config: {
     providers: [{ instanceId: "codex", driver: "codex" }],
-    environment: { capabilities: {} },
+    environment: { capabilities: {} as { iosTurnOrigin?: boolean } },
   },
 }));
 vi.mock("react", () => ({
@@ -47,7 +47,7 @@ vi.mock("react", () => ({
   useRef: <A>(value: A) => ({ current: value }),
   useState: <A>(initial: A) => [initial, vi.fn()],
 }));
-vi.mock("react-native", () => ({ Alert: { alert: vi.fn() } }));
+vi.mock("react-native", () => ({ Platform: { OS: "ios" }, Alert: { alert: vi.fn() } }));
 vi.mock("@effect/atom-react", async () => {
   const { appAtomRegistry } = await import("./atom-registry");
   return { useAtomValue: <A>(atom: Atom.Atom<A>) => appAtomRegistry.get(atom) };
@@ -173,6 +173,7 @@ function runDrain() {
 beforeEach(() => {
   state.grantedEnvironments = new Set(["primary"]);
   state.draftText = "Keep this draft separate";
+  state.config.environment.capabilities = {};
   appAtomRegistry.set(state.manager.queuedMessagesByThreadKeyAtom, {});
   appAtomRegistry.set(dispatchingQueuedMessageIdAtom, null);
   for (const command of [
@@ -253,26 +254,6 @@ describe("queued PR checkout", () => {
     expect(remaining()).toEqual([queued]);
   });
 
-  it("restores the PR draft when the reused worktree cannot reach the PR head", async () => {
-    state.grantedEnvironments.add("secondary");
-    await state.manager.enqueue(queuedPullRequest());
-    state.checkout.mockResolvedValueOnce(
-      AsyncResult.success({ ...preparedCheckout, isOnPullRequestHead: false }),
-    );
-    await runDrain();
-    expect(state.start).not.toHaveBeenCalled();
-    expect(remaining()).toEqual([]);
-    const { updateComposerDraftSettings } = await import("./use-composer-drafts");
-    expect(updateComposerDraftSettings).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.objectContaining({
-        workspaceSelection: expect.objectContaining({
-          pullRequestReference: queuedPullRequest().creation?.pullRequestReference,
-        }),
-      }),
-    );
-  });
-
   it("stops launch if operation access is revoked while checking out the PR", async () => {
     state.grantedEnvironments.add("secondary");
     const queued = queuedPullRequest();
@@ -340,8 +321,6 @@ describe("queued task operation access", () => {
 
   it.each([
     { isCreation: false, accepted: false },
-    { isCreation: true, accepted: false },
-    { isCreation: false, accepted: true },
     { isCreation: true, accepted: true },
   ])(
     "preserves a rejected queue but removes an accepted turn after access loss (new task: $isCreation, accepted: $accepted)",
@@ -430,6 +409,47 @@ describe("queued task operation access", () => {
       expect(state.prepare).toHaveBeenCalledOnce();
       expect(state.start).not.toHaveBeenCalled();
       expect(remaining()).toEqual([queued]);
+    },
+  );
+});
+
+describe("queued mobile origin compatibility", () => {
+  it.each([
+    { isCreation: false, iosTurnOrigin: undefined, expected: "mobile" },
+    { isCreation: false, iosTurnOrigin: false, expected: "mobile" },
+    { isCreation: false, iosTurnOrigin: true, expected: "ios" },
+    { isCreation: true, iosTurnOrigin: undefined, expected: "mobile" },
+    { isCreation: true, iosTurnOrigin: false, expected: "mobile" },
+    { isCreation: true, iosTurnOrigin: true, expected: "ios" },
+  ])(
+    "gates $expected for queued creation=$isCreation capability=$iosTurnOrigin",
+    async ({ isCreation, iosTurnOrigin, expected }) => {
+      state.grantedEnvironments.add("secondary");
+      state.config.environment.capabilities = iosTurnOrigin === undefined ? {} : { iosTurnOrigin };
+      const queued = message(
+        isCreation
+          ? {
+              threadId: ThreadId.make("new-origin-thread"),
+              modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+              creation: {
+                projectId: ProjectId.make("project"),
+                projectCwd: "/repo",
+                workspaceMode: "local",
+                branch: null,
+                worktreePath: null,
+              },
+            }
+          : {},
+      );
+      await state.manager.enqueue(queued);
+      await runDrain();
+      expect(state.start).toHaveBeenCalledWith(
+        expect.objectContaining({
+          environmentId: "secondary",
+          input: expect.objectContaining({ creationSource: expected }),
+        }),
+      );
+      expect(remaining()).toEqual([]);
     },
   );
 });

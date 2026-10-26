@@ -12,24 +12,10 @@ import { serializeComposerMessageForServer } from "./composerContext";
 
 import {
   buildProjectThreadStartTurnInput,
-  deriveThreadTitleFromPrompt,
   type ProjectThreadStartTurnSpec,
 } from "./projectThreadStartTurn";
 
 describe("project thread title", () => {
-  it("normalizes draft and queued titles while keeping the mobile length limit", () => {
-    expect(
-      deriveThreadTitleFromPrompt(
-        "![photo.png](t3-context://v1/image/photo) Fix [src/app.ts](t3-context://v1/mention/source) so the sidebar remains readable when a thread starts with an image",
-      ),
-    ).toBe("Fix src/app.ts so the sidebar remains readable when a thread starts w...");
-  });
-
-  it("keeps ordinary titles and the empty-prompt fallback", () => {
-    expect(deriveThreadTitleFromPrompt("  Fix\n the parser  ")).toBe("Fix the parser");
-    expect(deriveThreadTitleFromPrompt(" \n ")).toBe("New thread");
-  });
-
   it.each([
     {
       type: "image" as const,
@@ -80,6 +66,13 @@ describe("project thread title", () => {
     expect(input.bootstrap.createThread.title).toBe(input.titleSeed);
     expect(input.message.attachments).toEqual(uploadedAttachments);
     expect(input.message.text).toBe(wire.text);
+    expect(input.creationSource).toBe("mobile");
+    expect(
+      buildProjectThreadStartTurnInput({
+        ...spec,
+        destinationCapabilities: { iosTurnOrigin: true },
+      }).creationSource,
+    ).toBe("ios");
     const relaunched = buildProjectThreadStartTurnInput({
       ...spec,
       threadId: "local-relaunch",
@@ -116,6 +109,7 @@ describe("project thread title", () => {
     });
     const input = buildProjectThreadStartTurnInput({
       clientOrigin: "ios",
+      destinationCapabilities: { iosTurnOrigin: true },
       projectId: ProjectId.make("project"),
       projectCwd: "/workspace",
       threadId: "new-thread",

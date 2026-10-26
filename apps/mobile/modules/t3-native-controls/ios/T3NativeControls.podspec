@@ -21,5 +21,6 @@ Pod::Spec.new do |s|
     xcconfig['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] = '$(inherited) T3_IOS_HINGE_LAYOUT'
   end
   s.pod_target_xcconfig = xcconfig
+  s.resource_bundles = { 'T3NativeControlIcons' => ['Resources/Icons/pull-request*.png'] }
   s.source_files = '**/*.{h,m,mm,swift,hpp,cpp}'
 end

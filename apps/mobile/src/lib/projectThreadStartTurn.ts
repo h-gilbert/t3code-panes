@@ -1,9 +1,10 @@
-import { mobileCreationSource } from "./mobileClientOrigin";
+import { resolveMobileCreationSource } from "./mobileClientOrigin";
 import {
   CommandId,
   MessageId,
   ThreadId,
   type ChatAttachment,
+  type ExecutionEnvironmentCapabilities,
   type ModelSelection,
   type OrchestrationMessageContext,
   type ProjectId,
@@ -19,6 +20,7 @@ import type { UploadedMobileAttachment } from "./attachmentUpload";
 
 export interface ProjectThreadStartTurnSpec {
   readonly clientOrigin?: "ios" | "android";
+  readonly destinationCapabilities?: Pick<ExecutionEnvironmentCapabilities, "iosTurnOrigin">;
   readonly projectId: ProjectId;
   readonly projectCwd: string;
   readonly threadId: string;
@@ -47,12 +49,7 @@ export function buildProjectThreadStartTurnInput(spec: ProjectThreadStartTurnSpe
   const isWorktree = spec.workspaceMode === "worktree";
   return {
     commandId: CommandId.make(spec.commandId),
-    creationSource:
-      spec.clientOrigin === "ios"
-        ? "ios"
-        : spec.clientOrigin === "android"
-          ? "mobile"
-          : mobileCreationSource,
+    creationSource: resolveMobileCreationSource(spec.destinationCapabilities, spec.clientOrigin),
     threadId: ThreadId.make(spec.threadId),
     message: {
       messageId: MessageId.make(spec.messageId),
