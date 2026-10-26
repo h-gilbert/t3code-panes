@@ -3331,6 +3331,64 @@ describe("PreviewManager", () => {
       }).pipe(Effect.provide(managerLayer()), Effect.scoped),
   );
 
+  effectIt.effect("connects another server tab while a page evaluation is pending", () =>
+    Effect.gen(function* () {
+      const manager = yield* PreviewManager.PreviewManager;
+      const host = yield* DesktopBrowserHost.DesktopBrowserHost;
+      const lines = yield* Queue.unbounded<string>();
+      yield* host.events.pipe(
+        Stream.runForEach((line) => Queue.offer(lines, new TextDecoder().decode(line))),
+        Effect.forkScoped,
+      );
+      yield* TestClock.adjust(0);
+      const pending = Promise.withResolvers<unknown>();
+      const started = Promise.withResolvers<void>();
+      const guests = [42, 43].map((id) =>
+        Object.assign(makeTestPreviewWebContents(vi.fn(), id), {
+          getUserAgent: () => "Electron",
+          isDevToolsOpened: () => false,
+        }),
+      );
+      for (const [index, guest] of guests.entries()) {
+        fromId.mockReturnValue(guest);
+        yield* manager.createTab(`tab-${index}`, {
+          serverTab: { threadId: `thread-${index}`, tabId: `server-tab-${index}` },
+        });
+        yield* manager.registerWebview(`tab-${index}`, guest.id);
+        yield* Queue.take(lines);
+      }
+      vi.mocked(guests[0]!.debugger.sendCommand).mockImplementation((method) => {
+        if (method === "Runtime.evaluate") {
+          started.resolve();
+          return pending.promise;
+        }
+        return Promise.resolve({});
+      });
+      const secondSend = vi.mocked(guests[1]!.debugger.sendCommand);
+      secondSend.mockClear();
+      const command = (index: number, id: number, method: string) =>
+        host.handleCommandLine(
+          JSON.stringify({
+            type: "cdp",
+            threadId: `thread-${index}`,
+            tabId: `server-tab-${index}`,
+            message: JSON.stringify({ id, method, sessionId: "t3-preview-page" }),
+          }),
+        );
+      yield* command(0, 1, "Runtime.evaluate");
+      yield* Effect.promise(() => started.promise);
+      try {
+        yield* command(1, 2, "Runtime.enable");
+        yield* command(1, 3, "DOM.enable");
+        yield* Queue.take(lines);
+        expect(secondSend).toHaveBeenCalledWith("DOM.enable", {});
+        expect(secondSend).toHaveBeenCalledWith("Runtime.enable", {});
+      } finally {
+        pending.resolve({});
+      }
+    }).pipe(Effect.provide(managerLayer()), Effect.scoped),
+  );
+
   effectIt.effect("tells the server when a tab it renders natively closes", () =>
     Effect.gen(function* () {
       const host = yield* DesktopBrowserHost.DesktopBrowserHost;
@@ -5134,8 +5192,7 @@ describe("PreviewManager", () => {
   );
 
   describe("file pickers and downloads", () => {
-    /** Lets forked debugger and human-input handlers run. */
-    const settle = Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)));
+    const settle = TestClock.adjust(0);
     const viewport = { result: { value: { width: 800, height: 600 } } };
 
     const makeGuest = (

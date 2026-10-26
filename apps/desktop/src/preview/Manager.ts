@@ -858,15 +858,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   >(new Map());
   const actionSequenceRef = yield* Ref.make(0);
   const pointerSequenceRef = yield* Ref.make(0);
-  /**
-   * Native focus is one per application, so agent input is the one part of
-   * automation that cannot run per tab. A click hands its guest focus to
-   * dispatch, then hands it straight back to whatever the human was typing in,
-   * and a native key press targets a guest widget the same way. Two tabs doing
-   * that at once restore each other's focus and land keystrokes in the wrong
-   * surface, so serialise the dispatch windows — and only those, so agents
-   * driving separate tabs stay parallel everywhere else.
-   */
+  // Native input shares application focus; overlapping dispatches can restore focus into another tab.
   const nativeInputSemaphore = yield* Semaphore.make(1);
   /**
    * The last webContents the human was focused on that was not a preview guest.
@@ -1642,12 +1634,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
               { operation: "initializeDebugger.interceptFileChooser", webContentsId: wc.id },
               () => wcDebugger.sendCommand("Page.setInterceptFileChooserDialog", { enabled: true }),
             );
-            // Electron gives `<webview>` guests a transparent base background, and
-            // Chromium only paints a dark canvas for dark color-scheme pages over an
-            // opaque base. Without this, dark-scheme pages with no background of
-            // their own (text/plain, e.g. .md files) render white text on white.
-            // White matches the webview's existing white backing, so light pages look
-            // the same; Chromium still swaps in its dark canvas for dark-scheme pages.
+            // An opaque base lets Chromium paint its dark canvas for pages with no background.
             yield* attemptPromise(
               { operation: "initializeDebugger.defaultBackground", webContentsId: wc.id },
               () =>
@@ -3470,38 +3457,39 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
               }
             };
             if (!method.startsWith("Input.") && !method.startsWith("Runtime.")) return send();
+            const withFocusRestored = Effect.gen(function* () {
+              const focused = yield* resolveHumanFocus(wc, {
+                operation: "serverBrowserInput",
+                tabId,
+                webContentsId: wc.id,
+              });
+              const restore = () => {
+                if (
+                  focused &&
+                  focused.id !== wc.id &&
+                  !focused.isDestroyed() &&
+                  webContents.getFocusedWebContents()?.id === wc.id
+                )
+                  focused.focus();
+              };
+              wc.on("focus", restore);
+              return yield* Effect.tryPromise({
+                try: send,
+                catch: (cause) => new PreviewOperationError({ operation: method, tabId, cause }),
+              }).pipe(
+                Effect.ensuring(
+                  Effect.sync(() => {
+                    wc.off("focus", restore);
+                    restore();
+                  }),
+                ),
+              );
+            });
+            // Runtime commands may await page promises indefinitely, so only native input holds the shared lock.
             return runPromise(
-              nativeInputSemaphore.withPermits(1)(
-                Effect.gen(function* () {
-                  const focused = yield* resolveHumanFocus(wc, {
-                    operation: "serverBrowserInput",
-                    tabId,
-                    webContentsId: wc.id,
-                  });
-                  const restore = () => {
-                    if (
-                      focused &&
-                      focused.id !== wc.id &&
-                      !focused.isDestroyed() &&
-                      webContents.getFocusedWebContents()?.id === wc.id
-                    )
-                      focused.focus();
-                  };
-                  wc.on("focus", restore);
-                  return yield* Effect.tryPromise({
-                    try: send,
-                    catch: (cause) =>
-                      new PreviewOperationError({ operation: method, tabId, cause }),
-                  }).pipe(
-                    Effect.ensuring(
-                      Effect.sync(() => {
-                        wc.off("focus", restore);
-                        restore();
-                      }),
-                    ),
-                  );
-                }),
-              ),
+              method.startsWith("Input.")
+                ? nativeInputSemaphore.withPermits(1)(withFocusRestored)
+                : withFocusRestored,
             );
           },
         });
