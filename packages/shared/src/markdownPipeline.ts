@@ -312,9 +312,17 @@ function keepWindowsPathDestination(this: DestinationCompileContext, token: unkn
   const decoded = this.resume();
   const authored = this.sliceSerialize(token);
   const node = this.stack.at(-1);
+  // Generated file links escape every separator; their destination needs CommonMark decoding.
+  const escapedDrivePath =
+    /^[a-z]:/i.test(authored) &&
+    authored.includes("\\\\") &&
+    !authored.replaceAll("\\\\", "").includes("\\");
   // Character references still need decoding, so those destinations keep the parsed URL.
   if (node)
-    node.url = isWindowsAbsolutePath(authored) && !authored.includes("&") ? authored : decoded;
+    node.url =
+      isWindowsAbsolutePath(authored) && !authored.includes("&") && !escapedDrivePath
+        ? authored
+        : decoded;
 }
 
 const UNFINISHED_DRIVE_PATH = /(?:^|\W)[A-Za-z]:(?:[\\/]\S*)?$/;
@@ -329,6 +337,13 @@ interface EscapeCompileContext {
 function keepWindowsPathEscape(this: EscapeCompileContext) {
   const text = this.stack.at(-1)?.children?.at(-1);
   if (text?.type !== "text" || text.value === undefined) return;
+  if (
+    text.value.endsWith("\\") &&
+    this.stack.some((node) =>
+      ["link", "image", "definition", "linkReference", "imageReference"].includes(node.type),
+    )
+  )
+    return;
   const before = text.value.slice(0, -1);
   if (UNFINISHED_DRIVE_PATH.test(before)) text.value = `${before}\\${text.value.slice(-1)}`;
 }

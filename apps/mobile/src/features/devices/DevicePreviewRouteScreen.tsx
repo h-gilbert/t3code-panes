@@ -37,6 +37,7 @@ import {
 type DevicePreviewRouteScreenProps = StaticScreenProps<{
   readonly environmentId: string;
   readonly threadId: string;
+  readonly deviceKey?: string;
 }>;
 
 /** Keep navigation outside the stream so a failed device cannot trap the viewer. */
@@ -53,25 +54,31 @@ export function DevicePreviewRouteScreen({ route }: DevicePreviewRouteScreenProp
     <DevicePreviewScreen
       environmentId={EnvironmentId.make(environmentId)}
       threadId={ThreadId.make(threadId)}
+      initialDeviceKey={route.params.deviceKey}
       onClose={onClose}
     />
   );
 }
 
-function DevicePreviewScreen({
+export function DevicePreviewScreen({
   environmentId,
   threadId,
   onClose,
+  onMaximize,
+  initialDeviceKey,
 }: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly onClose: () => void;
+  readonly onMaximize?: (deviceKey: string | null) => void;
+  readonly initialDeviceKey?: string;
 }) {
+  const embedded = onMaximize !== undefined;
   const insets = useSafeAreaInsets();
   const { themeVariables } = useAppearancePreferences();
   const focused = useIsFocused();
   const [foreground, setForeground] = useState(AppState.currentState !== "background");
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(initialDeviceKey ?? null);
   const [inputConnected, setInputConnected] = useState(false);
   const [inputDetail, setInputDetail] = useState<string | null>(null);
   const [streamAttempt, setStreamAttempt] = useState(0);
@@ -229,13 +236,20 @@ function DevicePreviewScreen({
   ];
   return (
     <View className="flex-1" style={{ backgroundColor: themeVariables["--color-sheet-solid"] }}>
-      <StatusBar hidden animated />
+      {!embedded ? <StatusBar hidden animated /> : null}
       <View className="px-3" style={{ paddingTop: Math.max(insets.top, 12) }}>
         <GlassSurface className="flex-row items-center gap-1 p-1">
           <ControlPill accessibilityLabel="Close device preview" icon="xmark" onPress={onClose} />
           <AppText numberOfLines={1} className="flex-1 text-center font-t3-medium text-base">
             {preview?.name ?? "Devices"}
           </AppText>
+          {embedded ? (
+            <ControlPill
+              accessibilityLabel="Maximize device"
+              icon="arrow.up.left.and.arrow.down.right"
+              onPress={() => onMaximize(preview?.key ?? null)}
+            />
+          ) : null}
           <ControlPill
             accessibilityLabel="Home"
             icon="house"

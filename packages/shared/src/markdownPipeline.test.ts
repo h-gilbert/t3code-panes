@@ -2,7 +2,11 @@ import { expect, it } from "vite-plus/test";
 import { unified } from "unified";
 import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
-import { CHAT_MARKDOWN_REHYPE_PLUGINS, CHAT_MARKDOWN_REMARK_PLUGINS } from "./markdownPipeline.ts";
+import {
+  CHAT_MARKDOWN_REHYPE_PLUGINS,
+  CHAT_MARKDOWN_REMARK_PLUGINS,
+  remarkKeepWindowsPathDestinations,
+} from "./markdownPipeline.ts";
 
 it("preserves in-app thread links through the shared Markdown sanitizer", () => {
   const processor = unified()
@@ -75,4 +79,14 @@ it("keeps an image on its own line under a label but leaves inline images inline
   ).toBe("Palette<br>\n<img><br>\nHero (dark)<br>\n<img>");
   expect(render("Built [![CI](/ci.svg)](/ci)\nand wrapped")).toBe("Built <img>\nand wrapped");
   expect(render("Hard-wrapped\nprose")).toBe("Hard-wrapped\nprose");
+});
+
+it.each([
+  String.raw`[file](<C:\repo\_private\file.ts>)`,
+  String.raw`[file](<C:\\repo\\_private\\file.ts>)`,
+])("preserves Windows link destinations in authored and generated links: %s", (markdown) => {
+  const processor = unified().use(remarkParse).use(remarkKeepWindowsPathDestinations);
+  expect(processor.parse(markdown).children[0]).toMatchObject({
+    children: [{ type: "link", url: String.raw`C:\repo\_private\file.ts` }],
+  });
 });

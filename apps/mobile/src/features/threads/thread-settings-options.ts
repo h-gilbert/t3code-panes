@@ -35,13 +35,4 @@ export function runtimeModeChoicesForSupportedModes(
     : RUNTIME_MODE_CHOICES;
 }
 
-export function compatibleRuntimeModeForChoices(
-  runtimeMode: RuntimeMode,
-  choices: ReadonlyArray<{ readonly mode: RuntimeMode }>,
-): RuntimeMode {
-  return choices.some((choice) => choice.mode === runtimeMode)
-    ? runtimeMode
-    : (choices[0]?.mode ?? runtimeMode);
-}
-
 export { selectableProviderOptionChoices as selectableChoices } from "@t3tools/client-runtime/model-traits";
