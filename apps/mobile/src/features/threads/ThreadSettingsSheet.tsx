@@ -91,7 +91,7 @@ import { useNativeLayoutMetrics } from "../../native/native-layout-metrics";
 import { useNativeMailSearchToolbar } from "../../native/use-native-mail-search-toolbar";
 import { ModelRow, ChoiceRow } from "./ThreadSettingsRows";
 import {
-  compatibleRuntimeModeForChoices,
+  RUNTIME_MODE_CHOICES,
   runtimeModeChoicesForSupportedModes,
   selectableChoices,
 } from "./thread-settings-options";
@@ -498,10 +498,6 @@ function ThreadSettingsSessionProvider(
   const runtimeModeChoices = runtimeModeChoicesForSupportedModes(
     displayedModel?.supportedRuntimeModes,
   );
-  const compatibleRuntimeMode = compatibleRuntimeModeForChoices(
-    props.runtimeMode,
-    runtimeModeChoices,
-  );
 
   const hasLegacyModels = props.providerGroups.some((group) =>
     group.models.some((model) => model.isLegacy),
@@ -597,7 +593,7 @@ function ThreadSettingsSessionProvider(
     setManageHidden,
     toggleHidden,
     pendingHiddenKeys,
-    runtimeMode: compatibleRuntimeMode,
+    runtimeMode: props.runtimeMode,
     runtimeModeChoices,
     onUpdateRuntimeMode: props.onUpdateRuntimeMode,
     displayedDescriptors,
@@ -881,8 +877,7 @@ function ThreadSettingsOptionsItem(props: {
             isLast
             label="Runtime"
             value={
-              session.runtimeModeChoices.find((choice) => choice.mode === session.runtimeMode)
-                ?.label
+              RUNTIME_MODE_CHOICES.find((choice) => choice.mode === session.runtimeMode)?.label
             }
             onPress={() => props.onOpenSubmenu({ kind: "runtime" })}
           />

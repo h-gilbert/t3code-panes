@@ -989,13 +989,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const supportedRuntimeModes = selectedProviderEntry?.snapshot.supportedRuntimeModes;
   const compatibleRuntimeModeOptions =
     supportedRuntimeModes && supportedRuntimeModes.length > 0
-      ? runtimeModeOptions.filter((option) => supportedRuntimeModes.includes(option.mode))
+      ? runtimeModeOptions.filter(
+          (option) => option.mode === runtimeMode || supportedRuntimeModes.includes(option.mode),
+        )
       : runtimeModeOptions;
-  const compatibleRuntimeMode = compatibleRuntimeModeOptions.some(
-    (option) => option.mode === runtimeMode,
-  )
-    ? runtimeMode
-    : (compatibleRuntimeModeOptions[0]?.mode ?? runtimeMode);
+  const compatibleRuntimeMode = runtimeMode;
+  const runtimeModeBlockReason =
+    supportedRuntimeModes &&
+    supportedRuntimeModes.length > 0 &&
+    !supportedRuntimeModes.includes(runtimeMode)
+      ? `This provider does not support ${runtimeModeConfig[runtimeMode].label}. Choose another access mode or provider.`
+      : null;
 
   const providerSendBlockReason = getAntigravitySendBlockReason(
     selectedProviderEntry?.snapshot,
@@ -1003,6 +1007,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   );
   const sendDisabledReason =
     externalSendDisabledReason ??
+    (multipleModelSelections === null ? runtimeModeBlockReason : null) ??
     (multipleModelSelections?.length === 0 ? "Select at least one model." : null) ??
     (activePendingProgress
       ? attachmentBlockReason

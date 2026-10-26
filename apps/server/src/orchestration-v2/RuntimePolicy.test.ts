@@ -62,8 +62,10 @@ function makeThread(input: {
 }
 
 const grokInstanceId = ProviderInstanceId.make("grok");
+const restrictedInstanceId = ProviderInstanceId.make("restricted");
 const supportedRuntimeModesByInstance = new Map<ProviderInstanceId, ReadonlyArray<RuntimeMode>>([
   [grokInstanceId, ["approval-required", "auto", "full-access"]],
+  [restrictedInstanceId, ["approval-required"]],
 ]);
 const providerInstanceFor = (instanceId: ProviderInstanceId) =>
   ({
@@ -108,7 +110,7 @@ const layerTest = RuntimePolicy.layerFromProjectStore.pipe(
 );
 
 it.layer(layerTest)("RuntimePolicyV2", (it) => {
-  it.effect("runs a mode the provider does not offer in Supervised", () =>
+  it.effect("preserves selected modes and refuses unsupported modes without downgrading", () =>
     Effect.gen(function* () {
       const policy = yield* RuntimePolicy.RuntimePolicyV2;
       const now = yield* DateTime.now;
@@ -120,10 +122,22 @@ it.layer(layerTest)("RuntimePolicyV2", (it) => {
           })
           .pipe(Effect.map((resolved) => resolved.runtimeMode));
 
-      assert.equal(yield* modeFor(grokInstanceId, "auto-accept-edits"), "approval-required");
+      const error = yield* modeFor(grokInstanceId, "auto-accept-edits").pipe(Effect.flip);
+      assert.instanceOf(error, RuntimePolicy.RuntimePolicyResolveError);
+      assert.include(error.message, "auto-accept-edits");
+      assert.include(error.message, "Choose another access mode or provider");
+      const fullAccessError = yield* modeFor(restrictedInstanceId, "full-access").pipe(Effect.flip);
+      assert.include(fullAccessError.message, "selected access mode full-access");
       assert.equal(yield* modeFor(grokInstanceId, "auto"), "auto");
       assert.equal(yield* modeFor(grokInstanceId, "full-access"), "full-access");
-      assert.equal(yield* modeFor(providerInstanceId, "auto-accept-edits"), "auto-accept-edits");
+      for (const mode of [
+        "approval-required",
+        "auto-accept-edits",
+        "auto",
+        "full-access",
+      ] as const) {
+        assert.equal(yield* modeFor(providerInstanceId, mode), mode);
+      }
     }),
   );
 });

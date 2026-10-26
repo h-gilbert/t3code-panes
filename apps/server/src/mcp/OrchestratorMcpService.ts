@@ -699,19 +699,11 @@ export function resolveRuntimeMode(
   if (supported === undefined || supported.length === 0 || supported.includes(resolved)) {
     return Effect.succeed(resolved);
   }
-  if (!inherited) {
-    return Effect.fail(
-      failure(
-        "invalid_request",
-        `Provider ${target?.modelSelection.instanceId} does not offer runtime mode ${resolved}, so it would run as approval-required. Use one of: ${supported.join(", ")}.`,
-      ),
-    );
-  }
-  return Effect.succeed(
-    supported
-      .filter((mode) => runtimeModeRank(mode) <= runtimeModeRank(resolved))
-      .toSorted((left, right) => runtimeModeRank(right) - runtimeModeRank(left))[0] ??
-      "approval-required",
+  return Effect.fail(
+    failure(
+      "invalid_request",
+      `Provider ${target?.modelSelection.instanceId} does not offer ${inherited ? "inherited" : "requested"} runtime mode ${resolved}. Choose another access mode or provider. Supported modes: ${supported.join(", ")}.`,
+    ),
   );
 }
 

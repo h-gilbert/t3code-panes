@@ -3,7 +3,6 @@ import {
   OrchestrationV2AppThread,
   ProjectId,
   ProviderInstanceId,
-  type RuntimeMode,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -21,10 +20,14 @@ export class RuntimePolicyResolveError extends Schema.TaggedError<RuntimePolicyR
     projectId: ProjectId,
     providerInstanceId: ProviderInstanceId,
     cause: Schema.optional(Schema.Defect()),
+    reason: Schema.optional(Schema.String),
   },
 ) {
   override get message(): string {
-    return `Failed to resolve runtime policy for provider instance ${this.providerInstanceId} in project ${this.projectId}.`;
+    return (
+      this.reason ??
+      `Failed to resolve runtime policy for provider instance ${this.providerInstanceId} in project ${this.projectId}.`
+    );
   }
 }
 
@@ -59,17 +62,6 @@ export const layer: Layer.Layer<RuntimePolicyV2> = Layer.succeed(RuntimePolicyV2
     }),
 });
 
-function providerRuntimeMode(
-  runtimeMode: RuntimeMode,
-  supportedRuntimeModes: ReadonlyArray<RuntimeMode> | undefined,
-): RuntimeMode {
-  return supportedRuntimeModes === undefined ||
-    supportedRuntimeModes.length === 0 ||
-    supportedRuntimeModes.includes(runtimeMode)
-    ? runtimeMode
-    : "approval-required";
-}
-
 export const layerFromProjectStore: Layer.Layer<
   RuntimePolicyV2,
   never,
@@ -86,6 +78,17 @@ export const layerFromProjectStore: Layer.Layer<
           instance === undefined
             ? undefined
             : (yield* instance.snapshot.getSnapshot).supportedRuntimeModes;
+        if (
+          supportedRuntimeModes !== undefined &&
+          supportedRuntimeModes.length > 0 &&
+          !supportedRuntimeModes.includes(input.thread.runtimeMode)
+        ) {
+          return yield* new RuntimePolicyResolveError({
+            projectId: input.thread.projectId,
+            providerInstanceId: input.modelSelection.instanceId,
+            reason: `Provider ${input.modelSelection.instanceId} does not support the selected access mode ${input.thread.runtimeMode}. Choose another access mode or provider.`,
+          });
+        }
         const cwd =
           input.thread.worktreePath ??
           (yield* projects.get(input.thread.projectId).pipe(
@@ -112,7 +115,7 @@ export const layerFromProjectStore: Layer.Layer<
             ),
           ));
         return ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
-          runtimeMode: providerRuntimeMode(input.thread.runtimeMode, supportedRuntimeModes),
+          runtimeMode: input.thread.runtimeMode,
           interactionMode: input.thread.interactionMode,
           cwd,
         });

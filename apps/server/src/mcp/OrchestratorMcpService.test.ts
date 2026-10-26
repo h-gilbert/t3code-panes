@@ -2581,16 +2581,19 @@ describe("OrchestratorMcpService provider resolution", () => {
       }),
     );
 
-    it.effect("steps an inherited mode down to the broadest one the provider offers", () =>
+    it.effect("preserves an inherited mode or refuses it without downgrading", () =>
       Effect.gen(function* () {
         assert.equal(
           yield* OrchestratorMcpService.resolveRuntimeMode("full-access", "inherit", muse),
           "full-access",
         );
-        assert.equal(
-          yield* OrchestratorMcpService.resolveRuntimeMode("auto", undefined, muse),
-          "approval-required",
-        );
+        const error = yield* OrchestratorMcpService.resolveRuntimeMode(
+          "auto",
+          undefined,
+          muse,
+        ).pipe(Effect.flip);
+        assert.equal(error.code, "invalid_request");
+        assert.include(error.message, "inherited runtime mode auto");
       }),
     );
   });
