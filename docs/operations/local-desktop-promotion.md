@@ -128,7 +128,7 @@ installed app uses a T3 home other than `~/.t3`. Ambient `T3CODE_HOME` is delibe
 development shell cannot select production state accidentally. The Electron profile is resolved
 using the app's legacy `T3 Code (Alpha)` directory preference, then `t3code`, under
 `~/Library/Application Support`. `--profile-dir` identifies an existing nonstandard profile for
-backup; it does not change the app's profile configuration.
+closed-state inspection; it does not change the app's profile configuration.
 
 Set `T3CODE_LOCAL_SIGNING_IDENTITY` to the SHA-1 of the Apple Development certificate used by
 the installed app. Preparation signs the extracted local bundle with that identity and records its
@@ -149,8 +149,8 @@ install an unverified artifact manually just to bypass preparation.
 changes are retained in the candidate manifest. This is recorded build status, not a live server
 health report. By default, artifacts and records live in `~/.t3-promotions`. `--store` selects another
 private local directory; use it consistently across commands. Storage must be separate from the
-checkout, app and production state. Backups contain credentials and conversation data. Keep this
-directory private and allow enough disk space for the app and complete state copies.
+checkout, app and production state. Keep this directory private. Routine installs need space for
+the staged app and one previous app, without copying the production home or browser profile.
 
 `install` requires the target app to be fully quit. It refuses if a process is running from that
 bundle or has files open in the production home or Electron profile. Inspection errors also block
@@ -159,24 +159,37 @@ the safe quit boundary yourself after inspecting turns, subagents and managed te
 only a window is insufficient. Do not reopen the app while replacement is underway.
 
 Installation verifies the prepared checksum, copies the replacement beside the installed app,
-backs up the closed production home and Electron profile, records the migration history, and retains
-the old bundle beside the target. A durable journal records each replacement's paths. It verifies
+records the migration history, and retains the old bundle beside the target. The production home,
+database, worktrees, attachments, credentials and Electron profile stay in place. Routine updates
+do not create state backups. A durable journal records each replacement's paths. It verifies
 the installed bundle and reopens it through macOS with the same explicit T3 home. `--no-launch` leaves
 it closed. No development state is copied into production. If launch fails, the successfully installed
 app and all recovery paths remain recorded. Confirm server connection and pane restoration using the
 verification list above; the command does not claim to automate those UI checks.
 
+Before installing a release with database migrations, explicitly request a database snapshot with
+`vp run promote:desktop install --backup-database` or arrange a separate current database backup.
+The installer does not automatically detect whether the candidate will run new migrations. The
+option saves a consistent, compact SQLite snapshot including committed WAL data, omitting unused
+pages. It replaces `database-backup.sqlite` in the private promotion store only after the new
+snapshot completes, so repeated snapshots do not accumulate. It never copies caches, dependencies
+or the browser profile, and never restores the snapshot automatically. Regular data backups remain
+separate from application updates.
+
 `rollback` restores the previous bundle while retaining current state. It requires the app to be
 quit, verifies both bundle checksums, and refuses if migration history changed or another update
 replaced the installed app. It never restores an older database automatically. If migrations changed,
 a separate recovery decision is required because restoring a snapshot would discard newer work.
-Rollback itself saves the replaced app and current state. Only the most recent installation is an
-automatic rollback target; earlier records and backups remain available for deliberate recovery.
+Rollback itself saves the replaced app and keeps current state in place. After a successful install
+or rollback, the installer removes its previously recorded app backup only if the path belongs to
+the same target and its contents still match the recorded checksum. The immediate previous app is
+retained. Modified backups and backups from older, untracked installations are left alone.
 
 If the command is interrupted, inspect `installation.json` before retrying. A `staged` journal blocks
 further replacements until its recorded app, staged bundle and backup are reconciled. Do not delete
 those paths blindly. A surviving `lock/owner.json` records the PID and time; confirm that the owning
-process has stopped before removing the lock directory. Backups are not pruned automatically.
+process has stopped before removing the lock directory. Existing full-state backups are not deleted
+by this policy change.
 
 One-off local builds use a custom version suffix such as `0.0.44-panes.<timestamp>.<digest>`.
 The artifact builder defaults to `-panes.1`. These versions omit update feeds and reject

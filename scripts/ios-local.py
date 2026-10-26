@@ -224,7 +224,7 @@ def worker(number):
         check_source_policy()
         check_native_policy(native)
         with (directory / 'validation.log').open('w') as validation:
-            subprocess.run([str(SOURCE / 'node_modules/.bin/tsc-rs'), '--noEmit'],
+            subprocess.run([str(SOURCE / 'node_modules/.bin/tsc'), '--noEmit'],
                            cwd=SOURCE / 'apps/mobile', stdout=validation,
                            stderr=subprocess.STDOUT, check=True)
             subprocess.run([str(SOURCE / 'node_modules/.bin/vp'), 'test', 'run',

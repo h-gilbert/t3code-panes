@@ -115,13 +115,17 @@ export function sourceIdentity(root = repo) {
 
 // The server keeps its migrations in statev2.sqlite; state.sqlite only remains on
 // homes that predate it.
-export function databaseSchema(home) {
+function databasePath(home) {
   const current = NodePath.join(home, "userdata", "statev2.sqlite");
   const file = NodeFS.existsSync(current)
     ? current
     : NodePath.join(home, "userdata", "state.sqlite");
   if (!NodeFS.existsSync(file)) throw new Error(`Existing production database required: ${file}`);
-  const db = new NodeSqlite.DatabaseSync(file, { readOnly: true });
+  return file;
+}
+
+export function databaseSchema(home) {
+  const db = new NodeSqlite.DatabaseSync(databasePath(home), { readOnly: true });
   try {
     return db
       .prepare("SELECT migration_id AS id, name FROM effect_sql_migrations ORDER BY migration_id")
@@ -134,7 +138,7 @@ export function databaseSchema(home) {
 export function assertRollbackCompatible(before, current) {
   if (JSON.stringify(before) !== JSON.stringify(current)) {
     throw new Error(
-      "Rollback blocked: database migrations changed since installation. The saved app and state backup are retained. Restoring older state requires a separate recovery decision because it would discard newer work.",
+      "Rollback blocked: database migrations changed since installation. The previous app is retained. Database recovery requires a separately saved snapshot and an explicit decision because restoring older state would discard newer work.",
     );
   }
 }
@@ -189,6 +193,39 @@ export function replaceBundle({ app, staged, backup, rename = NodeFS.renameSync 
 
 function copy(source, target) {
   run("/usr/bin/ditto", [source, target]);
+}
+
+export function snapshotDatabase(home, destination) {
+  const temporary = `${destination}.${NodeCrypto.randomUUID()}.tmp`;
+  const db = new NodeSqlite.DatabaseSync(databasePath(home), { readOnly: true });
+  try {
+    // VACUUM INTO includes committed WAL data and omits unused database pages.
+    db.prepare("VACUUM INTO ?").run(temporary);
+    NodeFS.chmodSync(temporary, 0o600);
+    NodeFS.renameSync(temporary, destination);
+  } finally {
+    db.close();
+    NodeFS.rmSync(temporary, { force: true });
+  }
+}
+
+function retirePreviousBundle(previous, app) {
+  if (
+    previous?.app !== app ||
+    typeof previous.backup !== "string" ||
+    NodePath.dirname(previous.backup) !== NodePath.dirname(app) ||
+    !previous.backup.startsWith(`${app}.before-`) ||
+    !NodeFS.existsSync(previous.backup)
+  )
+    return;
+  // Only remove an unchanged bundle recorded by this installer, never discovered files.
+  try {
+    if (NodeFS.lstatSync(previous.backup).isSymbolicLink()) return;
+    if (treeDigest(previous.backup) !== previous.oldDigest) return;
+    NodeFS.rmSync(previous.backup, { recursive: true });
+  } catch (error) {
+    console.warn(`Installed successfully; could not retire ${previous.backup}: ${error.message}`);
+  }
 }
 
 export function assertSeparatePaths(paths) {
@@ -350,15 +387,15 @@ export function install(store, values, rollback, operations = {}) {
   const id = `${Date.now()}-${NodeCrypto.randomUUID().slice(0, 8)}`;
   const backup = `${app}.before-${id}`;
   const staged = NodePath.join(NodePath.dirname(app), `.t3-promotion-${id}.app`);
-  const stateBackup = NodePath.join(store, `state-${id}`);
+  const databaseBackup = values["backup-database"]
+    ? NodePath.join(store, "database-backup.sqlite")
+    : null;
   const oldDigest = treeDigest(app);
   duplicate(candidate.app, staged);
   if (treeDigest(staged) !== candidate.digest)
     throw new Error(`Staged app failed integrity verification: ${staged}`);
   stopped(app, [home, profile]);
-  NodeFS.mkdirSync(stateBackup, { mode: 0o700 });
-  duplicate(home, NodePath.join(stateBackup, "home"));
-  if (NodeFS.existsSync(profile)) duplicate(profile, NodePath.join(stateBackup, "profile"));
+  if (databaseBackup) snapshotDatabase(home, databaseBackup);
   stopped(app, [home, profile]);
   if (
     treeDigest(app) !== oldDigest ||
@@ -375,7 +412,7 @@ export function install(store, values, rollback, operations = {}) {
     profile,
     staged,
     backup,
-    stateBackup,
+    databaseBackup,
     schema,
     oldInfo,
     oldDigest,
@@ -404,8 +441,9 @@ export function install(store, values, rollback, operations = {}) {
     }
   }
   console.log(
-    `${rollback ? "Rolled back to" : "Installed"} ${candidate.info.version}.\nPrevious app: ${backup}\nState backup: ${stateBackup}\n${values["no-launch"] ? "Open the app normally" : "Requested app launch"} with the same T3 home (${home}). Check local server connection, windows and pane assignments. Server health and UI restoration require that check.`,
+    `${rollback ? "Rolled back to" : "Installed"} ${candidate.info.version}.\nPrevious app: ${backup}\n${databaseBackup ? `Database snapshot: ${databaseBackup}` : "Existing data and browser profile retained in place; no state backup created."}\n${values["no-launch"] ? "Open the app normally" : "Requested app launch"} with the same T3 home (${home}). Check local server connection, windows and pane assignments. Server health and UI restoration require that check.`,
   );
+  retirePreviousBundle(previous, app);
 }
 
 export function main(args = process.argv.slice(2)) {
@@ -419,12 +457,13 @@ export function main(args = process.argv.slice(2)) {
       "profile-dir": { type: "string" },
       help: { type: "boolean" },
       "no-launch": { type: "boolean" },
+      "backup-database": { type: "boolean" },
     },
   });
   const command = positionals[0];
   if (values.help || !command) {
     console.log(
-      "promote:desktop prepare | status | install | rollback\nOptions: --app <installed .app> --home-dir <production T3 home> --profile-dir <Electron profile> --store <promotion storage> --no-launch\nPreparation builds once. Install/rollback require the app and local state to be closed. They never stop processes; after replacement they reopen the app with its production home unless --no-launch is passed. Backups contain private state. Use a local, private store outside the checkout and production state.",
+      "promote:desktop prepare | status | install | rollback\nOptions: --app <installed .app> --home-dir <production T3 home> --profile-dir <Electron profile> --store <promotion storage> --no-launch --backup-database\nPreparation builds once. Install/rollback require the app and local state to be closed. They never stop processes; after replacement they reopen the app with its production home unless --no-launch is passed. Data stays in place. Only the latest previous app is retained after a successful update. --backup-database saves a compact snapshot before replacement, replacing the previous snapshot. Use a local, private store outside the checkout and production state.",
     );
     return;
   }
