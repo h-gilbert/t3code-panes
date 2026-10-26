@@ -1,3 +1,4 @@
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   type EnvironmentThreadShell,
   type PendingSubagentRequest,
@@ -5,7 +6,7 @@ import {
 } from "@t3tools/client-runtime/state/models";
 import { pendingSubagentRequestsByThread } from "@t3tools/client-runtime/state/threads";
 import { useAtomValue } from "@effect/atom-react";
-import { useNavigate, useParams } from "@tanstack/react-router";
+import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import type { EnvironmentId, OrchestrationV2ThreadShell, ThreadId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import {
@@ -16,6 +17,7 @@ import {
 } from "lucide-react";
 import { useEffect, useEffectEvent, useRef } from "react";
 
+import { DEFAULT_WORKSPACE_KEY, useWorkspacePaneStore } from "../workspacePaneStore";
 import { getClientSettings, useClientSettings } from "../hooks/useSettings";
 import { useEnvironmentIds } from "../state/environments";
 import { environmentShell } from "../state/shell";
@@ -121,6 +123,15 @@ function EnvironmentNotifications({
     (settings) => settings.inAppNotificationsEnabled,
   );
   const navigate = useNavigate();
+  const workspaceKey = useLocation({
+    select: (location) => location.search.workspace ?? DEFAULT_WORKSPACE_KEY,
+  });
+  const openPane = (threadId: ThreadId) => {
+    const workspace = useWorkspacePaneStore
+      .getState()
+      .revealThread(scopeThreadRef(environmentId, threadId), workspaceKey);
+    void navigate({ to: "/workspace", search: { workspace } });
+  };
   const { environmentId: activeEnvironmentId, threadId: activeThreadId } = useParams({
     strict: false,
   });
@@ -172,13 +183,10 @@ function EnvironmentNotifications({
             ),
         },
         actionProps: {
-          children: "Open thread",
+          children: "Open pane",
           onClick: () => {
             toastManager.close(toastId);
-            void navigate({
-              to: "/$environmentId/$threadId",
-              params: { environmentId, threadId: thread.id },
-            });
+            openPane(thread.id);
           },
         },
       });
@@ -202,10 +210,7 @@ function EnvironmentNotifications({
         notification.close();
         window.focus();
         void window.desktopBridge?.revealWindow?.().catch(() => undefined);
-        void navigate({
-          to: "/$environmentId/$threadId",
-          params: { environmentId, threadId: thread.id },
-        });
+        openPane(thread.id);
       });
     } catch {
       // Some browsers expose Notification but reject desktop presentation.

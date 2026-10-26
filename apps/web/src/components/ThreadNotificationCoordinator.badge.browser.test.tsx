@@ -1,6 +1,5 @@
 import { RegistryContext } from "@effect/atom-react";
 import { WORKING_EXIT_GRACE_MS } from "@t3tools/client-runtime/state/thread-inbox";
-import { EnvironmentId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import { Atom, AtomRegistry } from "effect/reactivity";
@@ -210,8 +209,8 @@ it.each(["hasPendingApprovals", "hasPendingUserInput"] as const)(
     const notification = TestNotification.sent[0]!;
     notification.dispatchEvent(new Event("click"));
     expect(state.navigate).toHaveBeenCalledWith({
-      to: "/$environmentId/$threadId",
-      params: { environmentId: EnvironmentId.make("one"), threadId: "thread" },
+      to: "/workspace",
+      search: { workspace: "main" },
     });
     state.mode = "sound";
     await app.render();

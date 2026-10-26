@@ -50,6 +50,7 @@ export interface WorkspacePaneState {
   layoutsByProjectKey: Record<string, ProjectWorkspaceLayout>;
   /** Projects the user removed from the pane project menu on this device. */
   hiddenPickerProjectKeys: ReadonlyArray<string>;
+  revealThread: (threadRef: ScopedThreadRef, workspaceKey: string) => string;
   assignThread: (
     projectKey: string,
     threadRef: ScopedThreadRef,
@@ -305,6 +306,25 @@ export const useWorkspacePaneStore = create<WorkspacePaneState>()(
     (set, get) => ({
       layoutsByProjectKey: {},
       hiddenPickerProjectKeys: [],
+      revealThread: (threadRef, workspaceKey) => {
+        const state = get();
+        const threadKey = scopedThreadKey(threadRef);
+        const candidates = [
+          workspaceKey,
+          ...Object.keys(state.layoutsByProjectKey).filter((key) => key !== workspaceKey),
+        ];
+        const existingWorkspace = candidates.find((key) => {
+          const layout = selectProjectWorkspaceLayout(state, key);
+          return layout.panes
+            .slice(0, layout.paneCount)
+            .some(
+              (target) => target && "threadId" in target && scopedThreadKey(target) === threadKey,
+            );
+        });
+        const destination = existingWorkspace ?? workspaceKey;
+        state.assignThread(destination, threadRef);
+        return destination;
+      },
       assignThread: (projectKey, threadRef, paneIndex) =>
         set((state) =>
           updateProjectLayout(state, projectKey, (layout) => {

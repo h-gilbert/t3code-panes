@@ -457,3 +457,54 @@ describe("pane-local related thread navigation", () => {
     store.resetWorkspace(key);
   });
 });
+
+describe("notification pane navigation", () => {
+  it("focuses the matching environment's pane and reveals it when another is maximized", () => {
+    const key = "notification-focus";
+    const store = useWorkspacePaneStore.getState();
+    const mac = scopeThreadRef("mac" as EnvironmentId, ThreadId.make("finished"));
+    const fred = scopeThreadRef("fred" as EnvironmentId, ThreadId.make("finished"));
+    try {
+      store.setPaneCount(key, 3);
+      store.assignThread(key, mac, 0);
+      store.assignThread(key, fred, 2);
+      store.toggleMaximize(key, 0);
+      const panes = selectProjectWorkspaceLayout(useWorkspacePaneStore.getState(), key).panes;
+      expect(store.revealThread(fred, key)).toBe(key);
+      const layout = selectProjectWorkspaceLayout(useWorkspacePaneStore.getState(), key);
+      expect(layout.panes).toEqual(panes);
+      expect(layout.focusedPaneIndex).toBe(2);
+      expect(layout.maximizedPaneIndex).toBe(2);
+    } finally {
+      store.resetWorkspace(key);
+    }
+  });
+
+  it("returns the existing workspace instead of replacing a pane in the current one", () => {
+    const store = useWorkspacePaneStore.getState();
+    const ref = scopeThreadRef("mac" as EnvironmentId, ThreadId.make("finished"));
+    try {
+      store.assignThread("notification-other", ref);
+      expect(store.revealThread(ref, "notification-current")).toBe("notification-other");
+      expect(
+        useWorkspacePaneStore.getState().layoutsByProjectKey["notification-current"],
+      ).toBeUndefined();
+    } finally {
+      store.resetWorkspace("notification-other");
+      store.resetWorkspace("notification-current");
+    }
+  });
+
+  it("opens a thread that has no pane in the current workspace", () => {
+    const store = useWorkspacePaneStore.getState();
+    const ref = scopeThreadRef("mac" as EnvironmentId, ThreadId.make("closed"));
+    try {
+      expect(store.revealThread(ref, "notification-new")).toBe("notification-new");
+      expect(
+        selectProjectWorkspaceLayout(useWorkspacePaneStore.getState(), "notification-new").panes[0],
+      ).toEqual(ref);
+    } finally {
+      store.resetWorkspace("notification-new");
+    }
+  });
+});
