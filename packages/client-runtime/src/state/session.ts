@@ -1,7 +1,9 @@
 import type { AuthSessionState, EnvironmentId, ServerConfig } from "@t3tools/contracts";
 import * as Data from "effect/Data";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import { HttpClient } from "effect/http";
@@ -36,6 +38,11 @@ function initialConfigOption<E>(
 }
 
 const DEFAULT_SESSION_STATE_TIMEOUT_MS = 6_000;
+const SESSION_STATE_RETRY_SCHEDULE = Schedule.exponential("1 second").pipe(
+  Schedule.modifyDelay(({ duration }) =>
+    Effect.succeed(Duration.min(duration, Duration.seconds(30))),
+  ),
+);
 
 export const fetchEnvironmentSessionState = Effect.fn(
   "clientRuntime.state.fetchEnvironmentSessionState",
@@ -138,7 +145,17 @@ function makeEnvironmentSessionAtoms<R, E>(
             prepared,
             signer,
             remoteAuthorization,
-          }).pipe(Effect.provideService(HttpClient.HttpClient, client.value));
+          }).pipe(
+            Effect.provideService(HttpClient.HttpClient, client.value),
+            // A mounted permission lookup does not revalidate on its own. Keep a
+            // temporary HTTP outage from disabling mutations for the entire session.
+            Effect.retry({
+              while: (error) =>
+                error._tag === "RemoteEnvironmentAuthTimeoutError" ||
+                error._tag === "RemoteEnvironmentAuthFetchError",
+              schedule: SESSION_STATE_RETRY_SCHEDULE,
+            }),
+          );
         });
       })
       .pipe(
