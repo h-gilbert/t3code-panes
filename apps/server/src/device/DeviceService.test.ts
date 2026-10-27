@@ -1134,3 +1134,32 @@ it.effect("a failed tool update reports npm's exit code but not its output", () 
     Effect.scoped,
   ),
 );
+
+it.effect("keeps a physical device with its thread until it releases control", () =>
+  Effect.gen(function* () {
+    const { service, devices, requests } = yield* fixture();
+    devices.push({
+      id: "physical-ipad",
+      name: "iPad",
+      platform: "ios",
+      version: "iOS 18",
+      booted: true,
+      physical: true,
+    });
+    yield* service.configure({ enabled: true, agentAccessEnabled: true });
+    const first = {
+      threadId: ThreadId.make("owner"),
+      deviceId: DeviceId.make("physical-ipad"),
+      platform: "ios" as const,
+    };
+    const second = { ...first, threadId: ThreadId.make("other") };
+    yield* service.open(first);
+    const failure = yield* service.open(second).pipe(Effect.flip);
+    expect(failure.message).toContain("in use by thread owner");
+    expect((yield* service.state).sessions.map((session) => session.threadId)).toEqual(["owner"]);
+    expect(requests.some((request) => request.endsWith("/grid/api/start"))).toBe(false);
+    yield* service.close(first);
+    yield* service.open(second);
+    expect((yield* service.state).sessions.map((session) => session.threadId)).toEqual(["other"]);
+  }),
+);

@@ -37,6 +37,7 @@ import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as DeviceHost from "./DeviceHost.ts";
+import { listPhysicalDevices } from "./PhysicalDevices.ts";
 import { makeDeviceHubOperations } from "./DeviceHubOperations.ts";
 import {
   agentDeviceStateDir,
@@ -113,13 +114,6 @@ const platformReason = Effect.fn("LocalDeviceHost.platformReason")(function* (
     return "Android SDK was not found. Install it with Android Studio or set ANDROID_HOME to your SDK directory.";
   if (!sdk.adb)
     return `Android SDK Platform-Tools are missing from ${sdk.root}. Install them in Android Studio's SDK Manager.`;
-  if (!sdk.emulator)
-    return `Android Emulator is missing from ${sdk.root}. Install it in Android Studio's SDK Manager.`;
-  if (!sdk.avdmanager) {
-    if (sdk.legacyAvdmanager)
-      return `The Android SDK command-line tools in ${sdk.root} appear to be an older, unsupported version. Install Android SDK Command-line Tools (latest) in Android Studio's SDK Manager under SDK Tools.`;
-    return `Android SDK Command-line Tools (latest) are missing from ${sdk.root}. Install them in Android Studio's SDK Manager.`;
-  }
   return null;
 });
 
@@ -807,6 +801,8 @@ export const make = Effect.fn("LocalDeviceHost.make")(function* () {
         Effect.catch((cause) => Effect.succeed({ stdout: "", stderr: String(cause), code: 127 })),
       );
 
+  const physicalDevices = yield* Effect.cachedWithTTL(listPhysicalDevices(run), "5 seconds");
+
   const toReady = (running: RunningHost): DeviceHost.DeviceHostReady => ({
     hub: { origin: running.hub.origin } satisfies DeviceHost.DeviceHubEndpoint,
     devices: makeDeviceHubOperations({
@@ -814,6 +810,7 @@ export const make = Effect.fn("LocalDeviceHost.make")(function* () {
       origin: running.hub.origin,
       http: httpClient,
       run,
+      physicalDevices,
       androidAvailable: platformAvailability("android").pipe(
         Effect.map((availability) => availability.available),
       ),

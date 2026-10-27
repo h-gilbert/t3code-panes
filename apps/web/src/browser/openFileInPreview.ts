@@ -1,3 +1,4 @@
+import { showBrowserInset } from "../components/preview/showBrowserInset";
 import type {
   AssetCreateUrlResult,
   AssetResource,
@@ -99,7 +100,7 @@ export async function openUrlInPreview<E>(input: {
       return;
     }
     applyPreviewServerSnapshot(input.threadRef, snapshot);
-    useRightPanelStore.getState().openBrowser(input.threadRef, snapshot.tabId);
+    showBrowserInset(input.threadRef, snapshot.tabId);
   });
 }
 

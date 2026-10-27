@@ -39,6 +39,24 @@ async function reloadRightPanelStore() {
 }
 
 describe("rightPanelStore", () => {
+  it("discards retired browser sidebar entries without closing other surfaces", () => {
+    const store = useRightPanelStore.getState();
+    store.openFile(refA, "README.md");
+    store.openBrowser(refA, "legacy-tab");
+    store.openFile(refA, "README.md");
+    const revision = store.getUserActionRevision(refA);
+    store.discardBrowserSurfaces(refA);
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA),
+    ).toMatchObject({
+      isOpen: true,
+      activeSurfaceId: "file:README.md",
+      surfaces: [expect.objectContaining({ kind: "file" })],
+    });
+    expect(store.getUserActionRevision(refA)).toBe(revision);
+    expect(useClosedViewStore.getState().entries).toEqual([]);
+  });
+
   it("records single and bulk tab closes, newest first", () => {
     const store = useRightPanelStore.getState();
     const pr = pullRequestSurface({

@@ -219,6 +219,12 @@ const diagnose = (
   );
 
 describe("Android SDK availability", () => {
+  it.effect("supports connected Android hardware with platform-tools alone", () =>
+    Effect.gen(function* () {
+      expect(yield* diagnose(["/sdk/platform-tools/adb"], { ANDROID_HOME: "/sdk" })).toBeNull();
+    }),
+  );
+
   it.effect("uses the standard Windows SDK without probing PATH", () =>
     Effect.gen(function* () {
       const root = "C:\\Users\\test\\AppData\\Local\\Android\\Sdk";
@@ -280,18 +286,33 @@ describe("Android SDK availability", () => {
   );
 
   // regression: #12017 detect unsupported legacy Android command-line tools
-  it.effect("explains how to upgrade legacy command-line tools in the standard macOS SDK", () =>
+  it.effect("keeps physical Android available when emulator command-line tools are legacy", () =>
     Effect.gen(function* () {
       const root = "/test/home/Library/Android/sdk";
       const reason = yield* diagnose(
         [`${root}/platform-tools/adb`, `${root}/emulator/emulator`, `${root}/tools/bin/avdmanager`],
         { HOME: "/test/home" },
       );
-      expect(reason).toContain("older, unsupported version");
-      expect(reason).toContain(root);
-      expect(reason).toContain(
-        "Install Android SDK Command-line Tools (latest) in Android Studio's SDK Manager under SDK Tools.",
+      expect(reason).toBeNull();
+      const sdk = yield* LocalDeviceHost.__testing.androidSdk.pipe(
+        Effect.provideService(HostProcess.Environment, { HOME: "/test/home" }),
+        Effect.provideService(HostProcess.Platform, "darwin"),
+        Effect.provideService(
+          FileSystem.FileSystem,
+          FileSystem.makeNoop({
+            exists: (file) =>
+              Effect.succeed(
+                [
+                  `${root}/platform-tools/adb`,
+                  `${root}/emulator/emulator`,
+                  `${root}/tools/bin/avdmanager`,
+                ].includes(file),
+              ),
+          }),
+        ),
+        Effect.provide(NodePath.layerPosix),
       );
+      expect(sdk).toMatchObject({ avdmanager: false, legacyAvdmanager: true });
     }),
   );
 

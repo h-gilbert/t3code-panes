@@ -12,8 +12,12 @@ T3 boots the device and shows its live stream in the Device panel. Follow its
 returned `quickStart`, using the exact `agentDevice.command` and all `targetArgs`
 on every operation. Use `device_screenshot` to inspect the screen.
 
-If T3 device tools or the selected device are unavailable, report the blocker
-and stop verification. Do not install or switch to another automation system.
+For connected physical hardware that T3 cannot discover, open, stream, or control,
+report the exact error and continue with device-pinned agent-device or native
+tools. Use screenshots when live video is unavailable. Preserve disabled device
+support, disabled agent access, and permission denials. Requested verification
+includes needed automation helpers and signed iOS runner setup, subject to build
+locks. Ask for trust, Developer Mode, or credentials only when needed.
 
 ## Use an isolated backend
 

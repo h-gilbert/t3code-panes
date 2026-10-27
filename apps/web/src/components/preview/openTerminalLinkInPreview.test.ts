@@ -10,11 +10,7 @@ vi.mock("~/previewStateStore", () => ({
   isPreviewSupportedInRuntime: () => true,
 }));
 
-vi.mock("~/rightPanelStore", () => ({
-  useRightPanelStore: {
-    getState: () => ({ openBrowser: vi.fn() }),
-  },
-}));
+vi.mock("./showBrowserInset", () => ({ showBrowserInset: vi.fn() }));
 
 const browserDefaultsMocks = vi.hoisted(() => ({
   resolve: vi.fn(),

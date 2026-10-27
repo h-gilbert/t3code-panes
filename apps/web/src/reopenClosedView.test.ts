@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { type ClosedViewEntry, useClosedViewStore } from "./closedViewStore";
 import { __setClientSettingsForTests } from "./hooks/useSettings";
 import { readThreadPreviewState, resetPreviewStateForTests } from "./previewStateStore";
+import { selectThreadPreviewMiniPlayer, usePreviewMiniPlayerStore } from "./previewMiniPlayerStore";
 import { planNextReopen, type ReopenOwnerState, reopenClosedView } from "./reopenClosedView";
 import {
   selectThreadRightPanelState,
@@ -37,6 +38,7 @@ beforeEach(() => {
   resetPreviewStateForTests();
   useClosedViewStore.setState({ entries: [] });
   useRightPanelStore.setState({ byThreadKey: {}, userActionRevisionByThreadKey: {} });
+  usePreviewMiniPlayerStore.setState({ byThreadKey: {}, frontThreadKey: null });
 });
 
 describe("reopenClosedView", () => {
@@ -87,7 +89,7 @@ describe("reopenClosedView", () => {
     ).toEqual([]);
   });
 
-  it("recreates a browser tab with saved URL, viewport and profile, then selects its new ID", async () => {
+  it("recreates a browser tab with saved URL, viewport and profile in the inset", async () => {
     const openPreview = vi.fn(async () => AsyncResult.success({ ...snapshot, tabId: "new-tab" }));
     const result = await reopenClosedView(
       { kind: "browser", threadRef, snapshot },
@@ -105,9 +107,12 @@ describe("reopenClosedView", () => {
     });
     expect(readThreadPreviewState(threadRef).snapshot?.tabId).toBe("new-tab");
     expect(
-      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef)
-        .activeSurfaceId,
-    ).toBe("browser:new-tab");
+      selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, threadRef)
+        ?.source,
+    ).toEqual({ kind: "browser", tabId: "new-tab" });
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, threadRef).isOpen,
+    ).toBe(false);
   });
 
   it("leaves the panel unchanged when a browser resource fails to reopen", async () => {

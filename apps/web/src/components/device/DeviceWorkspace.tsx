@@ -90,6 +90,7 @@ export function DeviceWorkspace(props: {
             deviceName={props.device.name}
             deviceDescription={`${props.hostLabel} · ${props.device.version}`}
             deviceId={props.device.id}
+            physical={props.device.physical}
             hostId={props.device.hostId}
             visible={props.visible}
             axOverlay={axOverlay}

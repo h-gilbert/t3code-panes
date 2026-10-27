@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import * as browserDefaults from "~/browser/browserDefaults";
 import { BrowserSettingsReadError, openUrlInPreview } from "~/browser/openFileInPreview";
 import { __setClientSettingsForTests } from "~/hooks/useSettings";
+import { usePreviewMiniPlayerStore, selectThreadPreviewMiniPlayer } from "~/previewMiniPlayerStore";
 import { useRightPanelStore } from "~/rightPanelStore";
 import {
   applyPreviewServerSnapshot,
@@ -40,6 +41,7 @@ const snapshot: PreviewSessionSnapshot = {
 
 beforeEach(() => {
   resetPreviewStateForTests();
+  usePreviewMiniPlayerStore.setState({ byThreadKey: {} });
   useRightPanelStore.setState({ byThreadKey: {}, threadPanelVisibilityByThreadKey: {} });
   __setClientSettingsForTests(DEFAULT_CLIENT_SETTINGS);
 });
@@ -49,6 +51,25 @@ afterEach(() => {
 });
 
 describe("openPreviewSession", () => {
+  it("opens visible links in the inset while retaining the user's sidebar tabs", async () => {
+    useRightPanelStore.getState().openFile(threadRef, "README.md");
+    const before = Object.values(useRightPanelStore.getState().byThreadKey)[0]!;
+    await openUrlInPreview({
+      threadRef,
+      url: "https://t3.chat/",
+      openPreview: async () => AsyncResult.success(snapshot),
+    });
+    expect(Object.values(useRightPanelStore.getState().byThreadKey)[0]).toMatchObject({
+      isOpen: false,
+      activeSurfaceId: before.activeSurfaceId,
+      surfaces: before.surfaces,
+    });
+    expect(
+      selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, threadRef)
+        ?.source,
+    ).toEqual({ kind: "browser", tabId: "tab-1" });
+  });
+
   it.each(["session", "link"] as const)(
     "does not open a %s with unread settings and uses the saved profile on retry",
     async (entryPoint) => {

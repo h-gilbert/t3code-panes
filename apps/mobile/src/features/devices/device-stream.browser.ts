@@ -155,6 +155,18 @@ export function start(configuration: DeviceStreamConfiguration) {
   );
   activeClient = client;
   client.setMjpegImage(image);
+  if (configuration.physical) {
+    const refresh = document.createElement("button");
+    refresh.textContent = "Refresh screenshot";
+    Object.assign(refresh.style, {
+      position: "fixed",
+      bottom: "12px",
+      right: "12px",
+      zIndex: "10",
+    });
+    refresh.addEventListener("click", () => client.start());
+    container.append(refresh);
+  }
   const touch = (event: PointerEvent, phase: "begin" | "move" | "end") => {
     const rect = frame.getBoundingClientRect();
     client.sendTouch(

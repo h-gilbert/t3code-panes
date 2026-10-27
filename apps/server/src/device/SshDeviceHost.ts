@@ -23,6 +23,7 @@ import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as ServerConfig from "../config.ts";
 import * as DeviceHost from "./DeviceHost.ts";
+import { listPhysicalDevices } from "./PhysicalDevices.ts";
 import { makeDeviceHubOperations } from "./DeviceHubOperations.ts";
 import { quoteRemoteArg, remoteDeviceEnvironment, remoteDeviceScript } from "./sshDeviceScript.ts";
 
@@ -192,6 +193,8 @@ export const make = Effect.fn("SshDeviceHost.make")(function* (
       ),
     );
 
+  const physicalDevices = yield* Effect.cachedWithTTL(listPhysicalDevices(run), "5 seconds");
+
   const platformAvailability: DeviceHost.DeviceHost["Service"]["platformAvailability"] = (
     platform,
   ) =>
@@ -316,6 +319,7 @@ export const make = Effect.fn("SshDeviceHost.make")(function* (
         origin: hubOrigin,
         http,
         run,
+        physicalDevices,
         androidAvailable: platformAvailability("android").pipe(
           Effect.map((availability) => availability.available),
         ),

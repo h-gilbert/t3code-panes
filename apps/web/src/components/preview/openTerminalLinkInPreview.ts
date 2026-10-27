@@ -1,3 +1,4 @@
+import { showBrowserInset } from "./showBrowserInset";
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
 import * as Schema from "effect/Schema";
@@ -12,7 +13,6 @@ import type { OpenPreviewMutation } from "~/browser/openFileInPreview";
 import { isPreviewAvailableFor, previewRuntimeFor } from "~/browser/previewRuntime";
 import { recordVisitForThread } from "~/browserHistoryStore";
 import { applyPreviewServerSnapshot } from "~/previewStateStore";
-import { useRightPanelStore } from "~/rightPanelStore";
 
 const terminalLinkErrorContext = {
   environmentId: Schema.String,
@@ -86,5 +86,5 @@ export async function openTerminalLinkInPreview<E>(
   }
   recordVisitForThread(input.threadRef, input.url);
   applyPreviewServerSnapshot(input.threadRef, result.value);
-  useRightPanelStore.getState().openBrowser(input.threadRef, result.value.tabId);
+  showBrowserInset(input.threadRef, result.value.tabId);
 }

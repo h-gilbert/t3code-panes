@@ -199,7 +199,11 @@ class MjpegImage extends EventTarget {
   }
 }
 
-function recoveryFixture(platform: "ios" | "android" = "ios", preferMjpeg = true) {
+function recoveryFixture(
+  platform: "ios" | "android" = "ios",
+  preferMjpeg = true,
+  physical = false,
+) {
   vi.useFakeTimers();
   const sockets: Socket[] = [];
   class Socket {
@@ -273,6 +277,7 @@ function recoveryFixture(platform: "ios" | "android" = "ios", preferMjpeg = true
     {
       platform,
       preferMjpeg,
+      physical,
       deviceId: "test-device",
       access: {
         httpBase: "https://test/api/device-hub",
@@ -432,5 +437,55 @@ describe("shared device stream readiness and recovery", () => {
     expect(events.onStatus).not.toHaveBeenCalled();
     client.stop();
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe("physical device screenshots", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("opens physical iOS with screenshots rather than simulator sockets", () => {
+    const { client, events, sockets, image, imageReady, fetch } = recoveryFixture(
+      "ios",
+      true,
+      true,
+    );
+    client.start();
+    expect(image.src).toContain("/vendor/serve-sim/api/screenshot?device=test-device");
+    expect(sockets).toHaveLength(0);
+    expect(fetch).not.toHaveBeenCalled();
+    imageReady();
+    expect(events.onStatus).toHaveBeenLastCalledWith(
+      "streaming",
+      expect.stringContaining("Screenshot only"),
+    );
+    expect(events.onScreen).toHaveBeenCalledWith({
+      width: 400,
+      height: 800,
+      orientation: "portrait",
+    });
+    client.stop();
+    events.onStatus.mockClear();
+    imageReady();
+    expect(events.onStatus).not.toHaveBeenCalled();
+  });
+
+  it("falls back to screenshots when physical Android sends no video", async () => {
+    const { client, events, image, imageReady } = recoveryFixture("android", false, true);
+    client.start();
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(image.src).toContain("/vendor/serve-emu/api/screenshot?device=test-device");
+    expect(events.onInputConnected).toHaveBeenLastCalledWith(
+      false,
+      expect.stringContaining("Screenshot only"),
+    );
+    imageReady();
+    expect(events.onStatus).toHaveBeenLastCalledWith(
+      "streaming",
+      expect.stringContaining("Screenshot only"),
+    );
+    client.stop();
   });
 });

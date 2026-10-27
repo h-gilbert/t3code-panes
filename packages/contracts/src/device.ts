@@ -563,13 +563,20 @@ export const DeviceToolListResult = Schema.Struct({
   hosts: Schema.Array(DeviceHostSummary),
   devices: Schema.Array(DeviceSummary),
   open: Schema.Array(Schema.Struct({ hostId: DeviceHostId, deviceId: DeviceId })),
+  inUse: Schema.optional(Schema.Array(DeviceSession)),
 });
 export type DeviceToolListResult = typeof DeviceToolListResult.Type;
 
 export const DeviceToolOpenInput = Schema.Struct({
+  physical: Schema.optional(
+    Schema.Boolean.annotate({
+      description: "Filter to physical hardware, or false for simulators/emulators.",
+    }),
+  ),
   deviceId: Schema.optional(
     DeviceId.annotate({
-      description: "Device id from `device_list`. Default: the booted or last used device.",
+      description:
+        "Device id from `device_list`. Reuses this thread's device, otherwise requires an unambiguous physical-device choice.",
     }),
   ),
   platform: Schema.optional(
@@ -588,7 +595,7 @@ export const DeviceToolOpenInput = Schema.Struct({
   ),
 }).annotate({
   description:
-    "Boots the device if needed, starts its live stream, and opens the Device panel so the user can watch. Returns how to drive it with the agent-device CLI.",
+    "Opens the Device panel and boots virtual devices if needed. Physical hardware may use screenshots instead of live video. Returns how to drive it with the agent-device CLI.",
 });
 export type DeviceToolOpenInput = typeof DeviceToolOpenInput.Type;
 

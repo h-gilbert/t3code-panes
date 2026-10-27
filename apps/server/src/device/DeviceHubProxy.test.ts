@@ -24,6 +24,7 @@ const fixture = (
   fail = false,
   authError?: EnvironmentAuth.ServerAuthCredentialError | EnvironmentAuth.ServerAuthInternalError,
   upstream?: DeviceHost.DeviceHostReady["upstream"],
+  physical = false,
 ) => {
   let finalized = 0;
   const requests: string[] = [];
@@ -59,13 +60,17 @@ const fixture = (
       ),
       Layer.provideMerge(
         Layer.succeed(DeviceService.DeviceService, {
+          state: Effect.succeed({
+            devices: physical ? [{ hostId: "local", id: "hardware", physical: true }] : [],
+          }),
+          screenshot: () => Effect.succeed({ png: new Uint8Array([137, 80, 78, 71]) }),
           currentReadiness: () =>
             Effect.succeed({
               hostId: LOCAL_DEVICE_HOST_ID,
               hub: { origin: "http://hub.test" },
               ...(upstream ? { upstream } : {}),
             }),
-        } as DeviceService.DeviceService["Service"]),
+        } as unknown as DeviceService.DeviceService["Service"]),
       ),
       Layer.provideMerge(Layer.succeed(HttpClient.HttpClient, client)),
     ),
@@ -76,6 +81,24 @@ const fixture = (
 };
 
 describe("device hub proxy", () => {
+  it("captures physical hardware without proxying a simulator screenshot", async () => {
+    const { handler, requests } = fixture(
+      [AuthOrchestrationReadScope],
+      false,
+      undefined,
+      undefined,
+      true,
+    );
+    const response = await handler(
+      new Request("http://t3.test/api/device-hub/vendor/serve-sim/api/screenshot?device=hardware"),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/png");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array([137, 80, 78, 71]));
+    expect(requests).toEqual([]);
+  });
+
   it("releases the upstream response after forwarding its body and strips tickets", async () => {
     const { handler, requests, finalized } = fixture([AuthOrchestrationReadScope]);
     const response = await handler(

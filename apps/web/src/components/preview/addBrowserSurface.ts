@@ -1,3 +1,4 @@
+import { showBrowserInset } from "./showBrowserInset";
 import {
   mapAtomCommandResult,
   type AtomCommandResult,
@@ -5,7 +6,6 @@ import {
 import type { ScopedThreadRef } from "@t3tools/contracts";
 
 import type { BrowserSettingsReadError, OpenPreviewMutation } from "~/browser/openFileInPreview";
-import { useRightPanelStore } from "~/rightPanelStore";
 
 import { openPreviewSession } from "./openPreviewSession";
 
@@ -20,6 +20,6 @@ export async function addBrowserSurface<E>(input: {
     ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
   });
   return mapAtomCommandResult(result, (snapshot) => {
-    useRightPanelStore.getState().openBrowser(input.threadRef, snapshot.tabId);
+    showBrowserInset(input.threadRef, snapshot.tabId);
   });
 }

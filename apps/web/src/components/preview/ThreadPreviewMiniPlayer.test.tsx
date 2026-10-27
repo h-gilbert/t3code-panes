@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   buttons: new Map<string, (() => void) | undefined>(),
   commit: vi.fn(async () => undefined),
 }));
+vi.mock("./PreviewView", () => ({ PreviewView: () => <section aria-label="Browser controls" /> }));
 vi.mock("react-dom", () => ({ createPortal: (children: ReactNode) => children }));
 vi.mock("~/components/ui/button", () => ({
   Button: (props: ComponentProps<"button">) => {
@@ -93,8 +94,7 @@ describe("browser presentation controls", () => {
     mocks.buttons.get("Open floating browser window")!();
     const windowMarkup = render();
     expect(windowMarkup).toContain('data-preview-presentation="window"');
-    expect(windowMarkup).toContain('data-test-fit="false"');
-    expect(windowMarkup).toContain('data-test-layer="111"');
+    expect(windowMarkup).toContain('aria-label="Browser controls"');
     mocks.buttons.get("Expand preview to full screen")!();
     expect(render()).toContain('data-preview-presentation="fullscreen"');
     mocks.buttons.get("Exit full screen")!();

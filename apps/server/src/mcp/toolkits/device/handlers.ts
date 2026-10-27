@@ -43,10 +43,14 @@ export function agentDeviceQuickStart(
   const platformNotes = cloud
     ? "This is an EAS Simulator session in the cloud. It bills the Expo account per minute until it stops, so call device_close with shutdown: true when you are done. It starts with no apps installed: install-from-source <url> installs a build from a URL (iOS needs a .tar.gz containing a .app), and install uploads one from this machine."
     : device.platform === "ios"
-      ? "First use builds an XCTest runner and can take a couple of minutes; later commands are fast."
+      ? device.physical
+        ? "Physical iOS requires trust, Developer Mode, and a signed XCTest runner. Run this launcher's help physical-device for signing setup. Use the configured Apple Development team and respect the shared compilation lock. First use may build the runner; a missing runner is a setup step. Do not restart another thread's daemon to configure yours."
+        : "First use builds an XCTest runner and can take a couple of minutes; later commands are fast."
       : "The Android snapshot helper installs itself on first use.";
   return [
-    `The user is watching ${device.name} (${device.version}) in the Device panel.`,
+    device.physical
+      ? `Physical device: ${device.name} (${device.version}). Live video may be unavailable; continue with screenshots and snapshots.`
+      : `The user is watching ${device.name} (${device.version}) in the Device panel.`,
     `Drive it with ${executable}. Use this exact executable path; login shells may reset PATH. Always pass ${target}.`,
     "Typical loop:",
     `  ${executable} open <bundle-or-package-id> ${target}     # or: open <app> <deep-link-url>`,
@@ -56,9 +60,12 @@ export function agentDeviceQuickStart(
     `  ${executable} screenshot /tmp/shot.png ${target}        # or call device_screenshot`,
     `  ${executable} install <app> <path-to-.app-or-.apk> ${target}`,
     `Prefer snapshot refs over coordinates. Run ${executable} help for workflow guides and ${executable} <command> --help for flags.`,
-    "Prefer agent-device for driving this device. simctl, adb, and xcrun remain available for anything it does not cover.",
+    "Prefer this agent-device launcher. If T3 discovery, streaming, or control fails on connected physical hardware, report the error and continue with device-pinned agent-device or native tools. adb UI control is allowed. Never bypass disabled device/agent access or a permission denial.",
+    "A requested device test includes installing development apps and automation helpers, signing in, taps, typing, captures, and task-related settings. Respect build locks and preserve unrelated apps/data. Ask only for trust, Developer Mode, or credentials you cannot supply.",
+    "If another thread owns the physical device, coordinate with it before taking control.",
     "For remote hosts, arrange builds, app installation, and any Metro reverse forwarding yourself. T3 provides discovery, streaming, and control only.",
     "Keep the returned --config and --session flags on every command. Other hosts can be used concurrently; opening one does not switch these commands.",
+    `Before releasing physical hardware, run ${executable} close ${target}, then call device_close.`,
     platformNotes,
   ].join("\n");
 }
@@ -78,7 +85,9 @@ const pickDevice = Effect.fn("handlers.pickDevice")(function* (
     readonly deviceId?: DeviceId | undefined;
     readonly platform?: DevicePlatform | undefined;
     readonly hostId?: DeviceHostId | undefined;
+    readonly physical?: boolean | undefined;
   },
+  owned: ReadonlyArray<{ readonly hostId: string; readonly deviceId: string }> = [],
 ): Effect.fn.Return<DeviceSummary, DeviceToolUnavailableError> {
   const hostId = input.hostId ?? LOCAL_DEVICE_HOST_ID;
   if (input.deviceId !== undefined) {
@@ -90,16 +99,32 @@ const pickDevice = Effect.fn("handlers.pickDevice")(function* (
       reason: `No device ${input.deviceId} on host ${hostId}. Call device_list for current ids.`,
     });
   }
+  const previous = owned.findLast(
+    (session) =>
+      (input.hostId === undefined || session.hostId === input.hostId) &&
+      devices.some(
+        (device) =>
+          device.hostId === session.hostId &&
+          device.id === session.deviceId &&
+          (input.platform === undefined || device.platform === input.platform) &&
+          (input.physical === undefined || device.physical === input.physical),
+      ),
+  );
+  if (previous)
+    return devices.find(
+      (device) => device.hostId === previous.hostId && device.id === previous.deviceId,
+    )!;
   const candidates = devices.filter(
     (device) =>
       device.hostId === hostId &&
-      (input.platform === undefined || device.platform === input.platform),
+      (input.platform === undefined || device.platform === input.platform) &&
+      (input.physical === undefined || device.physical === input.physical),
   );
   if (candidates.length === 0) {
     return yield* new DeviceToolUnavailableError({
       reason:
         input.platform === undefined
-          ? "No simulators or emulators were found. Call device_list to see why."
+          ? "No matching devices were found. Call device_list to see why."
           : `No ${input.platform} devices were found on host ${hostId}. Call device_list to see why.`,
     });
   }
@@ -107,6 +132,12 @@ const pickDevice = Effect.fn("handlers.pickDevice")(function* (
   if (input.platform === undefined && platforms.size > 1) {
     return yield* new DeviceToolUnavailableError({
       reason: "Both iOS and Android devices are available; pass platform or deviceId.",
+    });
+  }
+  if (candidates.length > 1 && candidates.some((device) => device.physical)) {
+    return yield* new DeviceToolUnavailableError({
+      reason:
+        "Several devices match. Ask which physical device to use, then pass its deviceId and hostId from device_list.",
     });
   }
   return candidates.find((device) => device.booted) ?? candidates[0]!;
@@ -139,6 +170,7 @@ const handlers = {
           ? state.devices.filter((device) => device.hostId === hostId)
           : state.devices,
         open,
+        inUse: state.sessions.filter((session) => !hostId || session.hostId === hostId),
       };
     }).pipe(Effect.mapError(toolError)),
   ),
@@ -153,12 +185,16 @@ const handlers = {
             "Device support is off. Ask the user to enable it in the Device panel before installing or starting device tools.",
         });
       }
-      const target = yield* pickDevice(state.devices, input);
+      const target = yield* pickDevice(
+        state.devices,
+        input,
+        state.sessions.filter((session) => session.threadId === scope.thread.threadId),
+      );
       // Resolve consent and agent connectivity before booting or registering a session.
       if (!(yield* devices.agentReadinessIfSupported(target.hostId))) {
         return yield* new DeviceToolUnavailableError({
           reason:
-            "Agent device access requires enabled device support, agent access, and an available simulator platform on this host.",
+            "Agent device access requires enabled device support, agent access, and an available device platform on this host.",
         });
       }
       const session = yield* devices.open(

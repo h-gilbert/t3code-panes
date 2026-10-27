@@ -9,6 +9,7 @@ import {
 } from "./duoControl.ts";
 import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
+import { createScreenshotView } from "./screenshotView.ts";
 import { createCanvasFrameSink, type DeviceFrameSink } from "./frame.ts";
 import { simulatorAvcConfig } from "./avcConfig.ts";
 import { type DeviceHubAccess, withDeviceHubQuery } from "./hubAccess.ts";
@@ -114,6 +115,7 @@ export interface DeviceStreamEvents {
 }
 
 export interface DeviceStreamTarget {
+  readonly physical?: boolean | undefined;
   readonly platform: DevicePlatform;
   readonly deviceId: string;
   readonly access: DeviceHubAccess;
@@ -387,6 +389,40 @@ export function createDeviceStreamClient(
   output: HTMLCanvasElement | DeviceFrameSink,
   events: DeviceStreamEvents,
 ): DeviceStreamClient {
+  if (target.physical) {
+    if (target.platform === "ios") return createScreenshotView(target, events);
+    let active: DeviceStreamClient;
+    let image: HTMLImageElement | null = null;
+    let fallback = false;
+    active = createDeviceStreamClient({ ...target, physical: false }, output, {
+      ...events,
+      onStatus: (status, detail) => {
+        if (status !== "error" || fallback) return events.onStatus(status, detail);
+        fallback = true;
+        active.stop();
+        active = createScreenshotView(target, events);
+        active.setMjpegImage(image);
+        active.start();
+      },
+    });
+    return {
+      start: () => active.start(),
+      stop: () => active.stop(),
+      setMjpegImage: (next) => {
+        image = next;
+        active.setMjpegImage(next);
+      },
+      sendTouch: (...args) => active.sendTouch(...args),
+      sendRawTouch: (...args) => active.sendRawTouch(...args),
+      sendKey: (...args) => active.sendKey(...args),
+      sendText: (text) => active.sendText(text),
+      pressButton: (button) => active.pressButton(button),
+      rotate: () => active.rotate(),
+      setOrientation: (orientation) => active.setOrientation(orientation),
+      controlDuo: (command) => active.controlDuo(command),
+      setDuoPanels: (panels) => active.setDuoPanels(panels),
+    };
+  }
   const { access, platform, deviceId } = target;
   const sink = "present" in output ? output : createCanvasFrameSink(output);
   const vendor = platform === "ios" ? "/vendor/serve-sim" : "/vendor/serve-emu";

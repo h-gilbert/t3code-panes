@@ -1,6 +1,10 @@
 // Loopback-only hubs expose shell execution or unauthenticated actions.
 // Proxy with environment read scope for streams and operate scope for input and tuning.
-import { AuthOrchestrationReadScope, AuthOrchestrationOperateScope } from "@t3tools/contracts";
+import {
+  DeviceId,
+  AuthOrchestrationReadScope,
+  AuthOrchestrationOperateScope,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import {
@@ -178,6 +182,24 @@ const handler = Effect.gen(function* () {
     controlsDevice ? AuthOrchestrationOperateScope : AuthOrchestrationReadScope,
   );
   const devices = yield* DeviceService.DeviceService;
+  if (/^\/vendor\/(serve-sim|serve-emu)\/api\/screenshot$/.test(hubPath)) {
+    const deviceId = url.value.searchParams.get("device");
+    const hostId = url.value.searchParams.get("hostId") ?? undefined;
+    const state = yield* devices.state;
+    const target = state.devices.find(
+      (device) => device.id === deviceId && device.hostId === (hostId ?? "local"),
+    );
+    if (target?.physical) {
+      const shot = yield* devices.screenshot({
+        hostId: target.hostId,
+        deviceId: DeviceId.make(target.id),
+      });
+      return HttpServerResponse.uint8Array(shot.png, {
+        contentType: "image/png",
+        headers: { "cache-control": "no-store" },
+      });
+    }
+  }
   const ready = yield* devices.currentReadiness(url.value.searchParams.get("hostId") ?? undefined);
   if (!ready) {
     return HttpServerResponse.text("Device hub is not running", { status: 503 });

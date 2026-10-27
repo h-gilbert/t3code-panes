@@ -49,6 +49,10 @@ export const makeDeviceHubOperations = (options: {
   readonly http: HttpClient.HttpClient;
   readonly run: DeviceHostReady["run"];
   /** Whether to list AVDs, which the hub does not report until they boot. */
+  readonly physicalDevices?: Effect.Effect<{
+    readonly devices: ReadonlyArray<HostDevice>;
+    readonly detail: string | undefined;
+  }>;
   readonly androidAvailable: Effect.Effect<boolean>;
 }): DeviceOperations => {
   const { hostId, origin, run } = options;
@@ -107,6 +111,18 @@ export const makeDeviceHubOperations = (options: {
         ),
     );
     const details = warnings?.map((error) => error.message) ?? [];
+    if (options.physicalDevices) {
+      const physical = yield* options.physicalDevices;
+      for (const device of physical.devices) {
+        if (
+          !devices.some(
+            (candidate) => candidate.platform === device.platform && candidate.id === device.id,
+          )
+        )
+          devices.push(device);
+      }
+      if (physical.detail) details.push(physical.detail);
+    }
     let androidDiscoveryIncomplete = false;
     if (yield* options.androidAvailable) {
       const avds = yield* run("emulator", ["-list-avds"]);
@@ -178,7 +194,7 @@ export const makeDeviceHubOperations = (options: {
   });
 
   const attach: DeviceOperations["attach"] = (device) =>
-    device.platform === "ios"
+    device.platform === "ios" && !device.physical
       ? attachIosStream(device.id, "open").pipe(Effect.asVoid)
       : Effect.void;
 

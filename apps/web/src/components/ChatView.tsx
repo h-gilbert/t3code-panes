@@ -1,3 +1,4 @@
+import { showBrowserInset } from "./preview/showBrowserInset";
 import { useProjects } from "../state/entities";
 import { prepareRevertedMessageAttachments } from "./ChatView.logic";
 import { Button } from "./ui/button";
@@ -999,13 +1000,13 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
     ),
   );
   const canReuseTerminal = activeThreadKnownSessionsRaw !== null;
-  const previewPanelOpen = activeRightPanelKind === "preview" && browserAvailable;
-  const rightPanelOpen = rightPanelState.isOpen;
+  const previewPanelOpen = activePreviewMiniPlayer?.source.kind === "browser" && browserAvailable;
+  const rightPanelOpen = rightPanelState.isOpen && activeRightPanelSurface?.kind !== "preview";
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
   const rightPanelPresenceValue = {
-    activeSurface: activeRightPanelSurface,
-    surfaces: rightPanelState.surfaces,
+    activeSurface: activeRightPanelSurface?.kind === "preview" ? null : activeRightPanelSurface,
+    surfaces: rightPanelState.surfaces.filter((surface) => surface.kind !== "preview"),
   };
   const rightPanelPresence = usePanelPresence(
     rightPanelOpen && activeThreadRef !== null,
@@ -1040,19 +1041,19 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
 
   useEffect(() => {
     if (!activeThreadRef || !previewSessionsReady) return;
-    const hiddenTabIds = new Set(
-      Object.values(activePreviewState.sessions)
-        .filter((session) => session.runtime === "server" && session.reveal === false)
-        .map((session) => session.tabId),
-    );
-    useRightPanelStore
-      .getState()
-      .reconcileBrowserSurfaces(
-        activeThreadRef,
-        Object.keys(activePreviewState.sessions),
-        hiddenTabIds,
-      );
-  }, [activePreviewState.sessions, activeThreadRef, previewSessionsReady]);
+    if (rightPanelState.isOpen && activeRightPanelSurface?.kind === "preview") {
+      const tabId = activeRightPanelSurface.resourceId;
+      const session = tabId ? activePreviewState.sessions[tabId] : undefined;
+      if (tabId && session && session.reveal !== false) showBrowserInset(activeThreadRef, tabId);
+    }
+    useRightPanelStore.getState().discardBrowserSurfaces(activeThreadRef);
+  }, [
+    activeThreadRef,
+    activeRightPanelSurface,
+    rightPanelState.isOpen,
+    activePreviewState.sessions,
+    previewSessionsReady,
+  ]);
 
   useEffect(() => {
     const source = activePreviewMiniPlayer?.source;
@@ -2130,7 +2131,6 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
     deviceStateLoaded,
     previewState: activePreviewState,
     serverBrowserAvailable: activeEnvironmentServerBrowser,
-    panelSurfaces: rightPanelState.surfaces,
     miniPlayerSource: activePreviewMiniPlayer?.source ?? null,
     sheetLayout: shouldUsePlanSidebarSheet,
   });

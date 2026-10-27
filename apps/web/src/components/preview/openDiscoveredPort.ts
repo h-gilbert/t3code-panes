@@ -1,3 +1,4 @@
+import { showBrowserInset } from "./showBrowserInset";
 import type { DiscoveredLocalServer, ScopedThreadRef } from "@t3tools/contracts";
 import {
   mapAtomCommandResult,
@@ -7,7 +8,6 @@ import {
 import { resolveDiscoveredServerUrl } from "~/browser/browserTargetResolver";
 import type { BrowserSettingsReadError, OpenPreviewMutation } from "~/browser/openFileInPreview";
 import { recordVisitForThread } from "~/browserHistoryStore";
-import { useRightPanelStore } from "~/rightPanelStore";
 import { openPreviewSession } from "./openPreviewSession";
 import { previewRuntimeFor } from "~/browser/previewRuntime";
 
@@ -27,6 +27,6 @@ export async function openDiscoveredPort<E>(input: {
   });
   return mapAtomCommandResult(result, (snapshot) => {
     recordVisitForThread(input.threadRef, input.port.url);
-    useRightPanelStore.getState().openBrowser(input.threadRef, snapshot.tabId);
+    showBrowserInset(input.threadRef, snapshot.tabId);
   });
 }

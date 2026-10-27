@@ -1,3 +1,5 @@
+import { PreviewView } from "./PreviewView";
+import { showBrowserInset } from "./showBrowserInset";
 import { previewPdfAssetUrl } from "@t3tools/shared/preview";
 import { useEnvironmentHttpBaseUrl } from "~/state/environments";
 import { observeResize } from "~/lib/observeResize";
@@ -377,11 +379,29 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
       >
-        <span className="min-w-0 flex-1 truncate pl-1 text-2xs text-muted-foreground">
-          {snapshot.navStatus._tag === "Idle"
-            ? "Browser"
-            : snapshot.navStatus.title.trim() || snapshot.navStatus.url.trim() || "Browser"}
-        </span>
+        {Object.keys(previewState.sessions).length > 1 ? (
+          <select
+            aria-label="Browser tab"
+            value={tabId}
+            className="min-w-0 flex-1 truncate bg-transparent pl-1 text-2xs text-muted-foreground outline-none"
+            onPointerDown={(event) => event.stopPropagation()}
+            onChange={(event) => showBrowserInset(threadRef, event.target.value)}
+          >
+            {Object.values(previewState.sessions).map((session) => (
+              <option key={session.tabId} value={session.tabId}>
+                {session.navStatus._tag === "Idle"
+                  ? "Browser"
+                  : session.navStatus.title.trim() || session.navStatus.url.trim() || "Browser"}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span className="min-w-0 flex-1 truncate pl-1 text-2xs text-muted-foreground">
+            {snapshot.navStatus._tag === "Idle"
+              ? "Browser"
+              : snapshot.navStatus.title.trim() || snapshot.navStatus.url.trim() || "Browser"}
+          </span>
+        )}
         {recording ? (
           <span
             role="status"
@@ -445,7 +465,17 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
 
       <div className="relative min-h-0 flex-1">
         <div className="absolute inset-0 z-[29] bg-muted" />
-        {serverTab ? (
+        {!compact ? (
+          <div className="pointer-events-auto absolute inset-0 z-[30] flex">
+            <PreviewView
+              threadRef={threadRef}
+              tabId={tabId}
+              visible
+              insetPresentation
+              surfaceZIndex={windowLayer + 1}
+            />
+          </div>
+        ) : serverTab ? (
           <div className="pointer-events-auto absolute inset-0 z-[30]">
             <ServerBrowserSurface
               environmentId={threadRef.environmentId}
@@ -485,7 +515,7 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
           />
         )}
         <div className="pointer-events-none absolute inset-0 z-[31] ring-1 ring-inset ring-border/80" />
-        {!serverTab && !desktopOverlay?.hasWebContents ? (
+        {compact && !serverTab && !desktopOverlay?.hasWebContents ? (
           <div className="pointer-events-none absolute inset-0 z-[32] flex items-center justify-center bg-muted text-xs text-muted-foreground">
             {desktopOverlay?.hostedElsewhere
               ? "Showing in another window…"

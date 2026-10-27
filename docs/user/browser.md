@@ -1,7 +1,13 @@
-# Browser editing
+# Browser
+
+Browser pages open in an inset over the thread. Use its header to switch tabs,
+expand to full screen, or open a floating window. Browser pages never open in the sidebar. Existing sidebar tabs are kept
+when you switch to the browser.
+
+## Editing
 
 In the desktop app's browser, click a text field and use **Command-V** on macOS
-or **Ctrl-V** on Windows and Linux to paste. This works in both the browser panel
+or **Ctrl-V** on Windows and Linux to paste. This works in the inset browser
 and the floating browser.
 
 Right-click inside the page for **Undo**, **Redo**, **Cut**, **Copy**, **Paste**,

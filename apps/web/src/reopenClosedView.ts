@@ -1,3 +1,4 @@
+import { showBrowserInset } from "./components/preview/showBrowserInset";
 import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
 
 import type { OpenPreviewMutation } from "./browser/openFileInPreview";
@@ -107,7 +108,7 @@ export async function reopenClosedView(
       ...(view.snapshot.profileId === undefined ? {} : { profileId: view.snapshot.profileId }),
     });
     if (result._tag === "Failure") return false;
-    panels.openBrowser(ref, result.value.tabId);
+    showBrowserInset(ref, result.value.tabId);
     return true;
   }
   const surface = view.surface;
@@ -119,7 +120,14 @@ export async function reopenClosedView(
   switch (surface.kind) {
     case "preview":
       if (surface.resourceId !== null) return false;
-      panels.openBrowser(ref, null);
+      {
+        const result = await openPreviewSession({
+          openPreview: options.openPreview,
+          threadRef: ref,
+        });
+        if (result._tag === "Failure") return false;
+        showBrowserInset(ref, result.value.tabId);
+      }
       break;
     case "file":
       if (surface.attachment) panels.openAttachment(ref, surface.attachment);

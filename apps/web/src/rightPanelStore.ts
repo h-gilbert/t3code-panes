@@ -167,6 +167,7 @@ interface RightPanelStoreState {
   closeSurfacesToRight: (ref: ScopedThreadRef, surfaceId: string) => void;
   closeAllSurfaces: (ref: ScopedThreadRef) => void;
   moveSurface: (ref: ScopedThreadRef, surfaceId: string, toIndex: number) => void;
+  discardBrowserSurfaces: (ref: ScopedThreadRef) => void;
   reconcileBrowserSurfaces: (
     ref: ScopedThreadRef,
     tabIds: readonly string[],
@@ -952,6 +953,20 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             const surfaces = [...current.surfaces];
             surfaces.splice(toIndex, 0, ...surfaces.splice(fromIndex, 1));
             return { ...current, surfaces };
+          }),
+        ),
+      discardBrowserSurfaces: (ref) =>
+        set((state) =>
+          automaticUpdate(state, scopedThreadKey(ref), (current) => {
+            const surfaces = current.surfaces.filter((surface) => surface.kind !== "preview");
+            if (surfaces.length === current.surfaces.length) return current;
+            const activeKept = surfaces.some((surface) => surface.id === current.activeSurfaceId);
+            return {
+              ...current,
+              surfaces,
+              isOpen: current.isOpen && activeKept,
+              activeSurfaceId: activeKept ? current.activeSurfaceId : (surfaces[0]?.id ?? null),
+            };
           }),
         ),
       reconcileBrowserSurfaces: (ref, tabIds, hiddenTabIds) =>

@@ -1,3 +1,4 @@
+import { showBrowserInset } from "../preview/showBrowserInset";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import type { Dispatch } from "react";
 import type { ThreadPreviewState } from "../../previewStateStore";
@@ -178,13 +179,13 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
   const togglePreviewPanel = () => {
     if (!activeThreadRef || !browserAvailable) return;
     if (previewPanelOpen) {
-      closePreviewPanel();
+      usePreviewMiniPlayerStore.getState().close(activeThreadRef);
       return;
     }
     if (!canOperatePreview) return;
     const activeTabId = activePreviewState.activeTabId;
     if (activeTabId) {
-      useRightPanelStore.getState().openBrowser(activeThreadRef, activeTabId);
+      showBrowserInset(activeThreadRef, activeTabId);
     } else {
       createBrowserSurface();
     }

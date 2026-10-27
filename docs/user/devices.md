@@ -1,7 +1,7 @@
 # Devices
 
-The Device panel shows a live iOS Simulator or Android Emulator next to a
-thread, so you can watch an agent verify mobile work and tap the device
+The Device panel shows simulators, emulators, and connected physical phones or
+tablets next to a thread, so you can watch an agent verify mobile work and tap the device
 yourself. Agents get the same device through `device_*` tools and the
 `agent-device` command line, which T3 Code sets up for them.
 
@@ -134,3 +134,21 @@ localhost without forwarding or another reachable address.
 The connected T3 server manages the device hub and agent tools on its own machine and configured SSH hosts. Required versions install automatically the next time those tools are used. Settings → Integrations → Check device tool versions reads installed versions without installing tools or starting devices.
 
 To receive newer tool versions on a remote environment, update that environment's T3 server. Updating only the browser or mobile app does not update the remote server. An offline host keeps its installed files, but an update needs network access before device support can start; T3 does not fall back to an older version. Reconnect the host and use Retry if installation fails. Existing device and agent-access settings are preserved.
+
+## Physical phones and tablets
+
+Connect an Android phone or tablet over USB with USB debugging enabled, or use an
+already-paired wireless connection. Physical Android devices need Platform-Tools
+with ADB; an emulator and AVD manager are not required. Paired iPhones and iPads
+are discovered through Xcode on their Mac host. Select the host where the device
+is connected, including a configured remote host.
+
+Agents can install development apps and automation helpers, inspect screens, tap,
+and type as part of a requested test. Physical iOS control needs Developer Mode,
+trust, and a signed XCTest runner. An on-device prompt may need your attention.
+When live video is unavailable, agents continue using screenshots. Physical iOS devices use
+a screenshot view with a refresh button. Physical Android devices also fall back
+to screenshots when live video fails.
+
+A physical device belongs to one thread while it is open. Close its device tab
+when another thread needs it. Closing the tab leaves the device powered on.

@@ -328,6 +328,7 @@ function OpenDevicePreview({
       access={access}
       platform={session.platform}
       deviceId={session.deviceId}
+      physical={preview.physical}
       colors={{
         background: themeVariables["--color-sheet-solid"],
         foreground: themeVariables["--color-foreground"],

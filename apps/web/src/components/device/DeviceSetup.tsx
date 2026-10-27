@@ -19,7 +19,7 @@ import { cn } from "~/lib/utils";
 const platformName = (platform: DevicePlatform) => (platform === "ios" ? "iOS" : "Android");
 
 export const deviceHubDescription =
-  "Enable this environment to open simulators and emulators, whether they run here or on a remote device host.";
+  "Enable this environment to open simulators, emulators, and connected physical phones or tablets on local or remote hosts.";
 export const agentDeviceDescription =
   "Allow new agent sessions in this environment to start and control local and remote devices, with required tools set up automatically.";
 
@@ -161,7 +161,7 @@ export function DeviceSetup(props: {
     <>
       <WizardHeader
         title="Set up devices"
-        description="Review what runs on this environment before using simulators and emulators."
+        description="Review what runs on this environment before using devices."
       >
         <WizardSteps
           steps={["Device hub", "Simulators", "Agent access"]}

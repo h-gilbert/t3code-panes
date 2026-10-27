@@ -13,6 +13,7 @@ import {
   type DeviceOpenInput,
   type DevicePlatform,
   DevicePlatformUnavailableError,
+  DeviceActionUnavailableError,
   type DeviceServiceState,
   type DeviceSession,
   type DeviceShutdownInput,
@@ -32,6 +33,7 @@ import { SshCommandError } from "@t3tools/ssh/errors";
 import * as FileSystem from "effect/FileSystem";
 import { resolveNodeExecutable, nodeRuntimeUnavailableMessage } from "@t3tools/shared/nodeRuntime";
 import * as Path from "effect/Path";
+import { capturePhysicalScreenshot, captureAndroidScreenshot } from "./PhysicalDeviceScreenshot.ts";
 import { ensureAgentDevice, ensureDeviceHub } from "./DeviceToolchain.ts";
 import * as ServerConfig from "../config.ts";
 import {
@@ -43,6 +45,8 @@ import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
+import * as Option from "effect/Option";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Scope from "effect/Scope";
@@ -62,6 +66,15 @@ import * as EasDeviceHost from "./EasDeviceHost.ts";
 import { makeExpoApi, resolveExpoCredential } from "./ExpoApi.ts";
 import * as Exit from "effect/Exit";
 import * as LocalDeviceHost from "./LocalDeviceHost.ts";
+
+const decodeMissingAgentSession = Schema.decodeUnknownOption(
+  Schema.fromJsonString(
+    Schema.Struct({
+      success: Schema.Literal(false),
+      error: Schema.Struct({ code: Schema.Literal("SESSION_NOT_FOUND") }),
+    }),
+  ),
+);
 
 export const DEVICE_HUB_ROUTE_PREFIX = "/api/device-hub";
 
@@ -142,6 +155,7 @@ export class DeviceService extends Context.Service<
     readonly detail: (input: DeviceDetailInput) => Effect.Effect<DeviceDetail, DeviceError>;
     readonly action: (input: DeviceActionInput) => Effect.Effect<DeviceDetail, DeviceError>;
     readonly screenshot: (input: {
+      readonly threadId?: ThreadId | undefined;
       readonly hostId?: DeviceHostId | undefined;
       readonly deviceId: DeviceId;
     }) => Effect.Effect<DeviceScreenshot, DeviceError>;
@@ -671,6 +685,20 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
               hostLabel: host.label,
               reason: "Device support was turned off while the device was opening.",
             });
+          const currentState = (yield* SynchronizedRef.get(stateRef)).state;
+          const owner =
+            device.physical &&
+            currentState.sessions.find(
+              (existing) =>
+                existing.hostId === session.hostId &&
+                existing.deviceId === session.deviceId &&
+                existing.threadId !== session.threadId,
+            );
+          if (owner)
+            return yield* new DeviceHostUnavailableError({
+              hostId: host.id,
+              reason: `Physical device ${device.name} is in use by thread ${owner.threadId}. Coordinate with that thread and wait for it to close the device.`,
+            });
           yield* publish((current) => ({
             ...current,
             sessions: [
@@ -777,7 +805,10 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
   const detail: DeviceService["Service"]["detail"] = Effect.fn("DeviceService.detail")(
     function* (input) {
       const { ready, device } = yield* resolveDevice(input.hostId, input.deviceId);
-      const read = yield* readDeviceDetail(ready, device.platform, device.id);
+      const read =
+        device.physical && device.platform === "ios"
+          ? { settings: {}, foregroundApp: null }
+          : yield* readDeviceDetail(ready, device.platform, device.id);
       return {
         hostId: ready.hostId,
         deviceId: device.id,
@@ -791,6 +822,12 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
   const action: DeviceService["Service"]["action"] = Effect.fn("DeviceService.action")(
     function* (input) {
       const { ready, device } = yield* resolveDevice(input.hostId, input.deviceId);
+      if (device.physical && device.platform === "ios")
+        return yield* new DeviceActionUnavailableError({
+          operation: input.type,
+          platform: "ios",
+          reason: "unsupported",
+        });
       yield* runDeviceAction(ready, device.platform, input);
       return yield* detail({ hostId: ready.hostId, deviceId: device.id });
     },
@@ -839,7 +876,7 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
             hostId: host.id,
             hostLabel: host.label,
             reason:
-              "Agent device access requires enabled device support, agent access, and an available simulator platform on this host.",
+              "Agent device access requires enabled device support, agent access, and an available device platform on this host.",
           });
         const { configPath, agentDeviceId } = yield* lifecycleLock.withPermit(
           Effect.gen(function* () {
@@ -1127,31 +1164,126 @@ export const make = Effect.gen(function* () {
     ),
   );
 
-  return {
-    ...service,
-    easAccount,
-    agentCli: resolveNodeExecutable("Device automation").pipe(
-      Effect.andThen(ensureAgentDevice(config.baseDir)),
-      Effect.provideService(FileSystem.FileSystem, fs),
-      Effect.provideService(Path.Path, path),
-      Effect.provideService(ProcessRunner.ProcessRunner, runner),
-      Effect.map((tool) => tool.entryPath),
-      Effect.mapError((error) =>
-        error._tag === "NodeRuntimeUnavailableError"
-          ? new DeviceHostUnavailableError({
-              hostId: LOCAL_DEVICE_HOST_ID,
-              hostLabel: LOCAL_DEVICE_HOST_LABEL,
-              reason: nodeRuntimeUnavailableMessage("Device automation"),
-              cause: error,
-            })
-          : new DeviceOperationError({
-              operation: "install agent CLI",
-              reason: "command_failed",
-              cause: error,
-            }),
-      ),
+  const agentCli = resolveNodeExecutable("Device automation").pipe(
+    Effect.andThen(ensureAgentDevice(config.baseDir)),
+    Effect.provideService(FileSystem.FileSystem, fs),
+    Effect.provideService(Path.Path, path),
+    Effect.provideService(ProcessRunner.ProcessRunner, runner),
+    Effect.map((tool) => tool.entryPath),
+    Effect.mapError((error) =>
+      error._tag === "NodeRuntimeUnavailableError"
+        ? new DeviceHostUnavailableError({
+            hostId: LOCAL_DEVICE_HOST_ID,
+            hostLabel: LOCAL_DEVICE_HOST_LABEL,
+            reason: nodeRuntimeUnavailableMessage("Device automation"),
+            cause: error,
+          })
+        : new DeviceOperationError({
+            operation: "install agent CLI",
+            reason: "command_failed",
+            cause: error,
+          }),
     ),
-  };
+  );
+  const screenshot: DeviceService["Service"]["screenshot"] = Effect.fn(
+    "DeviceService.captureScreenshot",
+  )(
+    function* (input) {
+      const state = yield* service.state;
+      const device = state.devices.find(
+        (device) =>
+          device.hostId === (input.hostId ?? LOCAL_DEVICE_HOST_ID) && device.id === input.deviceId,
+      );
+      if (!device?.physical) return yield* service.screenshot(input);
+      const session = state.sessions.find(
+        (session) =>
+          session.hostId === device.hostId &&
+          session.deviceId === device.id &&
+          (input.threadId === undefined || session.threadId === input.threadId),
+      );
+      if (!session)
+        return yield* new DeviceHostUnavailableError({
+          hostId: device.hostId,
+          reason: "Open the physical device in this thread before capturing it.",
+        });
+      if (device.platform === "android")
+        return yield* captureAndroidScreenshot(yield* service.readiness(device.hostId), device);
+      const target = yield* service.agentTarget(session);
+      return yield* capturePhysicalScreenshot(device, yield* agentCli, target.args);
+    },
+    Effect.provideService(FileSystem.FileSystem, fs),
+    Effect.provideService(Path.Path, path),
+    Effect.provideService(ProcessRunner.ProcessRunner, runner),
+  );
+  const close: DeviceService["Service"]["close"] = Effect.fn("DeviceService.closePhysicalSession")(
+    function* (input) {
+      const state = yield* service.state;
+      const sessions = state.sessions.filter(
+        (session) =>
+          session.threadId === input.threadId &&
+          (input.hostId === undefined || session.hostId === input.hostId) &&
+          (input.deviceId === undefined || session.deviceId === input.deviceId) &&
+          state.devices.some(
+            (device) =>
+              device.hostId === session.hostId && device.id === session.deviceId && device.physical,
+          ),
+      );
+      if (state.agentAccessEnabled)
+        for (const session of sessions) {
+          const target = yield* service.agentTarget(session);
+          const device = state.devices.find(
+            (device) => device.hostId === session.hostId && device.id === session.deviceId,
+          )!;
+          const node = yield* resolveNodeExecutable("Device automation").pipe(
+            Effect.mapError(
+              (cause) =>
+                new DeviceOperationError({
+                  operation: "close physical device session",
+                  reason: "command_failed",
+                  cause,
+                }),
+            ),
+          );
+          const result = yield* runner
+            .run({
+              command: node,
+              args: [
+                yield* agentCli,
+                "close",
+                "--platform",
+                device.platform,
+                device.platform === "ios" ? "--udid" : "--serial",
+                device.id,
+                ...target.args,
+                "--json",
+              ],
+              env: { ELECTRON_RUN_AS_NODE: "1" },
+              timeout: "30 seconds",
+            })
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new DeviceOperationError({
+                    operation: "close physical device session",
+                    reason: "command_failed",
+                    cause,
+                  }),
+              ),
+            );
+          const missing = decodeMissingAgentSession(result.stdout);
+          if ((result.code !== 0 || result.timedOut) && Option.isNone(missing))
+            return yield* new DeviceOperationError({
+              operation: "close physical device session",
+              reason: "command_failed",
+              cause: result,
+            });
+        }
+      return yield* service.close(input);
+    },
+    Effect.provideService(FileSystem.FileSystem, fs),
+    Effect.provideService(Path.Path, path),
+  );
+  return { ...service, easAccount, agentCli, screenshot, close };
 });
 
 export const layer = Layer.effect(DeviceService, make).pipe(Layer.provide(LocalDeviceHost.layer));

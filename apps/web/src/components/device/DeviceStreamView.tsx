@@ -77,6 +77,7 @@ export function DeviceStreamView(props: {
   readonly environmentId: EnvironmentId;
   readonly platform: DevicePlatform;
   readonly deviceId: string;
+  readonly physical?: boolean;
   readonly deviceName?: string;
   readonly deviceDescription?: string;
   readonly visible: boolean;
@@ -138,7 +139,7 @@ export function DeviceStreamView(props: {
       return;
     }
     const client = createDeviceStreamClient(
-      { platform: props.platform, deviceId: props.deviceId, access },
+      { platform: props.platform, deviceId: props.deviceId, physical: props.physical, access },
       createCanvasFrameSink(canvas, () => frameListenerRef.current?.()),
       {
         onDuoControl: setDuoControl,
@@ -196,6 +197,7 @@ export function DeviceStreamView(props: {
     props.deviceId,
     props.environmentId,
     props.platform,
+    props.physical,
     props.visible,
   ]);
 
@@ -378,7 +380,7 @@ export function DeviceStreamView(props: {
         )}
         tabIndex={0}
         role="application"
-        aria-label={`${props.platform === "ios" ? "iOS Simulator" : "Android Emulator"} screen`}
+        aria-label={`${props.platform === "ios" ? "iOS" : "Android"} device screen`}
         onKeyDown={(event) => {
           if (event.target !== event.currentTarget) return;
           if (event.metaKey && !["r", "R"].includes(event.key)) return;
@@ -499,6 +501,14 @@ export function DeviceStreamView(props: {
             onUnavailable={onPhoneUnavailable}
           />
         ) : null}
+        {props.physical && inputState.detail?.startsWith("Screenshot only") ? (
+          <div className="absolute bottom-3 left-3 z-20 flex items-center gap-2 rounded-lg bg-background/90 p-2 text-xs">
+            <span>Screenshot only. Agent control is available.</span>
+            <Button variant="outline" size="xs" onClick={() => clientRef.current?.start()}>
+              Refresh screenshot
+            </Button>
+          </div>
+        ) : null}
         {props.allowPhoneView && !props.renderControls && status === "streaming" ? (
           <div className="absolute top-3 left-3 flex gap-1 rounded-lg border border-border/50 bg-background/90 p-1 shadow-sm">
             <Button
@@ -521,7 +531,9 @@ export function DeviceStreamView(props: {
             </Button>
           </div>
         ) : null}
-        {status === "streaming" && !inputState.connected ? (
+        {status === "streaming" &&
+        !inputState.connected &&
+        !inputState.detail?.startsWith("Screenshot only") ? (
           <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center p-2">
             <span className="rounded-md bg-background/85 px-2 py-1 text-xs text-muted-foreground">
               Input disconnected{inputState.detail ? ` (${inputState.detail})` : ""}, reconnecting…

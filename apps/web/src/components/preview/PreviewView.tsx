@@ -1,3 +1,4 @@
+import { showBrowserInset } from "./showBrowserInset";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import type { PreviewViewportSetting } from "@t3tools/contracts";
 import { browserCredentialProfile } from "./browserCredentialProfile";
@@ -26,7 +27,7 @@ import {
   previewPdfAssetUrl,
   resolveSearchUrlTemplate,
 } from "@t3tools/shared/preview";
-import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { Trash2Icon } from "lucide-react";
 
 import {
@@ -120,6 +121,8 @@ interface Props {
   tabId?: string | null;
   configuredUrls?: ReadonlyArray<string> | undefined;
   visible: boolean;
+  insetPresentation?: boolean;
+  surfaceZIndex?: number;
   onSendAnnotation?: (
     annotation: PreviewAnnotationPayload,
     image: ComposerImageAttachment | null,
@@ -173,6 +176,8 @@ export function PreviewView({
   configuredUrls,
   visible,
   onSendAnnotation,
+  insetPresentation = false,
+  surfaceZIndex,
 }: Props) {
   const [focusUrlNonce, setFocusUrlNonce] = useState<number | undefined>(undefined);
   const [pickActive, setPickActive] = useState(false);
@@ -372,12 +377,7 @@ export function PreviewView({
         toastManager.add({ type: "error", title: "Unable to remove the saved login" });
       });
   });
-  // A tab created before profiles existed carries no profile of its own. It
-  // runs in the built-in `default` partition — the scope the browser used
-  // before profiles — not in whatever profile is configured as the default
-  // now, so that is what its label names and its clear actions target.
-  // Passing the snapshot's raw `undefined` through would reach the IPC layer
-  // as "every profile".
+  // Legacy tabs use the built-in default partition; undefined would clear every profile over IPC.
   const activeProfileId = snapshot?.profileId ?? DEFAULT_BROWSER_PROFILE_ID;
   const activeProfileName = snapshot?.browserScope
     ? (loginProfile ?? "Temporary session")
@@ -597,7 +597,7 @@ export function PreviewView({
       });
       return;
     }
-    useRightPanelStore.getState().openBrowser(threadRef, result.value.tabId);
+    showBrowserInset(threadRef, result.value.tabId);
     await closePreviewSession({ closePreview, snapshot, tabId, threadRef });
   };
 
@@ -1071,7 +1071,9 @@ export function PreviewView({
         captureDisabled={!desktopOverlay || isUnreachable}
         recording={recordingRuntimeTabId !== null}
         onPictureInPicture={
-          tabId && (isServerTab || previewBridge) ? handlePictureInPicture : undefined
+          !insetPresentation && tabId && (isServerTab || previewBridge)
+            ? handlePictureInPicture
+            : undefined
         }
         pictureInPicture={miniPlayerTabId === tabId}
         pictureInPictureDisabled={
@@ -1171,6 +1173,7 @@ export function PreviewView({
             <BrowserSurfaceSlot
               key={runtimeTabId}
               tabId={runtimeTabId}
+              {...(surfaceZIndex === undefined ? {} : { zIndex: surfaceZIndex })}
               visible={visible && !isUnreachable}
               className="absolute inset-0 h-full w-full"
             />
