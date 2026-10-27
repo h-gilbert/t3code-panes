@@ -5,7 +5,16 @@ import {
   type CDPSession,
   type Page,
 } from "playwright-core";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 
 import * as ServerBrowserPage from "./ServerBrowserPage.ts";
 
@@ -121,6 +130,77 @@ describe("server browser element refs", () => {
       "inside iframe",
     );
     expect(await page.getByRole("textbox", { name: "parent" }).inputValue()).toBe("");
+  });
+
+  it("edits a cross-site form without native keyboard input", async () => {
+    await page.route("https://parent.test/**", (route) =>
+      route.fulfill({
+        contentType: "text/html",
+        body: '<input aria-label="parent" value="keep"><iframe src="https://payments.test/form"></iframe>',
+      }),
+    );
+    await page.route("https://payments.test/**", (route) =>
+      route.fulfill({
+        contentType: "text/html",
+        body: `<input aria-label="Suburb" value="PARK"><script>
+        document.querySelector('input').addEventListener('input', event => {
+          document.body.dataset.saved = event.target.value;
+        });
+      </script>`,
+      }),
+    );
+    await page.goto("https://parent.test/");
+    const child = page.frameLocator("iframe").getByRole("textbox");
+    await child.waitFor();
+    const line = String((await takeSnapshot()).accessibilityTree)
+      .split("\n")
+      .find((line) => line.includes('textbox "Suburb"'));
+    const locator = locators(line)[0]!;
+    using _keyboard = vi
+      .spyOn(page.keyboard, "insertText")
+      .mockRejectedValue(new Error("Input.insertText timed out in embedded form"));
+    await child.evaluate((element) => {
+      element.focus();
+      (
+        element as unknown as { setSelectionRange(start: number, end: number): void }
+      ).setSelectionRange(4, 4);
+    });
+    await ServerBrowserPage.type(page, { locator, text: "VALE" });
+    expect(await child.inputValue()).toBe("PARKVALE");
+    await ServerBrowserPage.type(page, { text: "HASTINGS", clear: true });
+    expect(await child.inputValue()).toBe("HASTINGS");
+    expect(await page.frameLocator("iframe").locator("body").getAttribute("data-saved")).toBe(
+      "HASTINGS",
+    );
+    await ServerBrowserPage.type(page, { locator, text: "", clear: true });
+    expect(await child.inputValue()).toBe("");
+    expect(await page.getByRole("textbox", { name: "parent" }).inputValue()).toBe("keep");
+  });
+
+  it("edits a focused shadow input and contenteditable without keyboard input", async () => {
+    await page.setContent(`<div id="host"></div><div contenteditable aria-label="Notes">old</div>
+      <script>host.attachShadow({mode: 'open'}).innerHTML = '<input value="old">';</script>`);
+    await page.locator("#host input").focus();
+    await ServerBrowserPage.type(page, { text: "new", clear: true });
+    expect(await page.locator("#host input").inputValue()).toBe("new");
+    await ServerBrowserPage.type(page, {
+      selector: "[contenteditable]",
+      text: "literal <text>",
+      clear: true,
+    });
+    expect(await page.locator("[contenteditable]").textContent()).toBe("literal <text>");
+    await ServerBrowserPage.type(page, { selector: "[contenteditable]", text: "", clear: true });
+    expect(await page.locator("[contenteditable]").textContent()).toBe("");
+  });
+
+  it("preserves readonly fields and supports date replacement", async () => {
+    await page.setContent('<input id="locked" readonly value="keep"><input id="date" type="date">');
+    await expect(
+      ServerBrowserPage.type(page, { selector: "#locked", text: "new", clear: true }),
+    ).rejects.toThrow("not an enabled text field");
+    expect(await page.locator("#locked").inputValue()).toBe("keep");
+    await ServerBrowserPage.type(page, { selector: "#date", text: "2026-10-27", clear: true });
+    expect(await page.locator("#date").inputValue()).toBe("2026-10-27");
   });
 
   it("shows dotted fields as dots wherever their value appears, keeping text values and refs", async () => {

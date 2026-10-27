@@ -693,64 +693,119 @@ export const click = async (
   return point;
 };
 
+const focusedTextTarget = async (page: Page): Promise<Locator> => {
+  let frame = page.mainFrame();
+  for (;;) {
+    const target = frame.locator("*:focus").last();
+    const active = await frame.evaluateHandle(`(() => {
+      let element = document.activeElement;
+      while (element?.shadowRoot?.activeElement) element = element.shadowRoot.activeElement;
+      return element;
+    })()`);
+    const element = active.asElement();
+    try {
+      const child = await element?.contentFrame();
+      if (!child) return target;
+      frame = child;
+    } finally {
+      await active.dispose();
+    }
+  }
+};
+
 export const type = async (page: Page, input: PreviewAutomationTypeInput) => {
   const timeout = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const locator = targetLocator(page, input);
-  if (locator !== null && input.clear) {
-    await locator.fill(input.text, { timeout });
-    return;
-  }
-  // A shadow host also matches :focus; use its innermost focused descendant.
-  const target = locator ?? page.locator("*:focus").last();
-  const focused =
-    (locator !== null || (await target.count()) > 0) &&
-    (await target.evaluate(
-      (element) => {
-        // Require an enabled, focused text target to avoid losing input or sending it to the previous field.
-        const control = element as unknown as {
-          readonly type?: string;
-          readonly disabled?: boolean;
-          readonly readOnly?: boolean;
-          readonly isContentEditable?: boolean;
-          readonly focus?: () => void;
-        };
-        const nonText = [
-          "button",
-          "checkbox",
-          "color",
-          "file",
-          "hidden",
-          "image",
-          "radio",
-          "range",
-          "reset",
-          "submit",
-        ];
-        const textControl =
-          element.tagName === "TEXTAREA" ||
-          (element.tagName === "INPUT" && !nonText.includes(control.type ?? "text"));
-        if (!(textControl || control.isContentEditable) || control.disabled || control.readOnly) {
-          return false;
-        }
-        control.focus?.();
-        const root = element.getRootNode() as { readonly activeElement?: typeof element | null };
-        const active = root.activeElement;
-        return active != null && (active === element || element.contains(active));
-      },
-      undefined,
-      { timeout },
-    ));
-  if (focused !== true) {
+  const target = locator ?? (await focusedTextTarget(page));
+  if (locator === null && (await target.count()) === 0) {
     throw new ServerBrowserOperationError(
       "PreviewAutomationTargetNotEditableError",
       "The target is not an enabled text field, so no text was typed.",
     );
   }
-  if (input.clear) {
-    await page.keyboard.press("ControlOrMeta+A");
-    await page.keyboard.press("Delete");
+  await target.waitFor({ state: "visible", timeout });
+  // Native CDP input can stall in an unfocused Electron guest's cross-site frame.
+  // Evaluate on the resolved element so edits stay in its document and preserve app focus.
+  const edited = await target.evaluate<boolean, { text: string; clear: boolean }>(
+    (element, { text, clear }) => {
+      const doc = element.ownerDocument;
+      const textControl =
+        element.tagName === "TEXTAREA" ||
+        (element.tagName === "INPUT" &&
+          ![
+            "button",
+            "checkbox",
+            "color",
+            "file",
+            "hidden",
+            "image",
+            "radio",
+            "range",
+            "reset",
+            "submit",
+          ].includes(element.type));
+      if (!(textControl || element.isContentEditable) || element.disabled || element.readOnly)
+        return false;
+      element.focus();
+      const active = element.getRootNode().activeElement;
+      if (active !== element && !element.contains(active)) return false;
+      if (
+        textControl &&
+        ["date", "datetime-local", "month", "time", "week"].includes(element.type)
+      ) {
+        if (!clear) return false;
+        element.value = text;
+        if (element.value !== text) return false;
+        element.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+        element.dispatchEvent(new Event("change", { bubbles: true }));
+        return true;
+      }
+      if (clear) {
+        if (textControl) element.select();
+        else {
+          const range = doc.createRange();
+          range.selectNodeContents(element);
+          const selection = doc.getSelection();
+          selection?.removeAllRanges();
+          selection?.addRange(range);
+        }
+      }
+      if (text.length > 0) {
+        if (!doc.execCommand("insertText", false, text)) return false;
+      } else if (clear) {
+        doc.execCommand("delete", false);
+        const cleared = textControl
+          ? element.value.length === 0
+          : (element.textContent ?? "").length === 0;
+        if (!cleared) {
+          if (textControl) {
+            const setter = Object.getOwnPropertyDescriptor(
+              Object.getPrototypeOf(element),
+              "value",
+            )?.set;
+            if (setter) setter.call(element, "");
+            else element.value = "";
+          } else element.replaceChildren();
+          element.dispatchEvent(
+            new doc.defaultView.InputEvent("input", {
+              bubbles: true,
+              inputType: "deleteContentBackward",
+            }),
+          );
+        }
+      }
+      element.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    },
+    { text: input.text, clear: input.clear ?? false },
+    { timeout },
+  );
+  if (!edited) {
+    throw new ServerBrowserOperationError(
+      "PreviewAutomationTargetNotEditableError",
+      "The target is not an enabled text field, so no text was typed.",
+    );
   }
-  await page.keyboard.insertText(input.text);
 };
 
 export const hover = async (
