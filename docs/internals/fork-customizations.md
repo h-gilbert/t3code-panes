@@ -106,6 +106,11 @@ remains available, with pane markers for settled threads still visible in a pane
   owns are relayed to that window. Do not reintroduce a single "main window" that
   rejects guests from other windows; that left previews stuck reconnecting.
 
+Device previews open inset inside their owning thread, including embedded panes.
+Agents can reveal the same running device again or change its presentation without
+rebooting it. Keep reveal requests distinct from device ownership: hiding a preview
+must leave the device and agent session running. Fullscreen restores the previous view.
+
 The opening default lives in `apps/web/src/previewMiniPlayerStore.ts`, the header
 and fullscreen presentation in `components/preview/ThreadPreviewMiniPlayer.tsx`
 under that same `src` directory, and routing in `browser/browserTargetResolver.ts`.

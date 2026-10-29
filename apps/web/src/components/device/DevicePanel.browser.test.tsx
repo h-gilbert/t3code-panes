@@ -20,7 +20,7 @@ type CommandResult =
 const mocks = vi.hoisted(() => ({
   open: vi.fn<(request: unknown) => Promise<CommandResult>>(),
   close: vi.fn<(request: unknown) => Promise<CommandResult>>(),
-  openDevice: vi.fn(),
+  showDevice: vi.fn(),
   closeSurface: vi.fn(),
 }));
 const phone = {
@@ -74,9 +74,10 @@ vi.mock("~/state/use-atom-command", () => ({
         : () => Promise.resolve({ _tag: "Success", value: {} }),
 }));
 vi.mock("~/state/query", () => ({ formatEnvironmentQueryError: () => "Device failed" }));
+vi.mock("../preview/showDevicePreview", () => ({ showDevicePreview: mocks.showDevice }));
 vi.mock("~/rightPanelStore", () => ({
   useRightPanelStore: {
-    getState: () => ({ openDevice: mocks.openDevice, closeSurface: mocks.closeSurface }),
+    getState: () => ({ closeSurface: mocks.closeSurface }),
   },
 }));
 vi.mock("~/components/device/DeviceHostUpdates", () => ({ DeviceHostUpdates: () => null }));
@@ -163,20 +164,20 @@ describe("DevicePanel thread switches", () => {
 
     expect(startButton()).toBeNull();
     expect(errors()).toHaveLength(0);
-    expect(mocks.openDevice).not.toHaveBeenCalled();
+    expect(mocks.showDevice).not.toHaveBeenCalled();
 
     await act(async () => second.settle(opened));
 
     expect(startButton()).toBeNull();
-    expect(mocks.openDevice.mock.calls).toEqual([[threadB, phoneTarget]]);
+    expect(mocks.showDevice.mock.calls).toEqual([[threadB, phoneTarget, "inset"]]);
 
     await act(async () => latest.settle(opened));
 
     expect(startButton()?.disabled).toBe(false);
     expect(errors()).toHaveLength(0);
-    expect(mocks.openDevice.mock.calls).toEqual([
-      [threadB, phoneTarget],
-      [threadA, phoneTarget],
+    expect(mocks.showDevice.mock.calls).toEqual([
+      [threadB, phoneTarget, "inset"],
+      [threadA, phoneTarget, "inset"],
     ]);
   });
 });

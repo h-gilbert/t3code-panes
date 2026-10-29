@@ -314,6 +314,39 @@ describe("device setup consent", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect(
+    "reveals devices inset by default and accepts repeated presentation requests without rebooting",
+    () =>
+      Effect.gen(function* () {
+        const { service, requests } = yield* fixture();
+        yield* service.configure({ enabled: true });
+        const threadId = ThreadId.make("presentation-thread");
+        const first = yield* service.open({
+          threadId,
+          deviceId: "Pixel_API_35",
+          platform: "android",
+        });
+        expect(first).toMatchObject({ revealRequest: { presentation: "inset" } });
+        const fullscreen = yield* service.open({
+          threadId,
+          deviceId: first.deviceId,
+          platform: "android",
+          presentation: "fullscreen",
+        });
+        expect(fullscreen).toMatchObject({ revealRequest: { presentation: "fullscreen" } });
+        expect(fullscreen.revealRequest?.id).not.toBe(first.revealRequest?.id);
+        const hidden = yield* service.open({
+          threadId,
+          deviceId: first.deviceId,
+          platform: "android",
+          presentation: "hidden",
+        });
+        expect((yield* service.state).sessions).toEqual([hidden]);
+        expect(hidden).toMatchObject({ revealRequest: { presentation: "hidden" } });
+        expect(requests.filter((url) => url.endsWith("/boot"))).toHaveLength(1);
+      }).pipe(Effect.scoped),
+  );
+
   it.effect("blocks only emulator video until ffmpeg is usable, then allows retry", () =>
     Effect.gen(function* () {
       const { service, requests, devices, encoderResult } = yield* fixture();

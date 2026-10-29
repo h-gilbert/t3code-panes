@@ -19,20 +19,26 @@ This fork starts only one iOS Simulator per host by default. If another is
 running, T3 asks you to power it off before starting a different one. An agent
 can start an additional simulator only when you explicitly ask it to. T3 does
 not shut down simulators you start directly in Apple's Simulator app.
-Each device opens in its own tab. Use **+ → Device** to open another, and
-double-click a tab name or choose **Rename** from its context menu to rename it.
-Only the visible tab streams video; switching tabs keeps both devices running.
-Choose **Float device over chat** in the toolbar to keep watching and tapping the
-device in a small window while the right panel shows something else; drag the
-window by its handle, resize it from any edge, and use **Open in right panel**
-to bring it back.
+Devices open as an inset preview over their thread. You can move and resize the
+preview, expand it to fullscreen, or open it in the right panel. Fullscreen can
+return to the previous view. Closing the preview hides it while the device keeps
+running.
+
+In the right panel, each device has its own tab. Use **+ → Device** to open another,
+and double-click a tab name or choose **Rename** to rename it. Choose **Float device
+over chat** to return to the inset view.
+
+Agents can change the view by calling `device_open` again with `presentation` set
+to `inset`, `floating`, `fullscreen`, `panel`, or `hidden`. This keeps the same running
+device and its app state. `device_close` removes the device from the thread;
+`shutdown: true` also powers it off.
+
 Turn off the device hub in **Settings → Integrations → Devices** to stop the
 helper processes; simulators and emulators keep running until you power them
 off.
 
-For a full-screen view on your Mac, use the Simulator app's own window. It can
-stay open while T3 streams the same running simulator. Opening the device in T3
-attaches its stream; it does not take over the Simulator window.
+You can also keep Apple's Simulator app open while T3 streams the same running
+simulator. Opening the device in T3 does not take over its native window.
 
 Simulators run on the machine that hosts the environment server. iOS needs
 macOS with Xcode. Android needs the SDK Platform-Tools, Android Emulator,

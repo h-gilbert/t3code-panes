@@ -1,3 +1,4 @@
+import { showDevicePreview } from "../preview/showDevicePreview";
 import { DeviceHostUpdates } from "./DeviceHostUpdates";
 import type {
   DevicePlatform,
@@ -8,7 +9,6 @@ import type {
 import { ArrowUpRight, CircleAlert, Play, Smartphone, X } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 
-import { usePreviewMiniPlayerStore } from "~/previewMiniPlayerStore";
 import { useRightPanelStore, type RightPanelSurface } from "~/rightPanelStore";
 import { Button } from "~/components/ui/button";
 import { DiscoveryList } from "~/components/ui/discovery-list";
@@ -103,27 +103,28 @@ export function DevicePanel(props: {
     });
     if (result._tag === "Failure") settleOperation(formatEnvironmentQueryError(result.cause));
     else {
-      // The server opened the device for the starting thread, so its tab opens there.
-      useRightPanelStore.getState().openDevice(props.threadRef, {
-        hostId: result.value.hostId,
-        deviceId: result.value.deviceId,
-        platform: device.platform,
-        name: device.name,
-      });
+      showDevicePreview(
+        props.threadRef,
+        {
+          hostId: result.value.hostId,
+          deviceId: result.value.deviceId,
+          platform: device.platform,
+          name: device.name,
+        },
+        "inset",
+      );
       settleOperation(null);
     }
   };
 
   const floatActive = () => {
     if (!activeDevice) return;
-    usePreviewMiniPlayerStore.getState().open(props.threadRef, {
-      kind: "device",
+    showDevicePreview(props.threadRef, {
       hostId: activeDevice.hostId,
       deviceId: activeDevice.id,
       platform: activeDevice.platform,
       name: activeDevice.name,
     });
-    useRightPanelStore.getState().close(props.threadRef);
   };
 
   const closeActive = (powerOff: boolean) => {

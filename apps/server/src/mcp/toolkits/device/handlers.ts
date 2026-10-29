@@ -50,8 +50,9 @@ export function agentDeviceQuickStart(
   return [
     device.physical
       ? `Physical device: ${device.name} (${device.version}). Live video may be unavailable; continue with screenshots and snapshots.`
-      : `The user is watching ${device.name} (${device.version}) in the Device panel.`,
+      : `Opened ${device.name} (${device.version}) for this thread.`,
     `Drive it with ${executable}. Use this exact executable path; login shells may reset PATH. Always pass ${target}.`,
+    'Call device_open again with presentation: "inset", "floating", "fullscreen", "panel", or "hidden" to change this thread\'s view without restarting the device. Default: inset. Hidden keeps the device session and automation running.',
     "Typical loop:",
     `  ${executable} open <bundle-or-package-id> ${target}     # or: open <app> <deep-link-url>`,
     `  ${executable} snapshot -i ${target}                     # accessibility tree with @eN refs`,
@@ -203,6 +204,7 @@ const handlers = {
           hostId: target.hostId,
           deviceId: target.id,
           platform: target.platform,
+          ...(input.presentation === undefined ? {} : { presentation: input.presentation }),
         },
         { workspaceRoot: yield* threadWorkspaceRoot(scope.thread.threadId) },
       );

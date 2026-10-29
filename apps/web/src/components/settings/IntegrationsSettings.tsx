@@ -1121,7 +1121,7 @@ function BrowserAutoShowFloatingPreviewSetting({ disabled }: { readonly disabled
   return (
     <SettingsRow
       {...searchableSetting("browser-auto-show-floating-preview")}
-      description="Show the floating preview when an agent opens a browser or device unless the agent says otherwise."
+      description="Show the floating preview when an agent opens a browser unless the agent says otherwise."
       resetAction={
         !disabled && autoShow !== DEFAULT_BROWSER_AUTO_SHOW_FLOATING_PREVIEW ? (
           <SettingResetButton
@@ -1148,22 +1148,8 @@ function BrowserAutoShowFloatingPreviewSetting({ disabled }: { readonly disabled
   );
 }
 
-/**
- * Profile list, its header menu, and the import flow.
- *
- * One menu creates profiles and imports into them, because the two are the
- * same decision from the user's side: "I want a profile that has my Helium
- * logins in it". Import targets include "New profile" so that case does not
- * require creating one first and then finding a second control.
- *
- * Built-ins render without a rename field: they are synthesized rather than
- * stored, so there is nothing to rename and removing them would strand every
- * tab that opened under them.
- *
- * Sources are listed lazily on open: detection touches the other browser's
- * files, and the answer changes while the app is running (quitting the browser
- * clears `browserRunning`), so a value cached at mount would go stale.
- */
+// Built-in profiles are synthesized; removing them would strand their tabs.
+// Detect import sources on open because browser files and running state change after mount.
 function BrowserHostSettings() {
   const settings = useScopedSettings();
   const update = useUpdateScopedSettings();

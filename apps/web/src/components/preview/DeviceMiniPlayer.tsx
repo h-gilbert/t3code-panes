@@ -1,8 +1,16 @@
+import { createPortal } from "react-dom";
+import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { observeResize } from "~/lib/observeResize";
 
 import type { ScopedThreadRef } from "@t3tools/contracts";
 
-import { PanelRightIcon, XIcon } from "lucide-react";
+import {
+  Maximize2Icon,
+  Minimize2Icon,
+  PictureInPicture2,
+  PanelRightIcon,
+  XIcon,
+} from "lucide-react";
 import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
@@ -128,10 +136,7 @@ export function DeviceMiniPlayer({
   );
 }
 
-/**
- * Device frames follow the screen aspect ratio. Browser windows retain their
- * separate compact, floating and fullscreen presentation.
- */
+// Device windows keep the screen aspect ratio when dragged or resized.
 function MiniPlayerShell({
   threadRef,
   miniPlayer,
@@ -158,24 +163,31 @@ function MiniPlayerShell({
   const gestureRef = useRef<PointerGesture | null>(null);
   const [container, setContainer] = useState<PreviewMiniPlayerSize | null>(null);
   const sourceKey = previewMiniPlayerSourceKey(miniPlayer.source);
+  const { maximized, floating } = miniPlayer;
+  const compact = !maximized && !floating;
+  const inFront = usePreviewMiniPlayerStore(
+    (state) => state.frontThreadKey === scopedThreadKey(threadRef),
+  );
   const obstacles = {
     detailsCard: null,
     composer:
-      container && bottomInset > 0
+      compact && container && bottomInset > 0
         ? { left: 0, right: container.width, height: bottomInset }
         : null,
   };
   const frame = container
-    ? resolvePreviewMiniPlayerFrame({
-        width: miniPlayer.width,
-        position: miniPlayer.position,
-        source: sourceSize,
-        container,
-        obstacles,
-      })
+    ? maximized
+      ? { x: 0, y: 0, width: container.width, height: container.height }
+      : resolvePreviewMiniPlayerFrame({
+          width: miniPlayer.width ?? (floating ? 360 : null),
+          position: miniPlayer.position,
+          source: sourceSize,
+          container,
+          obstacles,
+        })
     : null;
 
-  const radius = frame ? cornerRadius(frame) : PREVIEW_MINI_PLAYER_CORNER_RADIUS;
+  const radius = maximized ? 0 : frame ? cornerRadius(frame) : PREVIEW_MINI_PLAYER_CORNER_RADIUS;
   // Inside a wide curve the default 8px inset would land on the clipped-away corner.
   const pillInset = Math.max(8, Math.round(radius * 0.55));
 
@@ -187,22 +199,27 @@ function MiniPlayerShell({
     const element = containerRef.current;
     if (!element) return;
     const measure = () => {
+      const size = compact
+        ? { width: element.clientWidth, height: element.clientHeight }
+        : { width: window.innerWidth, height: window.innerHeight };
       setContainer((current) =>
-        current?.width === element.clientWidth && current.height === element.clientHeight
-          ? current
-          : { width: element.clientWidth, height: element.clientHeight },
+        current?.width === size.width && current.height === size.height ? current : size,
       );
     };
     measure();
+    if (!compact) {
+      window.addEventListener("resize", measure);
+      return () => window.removeEventListener("resize", measure);
+    }
     if (typeof ResizeObserver === "undefined") return;
     return observeResize(element, measure);
-  }, []);
+  }, [compact]);
 
   const beginGesture = (
     event: ReactPointerEvent<HTMLElement>,
     direction: BrowserViewportResizeDirection | null,
   ) => {
-    if (event.button !== 0 || !frame) return;
+    if (event.button !== 0 || !frame || maximized) return;
     gestureRef.current = {
       pointerId: event.pointerId,
       pointerX: event.clientX,
@@ -253,93 +270,143 @@ function MiniPlayerShell({
     }
   };
 
-  return (
-    <div
-      ref={containerRef}
-      className="pointer-events-none absolute inset-0"
+  const player = frame ? (
+    <section
+      aria-label={label}
+      data-preview-mini-player={sourceKey}
+      data-preview-presentation={maximized ? "fullscreen" : floating ? "window" : "mini"}
+      onPointerDownCapture={() => {
+        if (!compact) usePreviewMiniPlayerStore.getState().bringToFront(threadRef);
+      }}
       onClick={(event) => event.stopPropagation()}
+      className={cn("pointer-events-none select-none", compact ? "absolute" : "fixed")}
+      style={{
+        left: frame.x,
+        top: frame.y,
+        width: frame.width,
+        height: frame.height,
+        borderRadius: radius,
+        zIndex: compact ? undefined : inFront ? 120 : 110,
+      }}
     >
-      {frame ? (
-        <section
-          aria-label={label}
-          data-preview-mini-player={sourceKey}
-          className="pointer-events-none absolute select-none"
-          style={{
-            left: frame.x,
-            top: frame.y,
-            width: frame.width,
-            height: frame.height,
-            borderRadius: radius,
-          }}
+      <div
+        className={cn(
+          "group pointer-events-auto absolute z-[49] size-3",
+          !compact && "[&>div]:pointer-events-auto [&>div]:opacity-100",
+        )}
+        style={{ right: pillInset, top: pillInset }}
+      >
+        <div
+          aria-hidden="true"
+          className="absolute right-0 top-0 size-2 rounded-full bg-foreground/25 shadow-sm ring-1 ring-background/70 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0"
+        />
+        <div
+          className="pointer-events-none absolute right-0 top-0 flex h-8 cursor-grab items-center gap-0.5 rounded-lg border border-border/80 bg-popover/92 p-0.5 opacity-0 shadow-lg/20 backdrop-blur-xl transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 active:cursor-grabbing"
+          onPointerDown={(event) => beginGesture(event, null)}
+          onPointerMove={handlePointerMove}
+          onPointerUp={endGesture}
+          onPointerCancel={endGesture}
         >
-          <div
-            className="group pointer-events-auto absolute z-[49] size-3"
-            style={{ right: pillInset, top: pillInset }}
-          >
-            <div
-              aria-hidden="true"
-              className="absolute right-0 top-0 size-2 rounded-full bg-foreground/25 shadow-sm ring-1 ring-background/70 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0"
-            />
-            <div
-              className="pointer-events-none absolute right-0 top-0 flex h-8 cursor-grab items-center gap-0.5 rounded-lg border border-border/80 bg-popover/92 p-0.5 opacity-0 shadow-lg/20 backdrop-blur-xl transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 active:cursor-grabbing"
-              onPointerDown={(event) => beginGesture(event, null)}
-              onPointerMove={handlePointerMove}
-              onPointerUp={endGesture}
-              onPointerCancel={endGesture}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label="Open preview in right panel"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={onOpenInPanel}
+                />
+              }
             >
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      aria-label="Open preview in right panel"
-                      onPointerDown={(event) => event.stopPropagation()}
-                      onClick={onOpenInPanel}
-                    />
+              <PanelRightIcon />
+            </TooltipTrigger>
+            <TooltipPopup side="top">Open in right panel</TooltipPopup>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={maximized ? "Exit full screen" : "Expand preview to full screen"}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={() =>
+                    usePreviewMiniPlayerStore
+                      .getState()
+                      .setMaximized(threadRef, sourceKey, !maximized)
                   }
-                >
-                  <PanelRightIcon />
-                </TooltipTrigger>
-                <TooltipPopup side="top">Open in right panel</TooltipPopup>
-              </Tooltip>
-              {pillActions}
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      aria-label="Close floating preview"
-                      onPointerDown={(event) => event.stopPropagation()}
-                      onClick={close}
-                    />
-                  }
-                >
-                  <XIcon />
-                </TooltipTrigger>
-                <TooltipPopup side="top">Close floating preview</TooltipPopup>
-              </Tooltip>
-            </div>
-          </div>
+                />
+              }
+            >
+              {maximized ? <Minimize2Icon /> : <Maximize2Icon />}
+            </TooltipTrigger>
+            <TooltipPopup side="top">{maximized ? "Exit full screen" : "Full screen"}</TooltipPopup>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={floating ? "Return to small preview" : "Open floating device window"}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={() => {
+                    const store = usePreviewMiniPlayerStore.getState();
+                    store.setFloating(threadRef, sourceKey, !floating);
+                    store.setMaximized(threadRef, sourceKey, false);
+                  }}
+                />
+              }
+            >
+              <PictureInPicture2 />
+            </TooltipTrigger>
+            <TooltipPopup side="top">{floating ? "Small preview" : "Floating window"}</TooltipPopup>
+          </Tooltip>
+          {pillActions}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label="Close floating preview"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={close}
+                />
+              }
+            >
+              <XIcon />
+            </TooltipTrigger>
+            <TooltipPopup side="top">Close floating preview</TooltipPopup>
+          </Tooltip>
+        </div>
+      </div>
 
-          <div className="absolute inset-0 z-[47] rounded-[inherit] bg-muted shadow-2xl/35" />
-          {children(frame)}
-          <div className="pointer-events-none absolute inset-0 z-[49] rounded-[inherit] ring-1 ring-inset ring-border/80" />
-          {RESIZE_HANDLES.map(({ direction, className }) => (
-            <div
-              key={direction}
-              role="presentation"
-              data-preview-mini-player-resize={direction}
-              className={cn("pointer-events-auto absolute z-[49] touch-none", className)}
-              onPointerDown={(event) => beginGesture(event, direction)}
-              onPointerMove={handlePointerMove}
-              onPointerUp={endGesture}
-              onPointerCancel={endGesture}
-            />
-          ))}
-        </section>
-      ) : null}
-    </div>
+      <div className="absolute inset-0 z-[47] rounded-[inherit] bg-muted shadow-2xl/35" />
+      {children(frame)}
+      <div className="pointer-events-none absolute inset-0 z-[49] rounded-[inherit] ring-1 ring-inset ring-border/80" />
+      {!maximized &&
+        RESIZE_HANDLES.map(({ direction, className }) => (
+          <div
+            key={direction}
+            role="presentation"
+            data-preview-mini-player-resize={direction}
+            className={cn("pointer-events-auto absolute z-[49] touch-none", className)}
+            onPointerDown={(event) => beginGesture(event, direction)}
+            onPointerMove={handlePointerMove}
+            onPointerUp={endGesture}
+            onPointerCancel={endGesture}
+          />
+        ))}
+    </section>
+  ) : null;
+  return (
+    <>
+      <div ref={containerRef} className="pointer-events-none absolute inset-0">
+        {compact ? player : null}
+      </div>
+      {!compact && player ? createPortal(player, document.body) : null}
+    </>
   );
 }

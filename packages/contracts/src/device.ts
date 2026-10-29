@@ -174,12 +174,24 @@ export const DeviceHostStatus = Schema.Literals([
 ]);
 export type DeviceHostStatus = typeof DeviceHostStatus.Type;
 
+export const DevicePresentation = Schema.Literals([
+  "inset",
+  "floating",
+  "fullscreen",
+  "panel",
+  "hidden",
+]);
+export type DevicePresentation = typeof DevicePresentation.Type;
+
 export const DeviceSession = Schema.Struct({
   threadId: ThreadId,
   hostId: DeviceHostId,
   deviceId: DeviceId,
   platform: DevicePlatform,
   openedAt: Schema.String,
+  revealRequest: Schema.optional(
+    Schema.Struct({ id: Schema.String, presentation: DevicePresentation }),
+  ),
 });
 export type DeviceSession = typeof DeviceSession.Type;
 
@@ -271,6 +283,7 @@ export const DeviceOpenInput = Schema.Struct({
   hostId: Schema.optional(DeviceHostId),
   deviceId: DeviceId,
   platform: DevicePlatform,
+  presentation: Schema.optional(DevicePresentation),
   /** Boot the simulator or emulator when it is not running. Defaults to true. */
   boot: Schema.optional(Schema.Boolean),
   /** Only for an explicit request to run more than one iOS Simulator on this host. */
@@ -568,6 +581,12 @@ export const DeviceToolListResult = Schema.Struct({
 export type DeviceToolListResult = typeof DeviceToolListResult.Type;
 
 export const DeviceToolOpenInput = Schema.Struct({
+  presentation: Schema.optional(
+    DevicePresentation.annotate({
+      description:
+        "Show this device inset, in a floating window, fullscreen, in the right panel, or hidden. Defaults to inset. Call again for an already-open device to change its view without restarting it.",
+    }),
+  ),
   physical: Schema.optional(
     Schema.Boolean.annotate({
       description: "Filter to physical hardware, or false for simulators/emulators.",
@@ -595,7 +614,7 @@ export const DeviceToolOpenInput = Schema.Struct({
   ),
 }).annotate({
   description:
-    "Opens the Device panel and boots virtual devices if needed. Physical hardware may use screenshots instead of live video. Returns how to drive it with the agent-device CLI.",
+    "Opens an inset device preview by default and boots virtual devices if needed. Presentation controls this thread's view; hidden keeps the session running. Physical hardware may use screenshots instead of live video. Returns how to drive it with the agent-device CLI.",
 });
 export type DeviceToolOpenInput = typeof DeviceToolOpenInput.Type;
 

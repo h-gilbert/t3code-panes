@@ -110,13 +110,15 @@ const layerDeviceServiceMock = Layer.mock(DeviceService.DeviceService)({
   list: Effect.succeed(state),
   agentReadinessIfSupported: () => Effect.succeed(readiness),
   open: (input) =>
-    Effect.succeed({
-      threadId: input.threadId,
-      hostId: "local",
-      deviceId: input.deviceId,
-      platform: input.platform,
-      openedAt: "2026-09-08T00:00:00.000Z",
-    }),
+    input.presentation !== "fullscreen"
+      ? Effect.die("Expected the tool's fullscreen request")
+      : Effect.succeed({
+          threadId: input.threadId,
+          hostId: "local",
+          deviceId: input.deviceId,
+          platform: input.platform,
+          openedAt: "2026-09-08T00:00:00.000Z",
+        }),
 
   sessionsForThread: (id) =>
     Effect.succeed(
@@ -164,7 +166,10 @@ it.effect("registers the device tools and returns the screenshot as image conten
         Effect.provideService(McpInvocationContext.McpInvocationContext, invocation(capabilities));
 
       const opened = yield* server
-        .callTool({ name: "device_open", arguments: { platform: "ios" } })
+        .callTool({
+          name: "device_open",
+          arguments: { platform: "ios", presentation: "fullscreen" },
+        })
         .pipe(callWith(["device"]), Effect.provideService(McpSchema.McpServerClient, client));
       expect(opened.isError).toBe(false);
       const openedContent = opened.structuredContent as { quickStart: string };

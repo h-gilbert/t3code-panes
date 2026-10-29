@@ -2132,7 +2132,6 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
     previewState: activePreviewState,
     serverBrowserAvailable: activeEnvironmentServerBrowser,
     miniPlayerSource: activePreviewMiniPlayer?.source ?? null,
-    sheetLayout: shouldUsePlanSidebarSheet,
   });
   // The thread's own change request, placed against the project it belongs to. Without a
   // project there is nothing to resolve it against, so the caller falls back to the browser.
