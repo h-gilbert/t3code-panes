@@ -225,7 +225,6 @@ export function useComposerSelection(input: ComposerSelectionInput) {
       { explicit: true, replaceOptions: true },
     );
     setStickyComposerModelSelection(nextModelSelection);
-    if (defaultReasoningOption) handleRuntimeModeChange("auto");
     if (options?.focusComposer !== false) scheduleComposerFocus();
   };
   const onProviderModelSelectStable = useStableCallback(onProviderModelSelect);
