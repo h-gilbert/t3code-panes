@@ -7,7 +7,7 @@ yourself. Agents get the same device through `device_*` tools and the
 
 ## Open a device
 
-Open the right panel in a project thread and choose **Device**. On first use,
+Choose **Device** from a project thread’s tools menu. Device discovery opens in an overlay. On first use,
 the panel walks through three steps: starting the device hub, checking iOS and
 Android support, and choosing whether agents may control devices. Opening the
 panel alone does not download or start anything. If the hub is already
@@ -20,16 +20,15 @@ running, T3 asks you to power it off before starting a different one. An agent
 can start an additional simulator only when you explicitly ask it to. T3 does
 not shut down simulators you start directly in Apple's Simulator app.
 Devices open as an inset preview over their thread. You can move and resize the
-preview, expand it to fullscreen, or open it in the right panel. Fullscreen can
+preview, float it over the workspace, or expand it to fullscreen. Fullscreen can
 return to the previous view. Closing the preview hides it while the device keeps
 running.
 
-In the right panel, each device has its own tab. Use **+ → Device** to open another,
-and double-click a tab name or choose **Rename** to rename it. Choose **Float device
-over chat** to return to the inset view.
+This fork does not open a tool sidebar. Files, diffs, terminals and device discovery
+use an overlay, leaving the chat layout unchanged. Existing device tabs reopen inset.
 
 Agents can change the view by calling `device_open` again with `presentation` set
-to `inset`, `floating`, `fullscreen`, `panel`, or `hidden`. This keeps the same running
+to `inset`, `floating`, `fullscreen`, or `hidden`. The older `panel` value opens inset too. This keeps the same running
 device and its app state. `device_close` removes the device from the thread;
 `shutdown: true` also powers it off.
 

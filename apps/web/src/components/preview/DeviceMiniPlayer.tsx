@@ -4,13 +4,7 @@ import { observeResize } from "~/lib/observeResize";
 
 import type { ScopedThreadRef } from "@t3tools/contracts";
 
-import {
-  Maximize2Icon,
-  Minimize2Icon,
-  PictureInPicture2,
-  PanelRightIcon,
-  XIcon,
-} from "lucide-react";
+import { Maximize2Icon, Minimize2Icon, PictureInPicture2, XIcon } from "lucide-react";
 import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
@@ -30,7 +24,6 @@ import {
   previewMiniPlayerSourceKey,
   usePreviewMiniPlayerStore,
 } from "~/previewMiniPlayerStore";
-import { useRightPanelStore } from "~/rightPanelStore";
 import { useDeviceState } from "~/state/device";
 
 import { DeviceStreamView } from "../device/DeviceStreamView";
@@ -94,16 +87,6 @@ export function DeviceMiniPlayer({
   const cornerRadius = (player: PreviewMiniPlayerSize) =>
     resolveDeviceMiniPlayerCornerRadius(source.platform, player);
 
-  const openInPanel = () => {
-    usePreviewMiniPlayerStore.getState().close(threadRef);
-    useRightPanelStore.getState().openDevice(threadRef, {
-      hostId: source.hostId,
-      deviceId: source.deviceId,
-      platform: source.platform,
-      name: source.name,
-    });
-  };
-
   return (
     <MiniPlayerShell
       threadRef={threadRef}
@@ -111,7 +94,6 @@ export function DeviceMiniPlayer({
       sourceSize={sourceSize}
       bottomInset={bottomInset}
       label="Floating device preview"
-      onOpenInPanel={openInPanel}
       cornerRadius={cornerRadius}
     >
       {() => (
@@ -143,7 +125,6 @@ function MiniPlayerShell({
   sourceSize,
   bottomInset,
   label,
-  onOpenInPanel,
   pillActions,
   cornerRadius = frameCornerRadius,
   children,
@@ -153,7 +134,6 @@ function MiniPlayerShell({
   readonly sourceSize: PreviewMiniPlayerSize;
   readonly bottomInset: number;
   readonly label: string;
-  readonly onOpenInPanel: () => void;
   readonly pillActions?: ReactNode;
   /** The clip radius for a given frame; the pill stays inside the curve. */
   readonly cornerRadius?: (frame: PreviewMiniPlayerSize) => number;
@@ -307,22 +287,6 @@ function MiniPlayerShell({
           onPointerUp={endGesture}
           onPointerCancel={endGesture}
         >
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label="Open preview in right panel"
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onClick={onOpenInPanel}
-                />
-              }
-            >
-              <PanelRightIcon />
-            </TooltipTrigger>
-            <TooltipPopup side="top">Open in right panel</TooltipPopup>
-          </Tooltip>
           <Tooltip>
             <TooltipTrigger
               render={

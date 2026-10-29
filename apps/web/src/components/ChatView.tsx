@@ -169,10 +169,7 @@ import { useThreadSelectionStore } from "../threadSelectionStore";
 import { subscribeSnapShotComposerFocus } from "../lib/desktopSnapShot";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { FileMetadataThreadProvider } from "../hooks/FileMetadataThreadProvider";
-import {
-  RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY,
-  type ThreadPanelPresentation,
-} from "../rightPanelLayout";
+import { type ThreadPanelPresentation } from "../rightPanelLayout";
 import { PopoverCreateHandle } from "./ui/popover";
 import {
   selectActiveRightPanel,
@@ -709,8 +706,7 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
     window.addEventListener("dragend", clearWorkspaceFileDrag);
     return () => window.removeEventListener("dragend", clearWorkspaceFileDrag);
   }, [isWorkspaceFileDragActive]);
-  const viewportRequiresRightPanelSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
-  const shouldUsePlanSidebarSheet = embeddedPane || viewportRequiresRightPanelSheet;
+  const shouldUsePlanSidebarSheet = true;
   const isMobileViewport = useMediaQuery("max-sm");
   const [workspaceLayoutElement, setWorkspaceLayoutElement] = useState<HTMLDivElement | null>(null);
   const setChatViewElement = useStableCallback((element: HTMLDivElement | null) => {
@@ -1001,7 +997,10 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
   );
   const canReuseTerminal = activeThreadKnownSessionsRaw !== null;
   const previewPanelOpen = activePreviewMiniPlayer?.source.kind === "browser" && browserAvailable;
-  const rightPanelOpen = rightPanelState.isOpen && activeRightPanelSurface?.kind !== "preview";
+  const rightPanelOpen =
+    rightPanelState.isOpen &&
+    activeRightPanelSurface?.kind !== "preview" &&
+    !(activeRightPanelSurface?.kind === "device" && activeRightPanelSurface.target);
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
   const rightPanelPresenceValue = {

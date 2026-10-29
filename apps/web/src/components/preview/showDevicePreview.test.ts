@@ -55,8 +55,9 @@ describe("device presentation requests", () => {
     expect(player()).toBeNull();
     showDevicePreview(ref, target, "panel");
     expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, ref).isOpen).toBe(
-      true,
+      false,
     );
+    expect(player()).toMatchObject({ source: { kind: "device" }, floating: false });
     showDevicePreview(ref, target);
     expect(player()?.source.kind).toBe("device");
     usePreviewMiniPlayerStore.getState().open(ref, "browser-tab");

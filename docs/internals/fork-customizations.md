@@ -110,6 +110,8 @@ Device previews open inset inside their owning thread, including embedded panes.
 Agents can reveal the same running device again or change its presentation without
 rebooting it. Keep reveal requests distinct from device ownership: hiding a preview
 must leave the device and agent session running. Fullscreen restores the previous view.
+The fork disables the tool sidebar. Targeted device/browser tabs restore inset,
+including legacy panel requests; other thread tools use a centered overlay.
 
 The opening default lives in `apps/web/src/previewMiniPlayerStore.ts`, the header
 and fullscreen presentation in `components/preview/ThreadPreviewMiniPlayer.tsx`

@@ -1,8 +1,9 @@
 import { showDevicePreview } from "./showDevicePreview";
 import { showBrowserInset } from "./showBrowserInset";
+import { selectActiveRightPanelSurface, useRightPanelStore } from "~/rightPanelStore";
 import type { DeviceServiceState, ScopedThreadRef } from "@t3tools/contracts";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { useClientSettings } from "../../hooks/useSettings";
 import {
   usePreviewMiniPlayerStore,
@@ -29,9 +30,18 @@ export function useAgentOpenedPreviews(input: {
     serverBrowserAvailable,
     miniPlayerSource,
   } = input;
+  const panelSurface = useRightPanelStore((state) =>
+    selectActiveRightPanelSurface(state.byThreadKey, threadRef),
+  );
+  useLayoutEffect(() => {
+    if (!threadRef) return;
+    if (panelSurface?.kind === "device" && panelSurface.target)
+      showDevicePreview(threadRef, panelSurface.target);
+    else if (panelSurface?.kind === "preview" && panelSurface.resourceId)
+      showBrowserInset(threadRef, panelSurface.resourceId);
+  }, [threadRef, panelSurface]);
   const autoShowFloatingPreview = useClientSettings(selectAutoShowFloatingPreview);
-  // Baseline sessions to preserve dismissals on reload; missing device summaries must remain eligible to open
-  // later.
+  // Older servers have no reveal request; only new sessions from those servers auto-open.
   const previousDeviceSessions = useRef(new Map<string, Map<string, string | undefined>>());
   useEffect(() => {
     if (!threadRef || !deviceStateLoaded) return;
@@ -53,10 +63,13 @@ export function useAgentOpenedPreviews(input: {
           .map((session) => [key(session), session.revealRequest?.id]),
       ),
     );
-    if (!previous) return;
     for (const session of sessions) {
       const request = session.revealRequest;
-      if (request ? previous.get(key(session)) === request.id : previous.has(key(session)))
+      if (
+        request
+          ? previous?.get(key(session)) === request.id
+          : !previous || previous.has(key(session))
+      )
         continue;
       const device = deviceFor(session);
       if (!device) continue;

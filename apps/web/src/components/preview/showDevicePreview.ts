@@ -16,10 +16,9 @@ export function showDevicePreview(
   const player = usePreviewMiniPlayerStore.getState();
   const panel = useRightPanelStore.getState();
   const current = selectThreadPreviewMiniPlayer(player.byThreadKey, threadRef);
-  if (presentation === "hidden" || presentation === "panel") {
+  if (presentation === "hidden") {
     if (current && previewMiniPlayerSourceKey(current.source) === key) player.close(threadRef);
-    if (presentation === "panel") panel.openDevice(threadRef, target);
-    else panel.closeSurface(threadRef, key);
+    panel.closeSurface(threadRef, key);
     return;
   }
   panel.close(threadRef);

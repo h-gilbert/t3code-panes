@@ -1,5 +1,4 @@
-import { usePreviewPanelInlineSize } from "../../hooks/usePreviewPanelInlineSize";
-import { RightPanelSheet } from "../RightPanelSheet";
+import { Dialog, DialogPopup } from "../ui/dialog";
 import { RightPanelTabs, type RightPanelTabsProps } from "../RightPanelTabs";
 
 type ChatRightPanelProps = Omit<RightPanelTabsProps, "mode" | "inlineSize" | "maximized"> & {
@@ -11,41 +10,32 @@ type ChatRightPanelProps = Omit<RightPanelTabsProps, "mode" | "inlineSize" | "ma
   readonly onCloseSheet: () => void;
 };
 
-/**
- * The right panel, inline beside the chat column or as a sheet on narrow
- * layouts. Its width follows a resize drag every frame, so the width state
- * lives here rather than in ChatView.
- */
 export function ChatRightPanel(props: ChatRightPanelProps) {
   const {
-    sheet,
-    workspaceLayoutElement,
-    widthStorageKey,
-    sheetAnimationDurationMs,
+    sheet: _sheet,
+    workspaceLayoutElement: _workspaceLayoutElement,
+    widthStorageKey: _widthStorageKey,
+    sheetAnimationDurationMs: _sheetAnimationDurationMs,
     onCloseSheet,
-    maximized,
-    layoutControls,
+    maximized: _maximized,
     ...tabs
   } = props;
-  const inlineSize = usePreviewPanelInlineSize(undefined, {
-    container: workspaceLayoutElement,
-    widthStorageKey,
-  });
-  if (!sheet) {
-    return <RightPanelTabs {...tabs} mode="inline" maximized={maximized} inlineSize={inlineSize} />;
-  }
   return (
-    <RightPanelSheet
-      animationDurationMs={sheetAnimationDurationMs}
+    <Dialog
       open={tabs.open === true}
-      onClose={onCloseSheet}
+      onOpenChange={(open) => {
+        if (!open) onCloseSheet();
+      }}
     >
-      <RightPanelTabs
-        {...tabs}
-        mode="sheet"
-        inlineSize={inlineSize}
-        layoutControls={layoutControls}
-      />
-    </RightPanelSheet>
+      <DialogPopup
+        aria-label="Thread tools"
+        showCloseButton={false}
+        bottomStickOnMobile={false}
+        keepMounted
+        className="h-[85dvh] w-[90vw] max-w-6xl overflow-hidden"
+      >
+        <RightPanelTabs {...tabs} mode="sheet" />
+      </DialogPopup>
+    </Dialog>
   );
 }

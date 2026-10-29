@@ -88,6 +88,7 @@ function DialogPopup({
   children,
   showCloseButton = true,
   bottomStickOnMobile = true,
+  keepMounted = false,
   variant = "default",
   ...props
 }: DialogPrimitive.Popup.Props & {
@@ -95,10 +96,11 @@ function DialogPopup({
   viewportClassName?: string;
   showCloseButton?: boolean;
   bottomStickOnMobile?: boolean;
+  keepMounted?: boolean;
   variant?: "default" | "media";
 }) {
   return (
-    <DialogPortal>
+    <DialogPortal keepMounted={keepMounted}>
       {/* Media opens from inside other overlays (a composer chip, a popover), so it sits above them. */}
       <DialogBackdrop
         className={cn(variant === "media" ? "z-[150]" : undefined, backdropClassName)}
