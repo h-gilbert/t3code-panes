@@ -27,6 +27,7 @@ export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 export type PullRequestDetailTab = "summary" | "guide" | "timeline" | "code";
 
 export interface DeviceTabTarget {
+  physical?: boolean;
   hostId: string;
   deviceId: string;
   platform: "ios" | "android";

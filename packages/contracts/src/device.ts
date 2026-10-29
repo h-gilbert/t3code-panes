@@ -584,7 +584,7 @@ export const DeviceToolOpenInput = Schema.Struct({
   presentation: Schema.optional(
     DevicePresentation.annotate({
       description:
-        "Show this device inset, in a floating window, fullscreen, or hidden. The legacy panel value also opens inset. Defaults to inset. Call again for an already-open device to change its view without restarting it.",
+        "Show this device inset, in a floating window, fullscreen, or hidden. The legacy panel value also opens inset. Defaults to inset for simulators/emulators. Physical devices always stay hidden. Call again for an already-open device to change its view without restarting it.",
     }),
   ),
   physical: Schema.optional(

@@ -8,7 +8,7 @@ import { useAgentOpenedPreviews } from "./useAgentOpenedPreviews";
 
 vi.mock("../../hooks/useSettings", () => ({ useClientSettings: () => true }));
 
-function setup() {
+function setup(physical = false) {
   usePreviewMiniPlayerStore.setState({ byThreadKey: {} });
   useRightPanelStore.setState({ byThreadKey: {} });
   const ref = { environmentId: EnvironmentId.make("fred"), threadId: ThreadId.make("android") };
@@ -26,7 +26,7 @@ function setup() {
     agentAccessEnabled: true,
     hubBasePath: "/api/device-hub",
     revision: 1,
-    devices: [{ ...target, id: target.deviceId, version: "16", booted: true, physical: false }],
+    devices: [{ ...target, id: target.deviceId, version: "16", booted: true, physical }],
     sessions: [
       {
         threadId: ref.threadId,
@@ -64,7 +64,7 @@ function setup() {
     });
     return <div>{player?.source.kind ?? "No preview"}</div>;
   }
-  return { ref, target, View };
+  return { ref, target, View, deviceState };
 }
 
 it("shows a device request already present when its thread loads", async () => {
@@ -81,4 +81,12 @@ it("moves a restored device sidebar into the inset even before discovery finishe
   expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, ref).isOpen).toBe(
     false,
   );
+});
+
+it("removes a restored physical-device inset and ignores its reveal request", async () => {
+  const { View, ref, target, deviceState } = setup(true);
+  usePreviewMiniPlayerStore.getState().open(ref, { kind: "device", ...target });
+  await using screen = await render(<View />);
+  await expect.element(screen.getByText("No preview", { exact: true })).toBeVisible();
+  expect(deviceState.sessions).toHaveLength(1);
 });

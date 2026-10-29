@@ -49,7 +49,7 @@ const DeviceListTool = Tool.make("device_list", {
 
 const DeviceOpenTool = Tool.make("device_open", {
   description:
-    "Open a simulator, emulator, or physical phone/tablet for this thread. Boots virtual devices if needed and shows an inset preview by default. Set presentation to floating, fullscreen or hidden to control this thread's view. Calling again changes the view without restarting the device. Physical devices may use screenshots when live video is unavailable. Returns the `agent-device` CLI call pinned to that device. Drive the device with that CLI.",
+    "Open a simulator, emulator, or physical phone/tablet for this thread. Boots virtual devices if needed and shows them inset by default. Physical devices stay hidden; automation and screenshots remain available. Set presentation to floating, fullscreen or hidden to control this thread's view. Calling again changes the view without restarting the device. Returns the `agent-device` CLI call pinned to that device. Drive the device with that CLI.",
   parameters: DeviceToolOpenInput,
   success: DeviceToolOpenResult,
   failure: DeviceToolFailure,

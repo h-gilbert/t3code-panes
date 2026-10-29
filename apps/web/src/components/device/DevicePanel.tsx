@@ -110,6 +110,7 @@ export function DevicePanel(props: {
           deviceId: result.value.deviceId,
           platform: device.platform,
           name: device.name,
+          physical: device.physical,
         },
         "inset",
       );
@@ -124,6 +125,7 @@ export function DevicePanel(props: {
       deviceId: activeDevice.id,
       platform: activeDevice.platform,
       name: activeDevice.name,
+      physical: activeDevice.physical,
     });
   };
 

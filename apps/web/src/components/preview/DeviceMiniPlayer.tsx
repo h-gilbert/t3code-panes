@@ -87,6 +87,8 @@ export function DeviceMiniPlayer({
   const cornerRadius = (player: PreviewMiniPlayerSize) =>
     resolveDeviceMiniPlayerCornerRadius(source.platform, player);
 
+  if (device?.physical) return null;
+
   return (
     <MiniPlayerShell
       threadRef={threadRef}

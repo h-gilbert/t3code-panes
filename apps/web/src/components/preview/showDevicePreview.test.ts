@@ -65,3 +65,13 @@ describe("device presentation requests", () => {
     expect(player()?.source).toEqual({ kind: "browser", tabId: "browser-tab" });
   });
 });
+
+it("keeps physical devices out of previews without closing a browser preview", () => {
+  const { ref, target, player } = setup();
+  showDevicePreview(ref, target);
+  showDevicePreview(ref, { ...target, physical: true });
+  expect(player()).toBeNull();
+  usePreviewMiniPlayerStore.getState().open(ref, "browser-tab");
+  showDevicePreview(ref, { ...target, physical: true }, "fullscreen");
+  expect(player()?.source).toEqual({ kind: "browser", tabId: "browser-tab" });
+});

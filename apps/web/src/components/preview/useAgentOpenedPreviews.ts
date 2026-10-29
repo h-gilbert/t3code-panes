@@ -78,6 +78,7 @@ export function useAgentOpenedPreviews(input: {
         deviceId: session.deviceId,
         platform: device.platform,
         name: device.name,
+        physical: device.physical,
       };
       const presentation = request?.presentation ?? "inset";
       showDevicePreview(threadRef, target, presentation);
@@ -123,6 +124,10 @@ export function useAgentOpenedPreviews(input: {
         session.hostId === source.hostId &&
         session.deviceId === source.deviceId,
     );
-    if (!sessionStillExists) usePreviewMiniPlayerStore.getState().close(threadRef);
-  }, [miniPlayerSource, threadRef, deviceState.sessions, deviceStateLoaded]);
+    const physical = deviceState.devices.some(
+      (device) =>
+        device.hostId === source.hostId && device.id === source.deviceId && device.physical,
+    );
+    if (!sessionStillExists || physical) usePreviewMiniPlayerStore.getState().close(threadRef);
+  }, [miniPlayerSource, threadRef, deviceState.sessions, deviceState.devices, deviceStateLoaded]);
 }

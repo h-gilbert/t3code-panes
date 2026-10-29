@@ -106,7 +106,13 @@ const switches = [
 ] as const;
 const threadB = switches[0][1];
 const picker: Extract<RightPanelSurface, { kind: "device" }> = { id: "device", kind: "device" };
-const phoneTarget = { hostId: "local", deviceId: "phone", platform: "ios", name: "Phone" };
+const phoneTarget = {
+  hostId: "local",
+  deviceId: "phone",
+  platform: "ios",
+  name: "Phone",
+  physical: false,
+};
 const opened = { _tag: "Success", value: { hostId: "local", deviceId: "phone" } } as const;
 const failed = { _tag: "Failure", cause: new Error("boom") } as const;
 

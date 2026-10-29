@@ -678,7 +678,7 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
         openedAt,
         revealRequest: {
           id: yield* crypto.randomUUIDv4().pipe(Effect.orDie),
-          presentation: input.presentation ?? "inset",
+          presentation: device.physical ? "hidden" : (input.presentation ?? "inset"),
         },
       };
       yield* lifecycleLock.withPermit(

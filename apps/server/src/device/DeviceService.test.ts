@@ -347,6 +347,42 @@ describe("device setup consent", () => {
       }).pipe(Effect.scoped),
   );
 
+  it.effect("keeps physical iOS and Android sessions hidden for every presentation", () =>
+    Effect.gen(function* () {
+      const { service, devices } = yield* fixture();
+      for (const platform of ["ios", "android"] as const) {
+        devices.push({
+          id: DeviceId.make(`physical-${platform}`),
+          name: "Physical phone",
+          platform,
+          version: "1",
+          booted: true,
+          physical: true,
+        });
+      }
+      yield* service.configure({ enabled: true });
+      for (const platform of ["ios", "android"] as const) {
+        for (const presentation of [
+          undefined,
+          "inset",
+          "panel",
+          "floating",
+          "fullscreen",
+          "hidden",
+        ] as const) {
+          const session = yield* service.open({
+            threadId: ThreadId.make("physical-presentation"),
+            deviceId: `physical-${platform}`,
+            platform,
+            ...(presentation === undefined ? {} : { presentation }),
+          });
+          expect(session.revealRequest?.presentation).toBe("hidden");
+          expect((yield* service.state).sessions).toContainEqual(session);
+        }
+      }
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("blocks only emulator video until ffmpeg is usable, then allows retry", () =>
     Effect.gen(function* () {
       const { service, requests, devices, encoderResult } = yield* fixture();
