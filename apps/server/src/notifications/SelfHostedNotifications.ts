@@ -48,15 +48,6 @@ import {
   APNS_TEAM_ID_SECRET,
 } from "./config.ts";
 
-export {
-  APNS_BUNDLE_ID_SECRET,
-  APNS_DEVICE_REGISTRATION_SECRET,
-  APNS_ENVIRONMENT_SECRET,
-  APNS_KEY_ID_SECRET,
-  APNS_PRIVATE_KEY_SECRET,
-  APNS_TEAM_ID_SECRET,
-} from "./config.ts";
-
 const StoredRegistration = Schema.Struct({
   device: RelayDeviceRegistrationRequest,
   activityPushToken: Schema.NullOr(Schema.String),
@@ -313,7 +304,7 @@ export function makeApnsProviderToken(credentials: ApnsCredentials, nowSeconds: 
   return jwt;
 }
 
-export function sendApns(input: {
+function sendApns(input: {
   readonly credentials: ApnsCredentials;
   readonly token: string;
   readonly pushType: "alert" | "liveactivity";
@@ -378,7 +369,7 @@ export function sendApns(input: {
   });
 }
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;

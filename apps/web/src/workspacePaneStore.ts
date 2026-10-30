@@ -142,7 +142,7 @@ export function assignWorkspaceThread(
 
 // Swaps two panes' threads and projects. Focus and maximize follow the moved
 // content rather than staying on the slot.
-export function swapWorkspaceLayoutPanes(
+function swapWorkspaceLayoutPanes(
   layout: ProjectWorkspaceLayout,
   fromIndex: WorkspacePaneIndex,
   toIndex: WorkspacePaneIndex,

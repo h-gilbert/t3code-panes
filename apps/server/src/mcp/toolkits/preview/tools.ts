@@ -261,7 +261,7 @@ const PreviewDownloadTool = safeBrowserTool(
   }).annotate(Tool.Title, "Receive browser download"),
 );
 
-export const PreviewAutofillTool = browserTool(
+const PreviewAutofillTool = browserTool(
   Tool.make("preview_autofill", {
     description:
       "Fill the current page's login form from the user's saved browser logins. Logins are bound to the exact page origin and profile; the password is typed directly into the page and never returned. Returns filled=false with a reason when no saved login matches, several match (pass username), or the page has no login fields.",
@@ -272,7 +272,7 @@ export const PreviewAutofillTool = browserTool(
   }).annotate(Tool.Title, "Autofill saved login"),
 );
 
-export const PreviewCloseTool = safeBrowserTool(
+const PreviewCloseTool = safeBrowserTool(
   Tool.make("preview_close", {
     description:
       "Close the collaborative browser tab selected by tabId, or this agent session's current tab when omitted. Ends the shared session and removes the tab from every connected client, including its inline preview.",

@@ -1,17 +1,6 @@
 /**
- * Keychain-backed store for browser logins the collaborative browser can
- * autofill.
- *
- * Passwords are encrypted with Electron `safeStorage` (macOS Keychain /
- * DPAPI / libsecret) and persisted next to the other desktop state. They are
- * decrypted only inside the main process at fill time and typed directly
- * into the guest page — list results never include them, and neither the
- * renderer nor an agent can read one back through this service.
- *
- * Every login is bound to an environment, an exact origin
- * (scheme://host[:port]), and a browser profile (null = the shared profile).
- * Fill callers must present all three; a mismatch is a refusal, not a
- * fallback, so an unrelated environment or site cannot borrow a login.
+ * Passwords stay encrypted at rest and are decrypted only in the main process for autofill.
+ * Every fill must match the saved environment, exact origin and browser profile.
  */
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -131,7 +120,7 @@ export const normalizeCredentialOrigin = (url: string): string | null => {
  * Select the login to fill for a live page. Exact environment + origin +
  * profile match only; `username` disambiguates several matching logins.
  */
-export const selectCredentialForFill = (
+const selectCredentialForFill = (
   credentials: ReadonlyArray<StoredCredential>,
   input: {
     readonly origin: string;
@@ -211,7 +200,7 @@ export class BrowserCredentials extends Context.Service<
   }
 >()("@t3tools/desktop/preview/BrowserCredentials") {}
 
-export const make = Effect.gen(function* BrowserCredentialsMake() {
+const make = Effect.gen(function* BrowserCredentialsMake() {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;

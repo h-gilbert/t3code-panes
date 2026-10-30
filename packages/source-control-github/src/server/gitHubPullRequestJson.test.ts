@@ -14,6 +14,7 @@ import {
   toLabelCandidates,
   toPullRequestActivityPage,
   toPullRequestCore,
+  toPullRequestSummary,
   toPullRequestFilesViewedPage,
   toPullRequestRows,
   toReviewerCandidates,
@@ -22,7 +23,10 @@ import {
   toReviewThreadPage,
   toViewerPermissions,
 } from "./gitHubPullRequestJson.ts";
-import { PullRequestWatchFingerprint } from "./pullRequestBatches.graphql.ts";
+import {
+  PullRequestWatchFingerprint,
+  PullRequestSummaryRepositoryPullRequestPullRequest,
+} from "./pullRequestBatches.graphql.ts";
 import {
   LabelCandidates,
   PullRequestActivity,
@@ -32,6 +36,10 @@ import {
   ViewerPermissions,
 } from "./pullRequestReads.graphql.ts";
 import { ReviewThreadComments, ReviewThreads } from "./pullRequestReviews.graphql.ts";
+
+const decodePullRequestSummary = Schema.decodeUnknownSync(
+  PullRequestSummaryRepositoryPullRequestPullRequest,
+);
 
 const through =
   <S extends Schema.Codec<unknown, unknown>, A>(schema: S, map: (result: S["Type"]) => A | null) =>
@@ -1687,91 +1695,46 @@ describe("pull request watch fingerprints", () => {
   });
 });
 
-describe("batched pull request summaries", () => {
-  it("refuses a repository GraphQL cannot address, rather than writing it into the document", () => {
-    expect(
-      buildPullRequestSummariesGraphQlQuery([{ repository: 'acme/web") { x } #', number: 1 }]),
-    ).toBeNull();
-    expect(
-      buildPullRequestSummariesGraphQlQuery([{ repository: "acme/web", number: 0 }]),
-    ).toBeNull();
-    expect(buildPullRequestSummariesGraphQlQuery([])).toBeNull();
-  });
-
-  it("files each answer by its alias and skips what GitHub or the decoder could not give", () => {
-    const decoded = decodePullRequestSummariesJson(
-      JSON.stringify({
-        data: {
-          s0: {
-            pullRequest: {
-              number: 7,
-              title: "Merged",
-              url: "https://github.com/acme/web/pull/7",
-              author: { __typename: "Bot", login: "renovate", avatarUrl: "https://a/r.png" },
-              headRefName: "feat/seven",
-              baseRefName: "main",
-              state: "MERGED",
-              mergedAt: "2026-08-24T00:00:00Z",
-              closedAt: "2026-08-24T00:00:00Z",
-              updatedAt: "2026-08-24T00:00:00Z",
-              commits: { nodes: [{ commit: { statusCheckRollup: { state: "FAILURE" } } }] },
-            },
-          },
-          s1: { pullRequest: null },
-          s2: { pullRequest: { number: 9 } },
-          rateLimit: { cost: 1 },
-        },
-      }),
-    );
-    expect(Result.isSuccess(decoded)).toBe(true);
-    if (!Result.isSuccess(decoded)) return;
-    expect([...decoded.success.keys()]).toEqual([0]);
-    expect(decoded.success.get(0)).toMatchObject({
-      number: 7,
-      state: "merged",
-      mergedAt: "2026-08-24T00:00:00Z",
-      author: { login: "renovate", isBot: true },
-      checksState: "failing",
-      mergeability: "unknown",
-      additions: 0,
-    });
-    // The document did not ask about stacks, so the summary does not claim an answer.
-    expect(decoded.success.get(0)).not.toHaveProperty("stack");
-  });
-
-  it("reads stack membership only where the document asked for it", () => {
-    expect(
-      buildPullRequestSummariesGraphQlQuery([{ repository: "acme/web", number: 7 }], true),
-    ).toContain("stack { number size baseRefName } stackEntry { position }");
-    expect(
-      buildPullRequestSummariesGraphQlQuery([{ repository: "acme/web", number: 7 }]),
-    ).not.toContain("stack {");
-    const pullRequest = (number: number, stack: Record<string, unknown>) => ({
-      pullRequest: {
-        number,
-        title: "Stacked",
-        url: `https://github.com/acme/web/pull/${number}`,
-        headRefName: `feat/${number}`,
-        baseRefName: "main",
-        state: "OPEN",
-        updatedAt: "2026-08-24T00:00:00Z",
-        ...stack,
-      },
-    });
-    const decoded = expectSuccess(
-      decodePullRequestSummariesJson(
-        JSON.stringify({
-          data: {
-            s0: pullRequest(7, { stack: null, stackEntry: null }),
-            s1: pullRequest(8, {
-              stack: { number: 3, size: 2, baseRefName: "main" },
-              stackEntry: { position: 2 },
-            }),
-          },
+describe("pull request summaries", () => {
+  it.each([
+    [undefined, undefined, undefined],
+    [null, null, null],
+    [
+      { number: 3, size: 2, baseRefName: "main" },
+      { position: 2 },
+      { number: 3, size: 2, base: "main", position: 2 },
+    ],
+  ] as const)(
+    "maps merged summaries and preserves requested stack membership (%j)",
+    (stack, stackEntry, expectedStack) => {
+      const pullRequest = decodePullRequestSummary(
+        row({
+          number: 7,
+          title: "Merged",
+          url: "https://github.com/acme/web/pull/7",
+          author: { __typename: "Bot", login: "renovate", avatarUrl: "https://a/r.png" },
+          state: "MERGED",
+          mergedAt: "2026-08-24T00:00:00Z",
+          closedAt: "2026-08-24T00:00:00Z",
+          additions: 0,
+          deletions: 0,
+          changedFiles: 0,
+          commits: { nodes: [{ commit: { statusCheckRollup: { state: "FAILURE" } } }] },
+          ...(stack === undefined ? {} : { stack, stackEntry }),
         }),
-      ),
-    );
-    expect(decoded.get(0)?.stack).toBeNull();
-    expect(decoded.get(1)?.stack).toEqual({ number: 3, size: 2, base: "main", position: 2 });
-  });
+      );
+      const summary = toPullRequestSummary(pullRequest);
+      expect(summary).toMatchObject({
+        number: 7,
+        state: "merged",
+        mergedAt: "2026-08-24T00:00:00Z",
+        author: { login: "renovate", isBot: true },
+        checksState: "failing",
+        mergeability: "unknown",
+        additions: 0,
+      });
+      if (expectedStack === undefined) expect(summary).not.toHaveProperty("stack");
+      else expect(summary.stack).toEqual(expectedStack);
+    },
+  );
 });

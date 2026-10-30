@@ -130,7 +130,7 @@ export const remoteHostCommand = DesktopIpc.makeIpcMethod({
     ),
 });
 
-export const createTab = DesktopIpc.makeIpcMethod({
+const createTab = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_CREATE_TAB_CHANNEL,
   payload: DesktopPreviewCreateTabInputSchema,
   result: Schema.Void,
@@ -168,7 +168,7 @@ export class PreviewAutomationRelayError extends Schema.TaggedError<PreviewAutom
   }
 }
 
-export const claimTab = DesktopIpc.makeIpcMethod({
+const claimTab = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_CLAIM_TAB_CHANNEL,
   payload: DesktopPreviewTabInputSchema,
   result: Schema.Boolean,
@@ -444,7 +444,7 @@ const clearCache = DesktopIpc.makeIpcMethod({
   }),
 });
 
-export const listBrowserCredentials = DesktopIpc.makeIpcMethod({
+const listBrowserCredentials = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_CREDENTIALS_LIST_CHANNEL,
   payload: Schema.Void,
   result: Schema.Array(DesktopBrowserCredentialSummarySchema),
@@ -454,7 +454,7 @@ export const listBrowserCredentials = DesktopIpc.makeIpcMethod({
   }),
 });
 
-export const saveBrowserCredential = DesktopIpc.makeIpcMethod({
+const saveBrowserCredential = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_CREDENTIALS_SAVE_CHANNEL,
   payload: DesktopBrowserCredentialSaveInputSchema,
   result: DesktopBrowserCredentialSummarySchema,
@@ -464,7 +464,7 @@ export const saveBrowserCredential = DesktopIpc.makeIpcMethod({
   }),
 });
 
-export const deleteBrowserCredential = DesktopIpc.makeIpcMethod({
+const deleteBrowserCredential = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_CREDENTIALS_DELETE_CHANNEL,
   payload: Schema.Struct({ id: Schema.String }),
   result: Schema.Void,
@@ -474,7 +474,7 @@ export const deleteBrowserCredential = DesktopIpc.makeIpcMethod({
   }),
 });
 
-export const autofillBrowserCredential = DesktopIpc.makeIpcMethod({
+const autofillBrowserCredential = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_CREDENTIALS_AUTOFILL_CHANNEL,
   payload: DesktopBrowserAutofillInputSchema,
   result: DesktopBrowserAutofillResultSchema,
@@ -671,7 +671,7 @@ export const automationStatus = DesktopIpc.makeIpcMethod({
   }),
 });
 
-export const automationSnapshot = DesktopIpc.makeIpcMethod({
+const automationSnapshot = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_AUTOMATION_SNAPSHOT_CHANNEL,
   payload: Schema.Struct({
     ...DesktopPreviewTabInputSchema.fields,
@@ -684,7 +684,7 @@ export const automationSnapshot = DesktopIpc.makeIpcMethod({
   }),
 });
 
-export const automationClick = DesktopIpc.makeIpcMethod({
+const automationClick = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_AUTOMATION_CLICK_CHANNEL,
   payload: DesktopPreviewAutomationClickInputSchema,
   result: PreviewAutomationInputResult,
@@ -694,7 +694,7 @@ export const automationClick = DesktopIpc.makeIpcMethod({
   }),
 });
 
-export const automationType = DesktopIpc.makeIpcMethod({
+const automationType = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_AUTOMATION_TYPE_CHANNEL,
   payload: DesktopPreviewAutomationTypeInputSchema,
   result: Schema.Void,
@@ -704,7 +704,7 @@ export const automationType = DesktopIpc.makeIpcMethod({
   }),
 });
 
-export const automationPress = DesktopIpc.makeIpcMethod({
+const automationPress = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_AUTOMATION_PRESS_CHANNEL,
   payload: DesktopPreviewAutomationPressInputSchema,
   result: PreviewAutomationInputResult,
@@ -714,7 +714,7 @@ export const automationPress = DesktopIpc.makeIpcMethod({
   }),
 });
 
-export const automationScroll = DesktopIpc.makeIpcMethod({
+const automationScroll = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_AUTOMATION_SCROLL_CHANNEL,
   payload: DesktopPreviewAutomationScrollInputSchema,
   result: Schema.Void,
@@ -724,7 +724,7 @@ export const automationScroll = DesktopIpc.makeIpcMethod({
   }),
 });
 
-export const automationEvaluate = DesktopIpc.makeIpcMethod({
+const automationEvaluate = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_AUTOMATION_EVALUATE_CHANNEL,
   payload: DesktopPreviewAutomationEvaluateInputSchema,
   result: Schema.Unknown,
@@ -734,7 +734,7 @@ export const automationEvaluate = DesktopIpc.makeIpcMethod({
   }),
 });
 
-export const automationWaitFor = DesktopIpc.makeIpcMethod({
+const automationWaitFor = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_AUTOMATION_WAIT_FOR_CHANNEL,
   payload: DesktopPreviewAutomationWaitForInputSchema,
   result: Schema.Void,
@@ -744,7 +744,7 @@ export const automationWaitFor = DesktopIpc.makeIpcMethod({
   }),
 });
 
-export const automationUpload = DesktopIpc.makeIpcMethod({
+const automationUpload = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_AUTOMATION_UPLOAD_CHANNEL,
   payload: DesktopPreviewAutomationUploadInputSchema,
   result: Schema.Array(Schema.String),
@@ -754,7 +754,7 @@ export const automationUpload = DesktopIpc.makeIpcMethod({
   }),
 });
 
-export const automationDownload = DesktopIpc.makeIpcMethod({
+const automationDownload = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_AUTOMATION_DOWNLOAD_CHANNEL,
   payload: DesktopPreviewAutomationDownloadInputSchema,
   result: DesktopPreviewDownloadedFileSchema,
@@ -764,7 +764,7 @@ export const automationDownload = DesktopIpc.makeIpcMethod({
   }),
 });
 
-export const saveRecording = DesktopIpc.makeIpcMethod({
+const saveRecording = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_RECORDING_SAVE_CHANNEL,
   payload: DesktopPreviewRecordingSaveInputSchema,
   result: DesktopPreviewRecordingArtifactSchema,

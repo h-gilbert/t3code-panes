@@ -16,7 +16,7 @@ import {
 import { isWindowsDrivePathHref, normalizeMarkdownLinkDestination } from "./markdownLinks.ts";
 import { THREAD_LINK_PROTOCOL } from "./threadLinks.ts";
 
-export const remarkKeepWindowsPathDestinations = remarkKeepWindowsPaths;
+const remarkKeepWindowsPathDestinations = remarkKeepWindowsPaths;
 
 type MarkdownImageHastNode = {
   type?: string;

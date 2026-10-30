@@ -634,6 +634,123 @@ function failingPush(reason?: GitCommandError["reason"]) {
   } satisfies Partial<GitVcsDriver.GitVcsDriver["Service"]>;
 }
 
+it.effect.each([
+  [undefined, "authentication_failed"],
+  ["auto", "host_key_unverified"],
+] as const)("publishes over HTTPS after automatic SSH rejection (%s, %s)", ([protocol, reason]) => {
+  let remoteUrl = "";
+  let created = 0;
+  const pushedUrls: string[] = [];
+  return Effect.gen(function* () {
+    const service = yield* SourceControlRepositoryService.SourceControlRepositoryService;
+    const result = yield* service.publishRepository({
+      cwd: "/workspace",
+      provider: SourceControlProviderKind.make("github"),
+      repository: "octocat/t3code",
+      visibility: "private",
+      ...(protocol === undefined ? {} : { protocol }),
+    });
+
+    assert.strictEqual(created, 1);
+    assert.deepStrictEqual(pushedUrls, [CLONE_URLS.sshUrl, CLONE_URLS.url]);
+    assert.strictEqual(remoteUrl, CLONE_URLS.url);
+    assert.strictEqual(result.remoteUrl, CLONE_URLS.url);
+    assert.strictEqual(result.remoteName, "origin-1");
+    assert.strictEqual(result.status, "pushed");
+  }).pipe(
+    Effect.provide(
+      layer({
+        provider: makeProvider({
+          createRepository: () =>
+            Effect.sync(() => {
+              created += 1;
+              return CLONE_URLS;
+            }),
+        }),
+        git: {
+          ensureRemote: (input) =>
+            Effect.sync(() => {
+              remoteUrl = input.url;
+              return "origin-1";
+            }),
+          execute: (input) =>
+            Effect.sync(() => {
+              if (input.args[0] === "remote") {
+                assert.deepStrictEqual(input.args, [
+                  "remote",
+                  "set-url",
+                  "--",
+                  "origin-1",
+                  CLONE_URLS.url,
+                ]);
+                remoteUrl = CLONE_URLS.url;
+              }
+              return processOutput();
+            }),
+          pushCurrentBranch: (cwd) =>
+            Effect.gen(function* () {
+              pushedUrls.push(remoteUrl);
+              if (remoteUrl === CLONE_URLS.sshUrl) {
+                return yield* failingPush(reason).pushCurrentBranch(cwd);
+              }
+              return {
+                status: "pushed" as const,
+                branch: "main",
+                upstreamBranch: "origin-1/main",
+                setUpstream: true,
+              };
+            }),
+        },
+      }),
+    ),
+  );
+});
+
+it.effect.each([
+  ["ssh", "authentication_failed", 1, "SSH authentication was rejected"],
+  ["auto", "remote_unreachable", 1, "Fix the problem"],
+  ["https", "authentication_failed", 1, "Git could not authenticate"],
+  ["auto", "authentication_failed", 2, "Git could not authenticate"],
+] as const)(
+  "bounds publish retries and explains failure (%s, %s)",
+  ([protocol, reason, attempts, detail]) => {
+    let pushCalls = 0;
+    return Effect.gen(function* () {
+      const service = yield* SourceControlRepositoryService.SourceControlRepositoryService;
+      const error = yield* Effect.flip(
+        service.publishRepository({
+          cwd: "/workspace",
+          provider: SourceControlProviderKind.make("github"),
+          repository: "octocat/t3code",
+          visibility: "private",
+          protocol,
+        }),
+      );
+
+      assert.strictEqual(pushCalls, attempts);
+      assert.include(error.detail, "Created octocat/t3code");
+      assert.include(error.detail, detail);
+      assert.instanceOf(error.cause, GitCommandError);
+    }).pipe(
+      Effect.provide(
+        layer({
+          git: {
+            execute: (input) => {
+              if (input.args[0] === "remote") assert.strictEqual(attempts, 2);
+              return Effect.succeed(processOutput());
+            },
+            pushCurrentBranch: (cwd) =>
+              Effect.suspend(() => {
+                pushCalls += 1;
+                return failingPush(reason).pushCurrentBranch(cwd);
+              }),
+          },
+        }),
+      ),
+    );
+  },
+);
+
 it.effect("explains a rejected SSH push after creating the repository", () =>
   Effect.gen(function* () {
     const service = yield* SourceControlRepositoryService.SourceControlRepositoryService;

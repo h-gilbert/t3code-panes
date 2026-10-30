@@ -802,13 +802,6 @@ export function orderItemsByPreferredIds<TItem, TId>(input: {
   return [...ordered, ...remaining];
 }
 
-export function getSidebarThreadIdsToPrewarm<TThreadId>(
-  visibleThreadIds: readonly TThreadId[],
-  limit = 3,
-): TThreadId[] {
-  return visibleThreadIds.slice(0, Math.max(0, limit));
-}
-
 export function limitRecentSidebarThreads<T>(input: {
   threads: readonly T[];
   maximum: number;

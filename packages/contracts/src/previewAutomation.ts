@@ -680,7 +680,7 @@ export const PreviewAutomationInputResult = Schema.Struct({
 });
 export type PreviewAutomationInputResult = typeof PreviewAutomationInputResult.Type;
 
-export const PREVIEW_FILE_TRANSFER_MAX_FILES = 10;
+const PREVIEW_FILE_TRANSFER_MAX_FILES = 10;
 export const PREVIEW_FILE_TRANSFER_TIMEOUT_MS = 120_000;
 // Browser uploads use disk-backed files, independently of chat attachment limits.
 export const PREVIEW_UPLOAD_MAX_FILE_BYTES = 1024 * 1024 * 1024;

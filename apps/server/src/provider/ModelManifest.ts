@@ -285,18 +285,6 @@ export const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(ModelManifest, make);
-
-/** Re-checks a provider whenever a fetch replaces the manifest in memory, for
- * the lifetime of the calling scope. */
-export const refreshOnManifestChange = (
-  manifest: ModelManifest["Service"],
-  refresh: Effect.Effect<unknown>,
-) =>
-  manifest.changes.pipe(
-    Stream.runForEach(() => refresh),
-    Effect.ignoreCause({ log: true }),
-    Effect.forkScoped,
-  );
 /** Bundled data only, with the provider catalog port drivers read; for tests. */
 export const layerTest = Layer.suspend(() =>
   layerModelCatalog.pipe(Layer.provideMerge(layerBundledOnly)),

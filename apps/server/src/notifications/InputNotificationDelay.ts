@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Scope from "effect/Scope";
 
-export const INPUT_NOTIFICATION_DELAY_MS = 90_000;
+const INPUT_NOTIFICATION_DELAY_MS = 90_000;
 
 export function isDue(
   current: Pick<OrchestrationV2ThreadShell, "archivedAt" | "pendingRuntimeRequest"> | null,

@@ -1,10 +1,6 @@
 import { memo } from "react";
 import { cn } from "~/lib/utils";
 
-export function hasNonZeroStat(stat: { additions: number; deletions: number }): boolean {
-  return stat.additions > 0 || stat.deletions > 0;
-}
-
 function formatCompactDiffCount(value: number): string {
   if (value < 1000) return String(value);
   if (value < 1_000_000) {

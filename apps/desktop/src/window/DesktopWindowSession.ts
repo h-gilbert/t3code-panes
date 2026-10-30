@@ -177,7 +177,7 @@ const writeSession = Effect.fn("desktop.windowSession.write")(function* (input: 
   );
 });
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;

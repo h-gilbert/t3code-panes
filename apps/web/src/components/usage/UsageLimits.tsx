@@ -73,7 +73,7 @@ export function barColor(driver: ServerProvider["driver"]): string {
 }
 
 /** Visible cycle pace, with the comparison explained on hover or keyboard focus. */
-export function PaceIcon({ pace }: { readonly pace: LimitPace }) {
+function PaceIcon({ pace }: { readonly pace: LimitPace }) {
   const Icon = PACE[pace].icon;
   return (
     <Tooltip>

@@ -773,7 +773,7 @@ export const EnvironmentNotificationStatusResult = Schema.Struct({
 export type EnvironmentNotificationStatusResult = typeof EnvironmentNotificationStatusResult.Type;
 
 /** Direct, account-free APNs registration against a paired T3 environment. */
-export class EnvironmentNotificationsHttpApi extends HttpApiGroup.make("notifications")
+class EnvironmentNotificationsHttpApi extends HttpApiGroup.make("notifications")
   .add(
     HttpApiEndpoint.get("status", "/api/notifications/status", {
       headers: OptionalBearerHeaders,
@@ -813,7 +813,7 @@ export class EnvironmentNotificationsHttpApi extends HttpApiGroup.make("notifica
     }).middleware(EnvironmentAuthenticatedAuth),
   ) {}
 
-export class EnvironmentConnectHttpApi extends HttpApiGroup.make("connect")
+class EnvironmentConnectHttpApi extends HttpApiGroup.make("connect")
   .add(
     HttpApiEndpoint.post("linkProof", "/api/connect/link-proof", {
       headers: OptionalBearerHeaders,

@@ -126,7 +126,7 @@ export function agentControlledBrowserCloseConfirmation(
   return agentControlledBrowserCloseConfirmationForCount(activeBrowserCount);
 }
 
-export function agentControlledBrowserCloseConfirmationForCount(
+function agentControlledBrowserCloseConfirmationForCount(
   activeBrowserCount: number,
 ): string | null {
   if (activeBrowserCount === 0) return null;
@@ -1212,14 +1212,6 @@ export function hasServerAcknowledgedLocalDispatch(input: {
     input.localDispatch.runtimeStatus !== (runtime?.status ?? null) ||
     input.localDispatch.runtimeUpdatedAt !== (runtime?.updatedAt ?? null)
   );
-}
-
-export function shouldResumeTimelineFollowForComposerInput(input: {
-  readonly isWorking: boolean;
-  readonly liveFollowEnabled: boolean;
-  readonly isAtEnd: boolean;
-}): boolean {
-  return input.isWorking && (!input.liveFollowEnabled || !input.isAtEnd);
 }
 
 // Returning to the window should land the caret in the composer, so the reader can type right

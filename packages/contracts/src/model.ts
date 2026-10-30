@@ -123,7 +123,7 @@ const ACP_REGISTRY_DRIVER_KIND = ProviderDriverKind.make("acpRegistry");
 const OPENCODE_DRIVER_KIND = ProviderDriverKind.make("opencode");
 
 export const DEFAULT_MODEL = "gpt-6-sol";
-export const DEFAULT_CLAUDE_MODEL = "claude-opus-5-5";
+const DEFAULT_CLAUDE_MODEL = "claude-opus-5-5";
 export const DEFAULT_PROVIDER_REASONING_EFFORT = "medium";
 
 /** First model present in model/list wins; otherwise use Codex's isDefault. */

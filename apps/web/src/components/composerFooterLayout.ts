@@ -1,7 +1,7 @@
 export const COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX = 620;
 export const COMPOSER_FOOTER_WIDE_ACTIONS_COMPACT_BREAKPOINT_PX = 780;
 export const COMPOSER_MODEL_PICKER_ICON_ONLY_BREAKPOINT_PX = 620;
-export const RESTING_COMPOSER_IMAGE_THUMBNAIL_LIMIT = 3;
+const RESTING_COMPOSER_IMAGE_THUMBNAIL_LIMIT = 3;
 
 export function getRestingComposerImagePreviewCounts(imageCount: number): {
   visibleCount: number;
@@ -181,21 +181,4 @@ export function resolveRestingComposerControlsLayout(
       ? minimumWidth <= hostWidth - RESTING_CONTROLS_SLACK_PX
       : minimumWidth <= hostWidth;
   return { hiddenCount, ...(input.iconOnlyBlockWidths ? { iconOnlyCount } : {}), visible };
-}
-
-export function resolveScrollToEndClearance(input: {
-  overlayHeight: number;
-  mainSurfaceTop: number;
-  button: { left: number; right: number };
-  attachments: ReadonlyArray<{ top: number; left: number; right: number }>;
-}): number {
-  let contentTop = input.mainSurfaceTop;
-  let top = contentTop;
-  for (const attachment of input.attachments) {
-    contentTop = Math.min(contentTop, attachment.top);
-    if (attachment.left < input.button.right && attachment.right > input.button.left) {
-      top = Math.min(top, attachment.top);
-    }
-  }
-  return Math.ceil(input.overlayHeight - (top - contentTop));
 }

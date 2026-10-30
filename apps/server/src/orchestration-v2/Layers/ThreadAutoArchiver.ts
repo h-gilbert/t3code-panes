@@ -90,7 +90,7 @@ const makeThreadAutoArchiver = Effect.fn("makeThreadAutoArchiver")(function* (
   yield* Effect.logInfo("thread auto-archiver started", { archiveAfterMs, sweepIntervalMs });
 });
 
-export const makeThreadAutoArchiverLive = (options?: ThreadAutoArchiverLiveOptions) =>
+const makeThreadAutoArchiverLive = (options?: ThreadAutoArchiverLiveOptions) =>
   Layer.effectDiscard(makeThreadAutoArchiver(options));
 
 export const ThreadAutoArchiverLive = makeThreadAutoArchiverLive();

@@ -84,7 +84,3 @@ export function getTriggerDisplayModelName(
   const shortName = resolveModelShortName(model, driverKind);
   return getDisplayModelName({ ...model, shortName }, { preferShortName: true });
 }
-
-export function getTriggerDisplayModelLabel(model: ModelEsque): string {
-  return getTriggerDisplayModelName(model);
-}

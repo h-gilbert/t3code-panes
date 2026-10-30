@@ -506,7 +506,7 @@ export const make = Effect.gen(function* () {
         repository: input.repository.trim(),
         visibility: input.visibility,
       });
-      const remoteUrl = selectRemoteUrl(urls, input.protocol);
+      let remoteUrl = selectRemoteUrl(urls, input.protocol);
       const remoteName = yield* git.ensureRemote({
         cwd: input.cwd,
         preferredName: input.remoteName?.trim() || "origin",
@@ -536,6 +536,26 @@ export const make = Effect.gen(function* () {
       }
 
       const pushResult = yield* git.pushCurrentBranch(input.cwd, null, { remoteName }).pipe(
+        Effect.catchIf(
+          (cause) =>
+            input.protocol !== "ssh" &&
+            remoteUrl === urls.sshUrl &&
+            (cause.reason === "authentication_failed" || cause.reason === "host_key_unverified"),
+          () =>
+            git
+              .execute({
+                operation: "SourceControlRepositoryService.publishRepository.useHttps",
+                cwd: input.cwd,
+                args: ["remote", "set-url", "--", remoteName, urls.url],
+                writesSharedConfig: true,
+              })
+              .pipe(
+                Effect.flatMap(() => {
+                  remoteUrl = urls.url;
+                  return git.pushCurrentBranch(input.cwd, null, { remoteName });
+                }),
+              ),
+        ),
         Effect.mapError(
           (cause) =>
             new SourceControlRepositoryError({

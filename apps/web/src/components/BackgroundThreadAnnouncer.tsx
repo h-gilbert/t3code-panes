@@ -16,7 +16,6 @@ import {
 } from "./backgroundThreadAnnouncement";
 
 const backgroundThreadLiveRegion = createLiveRegion();
-const attachBackgroundThreadRegion = backgroundThreadLiveRegion.attach;
 
 function readOpenThreadKey(router: AnyRouter): string | null {
   const target = resolveThreadRouteTarget(router.state.matches.at(-1)?.params ?? {});
@@ -79,13 +78,4 @@ export function startBackgroundThreadAnnouncements(
   return () => {
     for (const unsubscribe of unsubscribes) unsubscribe();
   };
-}
-
-/**
- * The region the background announcements are spoken through. It lives outside
- * the sidebar because a collapsed sidebar is inert, which silences its rows.
- */
-export function BackgroundThreadAnnouncer() {
-  // No role="status": Orca 50 maps it to a status bar in Chromium and drops its updates.
-  return <div ref={attachBackgroundThreadRegion} aria-live="polite" className="sr-only" />;
 }

@@ -161,7 +161,7 @@ export async function removeBrowserProfileCredentials(
   );
 }
 
-export function browserProfileRemovalAvailable(
+function browserProfileRemovalAvailable(
   bridgeAvailable: boolean,
   environmentsReady: boolean,
   environmentCount: number,
@@ -1154,20 +1154,21 @@ function BrowserProxySetting() {
           onCommit={(value) => {
             const trimmed = value.trim();
             if (trimmed) {
+              let valid = false;
               try {
                 const url = new URL(trimmed);
-                if (
-                  !["socks5:", "http:", "https:"].includes(url.protocol) ||
-                  !url.hostname ||
-                  !url.port ||
-                  url.username ||
-                  url.password ||
-                  (url.pathname !== "" && url.pathname !== "/") ||
-                  url.search ||
-                  url.hash
-                )
-                  throw new Error("Invalid proxy");
+                valid =
+                  ["socks5:", "http:", "https:"].includes(url.protocol) &&
+                  Boolean(url.hostname && url.port) &&
+                  !url.username &&
+                  !url.password &&
+                  (url.pathname === "" || url.pathname === "/") &&
+                  !url.search &&
+                  !url.hash;
               } catch {
+                valid = false;
+              }
+              if (!valid) {
                 toastManager.add({
                   type: "error",
                   title: "Enter a proxy URL with a port and no credentials or path",
