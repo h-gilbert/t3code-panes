@@ -34,7 +34,6 @@ import {
 import {
   CommandId,
   EnvironmentId,
-  EventId,
   MessageId,
   ProjectId,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
@@ -52,7 +51,7 @@ import type { CodexArtifactTemplate } from "@t3tools/shared/codexArtifactTemplat
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
-import { Atom, AsyncResult } from "effect/reactivity";
+import { Atom } from "effect/reactivity";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentThreadDetails } from "../state/threads";
 
@@ -63,7 +62,6 @@ import {
   getAntigravitySendBlockReason,
   resolveBackgroundDraftWorkspaceOptions,
   resolveComposerInteractionMode,
-  restorePlanFollowUpComposer,
   resolveComposerProviderSelection,
   resolveProactiveTurnDiffAction,
   resolveDraftHeroState,
@@ -71,11 +69,11 @@ import {
   resolveWorktreeSetupProgress,
   isPaintOnlyThreadTimeline,
   peekHeldThreadTimeline,
+  threadKeysShareEnvironment,
   peekRememberedThreadTimeline,
   rememberReadyThreadTimeline,
   resetHeldThreadTimeline,
   resolveThreadSwitchTimeline,
-  threadKeysShareEnvironment,
   timelineHasEphemeralPreviewUrls,
   scheduleEnvironmentReconnectWarning,
   codexArtifactTemplatePromptToAppend,
@@ -105,10 +103,8 @@ import {
   resolveSendEnvMode,
   startNewThreadForProject,
   shouldShowBranchMismatchBanner,
-  shouldResumeTimelineFollowForComposerInput,
   shouldShowPlanFollowUpPrompt,
   waitForRevertedMessage,
-  prepareRevertedMessageAttachments,
 } from "./ChatView.logic";
 
 const environmentId = EnvironmentId.make("environment-local");
@@ -377,20 +373,9 @@ describe("buildExpiredTerminalContextToastCopy", () => {
 });
 
 describe("getStartedThreadModelChangeBlockReason", () => {
-  const providers = [
-    {
-      instanceId: ProviderInstanceId.make("codex"),
-    },
-    {
-      instanceId: ProviderInstanceId.make("grok"),
-      requiresNewThreadForModelChange: true,
-    },
-  ];
-
   it("allows model changes before a provider session has started", () => {
     expect(
       getStartedThreadModelChangeBlockReason({
-        providers,
         hasStartedSession: false,
         currentModelSelection: {
           instanceId: ProviderInstanceId.make("grok"),
@@ -407,7 +392,6 @@ describe("getStartedThreadModelChangeBlockReason", () => {
   it("allows unchanged model selections for restricted providers", () => {
     expect(
       getStartedThreadModelChangeBlockReason({
-        providers,
         hasStartedSession: true,
         currentModelSelection: {
           instanceId: ProviderInstanceId.make("grok"),
@@ -421,10 +405,9 @@ describe("getStartedThreadModelChangeBlockReason", () => {
     ).toBeNull();
   });
 
-  it("blocks started-session model changes for providers that require a new thread", () => {
+  it("allows started-session model changes", () => {
     expect(
       getStartedThreadModelChangeBlockReason({
-        providers,
         hasStartedSession: true,
         currentModelSelection: {
           instanceId: ProviderInstanceId.make("grok"),
@@ -435,11 +418,7 @@ describe("getStartedThreadModelChangeBlockReason", () => {
           model: "grok-other",
         },
       }),
-    ).toEqual({
-      title: "Start a new chat to change models",
-      description:
-        "This provider does not allow switching models after a conversation has started.",
-    });
+    ).toBeNull();
   });
 });
 
@@ -1185,7 +1164,6 @@ describe("resolveThreadSwitchTimeline", () => {
         loading: true,
         activeThreadKey: "env-2:thread-b",
         nextEntries: [],
-        lastReady: held,
       }),
     ).toEqual({ entries: [], displayThreadKey: "env-2:thread-b" });
   });
@@ -2656,6 +2634,7 @@ describe("snapshotComposerSend", () => {
       previewAnnotations: [],
       reviewComments: [],
       threadContexts: [],
+      environmentContexts: [],
     });
 
     expect(snapshot.terminalContexts).toEqual([live]);
@@ -2735,22 +2714,12 @@ describe("withMessageContext", () => {
     Parameters<typeof withMessageContext>[0]["context"]
   >;
 
-  it("sends the context inline when the server supports it", () => {
-    expect(withMessageContext({ text: "hi", context, supportsInlineMessageContext: true })).toEqual(
-      { text: "hi", context },
-    );
-  });
-
-  it("folds the context into the text for older servers", () => {
-    const result = withMessageContext({ text: "hi", context, supportsInlineMessageContext: false });
-    expect(result.context).toBeUndefined();
-    expect(result.text).toContain("hi");
+  it("sends the context inline", () => {
+    expect(withMessageContext({ text: "hi", context })).toEqual({ text: "hi", context });
   });
 
   it("sends the text alone without context", () => {
-    expect(
-      withMessageContext({ text: "hi", context: undefined, supportsInlineMessageContext: false }),
-    ).toEqual({ text: "hi" });
+    expect(withMessageContext({ text: "hi", context: undefined })).toEqual({ text: "hi" });
   });
 });
 

@@ -2,7 +2,6 @@ import * as NodeNet from "node:net";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
-import * as Queue from "effect/Queue";
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NetService from "@t3tools/shared/Net";
@@ -40,16 +39,6 @@ const makeSuccessfulProcess = (stdout: string) => {
     getOutputFd: () => Stream.empty,
     unref: Effect.succeed(Effect.void),
   });
-};
-
-const makeDelayedSuccessfulProcess = (stdout: string, delayMs: number) => {
-  const process = makeSuccessfulProcess(stdout);
-  return {
-    ...process,
-    exitCode: Effect.sleep(Duration.millis(delayMs)).pipe(
-      Effect.as(ChildProcessSpawner.ExitCode(0)),
-    ),
-  };
 };
 
 const makeRunningProcess = (onKill: () => void) => {
@@ -798,7 +787,6 @@ describe("archive runner script", () => {
         assert.equal(afterUnowned.exitCode, 0, afterUnowned.stderr);
         assert.isFalse(yield* fs.exists(lock));
       }).pipe(Effect.provide(NodeServices.layer)),
-    60_000,
   );
 });
 
@@ -933,65 +921,56 @@ server.listen(Number(flag("--port")), "127.0.0.1", () => {
     };
   });
 
-  it.effect.skipIf(windowsHost)(
-    "reuses its own managed server and refuses a live duplicate",
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const {
-          stateDir,
-          readManagedPid,
-          runLaunch,
-          runLaunchScript,
-          launchManaged,
-          startDefaultHomeServer,
-        } = yield* prepareLaunch;
-        const { launched, pid: managedPid } = yield* launchManaged;
+  it.effect.skipIf(windowsHost)("reuses its own managed server and refuses a live duplicate", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const {
+        stateDir,
+        readManagedPid,
+        runLaunch,
+        runLaunchScript,
+        launchManaged,
+        startDefaultHomeServer,
+      } = yield* prepareLaunch;
+      const { launched, pid: managedPid } = yield* launchManaged;
 
-        // The managed server wrote the default runtime file itself, so a
-        // reconnect must keep it rather than stop it as an external server.
-        assert.deepEqual(yield* runLaunch, launched);
-        assert.equal(yield* readManagedPid, managedPid);
-        assert.isTrue(isAlive(managedPid));
+      // The managed server wrote the default runtime file itself, so a
+      // reconnect must keep it rather than stop it as an external server.
+      assert.deepEqual(yield* runLaunch, launched);
+      assert.equal(yield* readManagedPid, managedPid);
+      assert.isTrue(isAlive(managedPid));
 
-        // A remembered port that is stale must not hide our own server: the
-        // runtime file names its port.
-        yield* fs.writeFileString(`${stateDir}/port`, `${yield* freeLoopbackPort}\n`);
-        assert.deepEqual(yield* runLaunch, launched);
-        assert.equal(yield* readManagedPid, managedPid);
-        assert.equal(
-          (yield* fs.readFileString(`${stateDir}/port`)).trim(),
-          `${launched.remotePort}`,
-        );
+      // A remembered port that is stale must not hide our own server: the
+      // runtime file names its port.
+      yield* fs.writeFileString(`${stateDir}/port`, `${yield* freeLoopbackPort}\n`);
+      assert.deepEqual(yield* runLaunch, launched);
+      assert.equal(yield* readManagedPid, managedPid);
+      assert.equal((yield* fs.readFileString(`${stateDir}/port`)).trim(), `${launched.remotePort}`);
 
-        // A second server must not cause us to silently stop the first and
-        // switch to potentially stale process-local command state.
-        yield* startDefaultHomeServer([]);
-        const rejected = yield* runLaunchScript;
-        assert.equal(rejected.exitCode, 1);
-        assert.include(rejected.stderr, "Two T3 servers are using the default home");
-        assert.isTrue(isAlive(managedPid));
-        assert.isTrue(yield* isListening(launched.remotePort));
-        assert.equal(yield* readManagedPid, managedPid);
-      }).pipe(Effect.provide(NodeServices.layer)),
-    60_000,
+      // A second server must not cause us to silently stop the first and
+      // switch to potentially stale process-local command state.
+      yield* startDefaultHomeServer([]);
+      const rejected = yield* runLaunchScript;
+      assert.equal(rejected.exitCode, 1);
+      assert.include(rejected.stderr, "Two T3 servers are using the default home");
+      assert.isTrue(isAlive(managedPid));
+      assert.isTrue(yield* isListening(launched.remotePort));
+      assert.equal(yield* readManagedPid, managedPid);
+    }).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.effect.skipIf(windowsHost)(
-    "waits for its busy managed server instead of replacing it",
-    () =>
-      Effect.gen(function* () {
-        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-        const { readManagedPid, runLaunch, launchManaged } = yield* prepareLaunch;
-        const { launched, pid } = yield* launchManaged;
+  it.effect.skipIf(windowsHost)("waits for its busy managed server instead of replacing it", () =>
+    Effect.gen(function* () {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const { readManagedPid, runLaunch, launchManaged } = yield* prepareLaunch;
+      const { launched, pid } = yield* launchManaged;
 
-        process.kill(pid, "SIGSTOP");
-        yield* spawner.spawn(ChildProcess.make("sh", ["-c", `sleep 5; kill -CONT ${pid}`]));
-        assert.deepEqual(yield* runLaunch, launched);
-        assert.equal(yield* readManagedPid, pid);
-        assert.isTrue(isAlive(pid));
-      }).pipe(Effect.provide(NodeServices.layer)),
-    60_000,
+      process.kill(pid, "SIGSTOP");
+      yield* spawner.spawn(ChildProcess.make("sh", ["-c", `sleep 5; kill -CONT ${pid}`]));
+      assert.deepEqual(yield* runLaunch, launched);
+      assert.equal(yield* readManagedPid, pid);
+      assert.isTrue(isAlive(pid));
+    }).pipe(Effect.provide(NodeServices.layer)),
   );
 
   it.effect.skipIf(windowsHost)(
@@ -1021,86 +1000,79 @@ server.listen(Number(flag("--port")), "127.0.0.1", () => {
         );
         assert.equal((yield* fs.readFileString(`${stateDir}/managed`)).trim(), "managed");
       }).pipe(Effect.provide(NodeServices.layer)),
-    60_000,
   );
 
-  it.effect.skipIf(windowsHost)(
-    "still replaces its managed server when the runner changes",
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const { stateDir, readManagedPid, runLaunch, launchManaged } = yield* prepareLaunch;
-        const { pid: previousPid } = yield* launchManaged;
+  it.effect.skipIf(windowsHost)("still replaces its managed server when the runner changes", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const { stateDir, readManagedPid, runLaunch, launchManaged } = yield* prepareLaunch;
+      const { pid: previousPid } = yield* launchManaged;
 
-        yield* fs.writeFileString(`${stateDir}/run-t3.sh`, "# previous runner\n");
-        assert.equal((yield* runLaunch).serverKind, "managed");
-        const replacementPid = yield* readManagedPid;
-        assert.notEqual(replacementPid, previousPid);
-        assert.isFalse(isAlive(previousPid));
-        assert.isTrue(isAlive(replacementPid));
-      }).pipe(Effect.provide(NodeServices.layer)),
-    60_000,
+      yield* fs.writeFileString(`${stateDir}/run-t3.sh`, "# previous runner\n");
+      assert.equal((yield* runLaunch).serverKind, "managed");
+      const replacementPid = yield* readManagedPid;
+      assert.notEqual(replacementPid, previousPid);
+      assert.isFalse(isAlive(previousPid));
+      assert.isTrue(isAlive(replacementPid));
+    }).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.effect.skipIf(windowsHost)(
-    "replaces a managed server that exited but was not reaped",
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-        const { home, stateDir, readManagedPid, runLaunch, launchManaged } = yield* prepareLaunch;
-        const { launched, pid } = yield* launchManaged;
-        process.kill(pid, "SIGKILL");
+  it.effect.skipIf(windowsHost)("replaces a managed server that exited but was not reaped", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const { home, stateDir, readManagedPid, runLaunch, launchManaged } = yield* prepareLaunch;
+      const { launched, pid } = yield* launchManaged;
+      process.kill(pid, "SIGKILL");
 
-        // A crashed server whose parent never reaps it stays a zombie, which
-        // kill -0 still reports. Its pid file and runtime record keep naming it.
-        const parent = yield* spawner.spawn(
-          ChildProcess.make("sh", ["-c", "sleep 600 & echo $!; exec sleep 600"]),
-        );
-        const zombie = Number(
-          Option.getOrThrow(
-            yield* parent.stdout.pipe(Stream.decodeText(), Stream.splitLines, Stream.runHead),
-          ),
-        );
-        // Until the parent execs, the shell still reaps its children, and a child killed then
-        // never becomes a zombie. Wait for the parent to be the non-reaping sleep.
-        const parentExec = yield* runScript(home, [
-          "-c",
-          `attempt=0; while [ "$attempt" -lt 1000 ]; do
+      // A crashed server whose parent never reaps it stays a zombie, which
+      // kill -0 still reports. Its pid file and runtime record keep naming it.
+      const parent = yield* spawner.spawn(
+        ChildProcess.make("sh", ["-c", "sleep 600 & echo $!; exec sleep 600"]),
+      );
+      const zombie = Number(
+        Option.getOrThrow(
+          yield* parent.stdout.pipe(Stream.decodeText(), Stream.splitLines, Stream.runHead),
+        ),
+      );
+      // Until the parent execs, the shell still reaps its children, and a child killed then
+      // never becomes a zombie. Wait for the parent to be the non-reaping sleep.
+      const parentExec = yield* runScript(home, [
+        "-c",
+        `attempt=0; while [ "$attempt" -lt 1000 ]; do
             case "$(ps -o comm= -p ${parent.pid})" in *sleep) exit 0;; esac
             attempt=$((attempt + 1))
           done; exit 1`,
-        ]);
-        assert.equal(parentExec.exitCode, 0);
-        process.kill(zombie, "SIGKILL");
-        // SIGKILL delivery is asynchronous; establish the zombie fixture before launching.
-        const zombieState = yield* runScript(home, [
-          "-c",
-          `attempt=0; while [ "$attempt" -lt 100 ]; do
+      ]);
+      assert.equal(parentExec.exitCode, 0);
+      process.kill(zombie, "SIGKILL");
+      // SIGKILL delivery is asynchronous; establish the zombie fixture before launching.
+      const zombieState = yield* runScript(home, [
+        "-c",
+        `attempt=0; while [ "$attempt" -lt 100 ]; do
             state=$(ps -o stat= -p ${zombie}) || exit 1
             case "$state" in *Z*) printf '%s\\n' "$state"; exit 0;; esac
             attempt=$((attempt + 1))
           done; printf '%s\\n' "$state"; exit 1`,
-        ]);
-        assert.equal(zombieState.exitCode, 0, zombieState.stdout);
-        assert.include(zombieState.stdout, "Z");
-        yield* fs.writeFileString(`${stateDir}/pid`, `${zombie}\n`);
-        yield* fs.writeFileString(
-          `${home}/.t3/userdata/server-runtime.json`,
-          JSON.stringify({
-            version: 1,
-            pid: zombie,
-            port: launched.remotePort,
-            origin: `http://127.0.0.1:${launched.remotePort}`,
-          }),
-        );
+      ]);
+      assert.equal(zombieState.exitCode, 0, zombieState.stdout);
+      assert.include(zombieState.stdout, "Z");
+      yield* fs.writeFileString(`${stateDir}/pid`, `${zombie}\n`);
+      yield* fs.writeFileString(
+        `${home}/.t3/userdata/server-runtime.json`,
+        JSON.stringify({
+          version: 1,
+          pid: zombie,
+          port: launched.remotePort,
+          origin: `http://127.0.0.1:${launched.remotePort}`,
+        }),
+      );
 
-        assert.equal((yield* runLaunch).serverKind, "managed");
-        const replacementPid = yield* readManagedPid;
-        assert.notEqual(replacementPid, zombie);
-        assert.isTrue(isAlive(replacementPid));
-      }).pipe(Effect.provide(NodeServices.layer)),
-    60_000,
+      assert.equal((yield* runLaunch).serverKind, "managed");
+      const replacementPid = yield* readManagedPid;
+      assert.notEqual(replacementPid, zombie);
+      assert.isTrue(isAlive(replacementPid));
+    }).pipe(Effect.provide(NodeServices.layer)),
   );
 
   it.effect.skipIf(windowsHost)(
@@ -1119,7 +1091,6 @@ server.listen(Number(flag("--port")), "127.0.0.1", () => {
         });
         assert.isTrue(isAlive(pid));
       }).pipe(Effect.provide(NodeServices.layer)),
-    60_000,
   );
 
   it.effect.skipIf(windowsHost)(
@@ -1134,7 +1105,6 @@ server.listen(Number(flag("--port")), "127.0.0.1", () => {
         assert.deepEqual(yield* runLaunch, { remotePort: servicePort, serverKind: "external" });
         assert.isFalse(yield* fs.exists(`${stateDir}/pid`));
       }).pipe(Effect.provide(NodeServices.layer)),
-    60_000,
   );
 
   it.effect.skipIf(windowsHost)(
@@ -1172,6 +1142,5 @@ server.listen(Number(flag("--port")), "127.0.0.1", () => {
         const replacementPid = yield* readManagedPid;
         assert.isTrue(isAlive(replacementPid));
       }).pipe(Effect.provide(NodeServices.layer)),
-    60_000,
   );
 });

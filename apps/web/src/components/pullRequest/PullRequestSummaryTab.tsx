@@ -53,6 +53,7 @@ import {
   PullRequestLabelChip,
   PullRequestReviewOutcomeBadge,
   pullRequestReviewOutcomeLabel,
+  PullRequestReviewOutcomeAvatarBadge,
   pullRequestReviewOutcomeRingClassName,
   pullRequestReviewOutcomeStaleLabel,
 } from "./pullRequestPresentation";
@@ -814,11 +815,17 @@ export function PullRequestSummaryTab({
                             variant="avatar"
                           />
                           {entry.outcome ? (
-                            <span className="sr-only">
-                              {entry.stale
-                                ? pullRequestReviewOutcomeStaleLabel(entry.outcome)
-                                : pullRequestReviewOutcomeLabel(entry.outcome)}
-                            </span>
+                            <>
+                              <PullRequestReviewOutcomeAvatarBadge
+                                outcome={entry.outcome}
+                                stale={entry.stale}
+                              />
+                              <span className="sr-only">
+                                {entry.stale
+                                  ? pullRequestReviewOutcomeStaleLabel(entry.outcome)
+                                  : pullRequestReviewOutcomeLabel(entry.outcome)}
+                              </span>
+                            </>
                           ) : null}
                         </TooltipTrigger>
                         <TooltipPopup side="bottom">
@@ -943,8 +950,7 @@ export function PullRequestSummaryTab({
                 const failing = check.status === "failure" || check.status === "cancelled";
                 return (
                   <div
-                    // Position too: the host decides how many runs share a name, and a repeated
-                    // key would be a rendering fault on top of whatever the list already says.
+                    // oxlint-disable-next-line react/no-array-index-key -- hosts can return checks with identical names and URLs
                     key={`${index}:${check.name}:${check.url ?? ""}`}
                     className="group flex items-center gap-2 rounded-md pr-1 hover:bg-accent/60"
                   >

@@ -12,9 +12,9 @@ import {
   deriveProviderInstanceEntries,
   getDefaultProviderInstanceModel,
   isProviderInstanceModelsUsable,
+  resolveProviderCatalogAvailability,
   isProviderInstancePickerReady,
   resolveDefaultProviderModelSelection,
-  resolveProviderCatalogAvailability,
   resolveSelectableProviderInstance,
   shouldShowInstanceBadge,
 } from "./providerInstances";

@@ -7,8 +7,6 @@ import {
   type PreviewMiniPlayerObstacles,
   resizePreviewMiniPlayer,
   resizeFloatingPreviewFrame,
-  resolveDeviceMiniPlayerCornerRadius,
-  resolveDeviceMiniPlayerSourceSize,
   resolvePreviewMiniPlayerFrame,
   resolvePreviewMiniPlayerSourceSize,
 } from "./previewMiniPlayerLayout";

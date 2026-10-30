@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import type { EnvironmentId } from "@t3tools/contracts";
 
 import {
-  browserProfileRemovalAvailable,
   clearBrowserProfileData,
   removeBrowserProfileCredentials,
   importFailureReason,

@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 const stageArtworkState = vi.hoisted(() => ({
   mode: "none" as "artwork" | "none",
@@ -12,7 +12,8 @@ vi.mock("~/hooks/useSettings", () => ({
 }));
 vi.mock("../SidebarStageBackdrop", () => ({
   StageBackdropButtonArt: ({ variant }: { variant: string }) => `stage-${variant}`,
-  useSidebarStageBackdropVariant: (enabled = true) => (enabled ? stageArtworkState.variant : null),
+  useSidebarStageBackdropVariant: (mode: string) =>
+    mode === "artwork" ? stageArtworkState.variant : null,
 }));
 
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
@@ -35,7 +36,6 @@ function renderPendingActions(isRunning: boolean) {
       promptHasText: false,
       isSendBusy: false,
       sendDisabledReason: null,
-      isConnecting: false,
       isEnvironmentUnavailable: false,
       isPreparingWorktree: false,
       hasSendableContent: false,
@@ -58,7 +58,6 @@ function renderRunningActions(hasSendableContent: boolean) {
       promptHasText: hasSendableContent,
       isSendBusy: false,
       sendDisabledReason: null,
-      isConnecting: false,
       isEnvironmentUnavailable: false,
       isPreparingWorktree: false,
       hasSendableContent,
@@ -84,7 +83,6 @@ function renderSendButton(
       promptHasText: true,
       isSendBusy: false,
       sendDisabledReason,
-      isConnecting: false,
       isEnvironmentUnavailable: false,
       isPreparingWorktree: false,
       hasSendableContent: true,
@@ -96,13 +94,14 @@ function renderSendButton(
   );
 }
 
-afterEach(() => {
+function setup() {
   stageArtworkState.mode = "none";
   stageArtworkState.variant = null;
-});
+}
 
 describe("ComposerPrimaryActions", () => {
   it("disables and labels the send button while feedback is uploading", () => {
+    setup();
     const markup = renderSendButton("Sending feedback");
 
     expect(markup).toContain("disabled");
@@ -110,14 +109,17 @@ describe("ComposerPrimaryActions", () => {
   });
 
   it("offers Stop generation while a running turn is waiting for user input", () => {
+    setup();
     expect(renderPendingActions(true)).toContain('aria-label="Stop generation"');
   });
 
   it("does not offer Stop generation for a pending request without a running turn", () => {
+    setup();
     expect(renderPendingActions(false)).not.toContain('aria-label="Stop generation"');
   });
 
   it("renders stage artwork inside the send button when artwork identification is active", () => {
+    setup();
     stageArtworkState.mode = "artwork";
     stageArtworkState.variant = "nightly";
 
@@ -127,6 +129,7 @@ describe("ComposerPrimaryActions", () => {
   });
 
   it("hides stage artwork when artwork identification is inactive", () => {
+    setup();
     stageArtworkState.variant = "nightly";
 
     const markup = renderSendButton();
@@ -135,6 +138,7 @@ describe("ComposerPrimaryActions", () => {
   });
 
   it("distinguishes an idle main turn while background agents are still working", () => {
+    setup();
     const markup = renderSendButton(null, true);
 
     expect(markup).toContain("ring-warning/55");
@@ -143,6 +147,7 @@ describe("ComposerPrimaryActions", () => {
   });
 
   it("renders a queue action alongside stop while running with a sendable draft", () => {
+    setup();
     const markup = renderRunningActions(true);
 
     expect(markup).toContain('aria-label="Stop generation"');
@@ -151,6 +156,7 @@ describe("ComposerPrimaryActions", () => {
   });
 
   it("keeps stop as the only action while running with an empty composer", () => {
+    setup();
     const markup = renderRunningActions(false);
 
     expect(markup).toContain('aria-label="Stop generation"');

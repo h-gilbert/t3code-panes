@@ -23,10 +23,10 @@ vi.mock("electron", () => ({
 import * as DesktopBackendConfiguration from "../../backend/DesktopBackendConfiguration.ts";
 import * as DesktopBackendManager from "../../backend/DesktopBackendManager.ts";
 import * as DesktopBackendPool from "../../backend/DesktopBackendPool.ts";
+import * as DesktopAppSettings from "../../settings/DesktopAppSettings.ts";
 import * as ElectronDialog from "../../electron/ElectronDialog.ts";
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as DesktopIpc from "../DesktopIpc.ts";
-import * as DesktopAppSettings from "../../settings/DesktopAppSettings.ts";
 import {
   getLocalEnvironmentBootstraps,
   getWindowFullscreenState,
@@ -239,10 +239,10 @@ describe("getWindowFullscreenState", () => {
     }).pipe(
       Effect.provide(
         Layer.mock(ElectronWindow.ElectronWindow)({
-          currentMainOrFirst: Effect.succeed(Option.some(mainWindow)),
+          currentMainOrFirst: Effect.succeedSome(mainWindow),
           fromWebContents: (webContents) => {
             assert.strictEqual(webContents, sender);
-            return Effect.succeed(Option.some(requestingWindow));
+            return Effect.succeedSome(requestingWindow);
           },
         }),
       ),
@@ -316,7 +316,7 @@ describe("pasteAsText", () => {
       assert.equal(paste.mock.calls.length, 1);
     }).pipe(
       Effect.provide(
-        Layer.mock(ElectronWindow.ElectronWindow)({ main: Effect.succeed(Option.some(main)) }),
+        Layer.mock(ElectronWindow.ElectronWindow)({ main: Effect.succeedSome(main) }),
       ),
     );
   });
@@ -396,7 +396,22 @@ describe("pickProjectFavicon", () => {
             filters: [
               {
                 name: "Images",
-                extensions: ["avif", "gif", "ico", "jpeg", "jpg", "png", "svg", "webp", "icns"],
+                extensions: [
+                  "avif",
+                  "bmp",
+                  "gif",
+                  "ico",
+                  "heic",
+                  "heif",
+                  "jpeg",
+                  "jpg",
+                  "png",
+                  "svg",
+                  "tif",
+                  "tiff",
+                  "webp",
+                  "icns",
+                ],
               },
             ],
           },

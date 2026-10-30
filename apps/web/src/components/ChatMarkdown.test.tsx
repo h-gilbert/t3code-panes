@@ -652,8 +652,8 @@ describe("ChatMarkdown skill chips", () => {
             cwd="/tmp/project"
             text={text}
             skills={[
-              { name: "2spec", displayName: "2Spec" },
-              { name: "20k", displayName: "MoneySkill" },
+              { name: "2spec", displayName: "2Spec", path: "/skills/2spec", enabled: true },
+              { name: "20k", displayName: "MoneySkill", path: "/skills/20k", enabled: true },
             ]}
           />,
         );
@@ -1246,13 +1246,18 @@ it.each([
     query: "Hidden needle",
     count: 1,
   },
-  { text: ARTIFACT_TEMPLATE_DIRECTIVE, query: "Hello World", count: 1, useTemplate: true },
-  { text: ARTIFACT_TEMPLATE_DIRECTIVE, query: "Document template", count: 1, useTemplate: true },
-  { text: ARTIFACT_TEMPLATE_DIRECTIVE, query: "World Document", count: 0, useTemplate: true },
-  { text: ARTIFACT_TEMPLATE_DIRECTIVE, query: "Use template", count: 0, useTemplate: true },
+  { text: ARTIFACT_TEMPLATE_DIRECTIVE, query: "Hello World", count: 1, hasTemplateAction: true },
+  {
+    text: ARTIFACT_TEMPLATE_DIRECTIVE,
+    query: "Document template",
+    count: 1,
+    hasTemplateAction: true,
+  },
+  { text: ARTIFACT_TEMPLATE_DIRECTIVE, query: "World Document", count: 0, hasTemplateAction: true },
+  { text: ARTIFACT_TEMPLATE_DIRECTIVE, query: "Use template", count: 0, hasTemplateAction: true },
 ])(
   "highlights the indexed occurrences of $query in $text",
-  async ({ text, query, count, lineBreaks, user, useTemplate }) => {
+  async ({ text, query, count, lineBreaks, user, hasTemplateAction }) => {
     const skills = [{ name: "test-t3-app", displayName: "T3 App Testing" }];
     const highlights = new Map<string, Set<Range>>();
     vi.stubGlobal(
@@ -1283,10 +1288,14 @@ it.each([
               <ChatMarkdown
                 text={text}
                 cwd={undefined}
-                skills={skills}
+                skills={skills?.map((skill) => ({
+                  ...skill,
+                  path: `/skills/${skill.name}`,
+                  enabled: true,
+                }))}
                 lineBreaks={lineBreaks ?? false}
                 parseRawHtml={!user}
-                onUseArtifactTemplate={useTemplate ? () => undefined : undefined}
+                onUseArtifactTemplate={hasTemplateAction ? () => undefined : undefined}
               />
             </MarkdownFindContext>
           </div>

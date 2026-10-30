@@ -31,21 +31,7 @@ export function shouldUseRestingComposerLayout(input: {
   hasExpandedChrome: boolean;
   hasMultilinePrompt: boolean;
 }): boolean {
-  // Multiline drafts stay readable. Resting only clamps a single prompt
-  // line and overlays its actions; non-image attachment and context
-  // rows keep their natural height above it while image previews move inline.
-  // Banners and the tasks badge dock above the surface, so they are absent
-  // too. The context strip is optional: collapsed controls use it when
-  // present and otherwise occupy a compact row inside the composer.
-  //
-  // Only a timeline scroll rests the composer: the user asked for it with the
-  // gesture, and it lifts on the next composer interaction. Losing focus never
-  // rests it, so clicking a message, copying output, or selecting text for a
-  // citation leaves the composer where it was.
-  //
-  // Overflow gates the initiating gesture, never this layout. Collapsing
-  // enlarges the timeline viewport and can make its content fit; expanding
-  // in response would make it overflow again and oscillate indefinitely.
+  // Collapse must not depend on overflow: reclaiming the composer height can make content fit.
   return (
     input.isExistingThread &&
     !input.isMobileViewport &&

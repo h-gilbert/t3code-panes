@@ -19,9 +19,9 @@ describe("chat timeline composer layout", () => {
     expect(source).toMatch(/onLiveTailSizeChange[:=]\s*scheduleActiveTimelineEndReveal/);
     expect(follow).toMatch(/animated: false,\s+viewPosition: 0,/);
     expect(follow).toContain(
-      "showScrollDebouncer.current.cancel();\n    setShowScrollToBottom(false);",
+      "visitScroll().showScrollDebouncer.cancel();\n    setShowScrollToBottom(false);",
     );
     expect(source).toContain("bottom={4}");
-    expect(source).not.toContain("contentInsetEndAdjustment=");
+    expect(source).toContain("contentInsetEndAdjustment={0}");
   });
 });

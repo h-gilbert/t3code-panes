@@ -12,7 +12,6 @@ import {
   sanitizeThreadTitle,
   toJsonSchemaObject,
 } from "./textGenerationUtils.ts";
-import { TextGenerationError } from "@t3tools/contracts";
 
 describe("buildCommitMessagePrompt", () => {
   it("includes staged patch and summary in the prompt", () => {

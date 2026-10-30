@@ -80,8 +80,9 @@ export const layer = McpToolAccess.toLayer(EnvironmentToolkit, {
       };
     }),
   ),
-  t3_environment_preferences_update: McpToolAccess.actsAsCaller(({ reason, ...patch }) =>
-    update({ reason, patch }),
+  // Takes a linked-environment target, so it needs a remote check; approval stays in `update`.
+  t3_environment_preferences_update: McpToolAccess.writesWithCapability(
+    ({ reason, ...patch }) => update({ reason, patch }),
   ),
   t3_settings_update: McpToolAccess.actsAsCaller(update),
 });

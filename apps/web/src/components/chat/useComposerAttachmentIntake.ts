@@ -16,7 +16,7 @@ import {
   composerFileMatchesReattachMarker,
   composerFileNeedsReattach,
 } from "../../composerDraftStore";
-import { type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
+import { type ComposerPromptEditorHandle } from "../ComposerPromptEditorTiptap";
 import { type PendingUserInput } from "../../session-logic";
 import {
   changeQuestionAttachmentPreparation,
@@ -62,7 +62,6 @@ export function useComposerAttachmentIntake(input: {
   readonly pendingUserInputs: ReadonlyArray<PendingUserInput>;
   readonly supportsQuestionAttachments: boolean;
   readonly isLiteralPendingAnswer: boolean;
-  readonly isConnecting: boolean;
   readonly projectSelectionRequired: boolean;
   readonly questionAttachmentTarget: DraftId | null;
   readonly attachmentTargetKey: string;
@@ -93,8 +92,7 @@ export function useComposerAttachmentIntake(input: {
     pendingUserInputs,
     supportsQuestionAttachments,
     isLiteralPendingAnswer,
-    isConnecting,
-    projectSelectionRequired,
+    projectSelectionRequired: _projectSelectionRequired,
     questionAttachmentTarget,
     attachmentTargetKey,
     fileStagingLimit,
@@ -309,11 +307,7 @@ export function useComposerAttachmentIntake(input: {
     for (const image of nextImages) {
       if (!storedImageIds.has(image.id)) URL.revokeObjectURL(image.previewUrl);
     }
-    // Image attachments stay in the preview tray without changing the prompt.
-    // Only failures are reported here. Success must not pass `null`: by
-    // now other work (a failed send, an overlapping paste) may have set a
-    // thread error this call knows nothing about, and clearing it would
-    // swallow that message.
+    // Images use attachment previews and never add inline prompt chips.
     const compressionError = [...compressionErrors]
       .filter(([id]) => stillPreparingIds.has(id))
       .map(([, message]) => message)

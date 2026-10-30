@@ -1,4 +1,3 @@
-import { useEnvironmentPresentation } from "../../state/presentation";
 import { formatFilePathForClipboard } from "@t3tools/client-runtime/media-actions";
 import {
   isAtomCommandInterrupted,
@@ -12,6 +11,7 @@ import { readLocalApi } from "../../localApi";
 import { cn } from "../../lib/utils";
 import { shouldOpenMarkdownFileLinkInEditor } from "../../markdown-links";
 import type { markdownFileCopyPaths } from "../../markdownFileHostPath";
+import { documentChipKindForFileName } from "../../pierre-icons";
 import { ContextChip } from "../ContextChip";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -69,13 +69,6 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
   revealLabel,
   resolveCopyPaths,
 }: MarkdownFileLinkProps) {
-  const { presentation } = useEnvironmentPresentation(threadRef?.environmentId ?? null);
-  const canRevealInFinder =
-    typeof window !== "undefined" &&
-    typeof window.desktopBridge?.revealPath === "function" &&
-    navigator.platform.toLowerCase().includes("mac") &&
-    presentation?.entry.target._tag === "PrimaryConnectionTarget";
-
   const handleOpenInEditor = () => {
     if (!onOpen) {
       return;
@@ -328,6 +321,7 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
     canOpenInBrowser,
     canOpenInPanel,
   });
+  const chipKind = documentChipKindForFileName(iconPath) ?? "mention";
 
   return (
     <Tooltip>
@@ -335,7 +329,7 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
         render={
           hasPrimaryAction ? (
             <ContextChip
-              kind="mention"
+              kind={chipKind}
               dir="ltr"
               render={<a href={href} />}
               className={MARKDOWN_FILE_LINK_CLASS_NAME}
@@ -364,7 +358,7 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
             </ContextChip>
           ) : (
             <ContextChip
-              kind="mention"
+              kind={chipKind}
               dir="ltr"
               render={<button type="button" />}
               aria-label={`File options for ${label}`}

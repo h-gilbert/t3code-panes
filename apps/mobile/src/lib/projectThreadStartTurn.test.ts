@@ -1,14 +1,7 @@
-import {
-  EnvironmentId,
-  MessageId,
-  ProjectId,
-  ProviderInstanceId,
-  ThreadId,
-} from "@t3tools/contracts";
-import { serializeAssistantCitation } from "@t3tools/shared/assistantCitations";
+import { ProjectId, ProviderInstanceId } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-vi.mock("react-native", () => ({ Platform: { OS: "ios" } }));
+vi.stubEnv("EXPO_OS", "ios");
 
 import { serializeComposerMessageForServer } from "./composerContext";
 
@@ -42,7 +35,7 @@ describe("project thread title", () => {
     },
   ])("titles a $type-only message without changing its data", ({ text, title, ...attachment }) => {
     const uploadedAttachments = [{ ...attachment, id: "prepared-attachment", sizeBytes: 3 }];
-    const wire = serializeComposerMessageForServer(text, undefined, true);
+    const wire = serializeComposerMessageForServer(text, undefined);
     const spec = {
       projectId: ProjectId.make("project"),
       projectCwd: "/workspace",

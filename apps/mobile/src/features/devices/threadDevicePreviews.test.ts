@@ -84,6 +84,18 @@ describe("thread device previews", () => {
     );
   });
 
+  it("hides physical devices from previews", () => {
+    expect(
+      threadDevicePreviews(
+        {
+          ...state,
+          devices: state.devices.map((device) => ({ ...device, physical: true })),
+        },
+        threadId,
+      ),
+    ).toEqual([]);
+  });
+
   it("selects another open device when the agent closes the selected session", () => {
     const previews = threadDevicePreviews(state, threadId);
     const selectedKey = previews[1]!.key;

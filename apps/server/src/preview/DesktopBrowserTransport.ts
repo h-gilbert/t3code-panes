@@ -22,8 +22,8 @@ const prefix = "/api/preview-browser-host";
  * a header avoids URL/history logs; no cookies or public CDP listener are used.
  * File data and large CDP frames stay off the conversation WebSocket.
  */
-export const handler = (channel: DesktopBrowserChannel.DesktopBrowserChannel["Service"]) =>
-  Effect.gen(function* () {
+export const handler = Effect.fn("DesktopBrowserTransport.handler")(
+  function* (channel: DesktopBrowserChannel.DesktopBrowserChannel["Service"]) {
     const request = yield* HttpServerRequest.HttpServerRequest;
     const authorization = request.headers.authorization ?? "";
     if (!authorization.startsWith("T3Browser ")) return HttpServerResponse.empty({ status: 401 });
@@ -49,10 +49,10 @@ export const handler = (channel: DesktopBrowserChannel.DesktopBrowserChannel["Se
       return yield* HttpServerResponse.json(command, { headers: { "cache-control": "no-store" } });
     }
     return HttpServerResponse.empty({ status: 404 });
-  }).pipe(
-    Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(64 * 1024 * 1024)),
-    Effect.catch(() => Effect.succeed(HttpServerResponse.empty({ status: 403 }))),
-  );
+  },
+  Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(64 * 1024 * 1024)),
+  Effect.orElseSucceed(() => HttpServerResponse.empty({ status: 403 })),
+);
 
 export const routeLayer = HttpRouter.use((router) =>
   Effect.gen(function* () {

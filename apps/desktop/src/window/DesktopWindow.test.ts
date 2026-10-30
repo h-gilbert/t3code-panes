@@ -10,6 +10,7 @@ import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
 
@@ -316,9 +317,9 @@ function layerTest(input: {
     main: Ref.get(input.mainWindow),
     currentMainOrFirst: Ref.get(input.mainWindow),
     focusedMainOrFirst: input.focusedWindow
-      ? Effect.succeed(Option.some(input.focusedWindow))
+      ? Effect.succeedSome(input.focusedWindow)
       : Ref.get(input.mainWindow),
-    fromWebContents: () => Effect.succeed(Option.none()),
+    fromWebContents: () => Effect.succeedNone,
     setMain: (window) => Ref.set(input.mainWindow, Option.some(window)),
     clearMain: () => Ref.set(input.mainWindow, Option.none()),
     prepareReveal: () => Effect.succeed(false),
@@ -445,7 +446,7 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
       main: Ref.get(mainWindow),
       currentMainOrFirst,
       focusedMainOrFirst: currentMainOrFirst,
-      fromWebContents: () => Effect.succeed(Option.none()),
+      fromWebContents: () => Effect.succeedNone,
       setMain: (window) => Ref.set(mainWindow, Option.some(window)),
       clearMain: () => Ref.set(mainWindow, Option.none()),
       prepareReveal: () => Effect.succeed(false),
@@ -785,7 +786,13 @@ describe("DesktopWindow", () => {
         createCount,
         mainWindow,
         workspaceWindowRemovals,
-        desktopStateLayer: Layer.succeed(DesktopState.DesktopState, { backendReady, quitting }),
+        desktopStateLayer: Layer.succeed(DesktopState.DesktopState, {
+          backendReady,
+          quitting,
+          primaryBackendStartup: yield* SubscriptionRef.make<DesktopState.PrimaryBackendStartup>({
+            _tag: "Starting",
+          }),
+        }),
         workspaceWindows: [
           {
             workspaceId: "main",

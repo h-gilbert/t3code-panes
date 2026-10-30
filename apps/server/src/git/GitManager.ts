@@ -37,7 +37,6 @@ import {
   type OrchestrationV2TurnItem,
   type ProjectId,
   SourceControlProviderError,
-  SourceControlProviderKind,
   type SourceControlWritingStyleSettings,
   type ThreadId,
   type ThreadPullRequestKey,

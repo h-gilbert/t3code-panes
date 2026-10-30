@@ -2,7 +2,6 @@ import {
   PreviewAutomationAutofillInput,
   PreviewAutomationAutofillResult,
   ToolActivityIcon,
-  PreviewAutomationClickInput,
   PreviewAutomationCloseInput,
   PreviewAutomationCloseResult,
   PreviewAutomationDownloadArtifact,
@@ -12,24 +11,19 @@ import {
   PreviewAutomationInputResult,
   OrchestratorMcpFailure,
   PreviewAutomationDialogInput,
-  PreviewAutomationDragInput,
-  PreviewAutomationHoverInput,
+  PreviewAutomationActInput,
   PreviewAutomationNavigateInput,
   PreviewAutomationOpenInput,
-  PreviewAutomationPressInput,
   PreviewAutomationRecordingArtifact,
   PreviewAutomationRecordingStatus,
   PreviewAutomationResizeInput,
   PreviewAutomationResizeResult,
-  PreviewAutomationScrollInput,
-  PreviewAutomationSelectInput,
   PreviewAutomationSelectResult,
   PreviewAutomationSetColorSchemeInput,
   PreviewAutomationSetColorSchemeResult,
   PreviewAutomationSnapshot,
   PreviewAutomationStatus,
   PreviewAutomationTabTargetInput,
-  PreviewAutomationTypeInput,
   PreviewAutomationUploadInput,
   PreviewAutomationUploadResult,
   PreviewAutomationWaitForInput,
@@ -59,15 +53,6 @@ const PreviewActionResult = Schema.Struct(presentationFields).annotate({
   description: "The preview action completed successfully.",
 });
 
-const PreviewInputActionResult = Schema.Struct({
-  ...presentationFields,
-  ...PreviewAutomationInputResult.fields,
-}).annotate({
-  description:
-    "The preview action completed. fileChooser is set when it opened a file picker, which waits for preview_upload without a target.",
-});
-
-/** Drives the real browser and can destroy page state. */
 const browserTool = <T extends Tool.Any>(tool: T): T =>
   tool.annotate(Tool.OpenWorld, true).annotate(Tool.Destructive, true) as T;
 
@@ -180,80 +165,21 @@ export const PreviewSnapshotTool = safeBrowserTool(
   }).annotate(Tool.Title, "Inspect browser page"),
 );
 
-const PreviewClickTool = browserTool(
-  Tool.make("preview_click", {
+const PreviewActTool = browserTool(
+  Tool.make("preview_act", {
     description:
-      "Click exactly one target in the tab selected by tabId, or this agent session's current tab when omitted. Prefer a Playwright locator; selector accepts legacy CSS; x and y must be supplied together. Set button=right or clickCount=2 for server tabs. A file picker the click opens is held without a native dialog and reported as fileChooser; a file the click downloads is held for preview_download without a Save dialog.",
-    parameters: PreviewAutomationClickInput,
-    success: PreviewInputActionResult,
-    failure: PreviewToolFailure,
-    dependencies,
-  }).annotate(Tool.Title, "Click preview page"),
-);
-
-const PreviewTypeTool = browserTool(
-  Tool.make("preview_type", {
-    description: "Type literal text into one input. `clear=true` replaces the current text.",
-    parameters: PreviewAutomationTypeInput,
-    success: PreviewActionResult,
-    failure: PreviewToolFailure,
-    dependencies,
-  }).annotate(Tool.Title, "Type into preview page"),
-);
-
-const PreviewHoverTool = safeBrowserTool(
-  Tool.make("preview_hover", {
-    description: "Hover one target to show menus or tooltips.",
-    parameters: PreviewAutomationHoverInput,
-    success: PreviewActionResult,
-    failure: PreviewToolFailure,
-    dependencies,
-  }).annotate(Tool.Title, "Hover preview page"),
-);
-
-const PreviewSelectTool = browserTool(
-  Tool.make("preview_select", {
-    description:
-      "Pick options in one native <select>, by value or label. For a custom dropdown, click it open, then click the option.",
-    parameters: PreviewAutomationSelectInput,
+      "Act on the chosen tab. Target with `locator='aria-ref=<ref>'` from `preview_snapshot`; `x` and `y` go together. `timeoutMs` defaults to 15000. click: `button`, `clickCount` 1 to 3. File pickers and downloads wait for preview_upload or preview_download without a native dialog. type: literal `text`, `clear=true` replaces it. hover: shows menus or tooltips. select: `values` in one native <select>, by value or label; for a custom dropdown, click it open, then click the option. drag: `source` onto `target`. upload: absolute `paths` answer the file picker `preview_status` reports, [] cancels it, or a `locator` sets an <input type=file>. press: one `key`, such as 'Enter', with `modifiers`, to the focused element; click a field first to focus it. scroll: the tab, or one container with a locator; positive `deltaY` scrolls down, positive `deltaX` right.",
+    parameters: PreviewAutomationActInput,
     success: Schema.Struct({
-      ...PreviewAutomationSelectResult.fields,
       ...presentationFields,
+      ...PreviewAutomationInputResult.fields,
+      selected: Schema.optional(PreviewAutomationSelectResult.fields.selected),
+      tabId: Schema.optional(PreviewAutomationUploadResult.fields.tabId),
+      fileNames: Schema.optional(PreviewAutomationUploadResult.fields.fileNames),
     }),
     failure: PreviewToolFailure,
     dependencies,
-  }).annotate(Tool.Title, "Select preview option"),
-);
-
-const PreviewDragTool = browserTool(
-  Tool.make("preview_drag", {
-    description: "Drag one element onto another.",
-    parameters: PreviewAutomationDragInput,
-    success: PreviewActionResult,
-    failure: PreviewToolFailure,
-    dependencies,
-  }).annotate(Tool.Title, "Drag in preview page"),
-);
-
-const PreviewPressTool = browserTool(
-  Tool.make("preview_press", {
-    description: "Press one key, such as {key:'Enter'} or {key:'a',modifiers:['Meta']}.",
-    parameters: PreviewAutomationPressInput,
-    success: PreviewInputActionResult,
-    failure: PreviewToolFailure,
-    dependencies,
-  }).annotate(Tool.Title, "Press key in preview page"),
-);
-
-const PreviewScrollTool = safeBrowserTool(
-  Tool.make("preview_scroll", {
-    description:
-      "Scroll the chosen tab, or one container with a locator or selector. Positive `deltaY` scrolls down. Positive `deltaX` scrolls right.",
-    parameters: PreviewAutomationScrollInput,
-    success: PreviewActionResult,
-    failure: PreviewToolFailure,
-    dependencies,
-  }).annotate(Tool.Title, "Scroll preview page"),
+  }).annotate(Tool.Title, "Act in preview page"),
 );
 
 /** Wrap non-objects: MCP requires object structuredContent, and Claude Code rejects invalid results entirely. */
@@ -365,13 +291,7 @@ export const PreviewToolkit = Toolkit.make(
   PreviewResizeTool,
   PreviewSetAppearanceTool,
   PreviewSnapshotTool,
-  PreviewClickTool,
-  PreviewTypeTool,
-  PreviewHoverTool,
-  PreviewSelectTool,
-  PreviewDragTool,
-  PreviewPressTool,
-  PreviewScrollTool,
+  PreviewActTool,
   PreviewEvaluateTool,
   PreviewWaitForTool,
   PreviewRecordingStartTool,
@@ -389,13 +309,7 @@ export const PreviewStandardToolkit = Toolkit.make(
   PreviewNavigateTool,
   PreviewResizeTool,
   PreviewSetAppearanceTool,
-  PreviewClickTool,
-  PreviewTypeTool,
-  PreviewHoverTool,
-  PreviewSelectTool,
-  PreviewDragTool,
-  PreviewPressTool,
-  PreviewScrollTool,
+  PreviewActTool,
   PreviewEvaluateTool,
   PreviewWaitForTool,
   PreviewRecordingStartTool,

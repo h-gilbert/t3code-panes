@@ -39,6 +39,8 @@ import {
 } from "./orchestration.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 
+const encodeOrchestrationThreadShell = Schema.encodeEffect(OrchestrationThreadShell);
+
 const decodeTurnDiffInput = Schema.decodeUnknownEffect(OrchestrationGetTurnDiffInput);
 const decodeFullThreadDiffInput = Schema.decodeUnknownEffect(OrchestrationGetFullThreadDiffInput);
 const decodeThreadTurnDiff = Schema.decodeUnknownEffect(ThreadTurnDiff);
@@ -723,7 +725,7 @@ it.effect("defaults settled fields when decoding historical thread data", () =>
     const oldLinkFields = Schema.Struct({
       linkedPullRequest: Schema.optional(ThreadLinkedPullRequest),
     });
-    const newServerWire = yield* Schema.encodeEffect(OrchestrationThreadShell)({
+    const newServerWire = yield* encodeOrchestrationThreadShell({
       ...oldServerShell,
       pullRequests: [
         {
@@ -1394,20 +1396,7 @@ it.effect("preserves proposed plan implementation metadata when present", () =>
   }),
 );
 
-// ── ModelSelection: instance-keyed wire shape + legacy decoder ────────
-//
-// `ModelSelection` is routing-keyed on `instanceId` — never a driver kind.
-// Persisted and in-flight payloads from pre-instance builds carry a
-// `provider` field whose value was a driver kind; those payloads are migrated
-// at the wire boundary by
-// promoting `provider` to the default instance id for that driver
-// (built-in drivers use the driver kind slug as their default instance id, so
-// the migration is a 1:1 rename).
-//
-// These tests pin the rollback/fork tolerance invariant: legacy payloads
-// decode cleanly for fork-provided drivers, and the decoded form uses
-// `instanceId` uniformly regardless of origin.
-
+// Legacy provider fields must decode to instance IDs, including for fork drivers.
 const decodeModelSelection = Schema.decodeUnknownEffect(ModelSelection);
 const encodeModelSelection = Schema.encodeUnknownEffect(ModelSelection);
 

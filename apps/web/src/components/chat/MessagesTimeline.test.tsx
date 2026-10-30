@@ -50,7 +50,11 @@ vi.mock("@effect/atom-react", async (importOriginal) => {
     ...actual,
     useAtomValue: (atom: Parameters<typeof actual.useAtomValue>[0], ...args: unknown[]) =>
       atom === ("timeline-test-providers" as unknown)
-        ? activityTestState.providers
+        ? typeof args[0] === "function"
+          ? (args[0] as (providers: typeof activityTestState.providers) => unknown)(
+              activityTestState.providers,
+            )
+          : activityTestState.providers
         : actual.useAtomValue(atom, ...(args as [])),
   };
 });
@@ -106,6 +110,7 @@ vi.mock("./MessagesTimeline.logic", async (importOriginal) => {
 });
 
 beforeEach(() => {
+  legendListTestState.handle = null;
   activityTestState.providers = [];
   activityTestState.subagentTooltips = false;
   activityTestState.expanded = false;
@@ -114,13 +119,18 @@ beforeEach(() => {
 
 const legendListTestState = vi.hoisted(() => ({
   data: undefined as unknown,
+  onSize: undefined as (() => void) | undefined,
+  handle: null as LegendListRef | null,
   onScroll: undefined as (() => void) | undefined,
 }));
 
 vi.mock("@legendapp/list/react", async () => {
   const legendListTestId = "legend-list";
 
-  const LegendList = (props: {
+  const LegendList = ({
+    ref: listHandleRef,
+    ...props
+  }: {
     data: Array<{ id: string }>;
     keyExtractor: (item: { id: string }) => string;
     renderItem: (args: { item: { id: string } }) => ReactNode;
@@ -156,8 +166,34 @@ vi.mock("@legendapp/list/react", async () => {
     onScroll?: () => void;
     ref?: Ref<LegendListRef>;
   }) => {
-    legendListTestState.data = props.data;
-    legendListTestState.onScroll = props.onScroll;
+    useLayoutEffect(() => {
+      legendListTestState.data = props.data;
+      legendListTestState.onScroll = props.onScroll;
+      legendListTestState.onSize?.();
+    }, [props.data, props.onScroll]);
+    useLayoutEffect(() => {
+      const supplied = legendListTestState.handle;
+      const node = supplied?.getScrollableNode() ?? null;
+      if (!supplied) return;
+      const handle = {
+        ...supplied,
+        getScrollableNode: () => node,
+        getState: () => ({
+          ...supplied?.getState(),
+          data: legendListTestState.data,
+          listen: (_key: string, callback: () => void) => {
+            legendListTestState.onSize = callback;
+            return () => {
+              legendListTestState.onSize = undefined;
+            };
+          },
+        }),
+        scrollToEnd: () => Promise.resolve(),
+        scrollToOffset: () => Promise.resolve(),
+      } as unknown as LegendListRef;
+      if (typeof listHandleRef === "function") return listHandleRef(handle);
+    }, [listHandleRef]);
+
     if (props.anchoredEndSpace) {
       props.anchoredEndSpace.onSizeChanged?.(240);
       props.anchoredEndSpace.onReady?.({ anchorIndex: props.anchoredEndSpace.anchorIndex });
@@ -256,7 +292,6 @@ function matchMedia() {
 }
 
 let MessagesTimeline: typeof import("./MessagesTimeline").MessagesTimeline;
-let resolvePreviewAnnotationImage: typeof import("./MessagesTimeline").resolvePreviewAnnotationImage;
 
 const ElementStub = class ElementStub {};
 function stubDomGlobals() {
@@ -297,11 +332,10 @@ function stubDomGlobals() {
 }
 
 beforeEach(stubDomGlobals);
-// Cold transformation of the full chat dependency graph needs extra time on slower CI workers.
 beforeAll(async () => {
   Object.defineProperty(window, "matchMedia", { value: matchMedia, configurable: true });
-  ({ MessagesTimeline, resolvePreviewAnnotationImage } = await import("./MessagesTimeline"));
-}, 120_000);
+  ({ MessagesTimeline } = await import("./MessagesTimeline"));
+});
 
 const ACTIVE_THREAD_ENVIRONMENT_ID = EnvironmentId.make("environment-local");
 const MESSAGE_CREATED_AT = "2026-03-17T19:12:28.000Z";
@@ -641,7 +675,7 @@ describe("MessagesTimeline", () => {
       const props = buildProps();
       const runId = RunId.make("tool-output-run");
       let timelineIsAtEnd = isAtEnd;
-      props.listRef.current = {
+      legendListTestState.handle = props.listRef.current = {
         getState: () => ({ isAtEnd: timelineIsAtEnd }),
         getScrollableNode: () => null,
       } as unknown as LegendListRef;
@@ -727,9 +761,14 @@ describe("MessagesTimeline", () => {
           frames.clear();
           callbacks.forEach((callback) => callback(0));
         });
-      const viewport = { scrollTop: 400, scrollHeight: 1000 };
+      const viewport = {
+        scrollTop: 400,
+        scrollHeight: 1000,
+        addEventListener() {},
+        removeEventListener() {},
+      };
       const props = buildProps();
-      props.listRef.current = {
+      legendListTestState.handle = props.listRef.current = {
         getState: () => ({ isAtEnd }),
         getScrollableNode: () => viewport,
       } as unknown as LegendListRef;
@@ -803,12 +842,14 @@ describe("MessagesTimeline", () => {
         }),
     };
     const viewport = {
+      addEventListener: () => {},
+      removeEventListener: () => {},
       get scrollTop() {
         return timeline.scrollTop;
       },
       getBoundingClientRect: () => ({ top: 0 }),
     };
-    props.listRef.current = {
+    legendListTestState.handle = props.listRef.current = {
       getScrollableNode: () => viewport,
       getState: () => ({
         data: legendListTestState.data,
@@ -831,14 +872,20 @@ describe("MessagesTimeline", () => {
     let navigateManually = () => {};
     function ChatProbe() {
       const [liveFollowEnabled, setLiveFollowEnabled] = useState(true);
-      navigateManually = () => setLiveFollowEnabled(false);
+
       return (
         <MessagesTimeline
           emptyPlaceholderInset={0}
           {...props}
           timelineEntries={[buildUserTimelineEntry("First prompt")]}
           liveFollowEnabled={liveFollowEnabled}
-          onManualNavigation={navigateManually}
+          onViewportAttach={(viewport) => {
+            navigateManually = () => {
+              viewport.followReleased();
+              setLiveFollowEnabled(false);
+            };
+            return () => {};
+          }}
         />
       );
     }
@@ -1629,6 +1676,7 @@ describe("MessagesTimeline", () => {
         parentThreadLink={{
           threadId: ThreadId.make("thread-parent"),
           title: "Architecture audit",
+          open: () => {},
         }}
       />,
     );
@@ -2068,8 +2116,8 @@ describe("MessagesTimeline", () => {
     );
 
     expect(markup).toContain("Context handoff");
-    expect(markup).toContain("GPT 5.6 Sol");
-    expect(markup).toContain("Claude Fable 5");
+    expect(markup).toContain("5.6 Sol");
+    expect(markup).toContain("Fable 5");
     expect(markup).not.toContain("Full conversation context");
     expect(markup).not.toContain("·");
 
@@ -2105,8 +2153,8 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(legacyMarkup).toContain("GPT 5.6 Sol");
-    expect(legacyMarkup).toContain("Claude Fable 5");
+    expect(legacyMarkup).toContain("5.6 Sol");
+    expect(legacyMarkup).toContain("Fable 5");
     expect(legacyMarkup).not.toContain("Full conversation context");
 
     // Without run data either (e.g. cross-thread items) it falls back to
@@ -3512,6 +3560,17 @@ describe("fork timeline behavior", () => {
       });
     // A work entry renders without the DOM globals that message rows need
     // under react-test-renderer.
+    const viewport = {
+      scrollTop: 0,
+      scrollHeight: 0,
+      clientHeight: 0,
+      addEventListener() {},
+      removeEventListener() {},
+    };
+    legendListTestState.handle = {
+      getScrollableNode: () => viewport,
+      getState: () => ({ data: legendListTestState.data }),
+    } as unknown as LegendListRef;
     const entries = [
       {
         id: "entry-settle-work",

@@ -1,3 +1,5 @@
+import type { SavedRemoteConnection } from "../../lib/connection";
+import type { EnvironmentId } from "@t3tools/contracts";
 /// <reference types="node" />
 
 import * as NodeCrypto from "node:crypto";
@@ -7,14 +9,11 @@ import { describe, expect, it } from "@effect/vitest";
 import Constants from "expo-constants";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
-import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import { Cookies, FetchHttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { ManagedRelay } from "@t3tools/client-runtime/relay";
 
-import type { EnvironmentId } from "@t3tools/contracts";
 import { verifyDpopProof } from "@t3tools/shared/dpop";
-import type { SavedRemoteConnection } from "../../lib/connection";
 import * as Dpop from "../cloud/dpop";
 import * as ManagedRelayLayer from "../cloud/managedRelayLayer";
 import {
@@ -165,6 +164,7 @@ const layerRelayTest = ManagedRelayLayer.layer("https://relay.example.test").pip
 const runBackgroundOperations = Effect.fn("TestRemoteRegistration.runBackgroundOperations")(
   function* () {
     let idlePasses = 0;
+    // oxlint-disable-next-line t3code/no-polling-loop-in-tests -- This harness drains mocked runtime jobs and their promise continuations, not external I/O or elapsed time.
     for (;;) {
       yield* Effect.promise(() => Promise.resolve());
       const pending = backgroundRuntime.pending.shift();

@@ -1,7 +1,7 @@
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { observeResize } from "~/lib/observeResize";
 import { resolveTimelineMinimapPreview, type TimelineMinimapItem } from "./timelineMinimapItems";
-import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
+import { useLayoutEffect, useRef, useState, type MouseEvent } from "react";
 import { ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import {
@@ -60,6 +60,7 @@ export function TimelineMinimap({
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(Infinity);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- observes the marker viewport height to bound its independent scroll region
   useLayoutEffect(() => {
     const viewport = scrollRef.current;
     if (!viewport) return;
@@ -76,11 +77,6 @@ export function TimelineMinimap({
 
   const pressedOnStripRef = useRef(false);
   const [passThrough, setPassThrough] = useState(false);
-
-  useEffect(() => {
-    if (!passThrough) return;
-    return onMouseButtonsReleased(() => setPassThrough(false));
-  }, [passThrough]);
 
   const resolvedActiveIndex =
     activeIndex !== null && activeIndex < items.length ? activeIndex : null;
@@ -169,7 +165,9 @@ export function TimelineMinimap({
             });
           }}
           onMouseMove={(event) => {
-            if (event.buttons !== 0 && !pressedOnStripRef.current) setPassThrough(true);
+            if (event.buttons === 0 || pressedOnStripRef.current || passThrough) return;
+            setPassThrough(true);
+            onMouseButtonsReleased(() => setPassThrough(false));
           }}
           style={{
             height: resolveTimelineMinimapHeightStyle(items.length),
@@ -248,13 +246,7 @@ export function TimelineMinimap({
                 const activeDistance =
                   resolvedActiveIndex === null ? null : Math.abs(index - resolvedActiveIndex);
                 return (
-                  // Compositor-friendly on purpose: in-view state and the hover
-                  // fisheye animate constantly (every scroll tick and streaming
-                  // update flips a band of strips), so the strip animates only
-                  // transform and opacity. Width tiers are a scale-x on a fixed
-                  // w-6 box, and the in-view highlight is an opacity-faded bright
-                  // overlay — never background-color or width, which would force
-                  // main-thread style/layout/paint at 60fps for each transition.
+                  // Animate only transforms and opacity to avoid painting on every scroll.
                   <span
                     aria-hidden="true"
                     className={cn(

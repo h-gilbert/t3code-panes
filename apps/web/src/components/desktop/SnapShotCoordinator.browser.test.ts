@@ -13,11 +13,10 @@ import { toastManager } from "../ui/toast";
 import { SnapShotCoordinator } from "./SnapShotCoordinator";
 import { setSnapShotAnimationDestination } from "../../lib/snapShotAnimation";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
+import { type DesktopBridge, EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { DraftId, useComposerDraftStore } from "../../composerDraftStore";
-import type { DesktopSnapShotBridge } from "../../lib/desktopSnapShot";
 import * as imageCompression from "../../lib/imageCompression";
 import {
   questionAttachmentDraftId,
@@ -472,7 +471,7 @@ describe("window capture delivery", () => {
         setSnapShotAnimationDestination: vi.fn(() => never),
         onMenuAction: vi.fn(() => () => undefined),
         onSnapShotEvent: vi.fn(() => () => undefined),
-      } as unknown as DesktopSnapShotBridge;
+      } as unknown as DesktopBridge;
       const item: DesktopPendingSnapShot = {
         id: "12345678-1234-1234-1234-123456789abc",
         name: "window.png",
@@ -584,7 +583,7 @@ describe("open question delivery", () => {
   };
   const makeBridge = (readSnapShot: () => Promise<typeof capture> = async () => capture) => {
     const acknowledgeSnapShot = vi.fn(async () => undefined);
-    const bridge = { readSnapShot, acknowledgeSnapShot } as unknown as DesktopSnapShotBridge;
+    const bridge = { readSnapShot, acknowledgeSnapShot } as unknown as DesktopBridge;
     return { bridge, acknowledgeSnapShot };
   };
 
@@ -684,7 +683,7 @@ describe("durable snapshot delivery", () => {
       const bridge = {
         readSnapShot: async () => capture,
         acknowledgeSnapShot,
-      } as unknown as DesktopSnapShotBridge;
+      } as unknown as DesktopBridge;
       const write = storage.setItem.getMockImplementation()!;
       storage.setItem.mockImplementation(() => {
         throw new Error("QuotaExceededError");

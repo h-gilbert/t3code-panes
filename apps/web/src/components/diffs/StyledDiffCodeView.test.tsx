@@ -13,7 +13,6 @@ import {
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
   type Ref,
@@ -33,7 +32,10 @@ const testState = vi.hoisted(() => ({
   onInitializationHeld: undefined as (() => void) | undefined,
 }));
 
-vi.mock("../../hooks/useTheme", () => ({ useTheme: () => ({ resolvedTheme: "dark" }) }));
+vi.mock("../../hooks/useTheme", () => ({
+  useTheme: () => ({ resolvedTheme: "dark" }),
+  getRenderedAppearance: () => "dark",
+}));
 
 vi.mock("@pierre/diffs/worker/worker.js?worker", async () => {
   const { Worker } = await import("node:worker_threads");
@@ -331,7 +333,7 @@ describe("code-view worker lifecycle", () => {
   });
 });
 
-type RevealHandle = NonNullable<Parameters<typeof useCodeViewFileReveal>[0]>;
+type RevealHandle = NonNullable<Parameters<ReturnType<typeof useCodeViewFileReveal>["attach"]>[0]>;
 const revealCalls: {
   scope: string;
   fileKey: string;
@@ -355,21 +357,19 @@ function RevealViewer({
       instance.current = undefined;
     };
   }, [collapsed]);
-  const handle = useMemo(
-    () => ({
-      getInstance: () => instance.current,
-      scrollTo: (target: CodeViewScrollTarget) => {
-        if (target.type !== "item") return;
-        revealCalls.push({
-          scope,
-          fileKey: target.id,
-          mounted: instance.current !== undefined,
-          collapsed: instance.current?.collapsed,
-        });
-      },
-    }),
-    [scope],
-  );
+  const [handle] = useState(() => ({
+    getInstance: () => instance.current,
+    getItem: () => instance.current,
+    scrollTo: (target: CodeViewScrollTarget) => {
+      if (target.type !== "item") return;
+      revealCalls.push({
+        scope,
+        fileKey: target.id,
+        mounted: instance.current !== undefined,
+        collapsed: instance.current?.collapsed,
+      });
+    },
+  }));
   useImperativeHandle(viewerRef, () => handle, [handle]);
   return null;
 }
@@ -387,13 +387,19 @@ function RevealViews({
 }) {
   const [viewer, setViewer] = useState<RevealHandle | null>(null);
   const [collapsed, setCollapsed] = useState(true);
-  const selectedRequest = useMemo(() => ({ selectedFile, requestId }), [requestId, selectedFile]);
+  const selectedRequest = JSON.stringify([selectedFile, requestId]);
   useEffect(() => {
-    if (!selectedRequest.selectedFile || !viewer?.getInstance()) return;
-    viewer.scrollTo({ type: "item", id: selectedRequest.selectedFile, align: "start" });
+    const [file] = JSON.parse(selectedRequest) as [string | null, number];
+    if (!file || !viewer?.getInstance()) return;
+    viewer.scrollTo({ type: "item", id: file, align: "start" });
   }, [selectedRequest, viewer]);
-  const revealScope = useMemo(() => ({ scope, selectedRequest }), [scope, selectedRequest]);
-  const requestReveal = useCodeViewFileReveal(viewer, revealScope);
+  const revealScope = JSON.stringify([scope, selectedRequest]);
+  const requestReveal = useCodeViewFileReveal(revealScope);
+  useLayoutEffect(() => {
+    requestReveal.attach(viewer);
+    return () => requestReveal.attach(null);
+  }, [viewer, requestReveal]);
+  useEffect(() => requestReveal.flush());
   return (
     <>
       {visible && (
@@ -402,7 +408,7 @@ function RevealViews({
       <button
         onClick={() => {
           setCollapsed(false);
-          requestReveal("tree-file");
+          requestReveal.request("tree-file");
         }}
       >
         Reveal file

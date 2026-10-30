@@ -65,10 +65,9 @@ export async function restoreQueuedMessage(input: {
   for (const record of records) {
     switch (record.kind) {
       case "terminal":
-        store.addTerminalContext(
-          input.target,
+        store.addTerminalContexts(input.target, [
           terminalContextDraftFromRecord(record, input.threadId),
-        );
+        ]);
         break;
       case "review-comment":
         store.addReviewComment(input.target, reviewCommentFromRecord(record));

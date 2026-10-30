@@ -3,13 +3,13 @@ import {
   COMPOSER_FOOTER_WIDE_ACTIONS_COMPACT_BREAKPOINT_PX,
   getRestingComposerImagePreviewCounts,
   overlayComposerIsResting,
+  resolveComposerTimelineInset,
 } from "./composerFooterLayout";
 import { describe, expect, it } from "vite-plus/test";
 
 import { timelineContentOverflowsViewport } from "./chat/timelineScrollAnchoring";
 import { resolveContextStripLabelsCompact } from "./BranchToolbar.logic";
 import {
-  resolveComposerTimelineInset,
   resolveRestingComposerControlsLayout,
   resolveRestingComposerControlsNaturalWidth,
   shouldAnimateComposerRestingTransition,

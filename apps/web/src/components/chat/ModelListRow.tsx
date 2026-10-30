@@ -1,6 +1,5 @@
 import { type ProviderDriverKind, type ProviderInstanceId } from "@t3tools/contracts";
 import { memo } from "react";
-import { CheckIcon } from "lucide-react";
 import { getProviderIndependentModelName, getProviderRowLabel } from "./providerIconUtils";
 import { ComboboxItem } from "../ui/combobox";
 import { Badge } from "../ui/badge";
@@ -14,7 +13,6 @@ export const ModelListRow = memo(function ModelListRow(props: {
   index: number;
   slug: string;
   name: string;
-  shortName?: string | undefined;
   subProvider?: string | undefined;
   instanceId: ProviderInstanceId;
   driverKind: ProviderDriverKind;
@@ -23,10 +21,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
   acpRegistryAgentId?: string | undefined;
   acpRegistryIconUrl?: string | undefined;
   isSelected: boolean;
-  showSelection?: boolean;
   showProvider: boolean;
-  preferShortName?: boolean;
-  useTriggerLabel?: boolean;
   showNewBadge?: boolean;
   unavailable?: boolean;
   jumpLabel?: string | null;
@@ -35,7 +30,6 @@ export const ModelListRow = memo(function ModelListRow(props: {
   const model = {
     slug: props.slug,
     name: props.name,
-    shortName: props.shortName,
     subProvider: props.subProvider,
   };
   const providerLabel = getProviderRowLabel(props.providerDisplayName, props.subProvider);
@@ -55,14 +49,9 @@ export const ModelListRow = memo(function ModelListRow(props: {
       <div className="min-w-0 flex-1 text-left">
         <div className="flex min-w-0 items-center gap-2">
           <div className="min-w-0 truncate text-xs font-medium leading-snug">
-            {getProviderIndependentModelName(
-              model,
-              props.driverKind,
-              props.providerDisplayName,
-              props.useTriggerLabel || props.preferShortName
-                ? { preferShortName: true }
-                : undefined,
-            )}
+            {getProviderIndependentModelName(model, props.driverKind, props.providerDisplayName, {
+              preferShortName: true,
+            })}
           </div>
           {props.showNewBadge ? (
             <span
@@ -96,9 +85,6 @@ export const ModelListRow = memo(function ModelListRow(props: {
       </div>
 
       <div className="flex shrink-0 items-center gap-1.5">
-        {props.showSelection && props.isSelected ? (
-          <CheckIcon className="size-3.5" aria-hidden="true" />
-        ) : null}
         {props.jumpLabel ? <Kbd>{props.jumpLabel}</Kbd> : null}
       </div>
     </ComboboxItem>

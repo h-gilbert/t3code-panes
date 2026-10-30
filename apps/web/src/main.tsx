@@ -1,36 +1,16 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { createHashHistory, createBrowserHistory } from "@tanstack/react-router";
 
+import "@fontsource-variable/inter";
 import "./index.css";
 
-import { prepareProviderAuthDelivery } from "./providerAuthDelivery";
-import { isElectron } from "./env";
 import { hasCloudPublicConfig } from "./cloud/publicConfig";
-import { getRouter } from "./router";
-import {
-  syncDocumentElectronPlatformClasses,
-  syncDocumentWindowControlsOverlayClass,
-} from "./lib/windowControlsOverlay";
+import { isElectron } from "./env";
+import { startAppServices } from "./appInit";
 import { AppRoot } from "./AppRoot";
 import { clearChunkReloadGuard, reloadOnceForChunkLoadError } from "./lib/chunkReloadGuard";
 
-prepareProviderAuthDelivery();
-
-// Electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
-// Hash history only reads the fragment, so a path-style deep link (e.g. the desktop shell loading
-// /workspace?workspace=<id>) would otherwise be dropped and land on "/". Seed the hash from it.
-if (isElectron && !window.location.hash && window.location.pathname !== "/") {
-  window.history.replaceState(null, "", `/#${window.location.pathname}${window.location.search}`);
-}
-const history = isElectron ? createHashHistory() : createBrowserHistory();
-
-const router = getRouter(history);
-
-if (isElectron) {
-  syncDocumentElectronPlatformClasses(navigator.platform);
-  syncDocumentWindowControlsOverlayClass();
-}
+const router = startAppServices();
 
 const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined;
 

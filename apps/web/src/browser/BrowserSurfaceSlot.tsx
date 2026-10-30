@@ -23,13 +23,11 @@ export function BrowserSurfaceSlot(props: {
     fitSourceContent = false,
     fillContainer = false,
   } = props;
-  const elementRef = useRef<HTMLDivElement | null>(null);
   const presentationRef = useRef({ visible, cornerRadius, zIndex });
   const updateRef = useRef<(() => void) | null>(null);
 
-  useLayoutEffect(() => {
-    const element = elementRef.current;
-    if (!element) return;
+  // The lease lives as long as this element for one tab, so the ref callback owns it.
+  const attachSurface = (element: HTMLDivElement) => {
     let lease = acquireBrowserSurface(tabId, fitSourceContent, fillContainer);
     const update = () => {
       const rect = element.getBoundingClientRect();
@@ -79,8 +77,9 @@ export function BrowserSurfaceSlot(props: {
       if (updateRef.current === update) updateRef.current = null;
       lease.release();
     };
-  }, [fillContainer, fitSourceContent, tabId]);
+  };
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- pushes visibility, radius and stacking to the desktop browser surface after layout
   useLayoutEffect(() => {
     presentationRef.current = { visible, cornerRadius, zIndex };
     updateRef.current?.();
@@ -92,5 +91,5 @@ export function BrowserSurfaceSlot(props: {
     zIndex,
   ]);
 
-  return <div ref={elementRef} className={className} data-browser-surface-slot={tabId} />;
+  return <div ref={attachSurface} className={className} data-browser-surface-slot={tabId} />;
 }

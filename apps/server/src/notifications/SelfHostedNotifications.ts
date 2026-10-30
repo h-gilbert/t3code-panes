@@ -70,9 +70,6 @@ const decodeStoredRegistration = Schema.decodeUnknownOption(
 );
 const encodeStoredRegistration = Schema.encodeEffect(Schema.fromJsonString(StoredRegistration));
 const encodeUnknownJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
-const encodeAggregateJson = Schema.encodeSync(
-  Schema.fromJsonString(Schema.NullOr(RelayAgentActivityAggregateState)),
-);
 const decodeApnsResponse = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.Struct({ reason: Schema.optional(Schema.String) })),
 );
@@ -456,7 +453,6 @@ export const make = Effect.gen(function* () {
       if (!project) continue;
       const projected = resolveAgentAwarenessRelayPublishSnapshot({
         environmentId,
-        threadId: thread.id,
         thread: Option.some(thread),
         project: Option.some(project),
       }).state;
@@ -583,7 +579,6 @@ export const make = Effect.gen(function* () {
       : Option.none();
     const snapshot = resolveAgentAwarenessRelayPublishSnapshot({
       environmentId,
-      threadId,
       thread,
       project,
     });
@@ -671,7 +666,7 @@ export const make = Effect.gen(function* () {
       readCredentials.pipe(Effect.map((credentials) => credentials !== null)),
     ),
     getRegistration: publicOperation("read-registration", getRegistration),
-    registerDevice: (device) =>
+    registerDevice: Effect.fn("SelfHostedNotifications.registerDevice")((device) =>
       publicOperation(
         "register-device",
         Effect.gen(function* () {
@@ -686,7 +681,8 @@ export const make = Effect.gen(function* () {
           return yield* getAggregate;
         }),
       ),
-    unregisterDevice: (deviceId) =>
+    ),
+    unregisterDevice: Effect.fn("SelfHostedNotifications.unregisterDevice")((deviceId) =>
       publicOperation(
         "unregister-device",
         Effect.gen(function* () {
@@ -695,7 +691,8 @@ export const make = Effect.gen(function* () {
           return yield* getAggregate;
         }),
       ),
-    registerLiveActivity: (input) =>
+    ),
+    registerLiveActivity: Effect.fn("SelfHostedNotifications.registerLiveActivity")((input) =>
       publicOperation(
         "register-live-activity",
         Effect.gen(function* () {
@@ -706,6 +703,7 @@ export const make = Effect.gen(function* () {
           return yield* getAggregate;
         }),
       ),
+    ),
     getAggregate: publicOperation("read-aggregate", getAggregate),
     publishThread,
     start,

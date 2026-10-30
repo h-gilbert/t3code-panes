@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { observeResize } from "~/lib/observeResize";
 
 /** Escape pane stacking contexts while keeping alerts anchored to their chat column.
  * Layer 122 clears browser guests at 121 and stays below dialogs at 125.
@@ -9,6 +10,7 @@ export function ChatAlertOverlay({ children }: { children: ReactNode }) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const updateRef = useRef<(() => void) | null>(null);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Position the portal DOM relative to its pane anchor.
   useLayoutEffect(() => {
     const anchor = anchorRef.current;
     const overlay = overlayRef.current;
@@ -22,18 +24,18 @@ export function ChatAlertOverlay({ children }: { children: ReactNode }) {
     };
     updateRef.current = update;
     update();
-    const observer = new ResizeObserver(update);
-    observer.observe(anchor);
+    const stopObserving = observeResize(anchor, update);
     window.addEventListener("resize", update);
     window.addEventListener("scroll", update, true);
     return () => {
-      observer.disconnect();
+      stopObserving();
       window.removeEventListener("resize", update);
       window.removeEventListener("scroll", update, true);
       updateRef.current = null;
     };
   }, []);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Position the portal DOM relative to its pane anchor.
   useLayoutEffect(() => {
     updateRef.current?.();
   });

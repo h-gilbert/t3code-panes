@@ -1,33 +1,20 @@
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
 import { isElectron } from "../env";
 import { isMacPlatform } from "../lib/utils";
 
+const isMacosDesktop = () => isElectron && isMacPlatform(navigator.platform);
+const subscribe = (onChange: () => void) =>
+  (isMacosDesktop()
+    ? window.desktopBridge?.onWindowFullscreenStateChange?.(onChange)
+    : undefined) ?? (() => {});
+const getSnapshot = () =>
+  isMacosDesktop() && (window.desktopBridge?.getWindowFullscreenState?.() ?? false);
+const getServerSnapshot = () => false;
+
 export function useDesktopFullscreen() {
-  const isMacosDesktop = isElectron && isMacPlatform(navigator.platform);
-  const [isWindowFullscreen, setIsWindowFullscreen] = useState(() => {
-    const getWindowFullscreenState = window.desktopBridge?.getWindowFullscreenState;
-    return isMacosDesktop && typeof getWindowFullscreenState === "function"
-      ? getWindowFullscreenState()
-      : false;
-  });
+  const macosDesktop = isMacosDesktop();
+  const isWindowFullscreen = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
-  useEffect(() => {
-    if (!isMacosDesktop) return;
-    const bridge = window.desktopBridge;
-    if (!bridge) return;
-    const { getWindowFullscreenState, onWindowFullscreenStateChange } = bridge;
-    if (
-      typeof getWindowFullscreenState !== "function" ||
-      typeof onWindowFullscreenStateChange !== "function"
-    ) {
-      return;
-    }
-
-    const unsubscribe = onWindowFullscreenStateChange(setIsWindowFullscreen);
-    setIsWindowFullscreen(getWindowFullscreenState());
-    return unsubscribe;
-  }, [isMacosDesktop]);
-
-  return { isMacosDesktop, isWindowFullscreen } as const;
+  return { isMacosDesktop: macosDesktop, isWindowFullscreen } as const;
 }

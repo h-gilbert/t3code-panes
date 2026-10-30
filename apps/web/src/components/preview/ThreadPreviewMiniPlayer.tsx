@@ -166,12 +166,14 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
     store.setMaximized(threadRef, tabId, false);
   };
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Observe the pane anchor DOM size for compact preview placement.
   useLayoutEffect(() => {
     const anchor = anchorRef.current;
     if (!compact || !hasPreview || !anchor) return;
     return observeResize(anchor, () => setAnchorLayout((version) => version + 1));
   }, [compact, hasPreview]);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Clamp the floating window to the browser viewport on resize.
   useLayoutEffect(() => {
     if (!floating || maximized || !hasPreview) return;
     const clampAndMove = () => {
@@ -203,6 +205,7 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
     return () => window.removeEventListener("resize", clampAndMove);
   }, [floating, hasPreview, maximized, tabId, threadRef]);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Cancel pending browser animation frames when the drag surface changes or unmounts.
   useLayoutEffect(
     () => {
       return () => {

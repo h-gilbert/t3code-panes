@@ -1,7 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as TestClock from "effect/testing/TestClock";
@@ -91,10 +90,10 @@ function layerElectronWindow(window: ReturnType<typeof makeTestWindow>["window"]
     ElectronWindow.ElectronWindow,
     ElectronWindow.ElectronWindow.of({
       create: () => Effect.die("unexpected BrowserWindow creation"),
-      main: Effect.succeed(Option.some(window as Electron.BrowserWindow)),
-      currentMainOrFirst: Effect.succeed(Option.some(window as Electron.BrowserWindow)),
-      focusedMainOrFirst: Effect.succeed(Option.some(window as Electron.BrowserWindow)),
-      fromWebContents: () => Effect.succeed(Option.none()),
+      main: Effect.succeedSome(window as Electron.BrowserWindow),
+      currentMainOrFirst: Effect.succeedSome(window as Electron.BrowserWindow),
+      focusedMainOrFirst: Effect.succeedSome(window as Electron.BrowserWindow),
+      fromWebContents: () => Effect.succeedNone,
       setMain: () => Effect.void,
       clearMain: () => Effect.void,
       prepareReveal: () => Effect.succeed(false),

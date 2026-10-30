@@ -3,7 +3,7 @@ import {
   getCloneDirectoryName,
 } from "@t3tools/client-runtime/operations/projects";
 
-import { getBrowseLeafPathSegment } from "./lib/projectPaths";
+import { getBrowseLeafPathSegment } from "@t3tools/client-runtime/state/projects";
 
 export function resolvePaneEnvironmentMode(input: {
   readonly embeddedPane: boolean;

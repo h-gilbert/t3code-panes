@@ -3,6 +3,7 @@ import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeI
 
 import {
   T3_CODE_BROWSER_TOOL_INSTRUCTIONS,
+  T3_CODE_DEVICE_TOOL_INSTRUCTIONS,
   T3_CODE_ORCHESTRATION_SECTIONS,
 } from "@t3tools/provider-core/server/orchestrationInstructions";
 
@@ -14,14 +15,6 @@ import { T3_CODE_BACKGROUND_BROWSER_INSTRUCTIONS } from "./PreviewBrowserInstruc
  * every value built here has to fit.
  */
 export const CODEX_ADDITIONAL_CONTEXT_VALUE_MAX_BYTES = 4_000;
-
-const T3_CODE_DEVICE_TOOL_INSTRUCTIONS = `## T3 Code devices
-
-For simulators, emulators, and physical phones/tablets, try \`device_list\`, then \`device_open\`. Use its exact \`agent-device\` launcher and target flags on every command. Prefer snapshot refs over coordinates and use \`device_screenshot\` for captures. Reuse this thread's device; otherwise choose the only matching connected device and ask if several match. Coordinate with another thread before using its physical device.
-
-When T3 cannot discover, open, stream, or control connected hardware, report the exact limitation and continue with the host's agent-device or native device tools, including adb for Android UI control. Use explicit device IDs. Missing emulator tooling does not make physical Android unavailable. Live video is optional: continue using screenshots and snapshots. Never stop merely because a tool instruction assumes a simulator. Preserve device-support and agent-access settings; fallback must not bypass disabled access or a permission denial.
-
-A requested physical-device test includes installing the development app and automation helpers, signing in, UI interaction, captures, and task-related settings. Set up a signed iOS runner when needed, respecting the shared compilation lock. Ask only for trust, Developer Mode, or credentials you cannot supply. USB and already-paired wireless devices on configured hosts are supported targets. Preserve unrelated apps, data, and running work.`;
 
 export interface T3CodeToolAvailability {
   readonly browser: boolean;

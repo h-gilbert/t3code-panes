@@ -433,6 +433,7 @@ const ATOMIC_SETTINGS_KEYS: ReadonlySet<string> = new Set([
   "sourceControlWriterModelSelection",
   "reviewGuideModelSelection",
   "textGenerationModelSelection",
+  "fallbackModelSelection",
   "pullRequestMergeMethod",
 ]);
 
@@ -1043,9 +1044,6 @@ const make = Effect.gen(function* () {
         Effect.flatMap(use),
       ),
     );
-
-  const updateSettings = (patch: ServerSettingsPatch) =>
-    updateAndPersistSettings((current) => Effect.succeed(applyServerSettingsPatch(current, patch)));
 
   const revalidateAndEmit = writeSemaphore.withPermits(1)(
     Effect.gen(function* () {

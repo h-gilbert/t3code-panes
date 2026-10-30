@@ -5,7 +5,6 @@ import type {
   EnvironmentId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { AsyncResult, Atom } from "effect/reactivity";
 
@@ -99,5 +98,5 @@ export function usePreviewWebviewConfig(
   const result = useAtomValue(
     previewWebviewConfigAtom(configKey(environmentId, profileId, browserScope)),
   );
-  return Option.getOrNull(AsyncResult.value(result));
+  return AsyncResult.getOrElse(result, () => null);
 }

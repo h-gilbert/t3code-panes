@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useMediaQuery } from "~/hooks/useMediaQuery";
 
 export const CLAUDE_SPINNER_WORDS = [
   "Accomplishing",
@@ -219,20 +220,20 @@ export function formatComposerWorkingDuration(startedAt: string, nowMs: number):
 
 function WorkingDetails({ startedAt }: { startedAt: string }) {
   const durationRef = useRef<HTMLSpanElement>(null);
-  const nowMs = Date.now();
+  const [nowMs] = useState(() => Date.now());
   const initialWord = formatComposerWorkingWord(startedAt);
   const initialDuration = formatComposerWorkingDuration(startedAt, nowMs);
-  const [word, setWord] = useState(initialWord);
+  const reduceMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
+  const word = reduceMotion ? "Working" : initialWord;
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Update the working duration DOM from the wall clock and release its timer on unmount.
   useEffect(() => {
-    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const updateText = () => {
       const now = Date.now();
       if (durationRef.current) {
         durationRef.current.textContent = formatComposerWorkingDuration(startedAt, now);
       }
     };
-    setWord(reduceMotion ? "Working" : formatComposerWorkingWord(startedAt));
     updateText();
     const id = window.setInterval(updateText, 1_000);
     return () => window.clearInterval(id);

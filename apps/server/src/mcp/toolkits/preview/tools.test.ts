@@ -53,13 +53,7 @@ it("exports provider-compatible object schemas", () => {
 });
 
 it("exports exact object result schemas for preview actions", () => {
-  const actionNames = [
-    "preview_type",
-    "preview_hover",
-    "preview_drag",
-    "preview_scroll",
-    "preview_wait_for",
-  ] as const;
+  const actionNames = ["preview_wait_for"] as const;
   for (const name of actionNames) {
     // Effect's tool schemas follow the decoder default since rc.113 and leave
     // unmodeled result keys open.
@@ -73,12 +67,18 @@ it("exports exact object result schemas for preview actions", () => {
 });
 
 it("reports a file picker opened by a click or key press", () => {
-  for (const name of ["preview_click", "preview_press"] as const) {
+  for (const name of ["preview_act"] as const) {
     const schema = Tool.getJsonSchemaFromSchema(PreviewToolkit.tools[name].successSchema) as {
       readonly properties?: Record<string, unknown>;
       readonly additionalProperties?: boolean;
     };
-    expect(Object.keys(schema.properties ?? {}).toSorted()).toEqual(["fileChooser", "toolIcon"]);
+    expect(Object.keys(schema.properties ?? {}).toSorted()).toEqual([
+      "fileChooser",
+      "fileNames",
+      "selected",
+      "tabId",
+      "toolIcon",
+    ]);
     expect(schema.additionalProperties).toBe(true);
   }
 });

@@ -94,7 +94,7 @@ import { useLogicalProjectEnvironments } from "../hooks/useLogicalProjectEnviron
 import { EnvironmentMachineIcon } from "../components/EnvironmentMachineIcon";
 import { useNowMinute } from "../hooks/useNowMinute";
 import { useThreadActions } from "../hooks/useThreadActions";
-import { selectProjectGroupingSettings } from "../logicalProject";
+import { selectProjectGroupingSettings } from "@t3tools/client-runtime/state/project-grouping";
 import {
   markPromotedDraftThreadByRef,
   useComposerDraftStore,
@@ -249,21 +249,25 @@ function WorkspaceDraftPane({
   const assignThread = useWorkspacePaneStore((state) => state.assignThread);
   const clearPane = useWorkspacePaneStore((state) => state.clearPane);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- retains the pane draft while mounted and releases it on unmount
   useEffect(() => {
     retainDraftThread(draftId);
     return () => releaseDraftThread(draftId);
   }, [draftId, releaseDraftThread, retainDraftThread]);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- clears a restored pane whose draft no longer exists after storage hydration
   useEffect(() => {
     if (draftSession || !useComposerDraftStore.persist.hasHydrated()) return;
     clearPane(workspaceKey, index);
   }, [clearPane, draftSession, index, workspaceKey]);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reconciles a draft with its promoted server thread
   useEffect(() => {
     if (!inferredThreadRef || draftSession?.promotedTo) return;
     markPromotedDraftThreadByRef(inferredThreadRef);
   }, [draftSession?.promotedTo, inferredThreadRef]);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- replaces the pane draft assignment once the server thread is available
   useEffect(() => {
     if (draftSession?.promotedTo) {
       assignThread(workspaceKey, draftSession.promotedTo, index);
@@ -428,6 +432,7 @@ function WorkspacePane({
           member.projectId === pendingProjectRef.projectId,
       ),
     );
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- completes the asynchronous project selection after its projection arrives
   useEffect(() => {
     if (pendingProjectReady) resolvePendingProject();
   }, [pendingProjectReady]);
@@ -456,8 +461,9 @@ function WorkspacePane({
     draftRequestVersionRef.current += 1;
     clearPane(workspaceKey, index);
   });
+  const settlementNow = useNowMinute();
   const settleAvailable =
-    serverThreadShell !== null && canSettle(serverThreadShell, { now: new Date().toISOString() });
+    serverThreadShell !== null && canSettle(serverThreadShell, { now: settlementNow });
   const finishThread = useStableCallback(async () => {
     if (!serverThreadRef || settling) return;
     setSettling(true);
@@ -844,8 +850,8 @@ function WorkspacePane({
             <Button
               size="icon-micro"
               variant="ghost"
-              aria-label="Remove from pane — thread keeps running"
-              title="Remove from pane — thread keeps running"
+              aria-label="Remove from pane. Thread keeps running"
+              title="Remove from pane. Thread keeps running"
               onClick={handleClearPane}
             >
               <XIcon className="size-3" />
@@ -980,6 +986,7 @@ export function ProjectPaneWorkspace({
     window.open(isElectron ? `/#${path}` : path, "_blank");
   });
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes workspace keyboard commands only while its panes are active
   useEffect(() => {
     if (!active) return;
 

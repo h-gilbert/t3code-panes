@@ -48,7 +48,13 @@ describe("resolveProjectSettings", () => {
 
   it("falls back to project defaults when the starred provider is disabled", () => {
     const settings = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
-      providers: { claudeAgent: { enabled: false } },
+      providerInstances: {
+        ...DEFAULT_SERVER_SETTINGS.providerInstances,
+        [ProviderInstanceId.make("claudeAgent")]: {
+          ...DEFAULT_SERVER_SETTINGS.providerInstances[ProviderInstanceId.make("claudeAgent")]!,
+          enabled: false,
+        },
+      },
       starredModelSelection: createModelSelection(ProviderInstanceId.make("claudeAgent"), "opus"),
     });
     expect(resolveProjectSettings(settings, projectId).settings.defaultModelSelection).toBeNull();
@@ -62,7 +68,6 @@ describe("resolveProjectSettings", () => {
     }
     expect(resolveProjectSettings(DEFAULT_SERVER_SETTINGS, null).settings).toBe(
       DEFAULT_SERVER_SETTINGS,
-      PROJECT_SCOPED_SERVER_SETTING_KEYS,
     );
   });
 });

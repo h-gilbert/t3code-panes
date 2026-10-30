@@ -15,8 +15,10 @@ export function threadDevicePreviews(state: DeviceServiceState | null, threadId:
         physical: device?.physical ?? false,
         name: device?.name ?? (session.platform === "ios" ? "iOS Simulator" : "Android Emulator"),
         description: [device?.version, host?.label].filter(Boolean).join(" · "),
+        serveSimOnly: host?.kind === "simlock",
       };
-    });
+    })
+    .filter((preview) => !preview.physical);
 }
 
 export type ThreadDevicePreview = ReturnType<typeof threadDevicePreviews>[number];

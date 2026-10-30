@@ -83,6 +83,8 @@ export class DesktopBrowserChannel extends Context.Service<
       key: DesktopTabKey,
       pointer: { readonly phase: "move" | "click"; readonly x: number; readonly y: number },
     ) => Effect.Effect<void>;
+    /** Never fails. A failed write means a broken channel; the next backend starts with no turns. */
+    readonly turn: (threadId: string, active: boolean) => Effect.Effect<void>;
   }
 >()("t3/preview/DesktopBrowserChannel") {}
 
@@ -247,22 +249,25 @@ const make = Effect.gen(function* () {
     return `ws://127.0.0.1:${address.port}/${secret}`;
   });
 
-  const remoteEvent = (sessionId: string, connectionId: string, event: DesktopBrowserEvent) =>
-    Effect.gen(function* () {
-      const selected = yield* settings.getSettings.pipe(Effect.orDie);
-      if (
-        !remoteHost ||
-        selected.browserHostEnvironmentId !== remoteHost.hostEnvironmentId ||
-        remoteHost.sessionId !== sessionId ||
-        remoteHost.connectionId !== connectionId
-      )
-        return yield* new DesktopBrowserHostError({ reason: "disconnected" });
-      yield* receive(event);
-    });
+  const remoteEvent = Effect.fn("remoteEvent")(function* (
+    sessionId: string,
+    connectionId: string,
+    event: DesktopBrowserEvent,
+  ) {
+    const selected = yield* settings.getSettings.pipe(Effect.orDie);
+    if (
+      !remoteHost ||
+      selected.browserHostEnvironmentId !== remoteHost.hostEnvironmentId ||
+      remoteHost.sessionId !== sessionId ||
+      remoteHost.connectionId !== connectionId
+    )
+      return yield* new DesktopBrowserHostError({ reason: "disconnected" });
+    yield* receive(event);
+  });
 
   return DesktopBrowserChannel.of({
-    readRemoteCommand: (connectionId, commandId) =>
-      Effect.gen(function* () {
+    readRemoteCommand: Effect.fn("DesktopBrowserChannel.readRemoteCommand")(
+      function* (connectionId, commandId) {
         const selected = yield* settings.getSettings.pipe(Effect.orDie);
         if (
           !remoteHost ||
@@ -274,13 +279,16 @@ const make = Effect.gen(function* () {
         if (!command) return yield* new DesktopBrowserHostError({ reason: "disconnected" });
         remoteHost.commands.delete(commandId);
         return command;
-      }),
-    receiveRemoteEvent: (connectionId, event) =>
-      Effect.suspend(() =>
-        remoteHost
-          ? remoteEvent(remoteHost.sessionId, connectionId, event)
-          : Effect.fail(new DesktopBrowserHostError({ reason: "disconnected" })),
-      ),
+      },
+    ),
+    receiveRemoteEvent: Effect.fn("DesktopBrowserChannel.receiveRemoteEvent")(
+      (connectionId, event) =>
+        Effect.suspend(() =>
+          remoteHost
+            ? remoteEvent(remoteHost.sessionId, connectionId, event)
+            : Effect.fail(new DesktopBrowserHostError({ reason: "disconnected" })),
+        ),
+    ),
     get available() {
       return inputFd !== undefined || remoteHost !== undefined;
     },
@@ -336,28 +344,27 @@ const make = Effect.gen(function* () {
         ),
       ),
     remoteEvent,
-    operation: (key, request) =>
-      Effect.gen(function* () {
-        if (!attachedTabs.has(keyOf(key)))
-          return yield* Effect.fail(
-            new DesktopBrowserOperationError({ message: "Desktop browser tab detached." }),
-          );
-        const requestId = NodeCrypto.randomUUID();
-        const deferred = yield* Deferred.make<unknown, DesktopBrowserOperationError>();
-        pending.set(requestId, { key: keyOf(key), deferred });
-        return yield* command({ type: "operation", ...key, requestId, request }).pipe(
-          Effect.andThen(Deferred.await(deferred)),
-          Effect.timeout("60 seconds"),
-          Effect.mapError((error) => new DesktopBrowserOperationError({ message: error.message })),
-          Effect.ensuring(
-            Effect.sync(() => {
-              pending.delete(requestId);
-            }),
-          ),
-        );
-      }),
-    awaitAttached: (key, timeout) =>
-      Effect.scoped(
+    operation: Effect.fn("DesktopBrowserChannel.operation")(function* (key, request) {
+      if (!attachedTabs.has(keyOf(key)))
+        return yield* new DesktopBrowserOperationError({
+          message: "Desktop browser tab detached.",
+        });
+      const requestId = NodeCrypto.randomUUID();
+      const deferred = yield* Deferred.make<unknown, DesktopBrowserOperationError>();
+      pending.set(requestId, { key: keyOf(key), deferred });
+      return yield* command({ type: "operation", ...key, requestId, request }).pipe(
+        Effect.andThen(Deferred.await(deferred)),
+        Effect.timeout("60 seconds"),
+        Effect.mapError((error) => new DesktopBrowserOperationError({ message: error.message })),
+        Effect.ensuring(
+          Effect.sync(() => {
+            pending.delete(requestId);
+          }),
+        ),
+      );
+    }),
+    awaitAttached: Effect.fn("DesktopBrowserChannel.awaitAttached")(function (key, timeout) {
+      return Effect.scoped(
         Effect.gen(function* () {
           const subscription = yield* PubSub.subscribe(changes);
           if (attachedTabs.has(keyOf(key))) return true;
@@ -369,7 +376,8 @@ const make = Effect.gen(function* () {
             Effect.map((result) => Option.getOrElse(result, () => false)),
           );
         }),
-      ),
+      );
+    }),
     detached: Stream.fromPubSub(changes).pipe(
       Stream.filter((change) => !change.attached),
       Stream.map((change) => change.key),
@@ -378,9 +386,16 @@ const make = Effect.gen(function* () {
       Stream.filter((change) => change.attached),
       Stream.map((change) => change.key),
     ),
-    isAttached: (key) => Effect.sync(() => attachedTabs.has(keyOf(key))),
+    isAttached: Effect.fn("DesktopBrowserChannel.isAttached")(function (key) {
+      return Effect.sync(() => attachedTabs.has(keyOf(key)));
+    }),
     endpoint,
-    pointer: (key, pointer) => command({ type: "pointer", ...key, ...pointer }),
+    turn: Effect.fn("DesktopBrowserChannel.turn")(function (threadId, active) {
+      return command({ type: "turn", threadId, active });
+    }),
+    pointer: Effect.fn("DesktopBrowserChannel.pointer")(function (key, pointer) {
+      return command({ type: "pointer", ...key, ...pointer });
+    }),
   });
 });
 

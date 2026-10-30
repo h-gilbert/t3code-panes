@@ -32,6 +32,17 @@ import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import * as ServerSettingsModule from "./serverSettings.ts";
 import { resolveProviderInstanceTerminalEnvironment } from "./terminal/Manager.ts";
 
+const encodeSavedStreamingSettings = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
+const decodeSavedStreamingSettings = Schema.decodeEffect(
+  Schema.fromJsonString(
+    Schema.Struct({
+      responseStreamingMode: ServerSettings.fields.responseStreamingMode,
+      enableLegacyTokenStreaming: Schema.optionalKey(Schema.Boolean),
+      enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
+    }),
+  ),
+);
+
 const decodeSettingsPatch = Schema.decodeUnknownEffect(ServerSettingsPatch);
 
 const decodeServerSettings = Schema.decodeUnknownEffect(ServerSettings);
@@ -413,8 +424,9 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
       const instanceId = ProviderInstanceId.make("acpRegistry_shared");
-      const results = yield* Effect.all(
-        ["First", "Second"].map((displayName) =>
+      const results = yield* Effect.forEach(
+        ["First", "Second"],
+        (displayName) =>
           serverSettings
             .updateProviderInstance({
               operation: "create",
@@ -426,7 +438,6 @@ it.layer(NodeServices.layer)("server settings", (it) => {
               },
             })
             .pipe(Effect.result),
-        ),
         { concurrency: "unbounded" },
       );
 
@@ -939,21 +950,12 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       const config = yield* ServerConfig.ServerConfig;
       const fs = yield* FileSystem.FileSystem;
       const service = yield* ServerSettingsModule.ServerSettingsService;
-      yield* fs.writeFileString(
-        config.settingsPath,
-        yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(saved),
-      );
+      yield* fs.writeFileString(config.settingsPath, yield* encodeSavedStreamingSettings(saved));
       assert.equal((yield* service.getSettings).responseStreamingMode, expected);
       yield* service.updateSettings({ enableProviderUpdateChecks: false });
-      const persisted = yield* Schema.decodeUnknownEffect(
-        Schema.fromJsonString(
-          Schema.Struct({
-            responseStreamingMode: ServerSettings.fields.responseStreamingMode,
-            enableLegacyTokenStreaming: Schema.optionalKey(Schema.Boolean),
-            enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
-          }),
-        ),
-      )(yield* fs.readFileString(config.settingsPath));
+      const persisted = yield* decodeSavedStreamingSettings(
+        yield* fs.readFileString(config.settingsPath),
+      );
       assert.equal(persisted.responseStreamingMode, expected);
       assert.isUndefined(persisted.enableLegacyTokenStreaming);
       assert.isUndefined(persisted.enableAssistantStreaming);
@@ -2165,10 +2167,14 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         runOnWorktreeCreate: false,
       };
       const model = createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.5");
-      const modelJson = yield* Schema.encodeEffect(Schema.fromJsonString(ModelSelection))(model);
-      const scriptsJson = yield* Schema.encodeEffect(
+      const encodeModelSelection = Schema.encodeEffect(Schema.fromJsonString(ModelSelection));
+
+      const modelJson = yield* encodeModelSelection(model);
+      const encodeProjectScripts = Schema.encodeEffect(
         Schema.fromJsonString(Schema.Array(ProjectScript)),
-      )([script]);
+      );
+
+      const scriptsJson = yield* encodeProjectScripts([script]);
       for (const [projectId, modelColumn, envMode, autoPull, scripts] of [
         [legacyProject, modelJson, "worktree", 1, scriptsJson],
         [scriptedProject, null, null, 0, scriptsJson],

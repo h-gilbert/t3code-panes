@@ -1,3 +1,4 @@
+import { pipe } from "effect/Function";
 import {
   DEFAULT_MODEL_BY_PROVIDER,
   defaultInstanceIdForDriver,
@@ -42,35 +43,12 @@ export interface ProviderInstanceEntry {
   readonly models: ReadonlyArray<ServerProviderModel>;
 }
 
-export type ProviderCatalogAvailability = "loading" | "ready" | "unavailable" | "unconfigured";
-
-/** Initial null config is still loading; treating it as empty would strand recoverable threads. */
-export function resolveProviderCatalogAvailability(input: {
-  readonly catalogLoaded: boolean;
-  readonly entries: ReadonlyArray<ProviderInstanceEntry>;
-  readonly selectedEntry: ProviderInstanceEntry | undefined;
-}): ProviderCatalogAvailability {
-  if (!input.catalogLoaded) return "loading";
-  if (input.selectedEntry !== undefined) return "ready";
-  return input.entries.length === 0 ? "unconfigured" : "unavailable";
-}
-
 /** Disabled instances may retain ready status until reconciliation. */
 export function isProviderInstancePickerReady(entry: ProviderInstanceEntry): boolean {
   return entry.enabled && entry.isAvailable && entry.status === "ready";
 }
 
-/**
- * Whether an instance's models can still be picked and started.
- *
- * Looser than `isProviderInstancePickerReady`: a `warning` probe on an
- * installed CLI means some metadata could not be read (an unverifiable
- * subscription, a CLI too old to report one), not that the provider cannot
- * run. Gating the model list on `ready` emptied the picker for those, which
- * left the user unable to pick any model from a provider that works fine.
- * A `warning` on an uninstalled CLI is still the pending/absent case and
- * stays excluded.
- */
+/** Installed CLIs with warning probes can still run; missing or errored CLIs cannot. */
 export function isProviderInstanceModelsUsable(entry: ProviderInstanceEntry): boolean {
   return entry.enabled && entry.isAvailable && entry.installed && entry.status !== "error";
 }
@@ -176,7 +154,20 @@ function applyProviderInstanceBranding(
   };
 }
 
-export function sortProviderInstanceEntries(
+/** Picker order: each driver's default instance first, then its custom instances. */
+export function providerInstanceEntriesFor(
+  providers: ReadonlyArray<ServerProvider>,
+  settings: Pick<ServerSettings, "providerInstances" | "projectSettingsOverrides">,
+  projectId: ProjectId | null,
+): ReadonlyArray<ProviderInstanceEntry> {
+  return pipe(
+    deriveProviderInstanceEntries(providers),
+    (entries) => applyProviderInstanceSettings(entries, settings, projectId),
+    sortProviderInstanceEntries,
+  );
+}
+
+function sortProviderInstanceEntries(
   entries: ReadonlyArray<ProviderInstanceEntry>,
 ): ReadonlyArray<ProviderInstanceEntry> {
   const byKind = new Map<ProviderDriverKind, ProviderInstanceEntry[]>();
@@ -254,4 +245,33 @@ export function resolveDefaultProviderModelSelection(
   if (selection?.instanceId === instanceId) return selection;
   const model = getDefaultProviderInstanceModel(providers, instanceId);
   return model ? { instanceId, model } : null;
+}
+
+export function resolveProjectDefaultProviderModelSelection(
+  providers: ReadonlyArray<ServerProvider>,
+  settings: ServerSettings,
+  projectId: ProjectId | null,
+): ModelSelection | null {
+  const entries = providerInstanceEntriesFor(providers, settings, projectId);
+  // Matches resolveComposerProviderSelection: the first driver group wins before any other.
+  const entry =
+    resolveSelectableProviderInstanceEntry(
+      entries.filter((candidate) => candidate.driverKind === entries[0]?.driverKind),
+      undefined,
+    ) ?? resolveSelectableProviderInstanceEntry(entries, undefined);
+  const model = entry ? getDefaultProviderInstanceModel(providers, entry.instanceId) : undefined;
+  return entry && model ? { instanceId: entry.instanceId, model } : null;
+}
+
+export type ProviderCatalogAvailability = "loading" | "ready" | "unavailable" | "unconfigured";
+
+/** Initial null config is still loading; treating it as empty would strand recoverable threads. */
+export function resolveProviderCatalogAvailability(input: {
+  readonly catalogLoaded: boolean;
+  readonly entries: ReadonlyArray<ProviderInstanceEntry>;
+  readonly selectedEntry: ProviderInstanceEntry | undefined;
+}): ProviderCatalogAvailability {
+  if (!input.catalogLoaded) return "loading";
+  if (input.selectedEntry !== undefined) return "ready";
+  return input.entries.length === 0 ? "unconfigured" : "unavailable";
 }

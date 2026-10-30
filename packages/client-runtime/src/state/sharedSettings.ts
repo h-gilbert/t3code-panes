@@ -16,13 +16,12 @@ const SHARED_SERVER_SETTING_KEYS = [
   "sidebarAutoSettleOnMerge",
   "autoResumeLimitedThreads",
   "snoozeLimitedThreads",
+  "snoozePresets",
   "newWorktreesStartFromOrigin",
   "sourceControlWritingStyle",
   "textGenerationModelSelection",
   "starredModelSelection",
 ] as const satisfies ReadonlyArray<keyof ServerSettings & keyof ServerSettingsPatch>;
-
-export type SharedServerSettingKey = (typeof SHARED_SERVER_SETTING_KEYS)[number];
 
 const SHARED_KEY_SET = new Set<string>(SHARED_SERVER_SETTING_KEYS);
 
@@ -45,9 +44,8 @@ export function splitSharedServerPatch(patch: ServerSettingsPatch): {
   };
 }
 
-export function filterSharedServerPatch(
+function filterSharedPatch(
   patch: ServerSettingsPatch,
-  capabilities: Pick<ExecutionEnvironmentCapabilities, "threadRestartContinuation"> | undefined,
   settings?: ServerSettings,
   sourceSettings = settings,
   targetIsSource = false,
@@ -80,14 +78,60 @@ export function filterSharedServerPatch(
   ) {
     patch = Struct.omit(patch, ["textGenerationModelSelection"]);
   }
-  return capabilities?.threadRestartContinuation === true
-    ? patch
-    : Struct.omit(patch, ["continueThreadsAfterServerUpdate"]);
+  return settings ? patch : Struct.omit(patch, ["continueThreadsAfterServerUpdate"]);
+}
+
+type RestartCapabilities = Pick<ExecutionEnvironmentCapabilities, "threadRestartContinuation">;
+
+export type SharedServerSettingKey = (typeof SHARED_SERVER_SETTING_KEYS)[number];
+
+export function filterSharedServerPatch(
+  patch: ServerSettingsPatch,
+  settings?: ServerSettings,
+  sourceSettings?: ServerSettings,
+  targetIsSource?: boolean,
+): ServerSettingsPatch;
+export function filterSharedServerPatch(
+  patch: ServerSettingsPatch,
+  capabilities: RestartCapabilities | undefined,
+  settings?: ServerSettings,
+  sourceSettings?: ServerSettings,
+  targetIsSource?: boolean,
+): ServerSettingsPatch;
+export function filterSharedServerPatch(
+  patch: ServerSettingsPatch,
+  second?: ServerSettings | RestartCapabilities,
+  third?: ServerSettings,
+  fourth?: ServerSettings | boolean,
+  fifth = false,
+): ServerSettingsPatch {
+  if (
+    (second !== undefined && !("providerInstances" in second)) ||
+    typeof fourth === "object" ||
+    (second === undefined && third !== undefined)
+  ) {
+    const capabilities = second as RestartCapabilities | undefined;
+    const result = filterSharedPatch(
+      patch,
+      third,
+      typeof fourth === "object" ? fourth : third,
+      fifth,
+    );
+    return capabilities?.threadRestartContinuation === true
+      ? result
+      : Struct.omit(result, ["continueThreadsAfterServerUpdate"]);
+  }
+  return filterSharedPatch(
+    patch,
+    second as ServerSettings | undefined,
+    third,
+    typeof fourth === "boolean" ? fourth : false,
+  );
 }
 
 export function pickSharedServerSettings(
   settings: ServerSettings,
-  capabilities?: Pick<ExecutionEnvironmentCapabilities, "threadRestartContinuation">,
+  capabilities?: RestartCapabilities,
 ): ServerSettingsPatch {
   return filterSharedServerPatch(
     Struct.pick(settings, SHARED_SERVER_SETTING_KEYS),

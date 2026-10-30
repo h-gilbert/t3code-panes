@@ -9,7 +9,6 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import {
   baseSshArgs,
-  getLastNonEmptyOutputLine,
   parseSshResolveOutput,
   resolveRemoteT3CliPackageSpec,
   remoteStateKey,

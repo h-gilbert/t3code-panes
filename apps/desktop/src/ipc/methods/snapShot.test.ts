@@ -2,7 +2,6 @@ import type * as Electron from "electron";
 import { registerWorkspaceWindow } from "../../window/workspaceWindows.ts";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 
@@ -11,8 +10,6 @@ import * as ElectronDialog from "../../electron/ElectronDialog.ts";
 import * as DesktopSnapShot from "../../snapShot/DesktopSnapShot.ts";
 import {
   listPendingSnapShots,
-  checkSnapShotShortcut,
-  requestSnapShotPermissions,
   setupSnapShot,
   previewSnapShotConfig,
   applySnapShotConfig,
@@ -50,9 +47,9 @@ describe("window capture IPC", () => {
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
-          Layer.succeed(ElectronWindow.ElectronWindow, {
-            main: Effect.succeed(Option.none()),
-          } as ElectronWindow.ElectronWindow["Service"]),
+          Layer.mock(ElectronWindow.ElectronWindow)({
+            main: Effect.succeedNone,
+          }),
           Layer.succeed(DesktopSnapShot.DesktopSnapShot, {
             listPending: Effect.succeed([]),
           } as unknown as DesktopSnapShot.DesktopSnapShot["Service"]),

@@ -44,7 +44,7 @@ export function remoteBrowserHostAtom(options: {
           const failed = yield* Deferred.make<never, RemoteBrowserTransferError>();
           const runFork = Effect.runForkWith(yield* Effect.context<never>());
           let connectionId: string | null = null;
-          const pending = new AbortController();
+          const pending = yield* Effect.abortSignal;
           const transfer = async (lease: string, path: string, body?: unknown) => {
             const connection = readPreparedConnection(options.environmentId);
             if (!connection) throw new Error("Browser host connection is unavailable.");
@@ -58,7 +58,7 @@ export function remoteBrowserHostAtom(options: {
                   ...(body === undefined ? {} : { "content-type": "application/json" }),
                 },
                 ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-                signal: AbortSignal.any([pending.signal, AbortSignal.timeout(60_000)]),
+                signal: AbortSignal.any([pending, AbortSignal.timeout(60_000)]),
               },
             );
             if (!response.ok) throw new Error(`Browser host transfer failed (${response.status}).`);
@@ -84,7 +84,6 @@ export function remoteBrowserHostAtom(options: {
           yield* Effect.addFinalizer(() =>
             Effect.sync(() => {
               events.close();
-              pending.abort();
               const connected = connectionId !== null;
               connectionId = null;
               unsubscribe();

@@ -19,9 +19,6 @@ const decode = <S extends Schema.Top>(
     never
   >;
 
-const decodeResolvedRule = Schema.decodeUnknownEffect(ResolvedKeybindingRule as never);
-const encodeResolvedKeybindings = Schema.encodeEffect(ResolvedKeybindingsConfig);
-
 it.effect("parses keybinding rules", () =>
   Effect.gen(function* () {
     const parsed = yield* decode(KeybindingRule, {

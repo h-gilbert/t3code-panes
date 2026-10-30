@@ -168,7 +168,7 @@ describe("stageUploadFile", () => {
         expect(staged).toMatchObject({ name: "report.pdf", sizeBytes: 4 });
         const [, , , token, fileName] = staged.url!.split("/");
         const resolved = yield* resolveAsset(token!, fileName!);
-        expect(resolved?.kind).toBe("file");
+        if (resolved?.kind !== "file") throw new Error("Expected a staged file");
         expect(yield* fileSystem.readFileString(resolved!.path!)).toBe("pdf!");
       }).pipe(Effect.scoped);
 

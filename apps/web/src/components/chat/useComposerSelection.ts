@@ -133,7 +133,6 @@ export function useComposerSelection(input: ComposerSelectionInput) {
   const getModelDisabledReason = makeModelDisabledReason(
     currentModelSelection
       ? {
-          providers: providerStatuses,
           hasStartedSession,
           supportsProviderSwitchingViaHandoff,
           currentModelSelection,
@@ -203,7 +202,6 @@ export function useComposerSelection(input: ComposerSelectionInput) {
             defaultReasoningOption ? [defaultReasoningOption] : undefined,
           );
     const modelChangeBlockReason = getStartedThreadModelChangeBlockReason({
-      providers: providerStatuses,
       hasStartedSession: activeRuntime !== null,
       supportsProviderSwitchingViaHandoff,
       currentModelSelection: activeThread.modelSelection,

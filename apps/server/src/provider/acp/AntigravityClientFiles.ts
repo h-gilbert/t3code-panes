@@ -1,47 +1,16 @@
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import type * as FileSystem from "effect/FileSystem";
 import type * as Path from "effect/Path";
 import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/compat";
 
-/** The agent requests permission for every write; check only path containment here. */
 const CLIENT_FILE_MAX_BYTES = 8 * 1024 * 1024;
 
 function isInsideRoot(path: Path.Path, root: string, candidate: string): boolean {
   const relative = path.relative(root, candidate);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
-
-/** Resolve an existing ancestor before appending directories a new write will create. */
-const resolveNewFileParent = Effect.fn("AntigravityClientFiles.resolveNewFileParent")(
-  function* (input: {
-    readonly fileSystem: FileSystem.FileSystem;
-    readonly path: Path.Path;
-    readonly directory: string;
-  }) {
-    const missing: string[] = [];
-    let current = input.directory;
-    while (true) {
-      const resolved = yield* input.fileSystem
-        .realPath(current)
-        .pipe(Effect.orElseSucceed(() => null));
-      if (resolved !== null) return input.path.join(resolved, ...missing);
-      // A dangling link is not a directory that this write may create.
-      const isLink = yield* input.fileSystem.readLink(current).pipe(
-        Effect.as(true),
-        Effect.orElseSucceed(() => false),
-      );
-      if (isLink)
-        return yield* EffectAcpErrors.AcpRequestError.invalidParams(
-          `Cannot resolve directory '${current}'.`,
-        );
-      const parent = input.path.dirname(current);
-      if (parent === current) return current;
-      missing.unshift(input.path.basename(current));
-      current = parent;
-    }
-  },
-);
 
 /**
  * Symlinks resolve before the check, including the final component, so a link
@@ -59,25 +28,27 @@ const resolveClientFilePath = Effect.fn("AntigravityClientFiles.resolveClientFil
     const outside = EffectAcpErrors.AcpRequestError.invalidParams(
       `Path '${input.requestPath}' is outside the session workspace.`,
     );
-    const real = yield* input.fileSystem.realPath(resolved).pipe(
-      Effect.catch(() =>
-        Effect.gen(function* () {
-          // Fall back to the parent only for missing files, never dangling or unreadable links.
-          const entryExists = yield* input.fileSystem.readLink(resolved).pipe(
-            Effect.as(true),
-            Effect.catch(() => input.fileSystem.exists(resolved)),
-            Effect.orElseSucceed(() => true),
-          );
-          if (entryExists) return yield* outside;
-          const parent = yield* resolveNewFileParent({
-            fileSystem: input.fileSystem,
-            path,
-            directory: path.dirname(resolved),
-          });
-          return path.join(parent, path.basename(resolved));
-        }),
-      ),
-    );
+    // Canonicalize the deepest existing ancestor, so a link above missing directories cannot escape.
+    let candidate = resolved;
+    const missingSuffix: Array<string> = [];
+    let real: string;
+    while (true) {
+      const canonical = yield* input.fileSystem.realPath(candidate).pipe(Effect.option);
+      if (Option.isSome(canonical)) {
+        real = path.join(canonical.value, ...missingSuffix);
+        break;
+      }
+      // Walk up only past missing entries, never dangling or unreadable links.
+      const entryExists = yield* input.fileSystem.readLink(candidate).pipe(
+        Effect.as(true),
+        Effect.catch(() => input.fileSystem.exists(candidate)),
+        Effect.orElseSucceed(() => true),
+      );
+      const parent = path.dirname(candidate);
+      if (entryExists || parent === candidate) return yield* outside;
+      missingSuffix.unshift(path.basename(candidate));
+      candidate = parent;
+    }
     const roots = yield* Effect.forEach(input.allowedRoots, (root) =>
       input.fileSystem.realPath(root).pipe(Effect.orElseSucceed(() => root)),
     );
@@ -127,23 +98,5 @@ export const readAntigravityClientTextFile = Effect.fn("AntigravityClientFiles.r
     const start = Math.max(0, (line ?? 1) - 1);
     const end = limit === undefined ? lines.length : Math.min(lines.length, start + limit);
     return { content: lines.slice(start, end).join("\n") };
-  },
-);
-
-export const writeAntigravityClientTextFile = Effect.fn("AntigravityClientFiles.writeTextFile")(
-  function* (input: {
-    readonly fileSystem: FileSystem.FileSystem;
-    readonly path: Path.Path;
-    readonly allowedRoots: ReadonlyArray<string>;
-    readonly request: EffectAcpSchema.WriteTextFileRequest;
-  }): Effect.fn.Return<EffectAcpSchema.WriteTextFileResponse, EffectAcpErrors.AcpError> {
-    const filePath = yield* resolveClientFilePath({ ...input, requestPath: input.request.path });
-    yield* input.fileSystem.makeDirectory(input.path.dirname(filePath), { recursive: true }).pipe(
-      Effect.andThen(input.fileSystem.writeFileString(filePath, input.request.content)),
-      Effect.mapError(() =>
-        EffectAcpErrors.AcpRequestError.internalError(`Could not write '${input.request.path}'.`),
-      ),
-    );
-    return {};
   },
 );

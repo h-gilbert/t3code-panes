@@ -22,15 +22,12 @@ function connectionSignature(connection: SavedRemoteConnection): string {
   return `${connection.httpBaseUrl}|${connection.bearerToken ?? ""}`;
 }
 
-// Feeds saved environment connections to the agent-awareness module as they
-// come and go. Without this the direct (self-hosted) notification path never
-// runs: no permission prompt, no APNs device registration, no local
-// live-activity arming. Renders nothing; mounted once at the app root so only
-// this component re-renders on connection changes.
+// Self-hosted notification registration needs the current authenticated connections.
 export function AgentAwarenessConnectionSync() {
   const { savedConnectionsById } = useSavedRemoteConnections();
   const registered = useRef(new Map<EnvironmentId, string>());
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Keep native notification connection registrations in sync with authenticated connections.
   useEffect(() => {
     const next = new Map<EnvironmentId, string>();
     for (const connection of Object.values(savedConnectionsById)) {
@@ -56,6 +53,7 @@ export function AgentAwarenessConnectionSync() {
     registered.current = next;
   }, [savedConnectionsById]);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Release native notification registrations when the component unmounts.
   useEffect(
     () => () => {
       for (const environmentId of registered.current.keys()) {

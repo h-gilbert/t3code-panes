@@ -32,62 +32,63 @@ export function isThreadEligibleForAutoArchive(
   return Number.isFinite(settledAtMs) && input.nowMs - settledAtMs >= input.archiveAfterMs;
 }
 
-const makeThreadAutoArchiver = (options?: ThreadAutoArchiverLiveOptions) =>
-  Effect.gen(function* () {
-    const threads = yield* ThreadManagementService;
-    const archiveAfterMs = Math.max(
-      1,
-      options?.archiveAfterMs ?? DEFAULT_THREAD_AUTO_ARCHIVE_AFTER_MS,
-    );
-    const sweepIntervalMs = Math.max(1, options?.sweepIntervalMs ?? DEFAULT_SWEEP_INTERVAL_MS);
+const makeThreadAutoArchiver = Effect.fn("makeThreadAutoArchiver")(function* (
+  options?: ThreadAutoArchiverLiveOptions,
+) {
+  const threads = yield* ThreadManagementService;
+  const archiveAfterMs = Math.max(
+    1,
+    options?.archiveAfterMs ?? DEFAULT_THREAD_AUTO_ARCHIVE_AFTER_MS,
+  );
+  const sweepIntervalMs = Math.max(1, options?.sweepIntervalMs ?? DEFAULT_SWEEP_INTERVAL_MS);
 
-    const sweep = Effect.fn("ThreadAutoArchiver.sweep")(function* () {
-      const snapshot = yield* threads.getShellSnapshot();
-      const nowMs = yield* Clock.currentTimeMillis;
-      let archivedCount = 0;
+  const sweep = Effect.fn("ThreadAutoArchiver.sweep")(function* () {
+    const snapshot = yield* threads.getShellSnapshot();
+    const nowMs = yield* Clock.currentTimeMillis;
+    let archivedCount = 0;
 
-      for (const thread of snapshot.threads) {
-        if (!isThreadEligibleForAutoArchive(thread, { nowMs, archiveAfterMs })) continue;
-        const settledAt = thread.settledAt;
-        const commandId = CommandId.make(
-          `server:auto-archive:${thread.id}:${DateTime.formatIso(settledAt)}`,
+    for (const thread of snapshot.threads) {
+      if (!isThreadEligibleForAutoArchive(thread, { nowMs, archiveAfterMs })) continue;
+      const settledAt = thread.settledAt;
+      const commandId = CommandId.make(
+        `server:auto-archive:${thread.id}:${DateTime.formatIso(settledAt)}`,
+      );
+      const archived = yield* threads
+        .dispatch({
+          type: "thread.archive",
+          commandId,
+          threadId: thread.id,
+          ifSettledAt: settledAt,
+        })
+        .pipe(
+          Effect.as(true),
+          // Activity can un-settle the thread after the snapshot. The
+          // decider rejects that stale command through ifSettledAt.
+          Effect.catchCause((cause) =>
+            Effect.logDebug("thread auto-archive skipped", {
+              threadId: thread.id,
+              cause,
+            }).pipe(Effect.as(false)),
+          ),
         );
-        const archived = yield* threads
-          .dispatch({
-            type: "thread.archive",
-            commandId,
-            threadId: thread.id,
-            ifSettledAt: settledAt,
-          })
-          .pipe(
-            Effect.as(true),
-            // Activity can un-settle the thread after the snapshot. The
-            // decider rejects that stale command through ifSettledAt.
-            Effect.catchCause((cause) =>
-              Effect.logDebug("thread auto-archive skipped", {
-                threadId: thread.id,
-                cause,
-              }).pipe(Effect.as(false)),
-            ),
-          );
-        if (archived) archivedCount += 1;
-      }
+      if (archived) archivedCount += 1;
+    }
 
-      if (archivedCount > 0) {
-        yield* Effect.logInfo("thread auto-archive sweep complete", { archivedCount });
-      }
-    });
-
-    yield* forkParked(
-      sweep().pipe(
-        Effect.catchCause((cause) =>
-          Effect.logWarning("thread auto-archive sweep failed", { cause }),
-        ),
-        Effect.repeat(Schedule.spaced(Duration.millis(sweepIntervalMs))),
-      ),
-    );
-    yield* Effect.logInfo("thread auto-archiver started", { archiveAfterMs, sweepIntervalMs });
+    if (archivedCount > 0) {
+      yield* Effect.logInfo("thread auto-archive sweep complete", { archivedCount });
+    }
   });
+
+  yield* forkParked(
+    sweep().pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("thread auto-archive sweep failed", { cause }),
+      ),
+      Effect.repeat(Schedule.spaced(Duration.millis(sweepIntervalMs))),
+    ),
+  );
+  yield* Effect.logInfo("thread auto-archiver started", { archiveAfterMs, sweepIntervalMs });
+});
 
 export const makeThreadAutoArchiverLive = (options?: ThreadAutoArchiverLiveOptions) =>
   Layer.effectDiscard(makeThreadAutoArchiver(options));

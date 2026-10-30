@@ -216,7 +216,7 @@ export const make = Effect.gen(function* () {
       Effect.flatMap((windows) => SynchronizedRef.setAndGet(windowsRef, windows)),
       Effect.withSpan("desktop.windowSession.load"),
     ),
-    upsert: (window) =>
+    upsert: Effect.fn("desktop.windowSession.upsert")((window) =>
       persist((windows) => {
         const index = windows.findIndex(
           (candidate) => candidate.workspaceId === window.workspaceId,
@@ -227,12 +227,14 @@ export const make = Effect.gen(function* () {
         const next = [...windows];
         next[index] = window;
         return next;
-      }).pipe(Effect.withSpan("desktop.windowSession.upsert")),
-    remove: (workspaceId) =>
+      }),
+    ),
+    remove: Effect.fn("desktop.windowSession.remove")((workspaceId) =>
       persist((windows) => {
         const next = windows.filter((window) => window.workspaceId !== workspaceId);
         return next.length === windows.length ? windows : next;
-      }).pipe(Effect.withSpan("desktop.windowSession.remove")),
+      }),
+    ),
   });
 });
 
@@ -246,7 +248,7 @@ export const layerTest = (initialWindows: ReadonlyArray<DesktopWorkspaceWindowSt
       return DesktopWindowSession.of({
         get: SynchronizedRef.get(windowsRef),
         load: SynchronizedRef.get(windowsRef),
-        upsert: (window) =>
+        upsert: Effect.fn("desktop.windowSession.upsert")((window) =>
           SynchronizedRef.update(windowsRef, (windows) => {
             const index = windows.findIndex(
               (candidate) => candidate.workspaceId === window.workspaceId,
@@ -256,10 +258,12 @@ export const layerTest = (initialWindows: ReadonlyArray<DesktopWorkspaceWindowSt
             next[index] = window;
             return next;
           }),
-        remove: (workspaceId) =>
+        ),
+        remove: Effect.fn("desktop.windowSession.remove")((workspaceId) =>
           SynchronizedRef.update(windowsRef, (windows) =>
             windows.filter((window) => window.workspaceId !== workspaceId),
           ),
+        ),
       });
     }),
   );

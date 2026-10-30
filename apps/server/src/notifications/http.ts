@@ -9,13 +9,14 @@ import {
 } from "../auth/http.ts";
 import * as SelfHostedNotifications from "./SelfHostedNotifications.ts";
 
-const handleNotificationRequest = <A, E, R>(operation: Effect.Effect<A, E, R>) =>
-  Effect.gen(function* () {
-    yield* requireEnvironmentScope(AuthOrchestrationOperateScope);
-    return yield* operation.pipe(
-      Effect.catch((error) => failEnvironmentInternal("internal_error", error)),
-    );
-  });
+const handleNotificationRequest = Effect.fn("handleNotificationRequest")(function* <A, E, R>(
+  operation: Effect.Effect<A, E, R>,
+) {
+  yield* requireEnvironmentScope(AuthOrchestrationOperateScope);
+  return yield* operation.pipe(
+    Effect.catch((error) => failEnvironmentInternal("internal_error", error)),
+  );
+});
 
 export const notificationsHttpApiLayer = HttpApiBuilder.group(
   EnvironmentHttpApi,

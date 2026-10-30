@@ -312,13 +312,13 @@ export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
         bootstrapThreadId = existingThread.id;
       }
     }).pipe(
-      Effect.catchCause((cause) =>
-        Cause.hasInterrupts(cause)
-          ? Effect.failCause(cause)
-          : Effect.logWarning("startup thread auto-bootstrap failed", {
-              bootstrapProjectId: project.id,
-              cause,
-            }),
+      Effect.catchCauseIf(
+        (cause) => !Cause.hasInterrupts(cause),
+        (cause) =>
+          Effect.logWarning("startup thread auto-bootstrap failed", {
+            bootstrapProjectId: project.id,
+            cause,
+          }),
       ),
     );
   }
@@ -734,5 +734,3 @@ const make = Effect.fn("serverRuntimeStartup.make")(function* (options?: Startup
 
 export const layerWithOptions = (options?: StartupOptions) =>
   Layer.effect(ServerRuntimeStartup, make(options));
-
-const layer = layerWithOptions();

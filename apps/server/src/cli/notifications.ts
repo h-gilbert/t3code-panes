@@ -29,27 +29,26 @@ class ApnsPrivateKeyInvalidError extends Schema.TaggedError<ApnsPrivateKeyInvali
   }
 }
 
-const runWithNotificationSecrets = <A, E>(
+const runWithNotificationSecrets = Effect.fn("runWithNotificationSecrets")(function* <A, E>(
   flags: CliAuthLocationFlags,
   operation: (
     secrets: ServerSecretStore.ServerSecretStore["Service"],
   ) => Effect.Effect<A, E, FileSystem.FileSystem>,
-) =>
-  Effect.gen(function* () {
-    const logLevel = yield* GlobalFlag.LogLevel;
-    const config = yield* resolveCliAuthConfig(flags, logLevel);
-    return yield* Effect.gen(function* () {
-      const secrets = yield* ServerSecretStore.ServerSecretStore;
-      return yield* operation(secrets);
-    }).pipe(
-      Effect.provide(
-        ServerSecretStore.layer.pipe(
-          Layer.provide(ServerConfig.layer(config)),
-          Layer.provide(Layer.succeed(References.MinimumLogLevel, config.logLevel)),
-        ),
+) {
+  const logLevel = yield* GlobalFlag.LogLevel;
+  const config = yield* resolveCliAuthConfig(flags, logLevel);
+  return yield* Effect.gen(function* () {
+    const secrets = yield* ServerSecretStore.ServerSecretStore;
+    return yield* operation(secrets);
+  }).pipe(
+    Effect.provide(
+      ServerSecretStore.layer.pipe(
+        Layer.provide(ServerConfig.layer(config)),
+        Layer.provide(Layer.succeed(References.MinimumLogLevel, config.logLevel)),
       ),
-    );
-  });
+    ),
+  );
+});
 
 const teamIdFlag = Flag.String("team-id").pipe(Flag.withDescription("Apple Developer Team ID."));
 const keyIdFlag = Flag.String("key-id").pipe(Flag.withDescription("APNs signing key ID."));

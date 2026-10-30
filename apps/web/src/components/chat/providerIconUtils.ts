@@ -6,6 +6,7 @@ const PROVIDER_MODEL_NAME_QUALIFIERS: Partial<Record<ProviderDriverKind, readonl
   [ProviderDriverKind.make("cursor")]: ["Cursor"],
   [ProviderDriverKind.make("grok")]: ["Grok", "xAI"],
 };
+import { resolveModelShortName } from "@t3tools/client-runtime/provider-clients";
 
 export type ModelEsque = {
   slug: string;
@@ -76,8 +77,12 @@ export function getProviderRowLabel(
   return `${providerDisplayName} · ${sub}`;
 }
 
-export function getTriggerDisplayModelName(model: ModelEsque): string {
-  return getDisplayModelName(model, { preferShortName: true });
+export function getTriggerDisplayModelName(
+  model: ModelEsque,
+  driverKind?: ProviderDriverKind | null | undefined,
+): string {
+  const shortName = resolveModelShortName(model, driverKind);
+  return getDisplayModelName({ ...model, shortName }, { preferShortName: true });
 }
 
 export function getTriggerDisplayModelLabel(model: ModelEsque): string {

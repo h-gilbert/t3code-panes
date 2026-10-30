@@ -903,15 +903,14 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
         ),
       );
       return yield* Option.match(result, {
-        onNone: () =>
-          Effect.gen(function* () {
-            // An unanswered request invalidates this connection. Do not replay
-            // actions: the client may have applied them before becoming unreachable.
-            if (evictsOnTimeout) {
-              yield* disconnect(connection.clientId, connection.queue, true);
-            }
-            return yield* new PreviewAutomationTimeoutError(requestContext);
-          }),
+        // The enclosing operation owns the span for this inline handler.
+        onNone: Effect.fnUntraced(function* () {
+          // Never replay possibly applied actions; slow metadata reads must not evict the host.
+          if (evictsOnTimeout) {
+            yield* disconnect(connection.clientId, connection.queue, true);
+          }
+          return yield* new PreviewAutomationTimeoutError(requestContext);
+        }),
         onSome: (value) => Effect.succeed(value as A),
       });
     });

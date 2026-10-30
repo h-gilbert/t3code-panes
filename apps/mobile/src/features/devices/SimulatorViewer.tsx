@@ -1,3 +1,4 @@
+import { uuidv4 } from "../../lib/uuid";
 import type { DeviceSummary, EnvironmentId } from "@t3tools/contracts";
 import { useMemo, useState } from "react";
 import { ActivityIndicator, Modal, Pressable, View } from "react-native";
@@ -5,7 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
 
 import { AppText as Text } from "../../components/ui/AppText";
-import { refreshDeviceHubAccess, useDeviceHubAccess } from "../../state/device";
+import { useDeviceHubAccess } from "../../state/device";
 import { simulatorStreamUrl } from "./simulatorStreamUrl";
 
 /** Read-only live view. Simulator control stays in the Mac app and T3's desktop Device panel. */
@@ -14,7 +15,8 @@ export function SimulatorViewer(props: {
   readonly device: DeviceSummary;
   readonly onClose: () => void;
 }) {
-  const { access } = useDeviceHubAccess(props.environmentId, props.device.hostId);
+  const [viewer] = useState(uuidv4);
+  const { access, refresh } = useDeviceHubAccess(props.environmentId, props.device.hostId, viewer);
   const insets = useSafeAreaInsets();
   const [streamFailed, setStreamFailed] = useState(false);
   const url = access ? simulatorStreamUrl(access, props.device.id) : null;
@@ -44,7 +46,7 @@ export function SimulatorViewer(props: {
             accessibilityLabel="Retry simulator stream"
             onPress={() => {
               setStreamFailed(false);
-              refreshDeviceHubAccess(props.environmentId);
+              refresh();
             }}
             className="px-3 py-2"
           >

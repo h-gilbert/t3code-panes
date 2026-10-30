@@ -1,6 +1,7 @@
 import {
   type DeviceError,
   type DeviceHostId,
+  type DeviceHostSummary,
   type DeviceId,
   type DevicePlatform,
   type DeviceSummary,
@@ -8,12 +9,7 @@ import {
   LOCAL_DEVICE_HOST_ID,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
-import * as Path from "effect/Path";
-import * as HostProcess from "@t3tools/shared/HostProcess";
-import * as ServerConfig from "../../../config.ts";
-import { ensureAgentDeviceShim } from "../../../device/AgentDeviceShim.ts";
-import { nodeRuntimeUnavailableMessage } from "@t3tools/shared/nodeRuntime";
-
+import * as Option from "effect/Option";
 import * as DeviceService from "../../../device/DeviceService.ts";
 import { threadWorkspaceRoot } from "../../../project/threadWorkspaceRoot.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
@@ -26,49 +22,75 @@ function agentDeviceTargetArgs(device: DeviceSummary): ReadonlyArray<string> {
     : ["--platform", "android", "--serial", device.id];
 }
 
+const shellWord = (value: string) =>
+  /^[a-zA-Z0-9_./:-]+$/.test(value) ? value : "'" + value.replaceAll("'", "'\"'\"'") + "'";
+
+/** `targetArgs` are the flags the command still needs; a bound launcher needs none. */
 export function agentDeviceQuickStart(
   device: DeviceSummary,
   targetArgs = agentDeviceTargetArgs(device),
   command = "agent-device",
-  cloud = false,
+  host?:
+    | { readonly kind: "eas" }
+    | { readonly kind: "simlock"; readonly installDirectory?: string },
 ): string {
-  const executable = /^[a-zA-Z0-9_./:-]+$/.test(command)
-    ? command
-    : "'" + command.replaceAll("'", "'\"'\"'") + "'";
-  const target = targetArgs
-    .map((arg) =>
-      /^[a-zA-Z0-9_./:-]+$/.test(arg) ? arg : "'" + arg.replaceAll("'", "'\"'\"'") + "'",
-    )
-    .join(" ");
-  const platformNotes = cloud
-    ? "This is an EAS Simulator session in the cloud. It bills the Expo account per minute until it stops, so call device_close with shutdown: true when you are done. It starts with no apps installed: install-from-source <url> installs a build from a URL (iOS needs a .tar.gz containing a .app), and install uploads one from this machine."
-    : device.platform === "ios"
-      ? device.physical
-        ? "Physical iOS requires trust, Developer Mode, and a signed XCTest runner. Run this launcher's help physical-device for signing setup. Use the configured Apple Development team and respect the shared compilation lock. First use may build the runner; a missing runner is a setup step. Do not restart another thread's daemon to configure yours."
-        : "First use builds an XCTest runner and can take a couple of minutes; later commands are fast."
-      : "The Android snapshot helper installs itself on first use.";
+  const executable = shellWord(command);
+  const target = targetArgs.map(shellWord).join(" ");
+  const run = (args: string) => [executable, args, target].filter(Boolean).join(" ");
+  const platformNotes =
+    host?.kind === "simlock"
+      ? [
+          "This device is leased from a Simlock pool (alpha in T3 Code). The lease returns it to the pool, wiped, when it ends, so call device_close with shutdown: true when you are done. It starts with no apps installed.",
+          host.installDirectory
+            ? `agent-device accepts install for this lease only when run from ${host.installDirectory}.`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" ")
+      : host?.kind === "eas"
+        ? "This is an EAS Simulator session in the cloud. It bills the Expo account per minute until it stops, so call device_close with shutdown: true when you are done. It starts with no apps installed: install-from-source <url> installs a build from a URL (iOS needs a .tar.gz containing a .app), and install uploads one from this machine."
+        : device.platform === "ios"
+          ? device.physical
+            ? "Physical iOS requires trust, Developer Mode, and a signed XCTest runner. Run this launcher's help physical-device for signing setup. Respect the shared compilation lock and preserve other threads' runners."
+            : "First use builds an XCTest runner and can take a couple of minutes; later commands are fast."
+          : "The Android snapshot helper installs itself on first use.";
   return [
     device.physical
-      ? `Physical device: ${device.name} (${device.version}). Live video may be unavailable; continue with screenshots and snapshots.`
-      : `Opened ${device.name} (${device.version}) for this thread.`,
-    `Drive it with ${executable}. Use this exact executable path; login shells may reset PATH. Always pass ${target}.`,
-    device.physical
-      ? "Physical devices stay hidden in T3. Automation and screenshots remain available."
-      : 'Call device_open again with presentation: "inset", "floating", "fullscreen", or "hidden" to change this thread\'s view without restarting the device. Default: inset. Hidden keeps the device session and automation running.',
-    "Typical loop:",
-    `  ${executable} open <bundle-or-package-id> ${target}     # or: open <app> <deep-link-url>`,
-    `  ${executable} snapshot -i ${target}                     # accessibility tree with @eN refs`,
-    `  ${executable} click @e3 ${target}`,
-    `  ${executable} fill @e5 "text" ${target}`,
-    `  ${executable} screenshot /tmp/shot.png ${target}        # or call device_screenshot`,
-    `  ${executable} install <app> <path-to-.app-or-.apk> ${target}`,
-    `Prefer snapshot refs over coordinates. Run ${executable} help for workflow guides and ${executable} <command> --help for flags.`,
+      ? `Physical device: ${device.name} (${device.version}). Physical devices stay hidden in T3; automation and screenshots remain available.`
+      : `Opened ${device.name} (${device.version}) for this thread. Call device_open again with presentation: "inset", "floating", "fullscreen", or "hidden" to change its view without restarting it.`,
+    target === ""
+      ? `Drive it with ${executable}. It is bound to this device and session, so it needs no --platform, --udid, --serial, --config or --session flags. Use this exact path; login shells may reset PATH.`
+      : `Drive it with ${executable}. Use this exact path; login shells may reset PATH. Always pass ${target}.`,
+    // Screenshots and input need the session agent-device's open starts, and an iOS snapshot also
+    // needs its app. device_open does not run open itself: on iOS that can start a minutes-long
+    // XCTest runner build.
+    "Every app launch, deep link, tap, text entry, alert, setting, screenshot and recording on this device goes through it. Run open <bundle-or-package-id> (apps lists them) before snapshots, CLI screenshots or input; it starts the session they need. Use device_screenshot just to look.",
+    `  ${run("open <bundle-or-package-id> --relaunch")}  # restarts the app; Expo dev clients connect to their Metro, --metro-port <port> picks it`,
+    `  ${run("open <bundle-or-package-id> <deep-link-url>")}`,
+    `  ${run("snapshot -i")}  # accessibility tree with @eN refs`,
+    `  ${run("press @e3 --settle")}`,
+    `  ${run('fill @e5 "text" --settle')}`,
+    `  ${run("alert accept")}`,
+    `  ${run("settings appearance dark")}  # also text-size, permission grant <name>`,
+    `  ${run("screenshot /tmp/shot.png")}  # ${device.platform === "ios" ? "iOS saves 1x points; add --pixel-density <n> (3 on most iPhones) for device resolution, " : ""}or call device_screenshot to look`,
+    `  ${run("record start --scope device /tmp/run.mp4")}  # then record stop`,
+    `  ${run("install <app> <path-to-.app-or-.apk>")}`,
+    `Prefer snapshot refs over coordinates. Run ${executable} help <command> for flags and ${executable} help workflow for guides.`,
+    ...(!device.physical
+      ? [
+          "Do not use simctl, idb, adb or ssh for those actions. Use this launcher for routine virtual-device interaction; if it cannot perform an action, report that limitation and use the supported fallback.",
+        ]
+      : []),
     "Prefer this agent-device launcher. If T3 discovery, streaming, or control fails on connected physical hardware, report the error and continue with device-pinned agent-device or native tools. adb UI control is allowed. Never bypass disabled device/agent access or a permission denial.",
     "A requested device test includes installing development apps and automation helpers, signing in, taps, typing, captures, and task-related settings. Respect build locks and preserve unrelated apps/data. Ask only for trust, Developer Mode, or credentials you cannot supply.",
     "If another thread owns the physical device, coordinate with it before taking control.",
-    "For remote hosts, arrange builds, app installation, and any Metro reverse forwarding yourself. T3 provides discovery, streaming, and control only.",
-    "Keep the returned --config and --session flags on every command. Other hosts can be used concurrently; opening one does not switch these commands.",
-    `Before releasing physical hardware, run ${executable} close ${target}, then call device_close.`,
+
+    "Each device_open returns its own command; opening another device does not retarget this one.",
+    ...(target === ""
+      ? [
+          "The command is removed when the device closes or T3 Code restarts. If it is missing, call device_open again.",
+        ]
+      : []),
     platformNotes,
   ].join("\n");
 }
@@ -77,13 +99,44 @@ const requireDeviceAccess = McpInvocationContext.requireThreadMcpCapability("dev
   Effect.mapError(
     () =>
       new DeviceToolUnavailableError({
-        reason: "Agent device access is turned off for this environment.",
+        reason:
+          "Agent device access is turned off for this environment. Ask the user to turn on Agent device access in Settings > Integrations > Devices; it applies when the agent session next starts, such as in a new thread.",
       }),
   ),
 );
 
+const hostName = (host: { readonly id: DeviceHostId; readonly label?: string | undefined }) =>
+  host.label === undefined ? `hostId ${host.id}` : `'${host.label}' (hostId ${host.id})`;
+
+const mapLocateErrors = <A, R>(
+  effect: Effect.Effect<
+    A,
+    DeviceService.DeviceHostAmbiguousError | DeviceService.DeviceOnOtherHostError,
+    R
+  >,
+) =>
+  effect.pipe(
+    Effect.catchTags({
+      DeviceHostAmbiguousError: (error) =>
+        Effect.fail(
+          new DeviceToolUnavailableError({
+            reason: `Device ${error.deviceId} is on more than one host: ${error.hosts.map(hostName).join(", ")}. Pass hostId.`,
+          }),
+        ),
+      DeviceOnOtherHostError: (error) =>
+        Effect.fail(
+          new DeviceToolUnavailableError({
+            reason: `Device ${error.deviceId} is not on ${hostName(error.host)}. It is on ${error.hosts.map(hostName).join(", ")}; pass that hostId.`,
+          }),
+        ),
+    }),
+  );
+
 const pickDevice = Effect.fn("handlers.pickDevice")(function* (
-  devices: ReadonlyArray<DeviceSummary>,
+  state: {
+    readonly hosts: ReadonlyArray<DeviceHostSummary>;
+    readonly devices: ReadonlyArray<DeviceSummary>;
+  },
   input: {
     readonly deviceId?: DeviceId | undefined;
     readonly platform?: DevicePlatform | undefined;
@@ -91,21 +144,21 @@ const pickDevice = Effect.fn("handlers.pickDevice")(function* (
     readonly physical?: boolean | undefined;
   },
   owned: ReadonlyArray<{ readonly hostId: string; readonly deviceId: string }> = [],
-): Effect.fn.Return<DeviceSummary, DeviceToolUnavailableError> {
-  const hostId = input.hostId ?? LOCAL_DEVICE_HOST_ID;
+): Effect.fn.Return<DeviceSummary, DeviceToolUnavailableError, DeviceService.DeviceService> {
   if (input.deviceId !== undefined) {
-    const match = devices.find(
-      (device) => device.hostId === hostId && device.id === input.deviceId,
-    );
-    if (match) return match;
+    const { deviceId, hostId } = input;
+    const devices = yield* DeviceService.DeviceService;
+    const located = yield* devices.locateDevice({ deviceId, hostId }).pipe(mapLocateErrors);
+    if (Option.isSome(located)) return located.value;
     return yield* new DeviceToolUnavailableError({
-      reason: `No device ${input.deviceId} on host ${hostId}. Call device_list for current ids.`,
+      reason: `No device ${deviceId} on ${hostId === undefined ? "any host" : hostName(state.hosts.find((host) => host.id === hostId) ?? { id: hostId })}. Call device_list for current ids.`,
     });
   }
+  const hostId = input.hostId ?? LOCAL_DEVICE_HOST_ID;
   const previous = owned.findLast(
     (session) =>
       (input.hostId === undefined || session.hostId === input.hostId) &&
-      devices.some(
+      state.devices.some(
         (device) =>
           device.hostId === session.hostId &&
           device.id === session.deviceId &&
@@ -114,10 +167,10 @@ const pickDevice = Effect.fn("handlers.pickDevice")(function* (
       ),
   );
   if (previous)
-    return devices.find(
+    return state.devices.find(
       (device) => device.hostId === previous.hostId && device.id === previous.deviceId,
     )!;
-  const candidates = devices.filter(
+  const candidates = state.devices.filter(
     (device) =>
       device.hostId === hostId &&
       (input.platform === undefined || device.platform === input.platform) &&
@@ -189,7 +242,7 @@ const handlers = {
         });
       }
       const target = yield* pickDevice(
-        state.devices,
+        state,
         input,
         state.sessions.filter((session) => session.threadId === scope.thread.threadId),
       );
@@ -217,42 +270,43 @@ const handlers = {
         ) ?? target;
       // Target the opened device: an EAS device and its agent-device daemon
       // exist only once its session runs, and Android ids change on boot.
-      const agent = yield* devices.agentTarget({
+      const opened = {
         threadId: scope.thread.threadId,
-        hostId: device.hostId,
-        deviceId: device.id,
-      });
-      const cloud = after.hosts.some((host) => host.id === device.hostId && host.kind === "eas");
+        hostId: session.hostId,
+        deviceId: session.deviceId,
+      };
+      const agent = yield* devices.agentTarget(opened);
+      const hostKind = after.hosts.find((host) => host.id === device.hostId)?.kind;
       const targetArgs = [
-        ...agentDeviceTargetArgs({ ...device, id: agent.agentDeviceId }),
+        ...(agent.agentDeviceId === null
+          ? []
+          : agentDeviceTargetArgs({ ...device, id: agent.agentDeviceId })),
         ...agent.args,
       ];
-      const config = yield* ServerConfig.ServerConfig;
-      const path = yield* Path.Path;
-      const platform = yield* HostProcess.Platform;
-      const shimDir = yield* ensureAgentDeviceShim({
-        entryPath: yield* devices.agentCli,
-        stateDir: config.stateDir,
-      }).pipe(
-        Effect.mapError(
-          (error) =>
-            new DeviceToolUnavailableError({
-              reason:
-                error._tag === "NodeRuntimeUnavailableError"
-                  ? nodeRuntimeUnavailableMessage("Device automation")
-                  : "Could not prepare the agent-device launcher.",
-              cause: error,
-            }),
-        ),
-      );
-      const command = path.join(
-        shimDir,
-        platform === "win32" ? "agent-device.cmd" : "agent-device",
-      );
+      const launcher = yield* devices.agentLauncher({ ...opened, targetArgs });
+      if (Option.isNone(launcher)) {
+        return yield* new DeviceToolUnavailableError({
+          reason:
+            "The device was closed while device_open was preparing it. Call device_open again only if you still need it.",
+        });
+      }
+      const command = launcher.value;
       return {
         device,
-        agentDevice: { command, targetArgs },
-        quickStart: agentDeviceQuickStart(device, targetArgs, command, cloud),
+        agentDevice: { command, targetArgs, session: agent.session },
+        quickStart: agentDeviceQuickStart(
+          device,
+          [],
+          command,
+          hostKind === "simlock"
+            ? {
+                kind: "simlock",
+                ...(agent.installDirectory ? { installDirectory: agent.installDirectory } : {}),
+              }
+            : hostKind === "eas"
+              ? { kind: "eas" }
+              : undefined,
+        ),
       };
     }).pipe(Effect.mapError(toolError)),
   ),
@@ -260,20 +314,23 @@ const handlers = {
     Effect.gen(function* () {
       const scope = yield* requireDeviceAccess;
       const devices = yield* DeviceService.DeviceService;
-      const sessions = yield* devices.sessionsForThread(scope.thread.threadId);
-      const hostId =
-        input.deviceId === undefined ? input.hostId : (input.hostId ?? LOCAL_DEVICE_HOST_ID);
-      const target = sessions.findLast(
-        (session) =>
-          (hostId === undefined || session.hostId === hostId) &&
-          (input.deviceId === undefined || session.deviceId === input.deviceId),
-      );
+      const threadId = scope.thread.threadId;
+      const target =
+        input.deviceId === undefined
+          ? (yield* devices.sessionsForThread(threadId)).findLast(
+              (session) => input.hostId === undefined || session.hostId === input.hostId,
+            )
+          : Option.getOrUndefined(
+              yield* devices
+                .locateSession({ threadId, deviceId: input.deviceId, hostId: input.hostId })
+                .pipe(mapLocateErrors),
+            );
       if (!target) {
         return yield* new DeviceToolUnavailableError({
           reason:
             input.deviceId === undefined
               ? "No device is open in this thread. Call device_open first."
-              : `Device ${input.deviceId} on host ${hostId} is not open in this thread. Call device_open first.`,
+              : `Device ${input.deviceId} is not open in this thread. Call device_open first.`,
         });
       }
       const shot = yield* devices.screenshot(target);
@@ -291,10 +348,18 @@ const handlers = {
     Effect.gen(function* () {
       const scope = yield* requireDeviceAccess;
       const devices = yield* DeviceService.DeviceService;
+      const deviceId = input.deviceId;
+      const open =
+        deviceId === undefined
+          ? Option.none()
+          : yield* devices
+              .locateSession({ threadId: scope.thread.threadId, deviceId, hostId: input.hostId })
+              .pipe(mapLocateErrors);
+      const hostId = Option.isSome(open) ? open.value.hostId : input.hostId;
       yield* devices.close({
         threadId: scope.thread.threadId,
-        ...(input.hostId === undefined ? {} : { hostId: input.hostId }),
-        ...(input.deviceId === undefined ? {} : { deviceId: input.deviceId }),
+        ...(hostId === undefined ? {} : { hostId }),
+        ...(deviceId === undefined ? {} : { deviceId }),
         ...(input.shutdown === undefined ? {} : { shutdown: input.shutdown }),
       });
       return {};

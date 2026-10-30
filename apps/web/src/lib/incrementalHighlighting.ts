@@ -1,11 +1,10 @@
 import {
   renderTokenLines,
   type DiffsHighlighter,
+  type DiffsThemeNames,
   type ThemedToken,
   type TokensResult,
 } from "@pierre/diffs";
-
-import type { DiffThemeName } from "./diffRendering";
 
 function highlightedDocument(
   result: TokensResult,
@@ -50,7 +49,7 @@ export function highlightCodeToHast(
   highlighter: DiffsHighlighter,
   code: string,
   language: string,
-  theme: DiffThemeName,
+  theme: DiffsThemeNames,
 ) {
   return highlightedDocument(highlighter.codeToTokens(code, { lang: language, theme }));
 }
@@ -58,18 +57,20 @@ export function highlightCodeToHast(
 export function createIncrementalHighlightedDocument(
   highlighter: DiffsHighlighter,
   language: string,
-  theme: DiffThemeName,
+  theme: DiffsThemeNames,
 ) {
   const options = { lang: language, theme };
   let shell: TokensResult | undefined;
   let tokenizer: ReturnType<DiffsHighlighter["createStreamTokenizer"]> | undefined;
   let previous = "";
+  let previousDocument: ReturnType<typeof highlightedDocument> | undefined;
   const completedLines: ReturnType<typeof renderTokenLines> = [];
 
   function dispose() {
     tokenizer?.dispose();
     tokenizer = undefined;
     previous = "";
+    previousDocument = undefined;
     completedLines.length = 0;
   }
 
@@ -80,6 +81,7 @@ export function createIncrementalHighlightedDocument(
         dispose();
         return highlightCodeToHast(highlighter, code, language, theme);
       }
+      if (code === previous && previousDocument) return previousDocument;
       if (!code.startsWith(previous)) dispose();
       // Created on first use so an unknown language throws inside the caller's fallback.
       shell ??= highlighter.codeToTokens("", options);
@@ -99,10 +101,11 @@ export function createIncrementalHighlightedDocument(
         } else line.push(token);
       }
       // Completed line nodes retain their identity while the final line changes.
-      return highlightedDocument(shell, [
+      previousDocument = highlightedDocument(shell, [
         ...completedLines,
         ...renderTokenLines([update.unstable], {}),
       ]);
+      return previousDocument;
     },
     { dispose },
   );

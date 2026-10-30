@@ -10,8 +10,6 @@ import {
   OrchestrationV2ProviderThreadJson,
   OrchestrationV2RpcSchemas,
   OrchestrationV2RuntimeRequest,
-  OrchestrationV2ShellSnapshot,
-  OrchestrationV2SubscribeThreadInput,
   OrchestrationV2Subagent,
   OrchestrationV2ThreadShellJson,
   OrchestrationV2SubagentJson,
@@ -361,6 +359,9 @@ describe("orchestration V2 contracts", () => {
               index: 1,
               label: "Member",
               state: "completed" as const,
+              model: "claude-opus-5[1m]",
+              effort: "xhigh",
+              speed: "standard",
               prompt: preview,
               result: preview,
             },
@@ -382,10 +383,16 @@ describe("orchestration V2 contracts", () => {
         expect(decode(json).workflow?.agents[0]).toMatchObject({
           prompt: preview,
           result: preview,
+          model: "claude-opus-5[1m]",
+          effort: "xhigh",
+          speed: "standard",
         });
         expect(decode(incoming).workflow?.agents[0]).toMatchObject({
           prompt: preview,
           result: preview,
+          model: "claude-opus-5[1m]",
+          effort: "xhigh",
+          speed: "standard",
         });
       }
     },
@@ -645,6 +652,6 @@ it("encodes app-owned settings approvals for older clients and preserves server 
     type: "live",
     providerSessionId: "app:settings",
   });
-  expect(Schema.decodeUnknownSync(codec)(wire)).toEqual({ type: "settings" });
-  expect(Schema.decodeUnknownSync(codec)({ type: "settings" })).toEqual({ type: "settings" });
+  expect(Schema.decodeSync(codec)(wire)).toEqual({ type: "settings" });
+  expect(Schema.decodeSync(codec)({ type: "settings" })).toEqual({ type: "settings" });
 });

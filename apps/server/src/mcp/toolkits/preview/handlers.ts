@@ -4,6 +4,7 @@ import { safeFileNameSegment } from "@t3tools/shared/fileNameSegment";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as Record from "effect/Record";
 import * as Schema from "effect/Schema";
 import {
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
@@ -19,10 +20,11 @@ import {
   type PreviewAutomationAutofillResult,
   type PreviewAutomationCloseResult,
   type PreviewAutomationDownloadInput,
-  type PreviewAutomationInputResult,
   type PreviewAutomationUploadFile,
   type PreviewAutomationUploadInput,
   type PreviewAutomationUploadResult,
+  PreviewAutomationActInputs,
+  OrchestratorMcpFailure,
   type ToolActivityIcon,
   type PreviewAutomationOperation,
   type PreviewAutomationOpenInput,
@@ -30,7 +32,6 @@ import {
   type ThreadId,
   type PreviewAutomationRecordingStatus,
   type PreviewAutomationResizeResult,
-  type PreviewAutomationSelectResult,
   type PreviewAutomationSetColorSchemeResult,
   type PreviewAutomationSnapshot,
   type PreviewAutomationStatus,
@@ -132,6 +133,10 @@ const invokeTargeted = <A extends object>(
     })),
   );
 };
+
+const decodeActInput = Record.map(PreviewAutomationActInputs, (schema) =>
+  Schema.decodeUnknownEffect(schema),
+);
 
 const UploadedRecordingArtifact = Schema.Struct({
   ...PreviewAutomationRecordingArtifact.fields,
@@ -357,26 +362,28 @@ const handlers = {
       includeImage: includeImage !== false || save === true,
     });
   }),
-  preview_click: McpToolAccess.actsAsCaller((input) =>
-    invokeTargeted<PreviewAutomationInputResult>("click", input, input.timeoutMs),
-  ),
-  preview_type: McpToolAccess.actsAsCaller((input) =>
-    invokeTargeted<object>("type", input, input.timeoutMs),
-  ),
-  preview_hover: McpToolAccess.actsAsCaller((input) =>
-    invokeTargeted<object>("hover", input, input.timeoutMs),
-  ),
-  preview_select: McpToolAccess.actsAsCaller((input) =>
-    invokeTargeted<PreviewAutomationSelectResult>("select", input, input.timeoutMs),
-  ),
-  preview_drag: McpToolAccess.actsAsCaller((input) =>
-    invokeTargeted<object>("drag", input, input.timeoutMs),
-  ),
   preview_upload: McpToolAccess.actsAsCaller((input) => uploadFiles(input)),
-  preview_press: McpToolAccess.actsAsCaller((input) =>
-    invokeTargeted<PreviewAutomationInputResult>("press", input),
+  preview_act: McpToolAccess.actsAsCaller(({ action, ...input }) =>
+    decodeActInput[action](input).pipe(
+      Effect.mapError(
+        (cause) => new OrchestratorMcpFailure({ code: "invalid_request", message: cause.message }),
+      ),
+      Effect.flatMap((decoded) =>
+        action === "upload"
+          ? uploadFiles(decoded as PreviewAutomationUploadInput)
+          : invokeTargeted<{
+              fileChooser?: { multiple: boolean };
+              selected?: ReadonlyArray<string>;
+            }>(action, decoded, "timeoutMs" in decoded ? decoded.timeoutMs : undefined).pipe(
+              Effect.map(({ toolIcon, fileChooser, selected }) => ({
+                ...(toolIcon ? { toolIcon } : {}),
+                ...(fileChooser ? { fileChooser } : {}),
+                ...(selected ? { selected } : {}),
+              })),
+            ),
+      ),
+    ),
   ),
-  preview_scroll: McpToolAccess.actsAsCaller((input) => invokeTargeted<object>("scroll", input)),
   preview_evaluate: McpToolAccess.actsAsCaller(({ tabId, ...input }) =>
     invoke<unknown>("evaluate", input, undefined, tabId).pipe(
       Effect.map(({ result, toolIcon }) => ({

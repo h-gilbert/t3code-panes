@@ -10,6 +10,7 @@ import {
   type DesktopPreviewBridge,
 } from "@t3tools/contracts";
 import { act } from "react";
+import * as CommandRuntime from "@t3tools/client-runtime/state/runtime";
 import { create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -22,7 +23,7 @@ const mocks = vi.hoisted(() => ({
   registerWebview: vi.fn<DesktopPreviewBridge["registerWebview"]>(),
   getPreviewConfig: vi.fn<DesktopPreviewBridge["getPreviewConfig"]>(),
   activeRecordings: new Set<string>(),
-  resize: vi.fn(async () => ({ _tag: "Success", value: { tabId: "server-tab" } })),
+  resize: vi.fn(async (_input?: unknown) => ({ _tag: "Success", value: { tabId: "server-tab" } })),
   updateSnapshot: vi.fn(),
   claimTab: vi.fn<DesktopPreviewBridge["claimTab"]>(),
   ownership: (() => {
@@ -251,7 +252,13 @@ describe("HostedBrowserWebview settings hydration", () => {
     // The host remains alive with no right-panel PreviewView mounted.
     const nextViewport = { _tag: "freeform", width: 960, height: 640 } as const;
     await act(async () => {
-      await commitBrowserViewportChange(runtimeTabId, nextViewport);
+      using _run = vi
+        .spyOn(CommandRuntime, "runAtomCommand")
+        .mockImplementation(async (_registry, _command, input) => mocks.resize(input) as never);
+      await commitBrowserViewportChange(
+        { threadRef, tabId: "server-tab", runtimeTabId },
+        nextViewport,
+      );
     });
     expect(mocks.resize).toHaveBeenCalledWith({
       environmentId: threadRef.environmentId,

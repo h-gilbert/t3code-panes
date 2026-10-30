@@ -1,15 +1,13 @@
+import Constants from "expo-constants";
 import * as Dialog from "../../components/ui/Dialog";
-import { AuthRelayWriteScope } from "@t3tools/contracts";
-import { readEnvironmentScope } from "../../state/session";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
 import { useAuth } from "@clerk/expo";
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import * as Notifications from "expo-notifications";
 import { useNavigation } from "@react-navigation/native";
 import * as Effect from "effect/Effect";
-import { AsyncResult } from "effect/reactivity";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { AppState, Linking, Platform } from "react-native";
+import { useCallback, useSyncExternalStore } from "react";
+import { Linking, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText as Text } from "../../components/ui/AppText";
@@ -21,29 +19,35 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { supportsAgentAwarenessPush } from "../agent-awareness/capabilities";
-import {
-  openAndroidLiveUpdateSettings,
-  supportsAndroidLiveUpdateSettings,
-} from "../agent-awareness/androidNotifications";
 import { requestAgentNotificationPermission } from "../agent-awareness/notificationPermissions";
 import {
   getAgentAwarenessRegistrationStatus,
   refreshAgentAwarenessRegistration,
   subscribeAgentAwarenessRegistrationStatus,
 } from "../agent-awareness/remoteRegistration";
-import { refreshManagedRelayEnvironments } from "../cloud/managedRelayState";
-import { hasCloudPublicConfig, resolveRelayClerkTokenOptions } from "../cloud/publicConfig";
+import { hasCloudPublicConfig } from "../cloud/publicConfig";
+import { makePermissionStatusAtom } from "../../lib/permissionStatusAtom";
 import { runtime } from "../../lib/runtime";
-import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
-import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
-import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
 import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
 import { SettingsScreen } from "./components/SettingsScreen";
 import { resolveAgentAwarenessPlatformPresentation } from "./SettingsRouteScreen.logic";
 
 type NotificationStatus = "checking" | "enabled" | "disabled" | "unsupported";
-type LiveActivityStatus = "checking" | "enabled" | "disabled" | "signed-out" | "linking";
+
+const notificationStatusAtom = makePermissionStatusAtom<NotificationStatus>({
+  label: "mobile:notification-permission",
+  initial: "checking",
+  read: async () => {
+    if (Platform.OS !== "ios" && Platform.OS !== "android") return "unsupported";
+    const result = await settlePromise(() => Notifications.getPermissionsAsync());
+    if (result._tag === "Failure") {
+      reportAtomCommandResult(result, { label: "notification permission refresh" });
+      return "disabled";
+    }
+    return result.value.granted ? "enabled" : "disabled";
+  },
+});
 
 function useDeviceRegistered(): boolean {
   const status = useSyncExternalStore(
@@ -55,7 +59,7 @@ function useDeviceRegistered(): boolean {
 }
 
 export function SettingsNotificationsRouteScreen() {
-  if (!hasCloudPublicConfig()) {
+  if (!hasCloudPublicConfig() && Constants.expoConfig?.extra?.selfHostedBuild !== true) {
     return (
       <SettingsScreen title="Notifications">
         <ScrollView
@@ -74,8 +78,6 @@ export function SettingsNotificationsRouteScreen() {
 }
 
 function ConfiguredSettingsNotificationsRouteScreen() {
-  const preferencesResult = useAtomValue(mobilePreferencesAtom);
-  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
   const agentAwarenessPushAvailable = supportsAgentAwarenessPush();
   const agentAwarenessPlatform = resolveAgentAwarenessPlatformPresentation(Platform.OS);
   const agentAwarenessSubtitle =
@@ -85,30 +87,9 @@ function ConfiguredSettingsNotificationsRouteScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
-  const { savedConnectionsById } = useSavedRemoteConnections();
-  const [notificationStatus, setNotificationStatus] = useState<NotificationStatus>("checking");
+  const notificationStatus = useAtomValue(notificationStatusAtom);
+  const setNotificationStatus = useAtomSet(notificationStatusAtom);
   const deviceRegistered = useDeviceRegistered();
-  const refreshNotifications = async () => {
-    if (Platform.OS !== "ios" && Platform.OS !== "android") {
-      setNotificationStatus("unsupported");
-      return;
-    }
-    const result = await settlePromise(() => Notifications.getPermissionsAsync());
-    if (result._tag === "Failure") {
-      reportAtomCommandResult(result, { label: "notification permission refresh" });
-      setNotificationStatus("disabled");
-      return;
-    }
-    setNotificationStatus(result.value.granted ? "enabled" : "disabled");
-  };
-
-  useEffect(() => {
-    void refreshNotifications();
-    const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") void refreshNotifications();
-    });
-    return () => subscription.remove();
-  }, [refreshNotifications]);
 
   const requestNotifications = async () => {
     const result = await settleAsyncResult(() =>
@@ -137,7 +118,7 @@ function ConfiguredSettingsNotificationsRouteScreen() {
       } else {
         Dialog.alert(
           "Couldn't finish enabling notifications",
-          "Notification access was granted, but this device could not be registered with T3 Connect. Notifications will start once registration succeeds.",
+          "Notification access was granted, but this device could not be registered with the notification server. Notifications will start once registration succeeds.",
         );
       }
       return;
@@ -178,7 +159,7 @@ function ConfiguredSettingsNotificationsRouteScreen() {
   const handleDeviceNotificationsChange = useCallback(
     (enabled: boolean) => {
       if (enabled) {
-        if (!isSignedIn) {
+        if (!isSignedIn && Constants.expoConfig?.extra?.selfHostedBuild !== true) {
           promptSignIn();
           return;
         }

@@ -37,11 +37,7 @@ import {
   type WebviewCrashRecoveryState,
 } from "./webviewCrashRecovery";
 
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import { useAtomCommand } from "~/state/use-atom-command";
-import { previewEnvironment } from "~/state/preview";
-import { updatePreviewServerSnapshot, useThreadPreviewState } from "~/previewStateStore";
-import { subscribeBrowserViewportChange } from "./browserViewportActions";
+import { useThreadPreviewState } from "~/previewStateStore";
 
 interface ElectronWebview extends HTMLElement {
   src: string;
@@ -136,6 +132,7 @@ export function HostedBrowserWebview(props: {
   const hostedElsewhere =
     useThreadPreviewState(threadRef).desktopByTabId[tabId]?.hostedElsewhere ?? false;
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- leases the desktop preview tab for this webview and releases it on cleanup
   useEffect(() => {
     if (!clientSettingsHydrated) return;
     crashRecoveryRef.current = INITIAL_WEBVIEW_CRASH_RECOVERY_STATE;
@@ -164,39 +161,18 @@ export function HostedBrowserWebview(props: {
     remoteHosted,
   ]);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- applies the server color scheme to the desktop preview tab through the desktop bridge
   useEffect(() => {
     const bridge = window.desktopBridge?.preview;
     if (!bridge || serverColorScheme === undefined) return;
     withDesktopTab(runtimeTabId, () => bridge.setColorScheme(runtimeTabId, serverColorScheme));
   }, [runtimeTabId, serverColorScheme]);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- applies the server zoom factor to the desktop preview tab through the desktop bridge
   useEffect(() => {
     const bridge = window.desktopBridge?.preview;
     if (!bridge || serverZoomFactor === undefined) return;
     withDesktopTab(runtimeTabId, () => bridge.setZoomFactor(runtimeTabId, serverZoomFactor));
   }, [runtimeTabId, serverZoomFactor]);
-
-  const resize = useAtomCommand(previewEnvironment.resize, { reportFailure: false });
-  const handleViewportChange = useStableCallback(async (nextViewport: PreviewViewportSetting) => {
-    if (!tabId) return;
-    const result = await resize({
-      environmentId: threadRef.environmentId,
-      input: {
-        threadId: threadRef.threadId,
-        tabId,
-        viewport: nextViewport,
-      },
-    });
-    if (result._tag === "Failure") {
-      const error = squashAtomCommandFailure(result);
-      throw error;
-    }
-    updatePreviewServerSnapshot(threadRef, result.value);
-  });
-
-  useEffect(
-    () => subscribeBrowserViewportChange(runtimeTabId, handleViewportChange),
-    [runtimeTabId, handleViewportChange],
-  );
 
   const guestHealthCheckRef = useRef<{
     generation: number;
@@ -223,6 +199,7 @@ export function HostedBrowserWebview(props: {
     webviewRef.current = node as ElectronWebview | null;
   });
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers the webview's webContents with the desktop bridge and listens for crashes and focus
   useEffect(() => {
     const webview = webviewRef.current;
     const bridge = previewBridge;
@@ -304,7 +281,8 @@ export function HostedBrowserWebview(props: {
     };
   }, [clientSettingsHydrated, config, runtimeTabId, webviewGeneration]);
 
-  // A returning tab starts with a fresh crash budget, like a new guest.
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- resets the native guest recovery budget when ownership returns to this window
   useEffect(() => {
     if (!hostedElsewhere) crashRecoveryRef.current = INITIAL_WEBVIEW_CRASH_RECOVERY_STATE;
   }, [hostedElsewhere]);
@@ -312,6 +290,7 @@ export function HostedBrowserWebview(props: {
   // Showing a tab owned by another window, in the window the user is using,
   // moves the tab here.
   const presented = presentation.visible;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- claims the visible native guest when its workspace window gains focus
   useEffect(() => {
     const bridge = previewBridge;
     if (!hostedElsewhere || !presented || !bridge) return;
@@ -326,6 +305,7 @@ export function HostedBrowserWebview(props: {
     return () => window.removeEventListener("focus", claim);
   }, [hostedElsewhere, presented, runtimeTabId]);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- schedules a native guest health check while its surface is in use
   useEffect(() => {
     const check = guestHealthCheckRef.current;
     if (
@@ -393,7 +373,7 @@ export function HostedBrowserWebview(props: {
     handleResizePointerDown,
     layout: viewportLayout,
   } = useBrowserViewportResize({
-    tabId: runtimeTabId,
+    target: { threadRef, tabId, runtimeTabId },
     viewport: presentation.fillContainer ? { _tag: "fill" } : viewport,
     zoomFactor: layoutZoomFactor,
     containerSize,
@@ -423,11 +403,13 @@ export function HostedBrowserWebview(props: {
     });
   };
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- schedules a frame that publishes the webview layout and scroll to the browser surface store
   useEffect(() => {
     const frameId = window.requestAnimationFrame(syncContentPresentation);
     return () => window.cancelAnimationFrame(frameId);
   }, [syncContentPresentation]);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- scrolls the webview wrapper element to its origin for a new tab or viewport size
   useEffect(() => {
     const wrapper = wrapperRef.current;
     if (!wrapper) return;

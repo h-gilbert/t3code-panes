@@ -3,6 +3,7 @@ import * as Notifications from "expo-notifications";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { Platform } from "react-native";
+import type { SavedRemoteConnection } from "../../lib/connection";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { type RelayDeviceRegistrationRequest } from "@t3tools/contracts/relay";
 import { findErrorTraceId } from "@t3tools/client-runtime/errors";
@@ -13,7 +14,6 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 
-import type { SavedRemoteConnection } from "../../lib/connection";
 import { runtime } from "../../lib/runtime";
 import {
   clearAgentAwarenessRegistrationRecord,
@@ -109,7 +109,6 @@ export function normalizeAgentAwarenessRelayBaseUrl(
 function readRelayConfig(): { readonly url: string } | null {
   const relayUrl = resolveCloudPublicConfig().relay.url;
   if (!relayUrl) {
-    logRegistrationDebug("relay registration skipped; relay config missing");
     return null;
   }
 
@@ -131,7 +130,7 @@ function directNotificationConnections(): ReadonlyArray<SavedRemoteConnection> {
   );
 }
 
-export function shouldRegisterAgentAwarenessDeviceForProvider(
+function shouldRegisterAgentAwarenessDeviceForProvider(
   previousIdentity: string | null,
   identity: string | undefined,
 ): boolean {
@@ -278,10 +277,6 @@ const registerDeviceWithRelay = Effect.fn("remoteRegistration.registerDeviceWith
   expectedGeneration: number,
 ): Effect.fn.Return<void, unknown, ManagedRelay.ManagedRelayClient> {
   if (expectedGeneration !== deviceRegistrationGeneration) {
-    logRegistrationDebug("device registration cancelled before relay request", {
-      expectedGeneration,
-      currentGeneration: deviceRegistrationGeneration,
-    });
     return;
   }
   const relayConfig = readRelayConfig();
@@ -293,14 +288,9 @@ const registerDeviceWithRelay = Effect.fn("remoteRegistration.registerDeviceWith
   }
   const token = yield* relayToken("read-device-registration-relay-token");
   if (expectedGeneration !== deviceRegistrationGeneration) {
-    logRegistrationDebug("device registration cancelled after auth lookup", {
-      expectedGeneration,
-      currentGeneration: deviceRegistrationGeneration,
-    });
     return;
   }
   if (!token) {
-    logRegistrationDebug("relay device registration skipped; user is not signed in");
     setRegistrationStatus("unknown");
     return;
   }
@@ -317,10 +307,6 @@ const registerDeviceWithRelay = Effect.fn("remoteRegistration.registerDeviceWith
   if (expectedGeneration !== deviceRegistrationGeneration) {
     // Signed out while the record loaded — do not resurrect the cleared
     // record or report the previous account's registration as current.
-    logRegistrationDebug("device registration cancelled after record lookup", {
-      expectedGeneration,
-      currentGeneration: deviceRegistrationGeneration,
-    });
     return;
   }
   const payload = body;
@@ -329,16 +315,10 @@ const registerDeviceWithRelay = Effect.fn("remoteRegistration.registerDeviceWith
   const signature = `${relayConfig.url}|${registrationSignature(payload)}`;
   if (persisted && persisted.identity === identity && persisted.signature === signature) {
     setRegistrationStatus("registered");
-    logRegistrationDebug("relay device registration skipped; already registered for account", {
-      expectedGeneration,
-    });
     return;
   }
 
   const client = yield* ManagedRelay.ManagedRelayClient;
-  logRegistrationDebug("relay device registration request started", {
-    expectedGeneration,
-  });
   yield* client.registerDevice({
     clerkToken: token,
     payload,
@@ -347,10 +327,6 @@ const registerDeviceWithRelay = Effect.fn("remoteRegistration.registerDeviceWith
     // Signed out while the request was in flight: the sign-out path already
     // reset the status and cleared the record for the next account, so a
     // stale success must not overwrite either.
-    logRegistrationDebug("device registration completed after sign-out; result discarded", {
-      expectedGeneration,
-      currentGeneration: deviceRegistrationGeneration,
-    });
     return;
   }
   setRegistrationStatus("registered");
@@ -362,9 +338,6 @@ const registerDeviceWithRelay = Effect.fn("remoteRegistration.registerDeviceWith
       logRegistrationError("persist registration record failed", error);
     }),
   );
-  logRegistrationDebug("relay device registration request completed", {
-    expectedGeneration,
-  });
 });
 
 const unregisterDeviceWithRelay = Effect.fn("remoteRegistration.unregisterDeviceWithRelay")(
@@ -382,7 +355,6 @@ const unregisterDeviceWithRelay = Effect.fn("remoteRegistration.unregisterDevice
         }),
     });
     if (!token) {
-      logRegistrationDebug("relay device unregistration skipped; user is not signed in");
       return;
     }
 
@@ -437,10 +409,6 @@ function startPendingDeviceRegistration(): void {
   const next = pendingDeviceRegistration;
   pendingDeviceRegistration = null;
   const generation = deviceRegistrationGeneration;
-  logRegistrationDebug("device registration started", {
-    generation,
-    hasObservedPushToken: next.input.observedPushToken !== undefined,
-  });
   if (registrationStatus !== "registered") {
     setRegistrationStatus("pending");
   }
@@ -460,7 +428,6 @@ function startPendingDeviceRegistration(): void {
       }
       logRegistrationError(next.context, squashAtomCommandFailure(result));
     }
-    logRegistrationDebug("device registration finished", { generation });
     if (activeDeviceRegistration === registration) {
       activeDeviceRegistration = null;
     }
@@ -473,17 +440,9 @@ function enqueueDeviceRegistration(input: DeviceRegistrationInput, context: stri
     activeDeviceRegistration &&
     !registrationAddsInformation(activeDeviceRegistration.input, input)
   ) {
-    logRegistrationDebug("device registration coalesced with active request", {
-      generation: deviceRegistrationGeneration,
-    });
     return;
   }
 
-  logRegistrationDebug("device registration enqueued", {
-    generation: deviceRegistrationGeneration,
-    hasActiveRegistration: activeDeviceRegistration !== null,
-    hasPendingRegistration: pendingDeviceRegistration !== null,
-  });
   pendingDeviceRegistration = pendingDeviceRegistration
     ? {
         input: mergeDeviceRegistrationInput(pendingDeviceRegistration.input, input),
@@ -648,7 +607,6 @@ export function refreshAgentAwarenessRegistration(): Effect.Effect<
 }
 
 export function __resetAgentAwarenessRemoteRegistrationForTest(): void {
-  environmentConnections.clear();
   pushTokenSubscription?.remove();
   pushTokenSubscription = null;
   relayTokenProvider = null;
@@ -659,6 +617,7 @@ export function __resetAgentAwarenessRemoteRegistrationForTest(): void {
   registrationStatus = "unknown";
   registrationStatusListeners.clear();
   directNotificationPermissionRequested = false;
+  environmentConnections.clear();
 }
 
 export const unregisterAgentAwarenessDeviceForCurrentUser = Effect.fn(

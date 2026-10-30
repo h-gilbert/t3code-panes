@@ -1,4 +1,5 @@
 import { EnvironmentId } from "@t3tools/contracts";
+import { isPrivateNetworkHost, isPublicFaviconHost } from "@t3tools/shared/hostClassification";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const readPreparedConnection = vi.fn();
@@ -157,7 +158,6 @@ describe("browser target resolver", () => {
   });
 
   it("classifies exact private IPv4 and IPv6 boundaries", async () => {
-    const { isPrivateNetworkHost } = await import("./browserTargetResolver");
     const privateHosts = [
       "0.0.0.0",
       "10.0.0.0",
@@ -213,7 +213,6 @@ describe("browser target resolver", () => {
   });
 
   it("allows only globally routable hosts to reach a public favicon provider", async () => {
-    const { isPublicFaviconHost } = await import("./browserTargetResolver");
     const nonPublic = [
       "192.0.0.0",
       "192.0.0.255",

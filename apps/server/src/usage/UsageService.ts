@@ -99,14 +99,10 @@ const RatesCacheFile = Schema.Struct({
   fetchedAtMs: Schema.Number,
   document: Schema.Unknown,
 });
-const decodeRatesCache = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(RatesCacheFile as unknown as Schema.Codec<typeof RatesCacheFile.Type>),
-);
-const encodeRatesCache = Schema.encodeEffect(
-  Schema.fromJsonString(RatesCacheFile as unknown as Schema.Codec<typeof RatesCacheFile.Type>),
-);
+const decodeRatesCache = Schema.decodeUnknownEffect(Schema.fromJsonString(RatesCacheFile));
+const encodeRatesCache = Schema.encodeEffect(Schema.fromJsonString(RatesCacheFile));
 
-const ScanCacheJson = Schema.fromJsonString(Schema.Unknown as unknown as Schema.Codec<unknown>);
+const ScanCacheJson = Schema.fromJsonString(Schema.Unknown);
 const decodeScanCacheFile = Schema.decodeUnknownEffect(ScanCacheJson);
 const encodeUsageRecordKey = Schema.encodeSync(ScanCacheJson);
 const CachedSource = Schema.Struct({ dir: Schema.String, volumeId: Schema.String });
@@ -151,32 +147,6 @@ export class UsageService extends Context.Service<
     readonly refreshRates: Effect.Effect<UsagePricing>;
   }
 >()("t3/usage/UsageService") {}
-
-const EMPTY_PRICING: UsagePricing = {
-  status: "unavailable",
-  source: LITELLM_RATES_URL,
-  fetchedAt: null,
-  knownModels: 0,
-};
-
-const layerTest = Layer.succeed(
-  UsageService,
-  UsageService.of({
-    readSummary: (input) =>
-      Effect.succeed({
-        contractVersion: USAGE_CONTRACT_VERSION,
-        readAt: "1970-01-01T00:00:00.000Z",
-        timeZone: input.timeZone,
-        sinceDay: input.sinceDay,
-        untilDay: input.untilDay,
-        buckets: [],
-        sources: [],
-        pricing: EMPTY_PRICING,
-        scanDurationMs: 0,
-      }),
-    refreshRates: Effect.succeed(EMPTY_PRICING),
-  }),
-);
 
 export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
@@ -298,7 +268,6 @@ export const make = Effect.gen(function* () {
   const usageInstances = Effect.fn("UsageService.usageInstances")(function* <Config>(
     driver: ProviderDriver<Config, unknown, unknown>,
     settings: ServerSettingsValue,
-    retentionCutoffMs: number,
   ) {
     const entries: Array<
       readonly [ProviderInstanceId, Pick<ProviderInstanceConfig, "config" | "environment">, boolean]
@@ -335,7 +304,7 @@ export const make = Effect.gen(function* () {
     for (const { driver, reader } of transcriptReaders) {
       const { provider, format } = reader;
       const directories = yield* Effect.forEach(
-        yield* usageInstances(driver, settings, retentionCutoffMs),
+        yield* usageInstances(driver, settings),
         (instance) => reader.directories(instance),
       );
       for (const { dir: directory, fileName } of directories.flat()) {
@@ -624,30 +593,27 @@ export const make = Effect.gen(function* () {
     const scans = Effect.forEach(
       scanReaders,
       ({ driver, reader }) =>
-        usageInstances(driver, settings, retentionCutoffMs)
-          .pipe(
-            Effect.flatMap((instances) =>
-              reader.scan({ instances, settings, windowStartMs, retentionCutoffMs, awaitRefresh }),
-            ),
-          )
-          .pipe(
-            Effect.flatMap((sources) =>
-              Effect.forEach(sources, ({ volumeId, ...source }) =>
-                Effect.map(
-                  volumeId === undefined
-                    ? Effect.promise(() => readDirectoryVolumeId(source.dir))
-                    : Effect.succeed(volumeId),
-                  (resolved): ScannedDir => ({
-                    ...source,
-                    files: source.files?.map((file) => ({ ...file, malformedRecords: 0 })) ?? null,
-                    provider: reader.provider,
-                    volumeId: resolved,
-                  }),
-                ),
+        usageInstances(driver, settings).pipe(
+          Effect.flatMap((instances) =>
+            reader.scan({ instances, settings, windowStartMs, retentionCutoffMs, awaitRefresh }),
+          ),
+          Effect.flatMap((sources) =>
+            Effect.forEach(sources, ({ volumeId, ...source }) =>
+              Effect.map(
+                volumeId === undefined
+                  ? Effect.promise(() => readDirectoryVolumeId(source.dir))
+                  : Effect.succeed(volumeId),
+                (resolved): ScannedDir => ({
+                  ...source,
+                  files: source.files?.map((file) => ({ ...file, malformedRecords: 0 })) ?? null,
+                  provider: reader.provider,
+                  volumeId: resolved,
+                }),
               ),
             ),
-            Effect.provideContext(readerContext),
           ),
+          Effect.provideContext(readerContext),
+        ),
       { concurrency: "unbounded" },
     );
 

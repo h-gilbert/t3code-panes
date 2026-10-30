@@ -52,6 +52,7 @@ vi.mock("react", async (importOriginal) => {
     ...actual,
     useCallback: reactHookHarness.useCallback,
     useLayoutEffect: () => {},
+    useInsertionEffect: (effect: () => void) => effect(),
     useEffect: (effect: () => void) => settingsSearchState.effects.push(effect),
     useMemo: reactHookHarness.useMemo,
     useRef: reactHookHarness.useRef,
@@ -66,6 +67,8 @@ vi.mock("./settingsLayout", async (importOriginal) => {
     useSettingsSearchTargetId: () => settingsSearchState.targetId,
   };
 });
+
+vi.mock("./SettingsPanels", () => ({ CompactIdleThreadsRow: () => null }));
 
 vi.mock("./SettingsScopeSentence", () => ({ SettingsScopeSentence: () => null }));
 vi.mock("react/compiler-runtime", async () => {
@@ -390,7 +393,14 @@ describe("EnvironmentProviderSettings routing", () => {
     );
     expect(editor).not.toBeNull();
     if (!editor) throw new Error("Provider editor was not rendered");
-    (editor.props[action] as (models: string[]) => void)(["chosen"]);
+    if (action === "onHiddenModelsChange") {
+      (editor.props[action] as (models: string[], affectedModels: string[]) => void)(
+        ["chosen"],
+        ["chosen"],
+      );
+    } else {
+      (editor.props[action] as (models: string[]) => void)(["chosen"]);
+    }
     expect(settingsState.updateSettings).toHaveBeenCalledExactlyOnceWith(expected);
     expect(settingsState.updateClientSettings).not.toHaveBeenCalled();
   });

@@ -552,6 +552,69 @@ export const PreviewAutomationScrollInput = Schema.Struct({
 );
 export type PreviewAutomationScrollInput = typeof PreviewAutomationScrollInput.Type;
 
+export type PreviewAutomationAction = keyof typeof PreviewAutomationActInputs;
+
+/** One flat shape for every page action. The server decodes it with the action's strict input. */
+export const PreviewAutomationActInput = Schema.Struct({
+  action: Schema.Literals([
+    "click",
+    "type",
+    "hover",
+    "select",
+    "drag",
+    "upload",
+    "press",
+    "scroll",
+  ]).annotateKey({ description: "Page action to perform. Other arguments depend on the action." }),
+  ...PreviewAutomationTabTargetFields,
+  locator: Schema.optional(Locator).annotateKey({
+    description: "Playwright locator, including aria-ref=<ref> from the latest snapshot.",
+  }),
+  selector: Schema.optional(LegacySelector).annotateKey({
+    description: "Legacy CSS selector. Prefer locator.",
+  }),
+  x: Schema.optional(Schema.Finite).annotateKey({
+    description: "Horizontal CSS pixel coordinate; supply y too.",
+  }),
+  y: Schema.optional(Schema.Finite).annotateKey({
+    description: "Vertical CSS pixel coordinate; supply x too.",
+  }),
+  button: Schema.optional(Schema.Literals(["left", "right", "middle"])).annotateKey({
+    description: "Mouse button for click. Default left.",
+  }),
+  clickCount: Schema.optional(Schema.Int).annotateKey({
+    description: "Number of clicks, from 1 to 3.",
+  }),
+  text: Schema.optional(Schema.String).annotateKey({
+    description: "Literal text to insert for type.",
+  }),
+  clear: Schema.optional(Schema.Boolean).annotateKey({
+    description: "Replace existing text before typing.",
+  }),
+  values: Schema.optional(Schema.Array(Schema.String)).annotateKey({
+    description: "Option values or labels to select.",
+  }),
+  source: Schema.optional(Locator).annotateKey({ description: "Locator of the element to drag." }),
+  target: Schema.optional(Locator).annotateKey({ description: "Locator of the drop target." }),
+  paths: Schema.optional(Schema.Array(Schema.String)).annotateKey({
+    description: "Absolute paths in the agent environment to upload without a native dialog.",
+  }),
+  key: Schema.optional(Schema.String).annotateKey({
+    description: "Keyboard key such as Enter, Escape, or a single character.",
+  }),
+  modifiers: PreviewAutomationPressInput.fields.modifiers,
+  deltaX: Schema.optional(Schema.Finite).annotateKey({
+    description: "Horizontal CSS pixel scroll distance; positive scrolls right.",
+  }),
+  deltaY: Schema.optional(Schema.Finite).annotateKey({
+    description: "Vertical CSS pixel scroll distance; positive scrolls down.",
+  }),
+  timeoutMs: Schema.optional(Schema.Int).annotateKey({
+    description: "Maximum wait in milliseconds. Default 15000.",
+  }),
+});
+export type PreviewAutomationActInput = typeof PreviewAutomationActInput.Type;
+
 export const PreviewAutomationEvaluateInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
   expression: Schema.String.check(Schema.isTrimmed())
@@ -656,6 +719,18 @@ export const PreviewAutomationUploadInput = Schema.Struct({
       "Chooses files for a page's file picker without showing a native dialog. Target the file input or the control that opens the picker; omit the target to answer a picker an earlier action already opened.",
   });
 export type PreviewAutomationUploadInput = typeof PreviewAutomationUploadInput.Type;
+
+/** Strict input for each `preview_act` action. */
+export const PreviewAutomationActInputs = {
+  click: PreviewAutomationClickInput,
+  type: PreviewAutomationTypeInput,
+  hover: PreviewAutomationHoverInput,
+  select: PreviewAutomationSelectInput,
+  drag: PreviewAutomationDragInput,
+  upload: PreviewAutomationUploadInput,
+  press: PreviewAutomationPressInput,
+  scroll: PreviewAutomationScrollInput,
+} as const;
 
 /** One file the server staged for the desktop host to fetch. */
 export const PreviewAutomationUploadFile = Schema.Struct({

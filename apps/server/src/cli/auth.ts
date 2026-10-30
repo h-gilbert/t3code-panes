@@ -258,6 +258,7 @@ const mcpIssueCommand = Command.make("issue", {
       (environmentAuth) =>
         Effect.gen(function* () {
           const issued = yield* environmentAuth.issueMcpClientSession({
+            peerLink: false,
             access: flags.access,
             label: Option.getOrElse(flags.label, () => "CLI MCP client"),
             client: { deviceType: "bot" },

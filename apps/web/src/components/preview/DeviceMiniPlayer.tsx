@@ -1,3 +1,5 @@
+import { useAtomValue } from "@effect/atom-react";
+import { deviceStreamScreenAtom } from "../device/deviceStreamSession";
 import { createPortal } from "react-dom";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { observeResize } from "~/lib/observeResize";
@@ -27,7 +29,6 @@ import {
 import { useDeviceState } from "~/state/device";
 
 import { DeviceStreamView } from "../device/DeviceStreamView";
-import type { DeviceScreenSize } from "@t3tools/client-runtime/device/stream";
 import {
   clampPreviewMiniPlayerPosition,
   PREVIEW_MINI_PLAYER_CORNER_RADIUS,
@@ -77,7 +78,8 @@ export function DeviceMiniPlayer({
   bottomInset,
 }: Props & { readonly source: Extract<PreviewMiniPlayerSource, { kind: "device" }> }) {
   const { state: deviceState } = useDeviceState(threadRef.environmentId);
-  const [screen, setScreen] = useState<DeviceScreenSize | null>(null);
+  const viewId = `device-mini-player:${scopedThreadKey(threadRef)}:${source.hostId}:${source.deviceId}`;
+  const screen = useAtomValue(deviceStreamScreenAtom(viewId));
   const sourceSize = resolveDeviceMiniPlayerSourceSize(source.platform, screen);
   const device = deviceState.devices.find(
     (entry) => entry.hostId === source.hostId && entry.id === source.deviceId,
@@ -112,7 +114,10 @@ export function DeviceMiniPlayer({
             deviceName={device?.name ?? source.name}
             deviceDescription={`${hostLabel} · ${device?.version ?? source.platform}`}
             visible
-            onScreen={setScreen}
+            serveSimOnly={
+              deviceState.hosts.find((host) => host.id === source.hostId)?.kind === "simlock"
+            }
+            viewId={viewId}
           />
         </div>
       )}
@@ -177,6 +182,7 @@ function MiniPlayerShell({
     usePreviewMiniPlayerStore.getState().close(threadRef);
   };
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- observes the owning pane or window to clamp the native device viewer
   useLayoutEffect(() => {
     const element = containerRef.current;
     if (!element) return;

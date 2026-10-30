@@ -1,22 +1,20 @@
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 
 import { resolveMobileCreationSource } from "./mobileClientOrigin";
-
-vi.mock("react-native", () => ({ Platform: { OS: "ios" } }));
 
 describe("mobile turn origin", () => {
   it.each([undefined, null, {}, { iosTurnOrigin: false }])(
     "uses the stock mobile origin when the destination does not advertise support: %j",
     (capabilities) => {
-      expect(resolveMobileCreationSource(capabilities)).toBe("mobile");
+      expect(resolveMobileCreationSource(capabilities, "ios")).toBe("mobile");
     },
   );
 
   it("selects each destination independently for queued follow-ups", () => {
     const capable = { iosTurnOrigin: true };
-    expect(resolveMobileCreationSource(capable)).toBe("ios");
-    expect(resolveMobileCreationSource({})).toBe("mobile");
-    expect(resolveMobileCreationSource(capable)).toBe("ios");
+    expect(resolveMobileCreationSource(capable, "ios")).toBe("ios");
+    expect(resolveMobileCreationSource({}, "ios")).toBe("mobile");
+    expect(resolveMobileCreationSource(capable, "ios")).toBe("ios");
   });
 
   it("keeps Android under mobile even on a capable server", () => {

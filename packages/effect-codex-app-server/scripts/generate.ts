@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { pipe } from "effect/Function";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { make as makeJsonSchemaGenerator } from "@effect/openapi-generator/JsonSchemaGenerator";
@@ -801,15 +802,15 @@ const generateFiles = Effect.fn("generateFiles")(function* () {
           required: compatibleDefinitionSchema.required.filter((field) => field !== "projectId"),
         };
       }
-      aggregateSchemas[localDefinitionNames.get(definitionName)!] = stripNullDefaults(
-        normalizeNullableTypes(
-          rewriteExternalRefs(
-            compatibleDefinitionSchema,
-            localDefinitionNames,
-            file.namespace,
-            exportNameByQualifiedName,
-          ),
+      aggregateSchemas[localDefinitionNames.get(definitionName)!] = pipe(
+        rewriteExternalRefs(
+          compatibleDefinitionSchema,
+          localDefinitionNames,
+          file.namespace,
+          exportNameByQualifiedName,
         ),
+        normalizeNullableTypes,
+        stripNullDefaults,
       );
     }
 
@@ -820,15 +821,15 @@ const generateFiles = Effect.fn("generateFiles")(function* () {
       }
     }
 
-    aggregateSchemas[file.exportName] = stripNullDefaults(
-      normalizeNullableTypes(
-        rewriteExternalRefs(
-          topLevelSchema,
-          localDefinitionNames,
-          file.namespace,
-          exportNameByQualifiedName,
-        ),
+    aggregateSchemas[file.exportName] = pipe(
+      rewriteExternalRefs(
+        topLevelSchema,
+        localDefinitionNames,
+        file.namespace,
+        exportNameByQualifiedName,
       ),
+      normalizeNullableTypes,
+      stripNullDefaults,
     );
   }
 
