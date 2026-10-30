@@ -1,11 +1,9 @@
 import { upgradeLegacyContextMessage } from "@t3tools/shared/composerContextLegacy";
 import { buildProjectThreadStartTurnInput } from "./projectThreadStartTurn";
+import { ProjectId, ProviderInstanceId, EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { threadComposerContext } from "./composerContext";
 import {
-  ProjectId,
-  ProviderInstanceId,
   ComposerContextId,
-  EnvironmentId,
-  ThreadId,
   type OrchestrationMessageContext,
   type ServerProviderSkill,
 } from "@t3tools/contracts";
@@ -28,7 +26,6 @@ import {
   uploadedComposerContext,
   serializeComposerMessageForServer,
   pullRequestComposerContext,
-  threadComposerContext,
 } from "./composerContext";
 
 const terminal = {
@@ -272,12 +269,12 @@ describe("host context compatibility", () => {
   it("sends an image-only prompt as the attachment-only prompt and keeps the image", () => {
     const context: OrchestrationMessageContext = { version: 1, records: [image] };
     const reference = formatComposerContextReference(image);
-    expect(serializeComposerMessageForServer(reference, context, true)).toEqual({
+    expect(serializeComposerMessageForServer(reference, context)).toEqual({
       text: ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
       context,
     });
     const withProse = `${reference} what is this?`;
-    expect(serializeComposerMessageForServer(withProse, context, true)).toEqual({
+    expect(serializeComposerMessageForServer(withProse, context)).toEqual({
       text: withProse,
       context,
     });

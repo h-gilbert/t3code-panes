@@ -1,12 +1,9 @@
+import { remarkKeepWindowsPaths as remarkKeepWindowsPathDestinations } from "./markdownWindowsPaths.ts";
 import { expect, it } from "vite-plus/test";
 import { unified } from "unified";
 import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
-import {
-  CHAT_MARKDOWN_REHYPE_PLUGINS,
-  CHAT_MARKDOWN_REMARK_PLUGINS,
-  remarkKeepWindowsPathDestinations,
-} from "./markdownPipeline.ts";
+import { CHAT_MARKDOWN_REHYPE_PLUGINS, CHAT_MARKDOWN_REMARK_PLUGINS } from "./markdownPipeline.ts";
 
 it("preserves in-app thread links through the shared Markdown sanitizer", () => {
   const processor = unified()
@@ -16,7 +13,7 @@ it("preserves in-app thread links through the shared Markdown sanitizer", () => 
     .use(CHAT_MARKDOWN_REHYPE_PLUGINS);
   const tree = processor.runSync(
     processor.parse(
-      '[Open thread](t3-thread://v1/environment/thread)\n\n<a href="javascript:alert(1)">Unsafe</a>',
+      '[Open thread](t3-thread://v1/thread)\n\n<t3-thread://v2/environment/thread:a%3A1>\n\n<a href="javascript:alert(1)">Unsafe</a>',
     ),
   );
   expect(tree.children[0]).toMatchObject({
@@ -24,8 +21,18 @@ it("preserves in-app thread links through the shared Markdown sanitizer", () => 
     children: [
       {
         tagName: "a",
-        properties: { href: "t3-thread://v1/environment/thread" },
+        properties: { href: "t3-thread://v1/thread" },
         children: [{ type: "text", value: "Open thread" }],
+      },
+    ],
+  });
+  expect(tree.children[2]).toMatchObject({
+    tagName: "p",
+    children: [
+      {
+        tagName: "a",
+        properties: { href: "t3-thread://v2/environment/thread:a%3A1" },
+        children: [{ type: "text", value: "t3-thread://v2/environment/thread:a%3A1" }],
       },
     ],
   });

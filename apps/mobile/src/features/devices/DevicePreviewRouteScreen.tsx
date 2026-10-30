@@ -1,3 +1,5 @@
+import { SheetCloseButton } from "../../components/ui/SheetHeader";
+import { createShakeDetector } from "./shakeDetector";
 import { Button } from "../../components/ui/Button";
 import * as Dialog from "../../components/ui/Dialog";
 import {
@@ -8,8 +10,11 @@ import {
 import { useIsFocused, useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { Alert, AppState, Pressable, StatusBar, View } from "react-native";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { Pressable, StatusBar, View } from "react-native";
+import * as Haptics from "expo-haptics";
+import { Accelerometer } from "expo-sensors";
+import Animated, { FadeIn, FadeOut, ReduceMotion } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { SymbolView } from "../../components/ui/AppSymbol";
@@ -23,7 +28,12 @@ import {
   findHeaderMenuAction,
 } from "../../components/ui/headerMenu.android";
 import type { AppBarMenuItem } from "../../components/ui/AppBar.types";
-import { deviceEnvironment, refreshDeviceHubAccess, useDeviceHubAccess } from "../../state/device";
+import { deviceEnvironment, useDeviceHubAccess } from "../../state/device";
+import { useAppForeground } from "../../lib/appState";
+import { useHardwareBack } from "../../lib/backHandler";
+import { deriveBottomControlInsets } from "../../lib/reserved-regions";
+import { useNativeColumnLayoutMetrics } from "../../native/native-layout-metrics";
+import { uuidv4 } from "../../lib/uuid";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
@@ -33,6 +43,9 @@ import {
   threadDevicePreviews,
   type ThreadDevicePreview,
 } from "./threadDevicePreviews";
+
+const OVERLAY_ENTERING = FadeIn.duration(160).reduceMotion(ReduceMotion.System);
+const OVERLAY_EXITING = FadeOut.duration(120).reduceMotion(ReduceMotion.System);
 
 type DevicePreviewRouteScreenProps = StaticScreenProps<{
   readonly environmentId: string;
@@ -46,6 +59,7 @@ export function DevicePreviewRouteScreen({ route }: DevicePreviewRouteScreenProp
   const onClose = () => navigation.goBack();
   const { environmentId, threadId } = route.params;
   const isBlankLink = environmentId.trim().length === 0 || threadId.trim().length === 0;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- pops a deep-linked route with a blank environment or thread off the navigator
   useEffect(() => {
     if (isBlankLink) onClose();
   }, [isBlankLink, onClose]);
@@ -74,10 +88,12 @@ export function DevicePreviewScreen({
   readonly initialDeviceKey?: string;
 }) {
   const embedded = onMaximize !== undefined;
+  const handleBounds = deriveBottomControlInsets(useNativeColumnLayoutMetrics());
+  const [controlsVisible, setControlsVisible] = useState(true);
   const insets = useSafeAreaInsets();
   const { themeVariables } = useAppearancePreferences();
   const focused = useIsFocused();
-  const [foreground, setForeground] = useState(AppState.currentState !== "background");
+  const foreground = useAppForeground();
   const [selectedKey, setSelectedKey] = useState<string | null>(initialDeviceKey ?? null);
   const [inputConnected, setInputConnected] = useState(false);
   const [inputDetail, setInputDetail] = useState<string | null>(null);
@@ -89,19 +105,35 @@ export function DevicePreviewScreen({
   const state = useEnvironmentQuery(deviceEnvironment.state({ environmentId, input: {} }));
   const previews = threadDevicePreviews(state.data, threadId);
   const preview = selectedThreadDevicePreview(previews, selectedKey);
-  const onInputConnected = useCallback(async (connected: boolean, detail?: string) => {
-    setInputConnected(connected);
-    setInputDetail(connected ? null : (detail ?? null));
-  }, []);
-  useEffect(() => {
-    const subscription = AppState.addEventListener("change", (state) =>
-      setForeground(state !== "background"),
-    );
-    return () => subscription.remove();
-  }, []);
+  const onInputConnected = useCallback(
+    async (connected: boolean, detail?: string) => {
+      setInputConnected(connected);
+      setInputDetail(connected ? null : (detail ?? null));
+      if (connected && !embedded) setControlsVisible(false);
+    },
+    [embedded],
+  );
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- closes the focused route through the navigator once the thread has no device previews
   useEffect(() => {
     if (focused && state.data !== null && previews.length === 0) onClose();
   }, [focused, state.data, previews.length, onClose]);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes to the Accelerometer while focused to toggle controls on a shake
+  useEffect(() => {
+    if (!focused || !foreground || embedded) return;
+    const shaken = createShakeDetector();
+    Accelerometer.setUpdateInterval(50);
+    const subscription = Accelerometer.addListener((sample) => {
+      if (!shaken({ ...sample, timestamp: sample.timestamp * 1000 })) return;
+      void Haptics.selectionAsync();
+      setControlsVisible((visible) => !visible);
+    });
+    return () => subscription.remove();
+  }, [focused, foreground, embedded]);
+  useHardwareBack(!controlsVisible, () => {
+    setControlsVisible(true);
+    return true;
+  });
+
   const shutDownDevice = async () => {
     if (!preview || shuttingDown) return;
     setShuttingDown(true);
@@ -237,28 +269,22 @@ export function DevicePreviewScreen({
   return (
     <View className="flex-1" style={{ backgroundColor: themeVariables["--color-sheet-solid"] }}>
       {!embedded ? <StatusBar hidden animated /> : null}
-      <View className="px-3" style={{ paddingTop: Math.max(insets.top, 12) }}>
-        <GlassSurface className="flex-row items-center gap-1 p-1">
-          <ControlPill accessibilityLabel="Close device preview" icon="xmark" onPress={onClose} />
-          <AppText numberOfLines={1} className="flex-1 text-center font-t3-medium text-base">
+      {embedded ? (
+        <View
+          className="flex-row items-center gap-1 px-2 pb-2"
+          style={{ paddingTop: Math.max(insets.top, 8) }}
+        >
+          <SheetCloseButton accessibilityLabel="Close device preview" onClose={onClose} />
+          <AppText numberOfLines={1} className="min-w-0 flex-1 font-t3-medium text-sm">
             {preview?.name ?? "Devices"}
           </AppText>
-          {embedded ? (
-            <ControlPill
-              accessibilityLabel="Maximize device"
-              icon="arrow.up.left.and.arrow.down.right"
-              onPress={() => onMaximize(preview?.key ?? null)}
-            />
-          ) : null}
           <ControlPill
-            accessibilityLabel="Home"
-            icon="house"
-            disabled={!inputConnected}
-            onPress={pressHome}
+            accessibilityLabel="Maximize device"
+            icon="arrow.up.left.and.arrow.down.right"
+            onPress={() => onMaximize(preview?.key ?? null)}
           />
-          <DeviceOptionsMenu items={menuItems} />
-        </GlassSurface>
-      </View>
+        </View>
+      ) : null}
       {inputDetail ? (
         <AppText
           accessibilityLiveRegion="polite"
@@ -290,6 +316,65 @@ export function DevicePreviewScreen({
             <AppActivityIndicator color={themeVariables["--color-icon"]} />
           ) : null}
         </View>
+      )}
+      {embedded ? (
+        <View
+          className="flex-row items-center justify-center gap-2 px-3 py-2"
+          style={{ paddingBottom: Math.max(insets.bottom, 8) }}
+        >
+          <ControlPill
+            accessibilityLabel="Home"
+            icon="house"
+            disabled={!inputConnected}
+            onPress={pressHome}
+          />
+          <DeviceOptionsMenu items={menuItems} />
+        </View>
+      ) : controlsVisible ? (
+        <Animated.View
+          entering={OVERLAY_ENTERING}
+          exiting={OVERLAY_EXITING}
+          pointerEvents="box-none"
+          className="absolute inset-0"
+        >
+          {inputConnected ? (
+            <Pressable
+              accessibilityLabel="Hide device controls"
+              className="absolute inset-0 bg-black/30"
+              onPress={() => setControlsVisible(false)}
+            />
+          ) : null}
+          <View className="px-3" style={{ paddingTop: Math.max(insets.top, 12) }}>
+            <GlassSurface className="flex-row items-center gap-1 p-1">
+              <SheetCloseButton accessibilityLabel="Close device preview" onClose={onClose} />
+              <AppText numberOfLines={1} className="flex-1 text-center font-t3-medium text-base">
+                {preview?.name ?? "Devices"}
+              </AppText>
+              <ControlPill
+                accessibilityLabel="Home"
+                icon="house"
+                disabled={!inputConnected}
+                onPress={pressHome}
+              />
+              <DeviceOptionsMenu items={menuItems} />
+            </GlassSurface>
+          </View>
+        </Animated.View>
+      ) : (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Show device controls"
+          accessibilityHint="Shaking the phone also shows them"
+          hitSlop={12}
+          className="absolute h-11 w-16 items-center justify-center self-center"
+          style={{
+            top: Math.max(insets.top, 12),
+            transform: [{ translateX: (handleBounds.left - handleBounds.right) / 2 }],
+          }}
+          onPress={() => setControlsVisible(true)}
+        >
+          <View className="h-1.5 w-10 rounded-full bg-white/40" />
+        </Pressable>
       )}
     </View>
   );
@@ -330,18 +415,16 @@ function OpenDevicePreview({
 }) {
   const { session } = preview;
   const { themeVariables } = useAppearancePreferences();
-  const { access, error, refresh } = useDeviceHubAccess(environmentId, session.hostId);
-  const onUnauthorized = async () => refreshDeviceHubAccess(environmentId);
-  useEffect(() => {
-    refreshDeviceHubAccess(environmentId);
-    return () => void onInputConnected(false);
-  }, [environmentId, onInputConnected]);
+  const [viewer] = useState(uuidv4);
+  const { access, error, refresh } = useDeviceHubAccess(environmentId, session.hostId, viewer);
+  const onUnauthorized = async () => refresh();
   return access ? (
     <DeviceStreamWebView
       ref={streamRef}
       access={access}
       platform={session.platform}
       deviceId={session.deviceId}
+      serveSimOnly={preview.serveSimOnly}
       colors={{
         background: themeVariables["--color-sheet-solid"],
         foreground: themeVariables["--color-foreground"],

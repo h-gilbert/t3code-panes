@@ -23,6 +23,12 @@ const selfHostedApnsEnvironment =
   repoEnv.T3CODE_APNS_ENVIRONMENT === "production" ? "production" : "sandbox";
 const IOS_BUNDLE_IDENTIFIER_PATTERN = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
 
+// Compiled into the native project. Without a relay, Observe's native side could dispatch to
+// Expo's own ingest before observe.ts turns it off; `.invalid` never resolves (RFC 6761).
+const observeEndpointUrl = repoEnv.T3CODE_RELAY_URL?.trim()
+  ? new URL("/v1/mobile/observe", repoEnv.T3CODE_RELAY_URL.trim()).toString()
+  : "https://observe.invalid";
+
 const fromRepoRoot = (relativePath: string) => `../../${relativePath}`;
 // Universal exports already contain their own rounded-square silhouette. Using one as an adaptive
 // foreground makes Android draw an icon shape inside the launcher's mask.
@@ -182,7 +188,7 @@ const config: ExpoConfig = {
   // Keep the established t3code:// alias in private builds so existing links
   // continue to route back into the containing app.
   scheme: isSelfHostedBuild ? [appScheme, "t3code"] : appScheme,
-  version: repoEnv.T3CODE_MOBILE_VERSION ?? "2.1.0",
+  version: repoEnv.T3CODE_MOBILE_VERSION ?? "2.2.0",
   runtimeVersion: {
     // Skip costly fingerprinting on dev launches; preview and production OTAs require matching native projects.
     policy: runtimeVersionPolicy,
@@ -383,7 +389,7 @@ const config: ExpoConfig = {
     "./plugins/withIosCocoaPodsUuidCache.cjs",
     // Compile out the unused pedometer to avoid an iOS motion purpose string.
     ["expo-sensors", { motionPermission: false }],
-    "./plugins/withAndroidCleartextTraffic.cjs",
+    "./plugins/withAndroidNetworkSecurityConfig.cjs",
     "./plugins/withAndroidGradleHeap.cjs",
     "./plugins/withAndroidInputBackground.cjs",
     "./plugins/withAndroidModernPopupMenu.cjs",
@@ -406,11 +412,8 @@ const config: ExpoConfig = {
         : (repoEnv.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? null),
       jwtTemplate: isSelfHostedBuild ? null : (repoEnv.EXPO_PUBLIC_CLERK_JWT_TEMPLATE ?? null),
     },
-    // @clerk/expo reads these from `extra`
-    // under their exact env-var names (not nested), and its config plugin reads
-    // the iOS URL scheme at prebuild to register it in Info.plist.
-    // Unset values must be omitted (not null): the public manifest serializes
-    // null to {}, which is truthy and would defeat Clerk's fallback checks.
+    // Clerk reads these exact keys and registers the iOS URL scheme at prebuild.
+    // Omit unset values: Expo serializes null as {}, defeating Clerk's fallback.
     ...(!isSelfHostedBuild
       ? {
           EXPO_PUBLIC_CLERK_GOOGLE_WEB_CLIENT_ID: repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_WEB_CLIENT_ID,
@@ -431,6 +434,7 @@ const config: ExpoConfig = {
       ? {
           eas: {
             projectId: "d763fcb8-d37c-41ea-a773-b54a0ab4a454",
+            observe: { endpointUrl: observeEndpointUrl },
           },
         }
       : {}),
