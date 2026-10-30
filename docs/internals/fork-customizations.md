@@ -164,10 +164,11 @@ already contains text. Preserve this when integrating upstream composer changes.
 - Preserve retained terminal sessions and reconnect behavior described in
   `docs/internals/terminal-runtime.md`.
 - Preserve the separate private iOS branch and its normal push notifications for approval, input,
-  failure, and completion of turns submitted from iOS. Web/desktop completions stay quiet, with no Live Activities or Dynamic Island integration. Follow
+  and failure only. Completion alerts stay off, including for turns submitted from iOS, with no
+  Live Activities or Dynamic Island integration. Follow
   `docs/operations/local-ios-updates.md` and its existing policy checks. Send the private
   `ios` origin only when the destination advertises `iosTurnOrigin`; older servers reject
-  that value, so use `mobile` and keep routine completion alerts silent there.
+  that value, so use `mobile` there.
 - Updating source does not authorize replacing or restarting the installed app.
   Follow `docs/operations/fork-releases.md` for an authorized release and
   `docs/operations/local-desktop-promotion.md` for a requested one-off local install.

@@ -152,9 +152,8 @@ The most common defect in this repo is a change that works on the path you teste
 - Preserve the private iOS branch's commits when merging upstream. Do not build
   from a fresh upstream tree that drops the private changes.
 - This private app must have **normal push notifications and no Live Activities
-  or Dynamic Island support**. Preserve approval, input, and failure alerts;
-  enable completion alerts only for turns submitted from iOS, including follow-ups.
-  Keep web/desktop completion alerts disabled. Keep the widget SDK/extension, activity-token registration, and Live
+  or Dynamic Island support**. Preserve approval, input, and failure alerts.
+  Keep completion alerts disabled, including for turns submitted from iOS. Keep the widget SDK/extension, activity-token registration, and Live
   Activity settings removed. Do not weaken the build/install policy checks to
   accommodate an upstream update; adapt the private changes instead.
 - Use the build ledger and verify the phone's installed version before reporting

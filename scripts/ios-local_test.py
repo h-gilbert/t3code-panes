@@ -99,7 +99,7 @@ class PrivateSourcePolicyTests(unittest.TestCase):
         self.payload.parent.mkdir(parents=True)
         self.payload.write_text('const preferences = {liveActivitiesEnabled: false,\n'
                                 'notifyOnApproval: true, notifyOnInput: true,\n'
-                                'notifyOnCompletion: false, notifyOnIosCompletion: true, notifyOnFailure: true};')
+                                'notifyOnCompletion: false, notifyOnIosCompletion: false, notifyOnFailure: true};')
         (self.mobile / 'app.config.ts').write_text('')
         (self.mobile / 'package.json').write_text(json.dumps({
             'dependencies': {'expo-notifications': '57'},
@@ -119,9 +119,9 @@ class PrivateSourcePolicyTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'notifyOnCompletion'):
             ios.check_source_policy(self.source)
 
-    def test_ios_completion_filter_must_stay_enabled(self):
+    def test_ios_completion_alerts_cannot_be_reenabled(self):
         self.payload.write_text(self.payload.read_text().replace(
-            "notifyOnIosCompletion: true", "notifyOnIosCompletion: false"))
+            "notifyOnIosCompletion: false", "notifyOnIosCompletion: true"))
         with self.assertRaisesRegex(RuntimeError, "notifyOnIosCompletion"):
             ios.check_source_policy(self.source)
 

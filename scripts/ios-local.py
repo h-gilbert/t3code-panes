@@ -23,7 +23,7 @@ NOTIFICATION_POLICY = {
     'notifyOnApproval': True,
     'notifyOnInput': True,
     'notifyOnCompletion': False,
-    'notifyOnIosCompletion': True,
+    'notifyOnIosCompletion': False,
     'notifyOnFailure': True,
 }
 INPUTS = ['apps/mobile', 'packages', 'patches', 'assets', 'scripts/lib',
@@ -308,7 +308,7 @@ if __name__ == '__main__':
     elif args.command == 'check':
         check_source_policy()
         check_native_policy(SOURCE / 'apps/mobile/ios')
-        print('Private iOS policy passed: attention and iOS-origin completion alerts enabled; unfiltered completions and Live Activities disabled.')
+        print('Private iOS policy passed: approval, input and failure alerts enabled; completion alerts and Live Activities disabled.')
     elif args.command == 'build':
         build()
     elif args.command == '_build':
