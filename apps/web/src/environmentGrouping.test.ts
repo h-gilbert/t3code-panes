@@ -50,6 +50,35 @@ function makeProject(overrides: Partial<Project> = {}): Project {
 }
 
 describe("environment grouping", () => {
+  it.each(["repository", "repository_path"] as const)(
+    "retains a folder selection when repository identity arrives in %s mode",
+    (mode) => {
+      const project = makeProject();
+      const settings = { ...defaultGroupingSettings, sidebarProjectGroupingMode: mode };
+      const key = deriveLogicalProjectKeyFromSettings(project, settings);
+      const groupedProject = { ...project, repositoryIdentity };
+      const groups = buildSidebarProjectSnapshots({
+        projects: [
+          makeProject({
+            id: ProjectId.make("other-host"),
+            environmentId: remoteEnvironmentId,
+            repositoryIdentity: { ...repositoryIdentity, canonicalKey: "github.com/other/repo" },
+          }),
+          groupedProject,
+        ],
+        settings,
+        primaryEnvironmentId,
+        resolveEnvironmentLabel: () => null,
+      });
+      expect(resolveSidebarProjectScopeKey({ groups, key, settings })).toBe(
+        deriveLogicalProjectKeyFromSettings(groupedProject, settings),
+      );
+      expect(
+        resolveSidebarProjectScopeKey({ groups, key, settings, canClearMissingScope: true }),
+      ).toBe(deriveLogicalProjectKeyFromSettings(groupedProject, settings));
+    },
+  );
+
   it("browses both scratch hosts through one pane scope while preserving the selected destination", () => {
     const local = makeProject({ isScratch: true, title: "No project" });
     const remote = makeProject({

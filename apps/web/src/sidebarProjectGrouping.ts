@@ -80,6 +80,9 @@ export function resolveSidebarProjectScopeKey(input: {
         candidate.isScratch &&
         resolveScratchProjectScopeKey(input.key, candidate.memberProjects, input.settings) ===
           candidate.projectKey,
+    ) ??
+    input.groups.find((candidate) =>
+      candidate.memberProjects.some((member) => member.physicalProjectKey === input.key),
     );
   return group?.projectKey ?? (input.canClearMissingScope ? null : input.key);
 }

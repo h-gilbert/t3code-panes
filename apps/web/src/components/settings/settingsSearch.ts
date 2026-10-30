@@ -866,6 +866,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     targetId: "browser-profiles",
   },
   {
+    id: "browser-saved-logins",
+    title: "Saved browser logins",
+    to: "/settings/browser",
+    targetId: "browser-saved-logins",
+    searchTerms: ["password credentials keychain autofill"],
+  },
+  {
     id: "browser-default-viewport",
     title: "Default browser viewport",
     to: "/settings/browser",

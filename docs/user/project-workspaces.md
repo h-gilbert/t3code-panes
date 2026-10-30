@@ -101,6 +101,10 @@ it available for later agent work. An agent can also open a tab under a named pr
 persistent cookie space — or as an ephemeral session that starts with no stored data and is
 discarded when the app quits.
 
+Manage saved logins in the desktop app's **Settings → Browser → Saved logins**. Add several
+websites, usernames and passwords, then save them together. Choose the environment and browser
+profile allowed to use each login. You can also replace passwords or remove saved entries there.
+
 You can save a site login from the browser's menu ("Save login for this site…"). Logins are
 encrypted with the operating system's keychain and never leave this computer. Each login is bound
 to its T3 Code environment, browser profile, and exact HTTPS site. HTTP is allowed only for local
