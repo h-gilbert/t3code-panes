@@ -30,11 +30,11 @@ export function makeRelayDeviceRegistrationRequest(input: {
     preferences: {
       liveActivitiesEnabled: false,
       notificationsEnabled: pushAvailable && input.notificationsEnabled,
-      // Older servers keep completion alerts off; updated servers filter by turn origin.
+      // The private app pushes only when a thread needs attention or fails.
       notifyOnApproval: true,
       notifyOnInput: true,
       notifyOnCompletion: false,
-      notifyOnIosCompletion: true,
+      notifyOnIosCompletion: false,
       notifyOnFailure: true,
     },
   };

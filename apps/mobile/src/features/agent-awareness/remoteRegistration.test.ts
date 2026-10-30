@@ -212,7 +212,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
         notifyOnApproval: true,
         notifyOnInput: true,
         notifyOnCompletion: false,
-        notifyOnIosCompletion: true,
+        notifyOnIosCompletion: false,
         notifyOnFailure: true,
       },
     });
@@ -238,7 +238,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
           notifyOnApproval: true,
           notifyOnInput: true,
           notifyOnCompletion: false,
-          notifyOnIosCompletion: true,
+          notifyOnIosCompletion: false,
           notifyOnFailure: true,
         },
       });
@@ -333,7 +333,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
         notifyOnApproval: true,
         notifyOnInput: true,
         notifyOnCompletion: false,
-        notifyOnIosCompletion: true,
+        notifyOnIosCompletion: false,
         notifyOnFailure: true,
       },
     });
