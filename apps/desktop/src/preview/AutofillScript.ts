@@ -1,12 +1,4 @@
-/**
- * Page-side script for filling a login form.
- *
- * Values are set through the native `value` setter and followed by `input` /
- * `change` events so framework-controlled inputs (React and friends) accept
- * them. The username field is the nearest text-like input before the
- * password field in the same form; on username-only steps (two-page logins)
- * a single text-like input is filled instead so the flow can proceed.
- */
+// Use native setters and input/change events so framework-controlled forms accept the values.
 
 const TEXT_LIKE_TYPES = new Set(["", "text", "email", "tel", "username"]);
 
@@ -16,11 +8,16 @@ export interface AutofillOutcome {
   readonly filledUsername: boolean;
 }
 
-export const buildAutofillExpression = (username: string, password: string): string => {
+export const buildAutofillExpression = (
+  username: string,
+  password: string,
+  origin?: string,
+): string => {
   const usernameJson = JSON.stringify(username);
   const passwordJson = JSON.stringify(password);
   const textLikeJson = JSON.stringify([...TEXT_LIKE_TYPES]);
   return `(() => {
+  if (${JSON.stringify(origin ?? null)} !== null && location.origin !== ${JSON.stringify(origin ?? null)}) return { filled: false, filledPassword: false, filledUsername: false };
   const username = ${usernameJson};
   const password = ${passwordJson};
   const textLike = new Set(${textLikeJson});

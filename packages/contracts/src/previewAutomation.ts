@@ -85,6 +85,10 @@ export const PreviewAutomationCloseResult = Schema.Struct({
 export type PreviewAutomationCloseResult = typeof PreviewAutomationCloseResult.Type;
 
 export const PreviewAutomationAutofillInput = Schema.Struct({
+  credentialName: Schema.optional(TrimmedNonEmptyString).annotateKey({
+    description:
+      "Named login from credentials_list in the environment credential vault. Must match the exact page origin and this project’s grant. Never returns the password.",
+  }),
   ...PreviewAutomationTabTargetFields,
   username: Schema.optional(TrimmedNonEmptyString).annotateKey({
     description:

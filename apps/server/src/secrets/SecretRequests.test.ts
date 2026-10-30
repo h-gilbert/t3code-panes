@@ -4,6 +4,7 @@ import { assert, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import {
   ProjectId,
+  type CredentialRequest,
   type OrchestrationV2ServerCommand,
   SecretRef,
   ThreadId,
@@ -34,6 +35,7 @@ const withService = <A, E>(
     readonly dispatched: Array<OrchestrationV2ServerCommand>;
   }) => Effect.Effect<A, E>,
   options: {
+    readonly credential?: CredentialRequest;
     readonly threadId?: ThreadId;
     readonly delivery?: "file";
     readonly directory?: string;
@@ -108,6 +110,7 @@ const withService = <A, E>(
                 reason: "Used as GH_TOKEN.",
                 ...(options.delivery === undefined ? {} : { delivery: options.delivery }),
                 secretStatus,
+                ...(options.credential === undefined ? {} : { credential: options.credential }),
               },
             ],
           } as never),
@@ -455,4 +458,145 @@ it.effect("a secret the card promised to keep from the agent is never written to
       assert.isTrue(valuesOf(stored).some((value) => value.includes("ghp_secret")));
     }),
   ),
+);
+
+it.effect(
+  "named logins persist encrypted, preserve passwords, and only issue fresh project-bound references",
+  () =>
+    withService(
+      ({ service, stored, dispatched }) =>
+        Effect.gen(function* () {
+          const credential = {
+            name: "Example login",
+            kind: "login" as const,
+            website: "https://example.com",
+          };
+          yield* service.answer({
+            threadId,
+            turnItemId,
+            answer: {
+              type: "save",
+              secret: " password with spaces ",
+              username: "user@example.com",
+            },
+          });
+          const original = Option.getOrThrow(yield* service.savedRef({ threadId, turnItemId }));
+          assert.isFalse(
+            [...stored.values()].some((bytes) =>
+              new TextDecoder().decode(bytes).includes("password with spaces"),
+            ),
+          );
+          const login = JSON.parse(yield* service.consume({ ref: original, projectId }));
+          assert.equal(login.password, " password with spaces ");
+          assert.equal(login.username, "user@example.com");
+          assert.deepEqual(
+            yield* service.browserCredential({
+              threadId,
+              name: credential.name,
+              origin: "https://example.com",
+            }),
+            { ...login, origin: "https://example.com" },
+          );
+          assert.equal(
+            (yield* service
+              .browserCredential({
+                threadId,
+                name: credential.name,
+                origin: "https://evil.example.com",
+              })
+              .pipe(Effect.flip)).reason,
+            "credential_failed",
+          );
+          assert.notInclude(
+            new TextDecoder().decode(stored.get("credential-vault")),
+            "password with spaces",
+          );
+          assert.notInclude(JSON.stringify(dispatched), "user@example.com");
+          assert.notInclude(
+            JSON.stringify(yield* service.listCredentials()),
+            "password with spaces",
+          );
+          assert.lengthOf(yield* service.listCredentials(ProjectId.make("other-project")), 0);
+          assert.isTrue(
+            Option.isNone(
+              yield* service.reuseCredential({
+                credential,
+                projectId: ProjectId.make("other-project"),
+              }),
+            ),
+          );
+          assert.isTrue(
+            Option.isNone(
+              yield* service.reuseCredential({
+                credential: { ...credential, website: "https://other.example" },
+                projectId,
+              }),
+            ),
+          );
+          yield* TestClock.adjust("25 hours");
+          const reused = Option.getOrThrow(
+            yield* service.reuseCredential({ credential, projectId }),
+          );
+          assert.isTrue("secretRef" in reused);
+          if (!("secretRef" in reused)) return;
+          assert.notEqual(reused.secretRef, original);
+          assert.deepEqual(
+            JSON.parse(yield* service.consume({ ref: reused.secretRef, projectId })),
+            login,
+          );
+          assert.equal(
+            (yield* service.consume({ ref: reused.secretRef, projectId }).pipe(Effect.flip)).reason,
+            "ref_unavailable",
+          );
+          const [metadata] = yield* service.listCredentials();
+          const pending = Option.getOrThrow(
+            yield* service.reuseCredential({ credential, projectId }),
+          );
+          yield* service.removeCredential(metadata!.id);
+          if ("secretRef" in pending)
+            assert.equal(
+              (yield* service.consume({ ref: pending.secretRef, projectId }).pipe(Effect.flip))
+                .reason,
+              "ref_unavailable",
+            );
+          assert.isTrue(Option.isNone(yield* service.reuseCredential({ credential, projectId })));
+        }),
+      { credential: { name: "Example login", kind: "login", website: "https://example.com" } },
+    ),
+);
+
+it.effect(
+  "only the private answer can grant reuse across projects; corrupted vaults fail closed",
+  () =>
+    withService(
+      ({ service, stored }) =>
+        Effect.gen(function* () {
+          const credential = { name: "Example token", kind: "secret" as const };
+          yield* service.answer({
+            threadId,
+            turnItemId,
+            answer: { type: "save", secret: "token-value", scope: "environment" },
+          });
+          const anotherProject = ProjectId.make("other-project");
+          const reused = Option.getOrThrow(
+            yield* service.reuseCredential({ credential, projectId: anotherProject }),
+          );
+          if (!("secretRef" in reused)) return;
+          assert.equal(
+            yield* service.consume({ ref: reused.secretRef, projectId: anotherProject }),
+            "token-value",
+          );
+          const vault = stored.get("credential-vault")!;
+          vault[vault.length - 1] = vault[vault.length - 1]! ^ 1;
+          assert.equal(
+            (yield* service.listCredentials().pipe(Effect.flip)).reason,
+            "credential_failed",
+          );
+          assert.equal(
+            (yield* service.reuseCredential({ credential, projectId }).pipe(Effect.flip)).reason,
+            "credential_failed",
+          );
+        }),
+      { credential: { name: "Example token", kind: "secret" } },
+    ),
 );

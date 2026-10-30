@@ -1,9 +1,15 @@
+import * as NodeVM from "node:vm";
 import { assert, describe, it } from "@effect/vitest";
 
 import { buildAutofillExpression, decodeAutofillOutcome } from "./AutofillScript.ts";
 
 describe("buildAutofillExpression", () => {
   it("embeds values JSON-escaped so quotes and script tags cannot break out", () => {
+    const blocked = NodeVM.runInNewContext(
+      buildAutofillExpression("user", "password", "https://example.com"),
+      { location: { origin: "https://other.example" } },
+    );
+    assert.isFalse(blocked.filled);
     const expression = buildAutofillExpression(`user"</script>`, `pa'ss\\word`);
     assert.include(expression, JSON.stringify(`user"</script>`));
     assert.include(expression, JSON.stringify(`pa'ss\\word`));

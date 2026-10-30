@@ -24,6 +24,8 @@ import {
   type OrchestratorMcpDelegateTaskResult,
   type OrchestratorMcpDeleteScheduledTaskInput,
   type OrchestratorMcpRequestSecretInput,
+  type OrchestratorMcpListCredentialsResult,
+  type OrchestratorMcpListCredentialsInput,
   type OrchestratorMcpRequestSecretResult,
   type OrchestratorMcpDeleteScheduledTaskResult,
   type OrchestratorMcpListScheduledTasksResult,
@@ -187,6 +189,10 @@ export interface OrchestratorMcpServiceShape {
     input: OrchestratorMcpDeleteScheduledTaskInput,
   ) => Effect.Effect<OrchestratorMcpDeleteScheduledTaskResult, OrchestratorMcpFailure>;
   /** Only status reaches the agent, never this value. */
+  readonly listCredentials: (
+    scope: McpInvocationScope,
+    input: OrchestratorMcpListCredentialsInput,
+  ) => Effect.Effect<OrchestratorMcpListCredentialsResult, OrchestratorMcpFailure>;
   readonly requestSecret: (
     scope: McpInvocationScope,
     input: OrchestratorMcpRequestSecretInput,
@@ -1978,6 +1984,17 @@ const make = Effect.gen(function* () {
         return { scheduledTaskId: existing.id, deleted: true };
       },
     ),
+    listCredentials: Effect.fn("OrchestratorMcpService.listCredentials")(function* (scope, input) {
+      const { parent } = yield* loadThreadCaller(scope, "credentials_list");
+      const credentials = yield* secretRequests
+        .listCredentials(parent.thread.projectId)
+        .pipe(Effect.mapError((error) => failure("orchestration_error", error.message)));
+      return {
+        credentials: credentials.filter((entry) =>
+          entry.name.toLowerCase().includes(input.query?.toLowerCase() ?? ""),
+        ),
+      };
+    }),
     requestSecret: Effect.fn("OrchestratorMcpService.requestSecret")(function* (scope, input) {
       const { scope: threadScope, parent } = yield* loadThreadCaller(scope, "request_secret");
       const threadId = threadScope.thread.threadId;
@@ -1991,6 +2008,16 @@ const make = Effect.gen(function* () {
           "parent_not_active",
           "Asking for a secret requires an active run owned by this MCP provider session.",
         );
+      }
+      if (input.credential !== undefined && input.credential.replace !== true) {
+        const reused = yield* secretRequests
+          .reuseCredential({
+            credential: input.credential,
+            projectId: parent.thread.projectId,
+            ...(input.delivery === "file" ? { delivery: "file" as const } : {}),
+          })
+          .pipe(Effect.mapError((error) => failure("orchestration_error", error.message)));
+        if (Option.isSome(reused)) return reused.value;
       }
       const runId = run.id;
       const nodeId = run.rootNodeId;
@@ -2015,6 +2042,7 @@ const make = Effect.gen(function* () {
             reason: input.reason,
             ...(input.placeholder === undefined ? {} : { placeholder: input.placeholder }),
             ...(input.delivery === "file" ? { delivery: "file" as const } : {}),
+            ...(input.credential === undefined ? {} : { credential: input.credential }),
             secretStatus,
           })
           .pipe(

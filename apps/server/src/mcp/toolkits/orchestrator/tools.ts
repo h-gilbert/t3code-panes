@@ -15,6 +15,8 @@ import {
   OrchestratorMcpDeleteScheduledTaskResult,
   OrchestratorMcpEnvironmentTarget,
   OrchestratorMcpRequestSecretInput,
+  OrchestratorMcpListCredentialsInput,
+  OrchestratorMcpListCredentialsResult,
   OrchestratorMcpRequestSecretResult,
   OrchestratorMcpFailure,
   OrchestratorMcpListScheduledTasksInput,
@@ -195,9 +197,21 @@ const DeleteScheduledTaskTool = Tool.make("delete_scheduled_task", {
   .annotate(Tool.Title, "Delete a scheduled task")
   .annotate(Tool.Destructive, true);
 
+const ListCredentialsTool = Tool.make("credentials_list", {
+  description:
+    "List saved credential names and scopes available to this project, never values. Reuse one with request_secret and the same credential name, kind and website. Credentials stay on this environment.",
+  parameters: OrchestratorMcpListCredentialsInput,
+  success: OrchestratorMcpListCredentialsResult,
+  failure: OrchestratorMcpFailure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Title, "List saved credentials")
+  .annotate(Tool.Readonly, true);
+
 const RequestSecretTool = Tool.make("request_secret", {
   description:
-    'Ask the user to enter a secret in a private card and wait. You never see the value. Returns a one-use `secretRef` for a tool that accepts it, or with `delivery: "file"` a private file path to read inside a shell command. Asked how to provide a secret: call this now, do not explain instead.',
+    'Ask the user to enter a secret in a private card and wait. You never see the value. Returns a one-use `secretRef` for a tool that accepts it, or with `delivery: "file"` a private file path to read inside a shell command. For reusable credentials, set credential:{name,kind:"login"|"secret",website?}. Reuses an authorized saved entry; otherwise opens a private form. credential.replace=true requests a replacement. Login deliveries are JSON {username,password}; token deliveries are raw. Never print or return file contents. Asked how to provide a secret: call this now, do not explain instead.',
   parameters: OrchestratorMcpRequestSecretInput,
   success: OrchestratorMcpRequestSecretResult,
   failure: OrchestratorMcpFailure,
@@ -358,6 +372,7 @@ export const OrchestratorToolkit = Toolkit.make(
   ListScheduledTasksTool,
   DeleteScheduledTaskTool,
   RequestSecretTool,
+  ListCredentialsTool,
   CreateThreadsTool,
   ThreadListTool,
   ThreadReadTool,

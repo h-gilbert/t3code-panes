@@ -6246,6 +6246,9 @@ export class PreviewManager extends Context.Service<
     readonly automationAutofill: (
       tabId: string,
       input: {
+        readonly credential?:
+          | { readonly origin: string; readonly username: string; readonly password: string }
+          | undefined;
         readonly environmentId: string;
         readonly profile: string | null;
         readonly profileId?: string | undefined;
@@ -6359,25 +6362,29 @@ export const make = Effect.gen(function* PreviewManagerMake() {
     }
     // The store re-checks (origin, profile) exactly; the password for one
     // site can never be typed into another.
-    const resolved = yield* browserCredentials
-      .resolveForFill({
-        origin,
-        environmentId: input.environmentId,
-        profile: input.profile,
-        ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
-        username: input.username,
-      })
-      .pipe(
-        Effect.mapError(
-          (cause) => new PreviewOperationError({ operation: "automationAutofill", cause }),
-        ),
-      );
+    if (input.credential !== undefined && input.credential.origin !== origin)
+      return { filled: false, reason: "no-credential", origin } as const;
+    const resolved =
+      input.credential ??
+      (yield* browserCredentials
+        .resolveForFill({
+          origin,
+          environmentId: input.environmentId,
+          profile: input.profile,
+          ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
+          username: input.username,
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) => new PreviewOperationError({ operation: "automationAutofill", cause }),
+          ),
+        ));
     if ("reason" in resolved) {
       return { filled: false, reason: resolved.reason, origin } as const;
     }
     const outcome = yield* operations.automationAutofill(
       tabId,
-      buildAutofillExpression(resolved.username, resolved.password),
+      buildAutofillExpression(resolved.username, resolved.password, origin),
     );
     return outcome?.filled
       ? ({ filled: true, origin, username: resolved.username } as const)

@@ -119,3 +119,11 @@ itself still receives the password, so only save accounts you are comfortable de
 
 Workspace assignments and layouts are stored locally in the browser or desktop app. Clearing local
 storage resets them.
+
+### Reusable credentials
+
+Ask an agent in a thread to save a named login or API token. Enter the values in the private card, rather than in a message. Logins ask for a username and password. By default, only agents in that project can reuse the credential; users with access-management permission can allow all projects on the same environment.
+
+Agents can list available credential names and reuse them for tools or commands. Saved logins can autofill the shared browser only on their saved website. Ask an agent to replace a credential, or revoke it in Settings → Sharing & access → Credentials. On mobile, open Settings → Environments → the environment → Credentials.
+
+Each environment stores its own vault, independent of browser profiles. Credentials do not synchronize between machines. Values stay out of thread history; command use creates a private file that expires after 24 hours. Revoking an entry prevents new deliveries, but does not remove copies already delivered or sign out existing website sessions.

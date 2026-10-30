@@ -1,3 +1,4 @@
+import { CredentialsSettings } from "./CredentialsSettings";
 import { SessionPermissions } from "./SessionPermissions";
 import { ChevronRightIcon, EllipsisIcon } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
@@ -1467,7 +1468,15 @@ export function ConnectionsSettings({ view }: { readonly view: "environments" | 
     </>
   );
 
-  if (showsAccess) return <SettingsPageContainer>{primarySettings}</SettingsPageContainer>;
+  if (showsAccess)
+    return (
+      <SettingsPageContainer>
+        {primarySettings}
+        {primaryEnvironmentId !== null ? (
+          <CredentialsSettings environmentId={primaryEnvironmentId} />
+        ) : null}
+      </SettingsPageContainer>
+    );
 
   return (
     <SettingsPageContainer>

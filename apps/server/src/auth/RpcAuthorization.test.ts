@@ -1,5 +1,7 @@
 import {
   AuthEnvironmentMaintainScope,
+  AuthAccessReadScope,
+  AuthAccessWriteScope,
   AuthDiagnosticsReadScope,
   AuthFilesystemReadScope,
   AuthProvidersManageScope,
@@ -7,6 +9,7 @@ import {
   DEFAULT_SERVER_SETTINGS,
   ProviderInstanceId,
   ThreadId,
+  TurnItemId,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   AuthSourceControlWriteScope,
@@ -30,6 +33,8 @@ import * as RpcAuthorization from "./RpcAuthorization.ts";
 
 describe("RPC authorization scopes", () => {
   it("declares exactly one scope for every RPC in the server group", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.credentialsList)).toBe(AuthAccessReadScope);
+    expect(requiredScopeForRpcMethod(WS_METHODS.credentialsRemove)).toBe(AuthAccessWriteScope);
     expect(new Set(Object.keys(RPC_REQUIRED_SCOPES))).toEqual(new Set(WsRpcGroup.requests.keys()));
   });
 
@@ -372,4 +377,48 @@ it.effect("denies manual cleanup before the handler without settings permission"
     });
     expect(handled).toBe(false);
   }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "project credential entry cannot grant environment-wide reuse without access management",
+  () =>
+    Effect.gen(function* () {
+      const group = WsRpcGroup.omit(
+        ...[...WsRpcGroup.requests.keys()].filter(
+          (
+            tag,
+          ): tag is Exclude<
+            keyof typeof RPC_REQUIRED_SCOPES,
+            typeof WS_METHODS.secretsAnswerRequest
+          > => tag !== WS_METHODS.secretsAnswerRequest,
+        ),
+      );
+      let handled = 0;
+      const client = yield* RpcTest.makeClient(group).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            group.toLayerHandler(WS_METHODS.secretsAnswerRequest, () =>
+              Effect.sync(() => {
+                handled++;
+              }),
+            ),
+            RpcAuthorization.layer([AuthOrchestrationOperateScope]),
+          ),
+        ),
+      );
+      const input = {
+        threadId: ThreadId.make("thread"),
+        turnItemId: TurnItemId.make("request"),
+        answer: { type: "save" as const, secret: "test-secret", scope: "project" as const },
+      };
+      yield* client[WS_METHODS.secretsAnswerRequest](input);
+      expect(handled).toBe(1);
+      expect(
+        yield* client[WS_METHODS.secretsAnswerRequest]({
+          ...input,
+          answer: { ...input.answer, scope: "environment" },
+        }).pipe(Effect.flip),
+      ).toMatchObject({ requiredPermission: AuthAccessWriteScope });
+      expect(handled).toBe(1);
+    }).pipe(Effect.scoped),
 );

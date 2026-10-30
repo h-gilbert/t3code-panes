@@ -1,3 +1,4 @@
+import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as ServerSettings from "../serverSettings.ts";
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off globalTimers:off - Playwright callbacks run outside the Effect runtime.
 // Screencasts ignore emulated device scale; real 2x keeps captures sharp.
@@ -468,6 +469,8 @@ const make = Effect.gen(function* () {
   const previewBrowser = yield* PreviewBrowser.PreviewBrowser;
   const desktopChannel = yield* DesktopBrowserChannel.DesktopBrowserChannel;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
+  // Standalone browser hosts can run without an orchestration credential vault.
+  const secrets = yield* Effect.serviceOption(SecretRequests.SecretRequests);
   const agentTurns = yield* (yield* PreviewAgentActivity.PreviewAgentActivity).changes;
   const runFork = Effect.runForkWith(yield* Effect.context<never>());
   const runPromise = Effect.runPromiseWith(yield* Effect.context<never>());
@@ -2238,10 +2241,24 @@ const make = Effect.gen(function* () {
         const profile = browserScope?.startsWith("profile:")
           ? browserScope.slice("profile:".length)
           : null;
+        const credentialName = (input as { credentialName?: string }).credentialName;
+        if (credentialName !== undefined && Option.isNone(secrets))
+          throw new Error("This browser host does not support the credential vault.");
+        const credential =
+          credentialName === undefined || Option.isNone(secrets)
+            ? undefined
+            : await runPromise(
+                secrets.value.browserCredential({
+                  threadId: ThreadId.make(tab.threadId),
+                  name: credentialName,
+                  origin: new URL(tab.page.url()).origin,
+                }),
+              );
         const filled = await runPromise(
           desktopChannel.operation(tab, {
             operation: "autofill",
             input: {
+              ...(credential === undefined ? {} : { credential }),
               environmentId:
                 (await runPromise(serverSettings.getSettings)).browserHostEnvironmentId ??
                 (await runPromise(environment.getEnvironmentId)),

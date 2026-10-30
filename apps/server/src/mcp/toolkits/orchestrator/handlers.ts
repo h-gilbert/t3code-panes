@@ -131,6 +131,15 @@ const handlers = {
       return yield* service.deleteScheduledTask(scope, input);
     }),
   ),
+  credentials_list: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext.McpInvocationContext;
+      return yield* (yield* OrchestratorMcpService.OrchestratorMcpService).listCredentials(
+        scope,
+        input,
+      );
+    }),
+  ),
   request_secret: McpToolAccess.actsAsCaller((input) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext.McpInvocationContext;

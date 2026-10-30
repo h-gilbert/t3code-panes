@@ -11,12 +11,18 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId, OrchestrationV2ProjectedTurnItem } from "@t3tools/contracts";
+import {
+  AuthAccessWriteScope,
+  type EnvironmentId,
+  type SecretRequestAnswerInput,
+  type OrchestrationV2ProjectedTurnItem,
+} from "@t3tools/contracts";
 import { useRef, useState } from "react";
 import { View, type ColorValue } from "react-native";
 
 import { SymbolView, type AppSymbolName } from "../../components/ui/AppSymbol";
 import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
+import { useEnvironmentScope } from "../../state/session";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../../components/ui/Button";
@@ -63,6 +69,7 @@ function PendingSecretRequestForm(props: {
   readonly iconColor: ColorValue;
 }) {
   const { item } = props;
+  const canGrantEnvironment = useEnvironmentScope(props.environmentId, AuthAccessWriteScope);
   const answer = useAtomCommand(serverEnvironment.answerSecretRequest, {
     label: "answer secret request",
     // The failure cause holds the request; keep it out of the console.
@@ -70,14 +77,21 @@ function PendingSecretRequestForm(props: {
     reportDefect: false,
   });
   const [secret, setSecret] = useState("");
+  const [username, setUsername] = useState("");
+  const [scope, setScope] = useState<"project" | "environment">("project");
+  const saveAnswer = (): SecretRequestAnswerInput["answer"] => ({
+    type: "save",
+    secret,
+    ...(item.credential === undefined
+      ? {}
+      : { scope, ...(item.credential.kind === "login" ? { username: username.trim() } : {}) }),
+  });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Submit then a tap can both run before a re-render; this guard is synchronous.
   const inFlight = useRef(false);
 
-  const send = async (
-    reply: { readonly type: "save"; readonly secret: string } | { readonly type: "decline" },
-  ) => {
+  const send = async (reply: SecretRequestAnswerInput["answer"]) => {
     const input = secretRequestAnswerInput(item, reply);
     if (input === null || inFlight.current) return;
     inFlight.current = true;
@@ -89,6 +103,7 @@ function PendingSecretRequestForm(props: {
     });
     if (result._tag === "Success") {
       setSecret("");
+      setUsername("");
       return;
     }
     if (!isAtomCommandInterrupted(result)) {
@@ -104,9 +119,43 @@ function PendingSecretRequestForm(props: {
           <Text className="font-sans text-sm leading-5 text-foreground-muted">{item.reason}</Text>
         ) : null}
       </View>
+      {item.credential !== undefined ? (
+        <View className="gap-2">
+          <Text className="font-sans text-sm text-foreground-muted">
+            {item.credential.name}
+            {item.credential.website ? ` · ${item.credential.website}` : ""}
+          </Text>
+          {item.credential.kind === "login" ? (
+            <TextInput
+              accessibilityLabel="Username or email"
+              placeholder="Username or email"
+              value={username}
+              onChangeText={setUsername}
+              editable={!submitting}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          ) : null}
+          {canGrantEnvironment ? (
+            <Button
+              label={
+                scope === "project"
+                  ? "Reuse in this project only"
+                  : "Reuse in all projects on this environment"
+              }
+              tone="text"
+              disabled={submitting}
+              onPress={() => setScope(scope === "project" ? "environment" : "project")}
+            />
+          ) : null}
+        </View>
+      ) : null}
       <TextInput
         accessibilityLabel={item.label}
-        placeholder={item.placeholder ?? SECRET_REQUEST_DEFAULT_PLACEHOLDER}
+        placeholder={
+          item.placeholder ??
+          (item.credential?.kind === "login" ? "Password" : SECRET_REQUEST_DEFAULT_PLACEHOLDER)
+        }
         value={secret}
         onChangeText={setSecret}
         editable={!submitting}
@@ -118,7 +167,7 @@ function PendingSecretRequestForm(props: {
         importantForAutofill="no"
         spellCheck={false}
         returnKeyType="done"
-        onSubmitEditing={() => void send({ type: "save", secret })}
+        onSubmitEditing={() => void send(saveAnswer())}
       />
       {error !== null ? (
         <Text
@@ -133,8 +182,12 @@ function PendingSecretRequestForm(props: {
         label="Save securely"
         tone="primary"
         fullWidth
-        disabled={submitting || secret.trim().length === 0}
-        onPress={() => void send({ type: "save", secret })}
+        disabled={
+          submitting ||
+          secret.length === 0 ||
+          (item.credential?.kind === "login" && username.trim().length === 0)
+        }
+        onPress={() => void send(saveAnswer())}
       />
       <View className="flex-row items-center justify-between gap-2">
         <View className="flex-1 flex-row items-center gap-1.5">

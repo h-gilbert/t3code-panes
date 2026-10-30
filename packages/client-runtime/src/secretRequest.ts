@@ -6,10 +6,16 @@ export type SecretRequestItem = Extract<
 >;
 
 /** A `file` request lets the agent's commands read the value, so its card must not promise more. */
-export const secretRequestPrivacyNote = (item: Pick<SecretRequestItem, "delivery">) =>
-  item.delivery === "file"
-    ? "Kept out of chat, in a private file this agent's commands can read for 24 hours"
-    : "Stored securely, never shown to the agent";
+export const secretRequestPrivacyNote = (
+  item: Pick<SecretRequestItem, "delivery" | "credential">,
+) =>
+  item.credential !== undefined
+    ? item.delivery === "file"
+      ? "Saved in this environment's vault. This agent's commands can read a private copy for 24 hours."
+      : "Saved credentials can be reused by authorized agents on this environment. Values stay out of chat."
+    : item.delivery === "file"
+      ? "Kept out of chat, in a private file this agent's commands can read for 24 hours"
+      : "Stored securely, never shown to the agent";
 export const SECRET_REQUEST_DEFAULT_PLACEHOLDER = "Paste the secret";
 
 export type SecretRequestDisplay =
@@ -64,14 +70,14 @@ export function secretRequestDisplay(
 
 export function secretRequestAnswerInput(
   item: Pick<SecretRequestItem, "id" | "threadId">,
-  answer: { readonly type: "save"; readonly secret: string } | { readonly type: "decline" },
+  answer: SecretRequestAnswerInput["answer"],
 ): SecretRequestAnswerInput | null {
   if (answer.type === "decline") {
     return { threadId: item.threadId, turnItemId: item.id, answer: { type: "decline" } };
   }
-  const secret = answer.secret.trim();
+  const secret = answer.secret;
   if (secret.length === 0) return null;
-  return { threadId: item.threadId, turnItemId: item.id, answer: { type: "save", secret } };
+  return { threadId: item.threadId, turnItemId: item.id, answer: { ...answer, secret } };
 }
 
 const USER_FACING_FAILURE_TAGS = new Set(["SecretRequestError", "EnvironmentAuthorizationError"]);

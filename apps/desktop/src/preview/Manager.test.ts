@@ -366,6 +366,16 @@ const makeTestPreviewWebContents = (
   } as unknown as TestPreviewWebContents;
 };
 
+const decodeStreamReply = Schema.decodeSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      result: Schema.optional(Schema.Unknown),
+      error: Schema.optional(Schema.Struct({ message: Schema.String })),
+    }),
+  ),
+);
+const decodeAttachedPage = Schema.decodeUnknownSync(Schema.Struct({ sessionId: Schema.String }));
+
 const setupServerStream = Effect.fn("test.setupServerStream")(function* () {
   const manager = yield* PreviewManager.PreviewManager;
   const browserHost = yield* DesktopBrowserHost.DesktopBrowserHost;
@@ -410,14 +420,22 @@ const setupServerStream = Effect.fn("test.setupServerStream")(function* () {
   let sequence = 0;
   const command = Effect.fn("test.serverStreamCommand")(function* (
     method: string,
-    sessionId = "t3-preview-page",
+    sessionId: string | null = "t3-preview-page",
+    params: Record<string, unknown> = {},
   ) {
     yield* browserHost.remoteCommand(key.environmentId, {
       type: "cdp",
       ...key,
-      message: JSON.stringify({ id: ++sequence, method, sessionId }),
+      message: JSON.stringify({
+        id: ++sequence,
+        method,
+        ...(sessionId === null ? {} : { sessionId }),
+        params,
+      }),
     });
-    yield* Queue.take(replies);
+    const reply = decodeStreamReply(yield* Queue.take(replies));
+    if (reply.error !== undefined) return yield* Effect.die(new Error(reply.error.message));
+    return reply.result;
   });
   return { manager, browserHost, key, guest, host, windowThrottling, capturePage, command, frames };
 });
@@ -3144,13 +3162,21 @@ describe("PreviewManager", () => {
         expect(yield* Queue.take(frames)).toBe(true);
         expect(windowThrottling.mock.calls).toEqual([[false]]);
         expect(guest.setBackgroundThrottling.mock.calls).toEqual([[false]]);
-        yield* command("Page.startScreencast", "viewer-2");
+        vi.mocked(guest.debugger.sendCommand).mockImplementation(async (method) =>
+          method === "Target.getTargetInfo"
+            ? { targetInfo: { targetId: "stream-target" } }
+            : undefined,
+        );
+        const viewer = decodeAttachedPage(
+          yield* command("Target.attachToTarget", null, { targetId: "stream-target" }),
+        );
+        yield* command("Page.startScreencast", viewer.sessionId);
         yield* command("Page.stopScreencast");
         expect(yield* Queue.clear(frames)).toEqual([]);
         expect(guest.setBackgroundThrottling.mock.calls).toEqual([[false]]);
         yield* TestClock.adjust(5_000);
         expect(capturePage).not.toHaveBeenCalled();
-        yield* command("Page.stopScreencast", "viewer-2");
+        yield* command("Page.stopScreencast", viewer.sessionId);
         expect(yield* Queue.take(frames)).toBe(false);
         expect(windowThrottling.mock.calls).toEqual([[false], [true]]);
         expect(guest.setBackgroundThrottling.mock.calls).toEqual([[false], [true]]);

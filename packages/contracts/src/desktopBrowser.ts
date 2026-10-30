@@ -8,16 +8,7 @@ import {
 
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 
-/**
- * The desktop app renders browser tabs for the server it launched, and the
- * server drives them with the same engine as its headless tabs. Messages
- * travel over bootstrap file descriptors for the local server, or an
- * authenticated RPC stream for an environment that selected this desktop.
- * Remote CDP endpoints are never exposed on the network.
- *
- * Each tab carries one CDP connection, multiplexed by `tabId`. CDP frames pass
- * through untouched; the desktop answers them with `CdpRelay`.
- */
+// CDP stays behind the desktop’s bootstrap pipes or authenticated host stream; no public endpoint.
 
 const TabKey = {
   threadId: TrimmedNonEmptyString,
@@ -48,6 +39,9 @@ export const DesktopBrowserPrivateOperation = Schema.Union([
   Schema.Struct({
     operation: Schema.Literal("autofill"),
     input: Schema.Struct({
+      credential: Schema.optional(
+        Schema.Struct({ origin: Schema.String, username: Schema.String, password: Schema.String }),
+      ),
       environmentId: Schema.String,
       profile: Schema.NullOr(Schema.String),
       profileId: Schema.optional(Schema.String),

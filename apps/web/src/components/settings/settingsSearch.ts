@@ -1051,6 +1051,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["machine glyph sidebar mac mini studio laptop desktop server cloud vm"],
   },
   {
+    id: "credential-vault",
+    title: "Credentials",
+    to: "/settings/access",
+    targetId: "credential-vault",
+    searchTerms: ["password login token secret vault private reusable agent"],
+  },
+  {
     id: "local-environment",
     title: "Local environment",
     to: "/settings/connections",

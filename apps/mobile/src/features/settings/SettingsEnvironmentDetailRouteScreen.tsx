@@ -1,3 +1,4 @@
+import { CredentialsSettingsSection } from "./CredentialsSettingsSection";
 import * as Dialog from "../../components/ui/Dialog";
 import { useAtom, useAtomValue } from "@effect/atom-react";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
@@ -279,6 +280,7 @@ function EnvironmentDetail({ environmentId }: { readonly environmentId: Environm
                     />
                   ) : null}
                 </SettingsSection>
+                <CredentialsSettingsSection environmentId={environmentId} />
                 <SettingsSection title="Providers">
                   <SettingsActionRow
                     icon="arrow.clockwise"

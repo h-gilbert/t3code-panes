@@ -11,10 +11,16 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId, OrchestrationV2ProjectedTurnItem } from "@t3tools/contracts";
+import {
+  AuthAccessWriteScope,
+  type EnvironmentId,
+  type SecretRequestAnswerInput,
+  type OrchestrationV2ProjectedTurnItem,
+} from "@t3tools/contracts";
 import { CheckIcon, LockIcon, MinusIcon, ShieldCheckIcon } from "lucide-react";
 import { useId, useRef, useState, type FormEvent } from "react";
 
+import { useEnvironmentScope } from "../../state/session";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
@@ -55,6 +61,7 @@ function PendingSecretRequestForm(props: {
   readonly item: SecretRequestItem;
 }) {
   const { item } = props;
+  const canGrantEnvironment = useEnvironmentScope(props.environmentId, AuthAccessWriteScope);
   const inputId = useId();
   const errorId = useId();
   const privacyId = useId();
@@ -65,14 +72,21 @@ function PendingSecretRequestForm(props: {
     reportDefect: false,
   });
   const [secret, setSecret] = useState("");
+  const [username, setUsername] = useState("");
+  const [scope, setScope] = useState<"project" | "environment">("project");
+  const saveAnswer = (): SecretRequestAnswerInput["answer"] => ({
+    type: "save",
+    secret,
+    ...(item.credential === undefined
+      ? {}
+      : { scope, ...(item.credential.kind === "login" ? { username: username.trim() } : {}) }),
+  });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Enter and click can both submit before a render.
   const inFlight = useRef(false);
 
-  const send = async (
-    reply: { readonly type: "save"; readonly secret: string } | { readonly type: "decline" },
-  ) => {
+  const send = async (reply: SecretRequestAnswerInput["answer"]) => {
     const input = secretRequestAnswerInput(item, reply);
     if (input === null || inFlight.current) return;
     inFlight.current = true;
@@ -84,6 +98,7 @@ function PendingSecretRequestForm(props: {
     });
     if (result._tag === "Success") {
       setSecret("");
+      setUsername("");
       return;
     }
     if (!isAtomCommandInterrupted(result)) {
@@ -93,7 +108,7 @@ function PendingSecretRequestForm(props: {
 
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    void send({ type: "save", secret });
+    void send(saveAnswer());
   };
 
   return (
@@ -114,13 +129,49 @@ function PendingSecretRequestForm(props: {
         </label>
         {item.reason.trim() ? <p className="text-sm text-muted-foreground">{item.reason}</p> : null}
       </div>
+      {item.credential !== undefined ? (
+        <div className="flex flex-col gap-2">
+          <p className="text-xs text-muted-foreground">
+            {item.credential.name}
+            {item.credential.website ? ` · ${item.credential.website}` : ""}
+          </p>
+          {item.credential.kind === "login" ? (
+            <label className="flex flex-col gap-1 text-sm">
+              Username or email
+              <Input
+                autoComplete="username"
+                value={username}
+                disabled={submitting}
+                onChange={(event) => setUsername(event.currentTarget.value)}
+              />
+            </label>
+          ) : null}
+          {canGrantEnvironment ? (
+            <label className="flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={scope === "environment"}
+                disabled={submitting}
+                onChange={(event) =>
+                  setScope(event.currentTarget.checked ? "environment" : "project")
+                }
+              />
+              Allow reuse by all projects on this environment
+            </label>
+          ) : null}
+          <p className="text-xs text-muted-foreground">
+            {scope === "project"
+              ? "Only agents in this project can reuse it."
+              : "Agents in any project on this environment can reuse it."}{" "}
+            Replace or revoke it in Settings → Sharing & access → Credentials.
+          </p>
+        </div>
+      ) : null}
       <div className="flex min-w-0 items-center gap-2">
         <div className="min-w-0 flex-1">
           <Input
             id={inputId}
-            // Password fields prompt to save credentials; this secret is not a login.
-            type="text"
-            className="[-webkit-text-security:disc]"
+            type="password"
             autoComplete="off"
             autoCorrect="off"
             autoCapitalize="off"
@@ -128,7 +179,10 @@ function PendingSecretRequestForm(props: {
             data-1p-ignore
             data-lpignore="true"
             data-bwignore
-            placeholder={item.placeholder ?? SECRET_REQUEST_DEFAULT_PLACEHOLDER}
+            placeholder={
+              item.placeholder ??
+              (item.credential?.kind === "login" ? "Password" : SECRET_REQUEST_DEFAULT_PLACEHOLDER)
+            }
             value={secret}
             disabled={submitting}
             aria-invalid={error !== null || undefined}
@@ -136,7 +190,14 @@ function PendingSecretRequestForm(props: {
             onChange={(event) => setSecret(event.currentTarget.value)}
           />
         </div>
-        <Button type="submit" disabled={submitting || secret.trim().length === 0}>
+        <Button
+          type="submit"
+          disabled={
+            submitting ||
+            secret.length === 0 ||
+            (item.credential?.kind === "login" && username.trim().length === 0)
+          }
+        >
           Save securely
         </Button>
       </div>

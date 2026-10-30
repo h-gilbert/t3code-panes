@@ -2159,6 +2159,9 @@ export const layerWsRpc = (
           Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
             Effect.andThen(guestShares.create(input)),
           ),
+        [WS_METHODS.credentialsList]: () =>
+          secretRequests.listCredentials().pipe(Effect.map((credentials) => ({ credentials }))),
+        [WS_METHODS.credentialsRemove]: (input) => secretRequests.removeCredential(input.id),
         [WS_METHODS.secretsAnswerRequest]: (input) =>
           Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
             Effect.andThen(secretRequests.answer(input)),
