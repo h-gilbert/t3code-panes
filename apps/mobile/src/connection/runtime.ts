@@ -14,6 +14,7 @@ import * as Runtime from "../lib/runtime";
 import { appAtomRegistry } from "../state/atom-registry";
 import * as BackgroundActivity from "./background-activity";
 import * as ConnectionPlatform from "./platform";
+import * as ConnectionDiagnostics from "./connection-diagnostics";
 
 declare const module: { readonly hot?: FoundationHotModule } | undefined;
 
@@ -43,6 +44,7 @@ const layerProvidedClientConnection = layerSnapshotLoader.pipe(
       Runtime.layer,
       layerProvidedConnectionPlatform,
       BackgroundActivity.layerObserver,
+      ConnectionDiagnostics.layer,
     ),
   ),
 );

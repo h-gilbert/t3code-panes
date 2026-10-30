@@ -36,6 +36,10 @@ import {
 import * as RpcSession from "../rpc/session.ts";
 import { presentConnectionState } from "./presentation.ts";
 import * as EnvironmentSupervisor from "./supervisor.ts";
+import {
+  ConnectionDiagnosticObserver,
+  type ConnectionDiagnosticEvent,
+} from "./diagnosticObserver.ts";
 import * as ConnectionWakeups from "./wakeups.ts";
 import { connectionRouteId, entryWithRoutes, isLearned, mergeLearnedRoutes } from "./routes.ts";
 
@@ -280,6 +284,46 @@ const makeHarness = Effect.fn("TestConnectionHarness.make")(function* (options?:
 });
 
 describe("EnvironmentSupervisor", () => {
+  it.effect("keeps connecting when the diagnostic observer fails", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+      const supervisor = yield* EnvironmentSupervisor.make(TARGET_ENTRY, {
+        initiallyDesired: true,
+      }).pipe(
+        Effect.provideService(ConnectionDiagnosticObserver, {
+          observe: () => Effect.die(new Error("Diagnostic storage unavailable")),
+        }),
+        Effect.provide(harness.dependencies),
+      );
+      yield* awaitState(supervisor.state, (state) => state.phase === "connected");
+      expect(yield* Ref.get(harness.sessionCount)).toBe(1);
+    }),
+  );
+
+  it.effect("records a live disconnect before clearing the visible failure", () =>
+    Effect.gen(function* () {
+      const events = yield* Ref.make<ReadonlyArray<ConnectionDiagnosticEvent>>([]);
+      const harness = yield* makeHarness();
+      const supervisor = yield* EnvironmentSupervisor.make(TARGET_ENTRY, {
+        initiallyDesired: true,
+      }).pipe(
+        Effect.provideService(ConnectionDiagnosticObserver, {
+          observe: (event) => Ref.update(events, (current) => [...current, event]),
+        }),
+        Effect.provide(harness.dependencies),
+      );
+      yield* awaitState(supervisor.state, (state) => state.phase === "connected");
+      const failure = transient("Fred stopped responding for 15s.");
+      yield* harness.closeLatestSession(failure);
+      yield* awaitState(supervisor.state, (state) => state.phase === "backoff");
+      expect((yield* Ref.get(events)).find((event) => event.kind === "failure")).toMatchObject({
+        environmentId: TARGET.environmentId,
+        failure,
+        state: { phase: "connected" },
+      });
+    }),
+  );
+
   it.effect("does not attempt a connection until it is desired", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness();

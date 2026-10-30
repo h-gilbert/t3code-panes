@@ -19,6 +19,7 @@ import { Button } from "../../components/ui/Button";
 import { environmentCatalog } from "../../connection/catalog";
 import { cn } from "../../lib/cn";
 import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
+import { readConnectionReport } from "../../connection/connection-log-store";
 
 const HOP_MARK = { ok: "✓", failed: "✕", unchecked: "–" } as const;
 const HOP_NOTE = { ok: "", failed: " · Failed", unchecked: " · Not checked" } as const;
@@ -49,6 +50,7 @@ export function useConnectionDiagnosis(
 
 export function ConnectionDiagnosisDetails(props: {
   readonly hostLabel: string;
+  readonly environmentId: EnvironmentId;
   readonly diagnosis: ConnectionDiagnosis;
 }) {
   const { diagnosis } = props;
@@ -83,9 +85,23 @@ export function ConnectionDiagnosisDetails(props: {
         label="Copy diagnostics"
         icon="doc.on.doc"
         onPress={() => {
-          copyTextWithHaptic(connectionDiagnosisText(props.hostLabel, diagnosis), {
-            target: "connection-diagnostics",
-          });
+          void readConnectionReport(props.environmentId)
+            .then((history) => {
+              copyTextWithHaptic(
+                `${connectionDiagnosisText(props.hostLabel, diagnosis)}\n\n${history}`,
+                {
+                  target: "connection-diagnostics",
+                },
+              );
+            })
+            .catch(() => {
+              copyTextWithHaptic(
+                `${connectionDiagnosisText(props.hostLabel, diagnosis)}\n\nConnection history could not be read.`,
+                {
+                  target: "connection-diagnostics",
+                },
+              );
+            });
         }}
       />
       {moreInfoUrl ? (

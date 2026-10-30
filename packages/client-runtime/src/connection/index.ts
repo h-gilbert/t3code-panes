@@ -1,5 +1,6 @@
 export * from "./catalog.ts";
 export * from "./diagnosis.ts";
+export * from "./diagnosticObserver.ts";
 export * as Connectivity from "./connectivity.ts";
 export * as CredentialStore from "./credentialStore.ts";
 export { type ConnectionDriverProgress, type EnvironmentConnectionLease } from "./driver.ts";

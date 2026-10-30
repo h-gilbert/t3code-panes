@@ -19,6 +19,10 @@ import type { ConnectionCatalogEntry, ConnectionRoute } from "./catalog.ts";
 import * as Connectivity from "./connectivity.ts";
 import * as ConnectionDriver from "./driver.ts";
 import {
+  ConnectionDiagnosticObserver,
+  type ConnectionDiagnosticEvent,
+} from "./diagnosticObserver.ts";
+import {
   type ConnectionAttemptError,
   type ConnectionTarget,
   ConnectionTransientError,
@@ -34,6 +38,7 @@ import {
   connectionRouteId,
   connectionRouteKind,
   connectionRoutes,
+  routeHttpBaseUrl,
   entryWithRoutes,
   type ReportedEndpoint,
 } from "./routes.ts";
@@ -276,6 +281,22 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
   // fresh by each attempt and check instead of being fixed at creation.
   const currentEntry = yield* Ref.make(entry);
   const currentRoutes = Ref.get(currentEntry).pipe(Effect.map(connectionRoutes));
+  const diagnosticObserver = yield* ConnectionDiagnosticObserver;
+  const observe = Effect.fn("EnvironmentSupervisor.observe")(
+    function* (event: Pick<ConnectionDiagnosticEvent, "kind" | "signal" | "failure">) {
+      yield* diagnosticObserver.observe({
+        ...event,
+        environmentId: target.environmentId,
+        label: target.label,
+        state: yield* SubscriptionRef.get(state),
+        routes: (yield* currentRoutes).flatMap((route) => {
+          const url = routeHttpBaseUrl(route);
+          return url === null ? [] : [url];
+        }),
+      });
+    },
+    (effect) => effect.pipe(Effect.ignoreCause),
+  );
   const preferredRouteId = yield* Ref.make(Option.none<string>());
   const routeCooldowns = yield* Ref.make<ReadonlyMap<string, bigint>>(new Map());
 
@@ -363,9 +384,19 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
     next: SupervisorConnectionState,
   ) {
     yield* SubscriptionRef.set(state, next);
+    yield* observe({ kind: "state" });
   });
 
   const signal = Effect.fn("EnvironmentSupervisor.signal")(function* (next: SupervisorSignal) {
+    yield* observe({
+      kind: "signal",
+      signal:
+        next._tag === "Wakeup"
+          ? next.reason
+          : next._tag === "NetworkChanged"
+            ? `network-${next.network}`
+            : next._tag,
+    });
     yield* Queue.offer(signals, next);
   });
 
@@ -935,6 +966,7 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
 
       const attemptSpan: Option.Option<Tracer.Span> = outcome.failure.attemptSpan;
       const error: ConnectionAttemptError = outcome.failure.error;
+      yield* observe({ kind: "failure", failure: error });
       if (!outcome.established) {
         latestFailure = error;
       }

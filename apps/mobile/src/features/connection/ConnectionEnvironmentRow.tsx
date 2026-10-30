@@ -204,6 +204,7 @@ export function ConnectionEnvironmentRow(props: {
         >
           {diagnosis ? (
             <ConnectionDiagnosisDetails
+              environmentId={props.environment.environmentId}
               hostLabel={props.environment.environmentLabel}
               diagnosis={diagnosis}
             />

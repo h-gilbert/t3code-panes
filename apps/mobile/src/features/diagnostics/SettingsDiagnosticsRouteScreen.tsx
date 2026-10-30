@@ -13,6 +13,8 @@ import { tryCopyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import { SettingsActionRow } from "../settings/components/SettingsActionRow";
 import { SettingsScreen } from "../settings/components/SettingsScreen";
 import { SettingsSection } from "../settings/components/SettingsSection";
+import { readConnectionReport, connectionLog } from "../../connection/connection-log-store";
+import type { ConnectionLogRecord } from "../../connection/connection-log";
 import {
   formatStartupCrashReport,
   parseStartupCrashRecords,
@@ -42,19 +44,40 @@ export function SettingsDiagnosticsRouteScreen() {
     Updates.isEnabled ? { status: "loading" } : { status: "unavailable" },
   );
   const [copied, setCopied] = useState(false);
+  const [connections, setConnections] = useState<ReadonlyArray<ConnectionLogRecord>>([]);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [connectionsCopied, setConnectionsCopied] = useState(false);
+
+  const copyConnections = async () => {
+    try {
+      const report = await readConnectionReport();
+      const ok = await tryCopyTextWithHaptic(report, { target: "connection history" });
+      if (ok) setConnectionsCopied(true);
+    } catch {
+      setConnectionError("Could not read connection history. Try again.");
+    }
+  };
 
   useEffect(() => {
-    if (!Updates.isEnabled) return;
     let cancelled = false;
-    Updates.readLogEntriesAsync(LOG_WINDOW_MS)
-      .then((entries) => {
-        if (cancelled) return;
-        setState({ status: "ready", records: parseStartupCrashRecords(entries) });
+    connectionLog
+      .read()
+      .then((records) => {
+        if (!cancelled) setConnections(records);
       })
-      .catch((error: unknown) => {
-        console.warn("[diagnostics] could not read the expo-updates log", error);
-        if (!cancelled) setState({ status: "unavailable" });
+      .catch(() => {
+        if (!cancelled) setConnectionError("Could not read connection history.");
       });
+    if (Updates.isEnabled)
+      Updates.readLogEntriesAsync(LOG_WINDOW_MS)
+        .then((entries) => {
+          if (cancelled) return;
+          setState({ status: "ready", records: parseStartupCrashRecords(entries) });
+        })
+        .catch((error: unknown) => {
+          console.warn("[diagnostics] could not read the expo-updates log", error);
+          if (!cancelled) setState({ status: "unavailable" });
+        });
     return () => {
       cancelled = true;
     };
@@ -77,6 +100,40 @@ export function SettingsDiagnosticsRouteScreen() {
         className="flex-1"
         contentContainerClassName="gap-6 px-5 pt-4 pb-[18px]"
       >
+        <View className="gap-3">
+          <SettingsSection title="Connection history">
+            <SettingsActionRow
+              icon={connectionsCopied ? "checkmark" : "doc.on.doc"}
+              label={connectionsCopied ? "Copied" : "Copy connection history"}
+              onPress={() => void copyConnections()}
+            />
+          </SettingsSection>
+          <Text className="px-2 text-sm leading-normal text-foreground-muted">
+            Keeps the latest 300 connection events for up to 7 days, including disconnect errors,
+            retries and network changes. History stays available after reconnecting or restarting.
+          </Text>
+          {connectionError ? (
+            <Text className="px-2 text-sm text-danger-foreground">{connectionError}</Text>
+          ) : (
+            connections
+              .filter((record) => record.kind === "failure")
+              .slice(-3)
+              .sort((left, right) => right.timestamp.localeCompare(left.timestamp))
+              .map((record) => (
+                <View
+                  key={`${record.timestamp}-${record.environmentId}-${record.fields.generation}-${record.fields.attempt}`}
+                  className="gap-1 px-2"
+                >
+                  <Text className="text-xs text-foreground-muted">
+                    {new Date(record.timestamp).toLocaleString()} · {record.fields.label}
+                  </Text>
+                  <Text selectable className="text-sm text-foreground">
+                    {record.fields.error}
+                  </Text>
+                </View>
+              ))
+          )}
+        </View>
         <SettingsSection title="Startup crashes">
           {state.status === "loading" ? (
             <View className="items-center gap-3 px-6 py-8">
