@@ -1,12 +1,19 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
-import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  ProjectId,
+  ThreadId,
+  type OrchestrationV2Subagent,
+  ProviderInstanceId,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   buildWorkspaceThreadPickerItems,
   countRunningWorkspaceSubagents,
   filterWorkspaceThreadPickerItems,
+  mergeWorkspaceRunningSubagents,
   runningWorkspaceSubagentsByParent,
   type WorkspaceThreadPickerProject,
 } from "./workspacePaneThreadPicker";
@@ -222,5 +229,73 @@ describe("subagents in workspace lists", () => {
       source: { ...native.source, status: "completed" },
     } as EnvironmentThreadShell;
     expect(countRunningWorkspaceSubagents([completed]).size).toBe(0);
+  });
+
+  it("includes remote delegated work and its nested agents under the scoped parent", () => {
+    const remote = {
+      ...thread("agent", projectA),
+      environmentId: EnvironmentId.make("remote"),
+      delegatedFrom: { environmentId, threadId: ThreadId.make("parent"), title: "Parent" },
+      runtime: { status: "running" } as EnvironmentThreadShell["runtime"],
+    };
+    const nested = {
+      ...child("nested", "agent"),
+      environmentId: remote.environmentId,
+    };
+    const threads = [thread("parent", projectA), thread("agent", projectA), remote, nested];
+    const agents = runningWorkspaceSubagentsByParent(threads);
+    expect(agents.get("local:parent")).toEqual([remote, nested]);
+    expect(agents.get("remote:agent")).toEqual([nested]);
+    expect(agents.has("local:agent")).toBe(false);
+    expect(countRunningWorkspaceSubagents(threads).get("local:parent")).toBe(2);
+    expect(
+      buildWorkspaceThreadPickerItems({
+        threads,
+        projects: [
+          {
+            ...projects[0]!,
+            memberProjectRefs: [
+              ...projects[0]!.memberProjectRefs,
+              { environmentId: remote.environmentId, projectId: projectA },
+            ],
+          },
+          projects[1]!,
+        ],
+        paneTargets: [],
+      }).find(
+        (item) =>
+          item.threadRef.threadId === remote.id &&
+          item.threadRef.environmentId === remote.environmentId,
+      ),
+    ).toBeUndefined();
+    expect(
+      countRunningWorkspaceSubagents([thread("parent", projectA), { ...remote, runtime: null }])
+        .size,
+    ).toBe(0);
+  });
+
+  it("keeps remote work available without its shell and deduplicates connected or queued children", () => {
+    const remote = {
+      ...child("remote", "parent"),
+      environmentId: EnvironmentId.make("remote"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+    };
+    const task = {
+      status: "running",
+      title: "Remote work",
+      providerInstanceId: remote.providerInstanceId,
+      remoteChild: { environmentId: remote.environmentId, threadId: remote.id },
+    } as OrchestrationV2Subagent;
+    expect(mergeWorkspaceRunningSubagents([], [task, task])).toEqual([
+      {
+        id: remote.id,
+        environmentId: remote.environmentId,
+        title: task.title,
+        providerInstanceId: remote.providerInstanceId,
+      },
+    ]);
+    expect(mergeWorkspaceRunningSubagents([remote], [task])).toEqual([remote]);
+    expect(mergeWorkspaceRunningSubagents([], [task], [remote])).toEqual([]);
+    expect(mergeWorkspaceRunningSubagents([], [{ ...task, status: "completed" }])).toEqual([]);
   });
 });

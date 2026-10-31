@@ -1,5 +1,6 @@
 import {
   CommandId,
+  type EnvironmentId,
   type RunId,
   isProviderAvailable,
   MessageId,
@@ -207,6 +208,11 @@ export interface OrchestratorMcpServiceShape {
   ) => Effect.Effect<OrchestratorMcpThreadReadResult, OrchestratorMcpFailure>;
   readonly sendToThread: (
     scope: McpInvocationScope,
+    input: OrchestratorMcpThreadSendInput,
+  ) => Effect.Effect<OrchestratorMcpThreadSendResult, OrchestratorMcpFailure>;
+  readonly sendToRemoteThread: (
+    scope: McpInvocationScope,
+    environmentId: EnvironmentId,
     input: OrchestratorMcpThreadSendInput,
   ) => Effect.Effect<OrchestratorMcpThreadSendResult, OrchestratorMcpFailure>;
   readonly waitForThread: (
@@ -2939,6 +2945,9 @@ const make = Effect.gen(function* () {
         hasMore: timeline.hasMore,
       } satisfies OrchestratorMcpThreadReadResult;
     }),
+    sendToRemoteThread: Effect.fn("OrchestratorMcpService.sendToRemoteThread")(
+      (scope, environmentId, input) => remoteDelegation.sendToThread(scope, environmentId, input),
+    ),
     sendToThread: Effect.fn("OrchestratorMcpService.sendToThread")(function* (scope, input) {
       const { parent, limits, target } = yield* loadScopedThread(scope, input.threadId);
       yield* assertLiveCallerForOtherThread(scope, parent, target);

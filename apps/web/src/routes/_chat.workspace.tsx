@@ -1,5 +1,6 @@
 import { useStableCallback } from "../hooks/useStableCallback";
-import { useEnvironmentThread } from "../state/threads";
+import { environmentThreadDetails, useEnvironmentThread } from "../state/threads";
+import { Atom } from "effect/reactivity";
 import { useEnvironmentIdentities, useEnvironmentProviders } from "../state/environments";
 import { shouldTypeToFocusComposer } from "../components/chat/composerFocusRedirect";
 // @effect-diagnostics cryptoRandomUUID:off -- Synchronous workspace drag-and-drop allocates local view identities.
@@ -14,6 +15,7 @@ import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime"
 import { canSettle, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
 import { createFileRoute } from "@tanstack/react-router";
 import type { EnvironmentId, ScopedProjectRef, ScopedThreadRef } from "@t3tools/contracts";
+import type { OrchestrationV2Subagent } from "@t3tools/contracts";
 import {
   ArrowLeftIcon,
   BotIcon,
@@ -121,7 +123,9 @@ import {
 import { resolveWorkspaceDraftThreadRef } from "../workspacePaneTitle";
 import {
   buildWorkspaceThreadPickerItems,
+  mergeWorkspaceRunningSubagents,
   runningWorkspaceSubagentsByParent,
+  type WorkspaceRunningSubagent,
   type WorkspaceThreadPickerItem,
 } from "../workspacePaneThreadPicker";
 import { cn } from "~/lib/utils";
@@ -296,9 +300,12 @@ function WorkspaceDraftPane({
   );
 }
 
-function RunningSubagentProviderIcon({ agent }: { readonly agent: EnvironmentThreadShell }) {
+const EMPTY_PANE_THREAD_ATOM = Atom.make(null);
+const EMPTY_PANE_SUBAGENTS: readonly OrchestrationV2Subagent[] = [];
+
+function RunningSubagentProviderIcon({ agent }: { readonly agent: WorkspaceRunningSubagent }) {
   const providers = useEnvironmentProviders();
-  const instanceId = agent.runtime?.providerInstanceId ?? agent.modelSelection.instanceId;
+  const instanceId = agent.providerInstanceId;
   const provider = providers
     .get(agent.environmentId)
     ?.find((candidate) => candidate.instanceId === instanceId);
@@ -332,7 +339,8 @@ function WorkspacePane({
   style,
   composerHandleRef,
   settleThread,
-  runningSubagents,
+  runningSubagents: runningThreadSubagents,
+  knownThreads,
 }: {
   readonly workspaceKey: string;
   readonly index: WorkspacePaneIndex;
@@ -346,6 +354,7 @@ function WorkspacePane({
   readonly style: CSSProperties;
   readonly composerHandleRef: RefObject<ChatComposerHandle | null>;
   readonly runningSubagents: readonly EnvironmentThreadShell[];
+  readonly knownThreads: readonly EnvironmentThreadShell[];
   readonly settleThread: ReturnType<typeof useThreadActions>["settleThread"];
 }) {
   const openRelatedThread = useWorkspacePaneStore((state) => state.openRelatedThread);
@@ -380,6 +389,17 @@ function WorkspacePane({
   const draftRequestVersionRef = useRef(0);
   const serverThreadRef = paneTarget && "threadId" in paneTarget ? paneTarget : null;
   const serverThreadShell = useThreadShell(serverThreadRef);
+  const remoteSubagents = useAtomValue(
+    serverThreadRef === null
+      ? EMPTY_PANE_THREAD_ATOM
+      : environmentThreadDetails.threadAtom(serverThreadRef),
+    (thread) => thread?.projection.subagents ?? EMPTY_PANE_SUBAGENTS,
+  );
+  const runningSubagents = mergeWorkspaceRunningSubagents(
+    runningThreadSubagents,
+    remoteSubagents,
+    knownThreads,
+  );
   const openFreshDraft = useStableCallback((projectRef: ScopedProjectRef) => {
     const requestVersion = ++draftRequestVersionRef.current;
     const freshDraft = { draftId: newDraftId(), threadId: newThreadId() };
@@ -1171,6 +1191,7 @@ export function ProjectPaneWorkspace({
           if (maximizedPaneIndex !== null && maximizedPaneIndex !== index) return null;
           return (
             <WorkspacePane
+              knownThreads={threads}
               runningSubagents={
                 paneTarget && "threadId" in paneTarget
                   ? (runningAgents.get(scopedThreadKey(paneTarget)) ?? [])

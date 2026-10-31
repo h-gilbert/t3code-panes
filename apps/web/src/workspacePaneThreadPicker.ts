@@ -5,6 +5,7 @@ import {
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+import type { OrchestrationV2Subagent } from "@t3tools/contracts";
 
 import {
   isSidebarSubagentThread,
@@ -32,6 +33,50 @@ export interface WorkspaceThreadPickerItem {
   readonly activity: ReturnType<typeof resolveSidebarThreadStatus>;
 }
 
+export type WorkspaceRunningSubagent = Pick<
+  EnvironmentThreadShell,
+  "id" | "environmentId" | "title" | "providerInstanceId"
+>;
+
+export function mergeWorkspaceRunningSubagents(
+  threads: readonly EnvironmentThreadShell[],
+  tasks: readonly OrchestrationV2Subagent[],
+  knownThreads: readonly EnvironmentThreadShell[] = threads,
+): readonly WorkspaceRunningSubagent[] {
+  const known = new Map(
+    knownThreads.map((thread) => [
+      scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+      thread,
+    ]),
+  );
+  const agents = new Map<string, WorkspaceRunningSubagent>(
+    threads.map((thread) => [
+      scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+      {
+        ...thread,
+        providerInstanceId: thread.runtime?.providerInstanceId ?? thread.providerInstanceId,
+      },
+    ]),
+  );
+  for (const task of tasks) {
+    if (task.remoteChild === undefined || (task.status !== "running" && task.status !== "waiting"))
+      continue;
+    const ref = task.remoteChild;
+    const key = scopedThreadKey(ref);
+    if (agents.has(key)) continue;
+    const shell = known.get(key);
+    if (shell !== undefined && (ref.runId === undefined || shell.latestRun?.runId === ref.runId))
+      continue;
+    agents.set(key, {
+      environmentId: ref.environmentId,
+      id: ref.threadId,
+      title: task.title ?? "Subagent",
+      providerInstanceId: task.providerInstanceId,
+    });
+  }
+  return [...agents.values()];
+}
+
 export function buildWorkspaceThreadPickerItems(input: {
   readonly threads: readonly EnvironmentThreadShell[];
   readonly projects: readonly WorkspaceThreadPickerProject[];
@@ -54,9 +99,16 @@ export function buildWorkspaceThreadPickerItems(input: {
   );
 
   const runningCounts = countRunningWorkspaceSubagents(input.threads);
+  const threadKeys = new Set(
+    input.threads
+      .filter((thread) => thread.archivedAt === null && thread.deletedAt == null)
+      .map((thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))),
+  );
   return sortThreadsForSidebar(
     input.threads.filter((thread) => {
       if (thread.archivedAt !== null || thread.deletedAt != null || isSidebarSubagentThread(thread))
+        return false;
+      if (thread.delegatedFrom != null && threadKeys.has(scopedThreadKey(thread.delegatedFrom)))
         return false;
       return projectByRef.has(
         scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)),
@@ -130,7 +182,7 @@ export function runningWorkspaceSubagentsByParent(
   for (const thread of threads) {
     if (
       thread.archivedAt !== null ||
-      !isSidebarSubagentThread(thread) ||
+      (!isSidebarSubagentThread(thread) && thread.delegatedFrom == null) ||
       !["preparing", "queued", "starting", "running", "waiting"].includes(
         thread.source?.activityRunStatus ?? thread.source?.status ?? thread.runtime?.status ?? "",
       )
@@ -138,10 +190,13 @@ export function runningWorkspaceSubagentsByParent(
       continue;
     const seen = new Set([scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))]);
     let child: EnvironmentThreadShell | undefined = thread;
-    while (child?.lineage.relationshipToParent === "subagent" && child.lineage.parentThreadId) {
-      const parentKey = scopedThreadKey(
-        scopeThreadRef(thread.environmentId, child.lineage.parentThreadId),
-      );
+    while (child !== undefined) {
+      const parent =
+        child.lineage.relationshipToParent === "subagent" && child.lineage.parentThreadId
+          ? scopeThreadRef(child.environmentId, child.lineage.parentThreadId)
+          : child.delegatedFrom;
+      if (parent == null) break;
+      const parentKey = scopedThreadKey(parent);
       if (seen.has(parentKey)) break;
       seen.add(parentKey);
       const agents = agentsByParent.get(parentKey);

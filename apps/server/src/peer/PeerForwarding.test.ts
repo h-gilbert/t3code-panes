@@ -275,6 +275,13 @@ const makeLaptop = Effect.gen(function* () {
       ),
     ),
     Layer.provide(NodeServices.layer),
+    Layer.provide(
+      Layer.unwrap(
+        Effect.map(PeerForwarding.PeerForwarding, (forwarding) =>
+          Layer.mock(RemoteDelegation.RemoteDelegation)({ sendToThread: forwarding.sendToThread }),
+        ),
+      ),
+    ),
     Layer.provide(PeerForwarding.layer),
     Layer.provide(Layer.succeedContext(linking)),
     Layer.provide(NodeCrypto.layer),
@@ -309,7 +316,6 @@ const makeLaptop = Effect.gen(function* () {
         Layer.mock(ProjectService.ProjectService)({}),
         Layer.mock(SecretRequests.SecretRequests)({}),
         ServerSettings.layerTest(),
-        Layer.mock(RemoteDelegation.RemoteDelegation)({}),
         Layer.mock(PeerLinkRequests.PeerLinkRequests)({}),
       ),
     ),

@@ -6,6 +6,8 @@ import {
   OrchestratorMcpThreadInterruptResult,
   OrchestratorMcpThreadReadInput,
   OrchestratorMcpThreadReadResult,
+  OrchestratorMcpThreadSendInput,
+  OrchestratorMcpThreadSendResult,
   OrchestratorMcpThreadWaitInput,
   OrchestratorMcpThreadWaitResult,
 } from "@t3tools/contracts";
@@ -61,6 +63,11 @@ export class PeerForwarding extends Context.Service<
       environmentId: EnvironmentId,
       input: OrchestratorMcpThreadReadInput,
     ) => Effect.Effect<OrchestratorMcpThreadReadResult, OrchestratorMcpFailure>;
+    readonly sendToThread: (
+      scope: Scope,
+      environmentId: EnvironmentId,
+      input: OrchestratorMcpThreadSendInput,
+    ) => Effect.Effect<OrchestratorMcpThreadSendResult, OrchestratorMcpFailure>;
     /** `t3_thread_interrupt` there. */
     readonly interruptThread: (
       scope: Scope,
@@ -266,6 +273,20 @@ const make = Effect.gen(function* () {
   return PeerForwarding.of({
     call,
     readThread,
+    sendToThread: Effect.fn("PeerForwarding.sendToThread")((scope, environmentId, input) =>
+      requireEnabled.pipe(
+        Effect.andThen(
+          forward<OrchestratorMcpThreadSendResult>(
+            scope,
+            "t3_thread_send",
+            OrchestratorMcpThreadSendInput,
+            OrchestratorMcpThreadSendResult,
+            environmentId,
+            input,
+          ),
+        ),
+      ),
+    ),
     interruptThread,
     waitForThread,
     links: listLinks,

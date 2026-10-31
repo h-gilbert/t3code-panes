@@ -57,6 +57,17 @@ type RemoteCheck<P> = (
   params: P,
 ) => Effect.Effect<unknown, OrchestratorMcpFailure, Effect.Services<typeof writingCaller>>;
 let remoteCheckOf: <Handler>(declaration: Declaration<Handler>) => RemoteCheck<never> | undefined;
+type RemoteHandler<Handler> = Handler extends (...params: infer P) => infer A
+  ? (params: P[0], environmentId: EnvironmentId) => A
+  : never;
+let remoteHandlerOf: <Handler>(
+  declaration: Declaration<Handler>,
+) => RemoteHandler<Handler> | undefined;
+let withRemoteHandler: <Handler>(
+  declaration: Declaration<Handler>,
+  handle: RemoteHandler<Handler>,
+) => Declaration<Handler>;
+export { withRemoteHandler };
 
 type CheckedHandlerOf<D> = D extends Declaration<infer Handler> ? Handler : never;
 
@@ -74,19 +85,25 @@ let handlersLayer: <Tools extends Record<string, Tool.Any>, EX, RX>(
 export class Declaration<out Handler> {
   readonly #handle: Handler;
   readonly #remote: RemoteCheck<never> | undefined;
+  readonly #remoteHandler: RemoteHandler<Handler> | undefined;
   private constructor(
     token: typeof builtHere,
     handle: Handler,
     remote: RemoteCheck<never> | undefined,
+    remoteHandler?: RemoteHandler<Handler>,
   ) {
     refuseOutsideConstruction(token);
     this.#handle = handle;
     this.#remote = remote;
+    this.#remoteHandler = remoteHandler;
   }
   static {
     declare = (handle, remote) => new Declaration(builtHere, handle, remote);
     checkedHandler = Struct.lambda<CheckedHandler>((declaration) => declaration.#handle);
     remoteCheckOf = (declaration) => declaration.#remote;
+    remoteHandlerOf = (declaration) => declaration.#remoteHandler;
+    withRemoteHandler = (declaration, handle) =>
+      new Declaration(builtHere, declaration.#handle, declaration.#remote, handle);
   }
 }
 
@@ -394,6 +411,12 @@ const routed = Effect.fn("McpToolAccess.routed")(function* <Tools extends Record
     const here = handlers[name] as (
       params: object,
     ) => Effect.Effect<unknown, Tool.Failure<Tools[keyof Tools]>>;
+    const remoteHandler = remoteHandlerOf(declaration) as
+      | ((
+          params: object,
+          environmentId: EnvironmentId,
+        ) => Effect.Effect<unknown, OrchestratorMcpFailure>)
+      | undefined;
     handlers[name] = ({ environmentId, ...params }: { readonly environmentId?: EnvironmentId }) =>
       Effect.gen(function* () {
         const scope = yield* McpInvocationContext.McpInvocationContext;
@@ -401,6 +424,7 @@ const routed = Effect.fn("McpToolAccess.routed")(function* <Tools extends Record
         if (target === undefined) return yield* here(params);
         if (scope.linkedEnvironments === false) return yield* PeerForwarding.linkedEnvironmentsOff;
         yield* (remote as RemoteCheck<typeof params>)(params);
+        if (remoteHandler !== undefined) return yield* remoteHandler(params, target);
         if (Option.isNone(forwarding)) return yield* linksUnavailable;
         return yield* forwarding.value.call(scope, tool, target, { ...params, environmentId });
       });
