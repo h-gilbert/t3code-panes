@@ -140,6 +140,15 @@ const handlers = {
       );
     }),
   ),
+  t3_credential_vault: McpToolAccess.writes(
+    (input) =>
+      Effect.gen(function* () {
+        const scope = yield* McpInvocationContext.McpInvocationContext;
+        const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+        return yield* service.credentialVaultForLink(scope, input);
+      }),
+    { linkedCallers: "allowed" },
+  ),
   request_secret: McpToolAccess.actsAsCaller((input) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext.McpInvocationContext;

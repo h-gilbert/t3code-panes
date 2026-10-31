@@ -3,6 +3,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import {
+  EnvironmentId,
   ProjectId,
   type CredentialRequest,
   type OrchestrationV2ServerCommand,
@@ -10,6 +11,7 @@ import {
   ThreadId,
   TurnItemId,
 } from "@t3tools/contracts";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -21,31 +23,35 @@ import * as PlatformError from "effect/PlatformError";
 import * as TestClock from "effect/testing/TestClock";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import * as ProjectEnrichmentService from "../project/ProjectEnrichmentService.ts";
+import * as LinkedCredentialVault from "./LinkedCredentialVault.ts";
 import * as SecretRequests from "./SecretRequests.ts";
 
 const threadId = ThreadId.make("thread-orchestrator");
 const turnItemId = TurnItemId.make("turn-item:secret-request:1");
 const projectId = ProjectId.make("project-1");
 
-const withService = <A, E>(
-  body: (input: {
-    readonly service: SecretRequests.SecretRequests["Service"];
-    readonly stored: Map<string, Uint8Array>;
-    readonly dispatched: Array<OrchestrationV2ServerCommand>;
-  }) => Effect.Effect<A, E>,
-  options: {
-    readonly credential?: CredentialRequest;
-    readonly threadId?: ThreadId;
-    readonly delivery?: "file";
-    readonly directory?: string;
-    readonly runStatus?: string;
-    readonly removeFails?: boolean;
-    readonly closedFirst?: boolean;
-    readonly failedRecords?: number;
-  } = {},
-) =>
+interface ServiceOptions {
+  readonly credential?: CredentialRequest;
+  readonly threadId?: ThreadId;
+  readonly delivery?: "file";
+  readonly directory?: string;
+  readonly runStatus?: string;
+  readonly removeFails?: boolean;
+  readonly closedFirst?: boolean;
+  readonly failedRecords?: number;
+  readonly projectId?: ProjectId;
+  /** Repository keys of projects, as their checkouts' Git remotes resolve. */
+  readonly repositories?: Readonly<Record<string, string>>;
+  /** The vault service of a linked browser host this environment shares. */
+  readonly linkedHost?: SecretRequests.SecretRequests["Service"];
+}
+
+const buildService = (options: ServiceOptions = {}) =>
   Effect.gen(function* () {
+    const threadProjectId = options.projectId ?? projectId;
     const stored = new Map<string, Uint8Array>();
     const dispatched: Array<OrchestrationV2ServerCommand> = [];
     let secretStatus = "pending";
@@ -97,7 +103,7 @@ const withService = <A, E>(
       Layer.mock(ThreadManagementService.ThreadManagementService)({
         getThreadRecords: () =>
           Effect.succeed({
-            thread: { projectId },
+            thread: { projectId: threadProjectId },
             runs: [{ id: "run-1", status: options.runStatus ?? "running" }],
             turnItems: [
               {
@@ -131,11 +137,45 @@ const withService = <A, E>(
         },
       }),
     );
-    return yield* Effect.gen(function* () {
-      const service = yield* SecretRequests.SecretRequests;
-      return yield* body({ service, stored, dispatched });
-    }).pipe(Effect.provide(SecretRequests.layer.pipe(Layer.provide(layerDependencies))));
+    const layerProjects = Layer.mergeAll(
+      Layer.mock(ProjectStore.ProjectStoreV2)({
+        get: (id) => Effect.succeedSome({ workspaceRoot: `/work/${id}` } as never),
+      }),
+      Layer.mock(ProjectEnrichmentService.ProjectEnrichmentService)({
+        readRepositoryIdentity: (root) => {
+          const key = options.repositories?.[root.slice("/work/".length)];
+          return Effect.succeed(key === undefined ? null : ({ canonicalKey: key } as never));
+        },
+      }),
+    );
+    const host = options.linkedHost;
+    const layerLinked =
+      host === undefined
+        ? Layer.empty
+        : Layer.succeed(
+            LinkedCredentialVault.LinkedCredentialVault,
+            LinkedCredentialVault.LinkedCredentialVault.of({
+              host: Effect.succeedSome(EnvironmentId.make("environment-mac")),
+              call: (_environmentId, input) => host.peerVault(input),
+            }),
+          );
+    const context = yield* Layer.build(
+      SecretRequests.layer.pipe(
+        Layer.provide(Layer.mergeAll(layerDependencies, layerProjects, layerLinked)),
+      ),
+    );
+    const service = Context.get(context, SecretRequests.SecretRequests);
+    return { service, stored, dispatched };
   });
+
+const withService = <A, E>(
+  body: (input: {
+    readonly service: SecretRequests.SecretRequests["Service"];
+    readonly stored: Map<string, Uint8Array>;
+    readonly dispatched: Array<OrchestrationV2ServerCommand>;
+  }) => Effect.Effect<A, E>,
+  options: ServiceOptions = {},
+) => Effect.scoped(Effect.flatMap(buildService(options), body));
 
 const valuesOf = (stored: Map<string, Uint8Array>) =>
   Array.from(stored.entries())
@@ -489,24 +529,10 @@ it.effect(
           const login = JSON.parse(yield* service.consume({ ref: original, projectId }));
           assert.equal(login.password, " password with spaces ");
           assert.equal(login.username, "user@example.com");
-          assert.deepEqual(
-            yield* service.browserCredential({
-              threadId,
-              name: credential.name,
-              origin: "https://example.com",
-            }),
-            { ...login, origin: "https://example.com" },
-          );
-          assert.equal(
-            (yield* service
-              .browserCredential({
-                threadId,
-                name: credential.name,
-                origin: "https://evil.example.com",
-              })
-              .pipe(Effect.flip)).reason,
-            "credential_failed",
-          );
+          assert.deepEqual(yield* service.browserCredential({ threadId, name: credential.name }), {
+            ...login,
+            origin: "https://example.com",
+          });
           assert.notInclude(
             new TextDecoder().decode(stored.get("credential-vault")),
             "password with spaces",
@@ -590,13 +616,194 @@ it.effect(
           vault[vault.length - 1] = vault[vault.length - 1]! ^ 1;
           assert.equal(
             (yield* service.listCredentials().pipe(Effect.flip)).reason,
-            "credential_failed",
+            "vault_unreadable",
           );
           assert.equal(
             (yield* service.reuseCredential({ credential, projectId }).pipe(Effect.flip)).reason,
-            "credential_failed",
+            "vault_unreadable",
           );
         }),
       { credential: { name: "Example token", kind: "secret" } },
     ),
+);
+
+it.effect("a browser login resolves to its website's origin, and failures say what is wrong", () =>
+  withService(
+    ({ service }) =>
+      Effect.gen(function* () {
+        yield* service.answer({
+          threadId,
+          turnItemId,
+          answer: { type: "save", secret: "dummy-password", username: "dummy@example.com" },
+        });
+        // Apple frames this sign-in form inside appstoreconnect.apple.com; the browser host matches frames.
+        assert.deepEqual(yield* service.browserCredential({ threadId, name: "Apple ID" }), {
+          username: "dummy@example.com",
+          password: "dummy-password",
+          origin: "https://idmsa.apple.com",
+        });
+        const missing = yield* service
+          .browserCredential({ threadId, name: "Unknown" })
+          .pipe(Effect.flip);
+        assert.equal(missing.reason, "credential_not_found");
+        assert.notInclude(missing.message, "vault");
+      }),
+    {
+      credential: {
+        name: "Apple ID",
+        kind: "login",
+        website: "https://idmsa.apple.com/appleauth/auth/signin",
+      },
+    },
+  ),
+);
+
+it.effect("a login saved without a website cannot be autofilled, and says so", () =>
+  withService(
+    ({ service }) =>
+      Effect.gen(function* () {
+        yield* service.answer({
+          threadId,
+          turnItemId,
+          answer: { type: "save", secret: "dummy-password", username: "dummy@example.com" },
+        });
+        const error = yield* service
+          .browserCredential({ threadId, name: "No site" })
+          .pipe(Effect.flip);
+        assert.equal(error.reason, "credential_no_website");
+      }),
+    { credential: { name: "No site", kind: "login" } },
+  ),
+);
+
+it.effect("a project grant covers projects of the same repository, and only those", () =>
+  withService(
+    ({ service }) =>
+      Effect.gen(function* () {
+        const credential = { name: "Deploy token", kind: "secret" as const };
+        yield* service.answer({ threadId, turnItemId, answer: { type: "save", secret: "dummy" } });
+        const sameRepository = ProjectId.make("project-same-repo");
+        const reused = Option.getOrThrow(
+          yield* service.reuseCredential({ credential, projectId: sameRepository }),
+        );
+        assert.isTrue("secretRef" in reused);
+        if ("secretRef" in reused)
+          assert.equal(
+            yield* service.consume({ ref: reused.secretRef, projectId: sameRepository }),
+            "dummy",
+          );
+        assert.isTrue(
+          Option.isNone(
+            yield* service.reuseCredential({
+              credential,
+              projectId: ProjectId.make("project-other-repo"),
+            }),
+          ),
+        );
+        assert.isTrue(
+          Option.isNone(
+            yield* service.reuseCredential({
+              credential,
+              projectId: ProjectId.make("project-no-remote"),
+            }),
+          ),
+        );
+      }),
+    {
+      credential: { name: "Deploy token", kind: "secret" },
+      repositories: {
+        [projectId]: "github.com/acme/app",
+        "project-same-repo": "github.com/acme/app",
+        "project-other-repo": "github.com/acme/other",
+      },
+    },
+  ),
+);
+
+it.effect(
+  "an environment whose browser host is linked saves to, lists, reuses and autofills from the host's vault",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const directory = yield* fs.makeTempDirectoryScoped({ prefix: "linked-vault-test-" });
+        const credential = {
+          name: "Dummy site",
+          kind: "login" as const,
+          website: "https://login.example.com",
+        };
+        const repositories = {
+          "project-mac": "github.com/acme/app",
+          "project-fred": "github.com/acme/app",
+        };
+        const mac = yield* buildService({
+          projectId: ProjectId.make("project-mac"),
+          repositories,
+          credential,
+        });
+        const fredProject = ProjectId.make("project-fred");
+        const fred = yield* buildService({
+          projectId: fredProject,
+          repositories,
+          credential,
+          directory,
+          linkedHost: mac.service,
+        });
+
+        // A private card on the linked machine saves into the host's vault, and only there.
+        yield* fred.service.answer({
+          threadId,
+          turnItemId,
+          answer: { type: "save", secret: "dummy-password", username: "dummy@example.com" },
+        });
+        assert.isFalse(fred.stored.has("credential-vault"));
+        assert.isTrue(mac.stored.has("credential-vault"));
+        assert.notInclude(
+          new TextDecoder().decode(mac.stored.get("credential-vault")),
+          "dummy-password",
+        );
+        const [onMac] = yield* mac.service.listCredentials(ProjectId.make("project-mac"));
+        assert.equal(onMac?.repositoryKey, "github.com/acme/app");
+
+        assert.deepEqual(
+          (yield* fred.service.listCredentials(fredProject)).map((entry) => entry.name),
+          ["Dummy site"],
+        );
+        const ref = Option.getOrThrow(
+          yield* fred.service.reuseCredential({ credential, projectId: fredProject }),
+        );
+        if ("secretRef" in ref)
+          assert.equal(
+            JSON.parse(yield* fred.service.consume({ ref: ref.secretRef, projectId: fredProject }))
+              .password,
+            "dummy-password",
+          );
+        const file = Option.getOrThrow(
+          yield* fred.service.reuseCredential({
+            credential,
+            projectId: fredProject,
+            delivery: "file",
+          }),
+        );
+        if ("file" in file) {
+          assert.isTrue(file.file.startsWith(directory));
+          assert.include(yield* fs.readFileString(file.file), "dummy-password");
+        }
+        assert.deepEqual(yield* fred.service.browserCredential({ threadId, name: "Dummy site" }), {
+          username: "dummy@example.com",
+          password: "dummy-password",
+          origin: "https://login.example.com",
+        });
+
+        // Revoking on the host revokes it everywhere.
+        yield* mac.service.removeCredential(onMac!.id);
+        assert.lengthOf(yield* fred.service.listCredentials(fredProject), 0);
+        assert.equal(
+          (yield* fred.service
+            .browserCredential({ threadId, name: "Dummy site" })
+            .pipe(Effect.flip)).reason,
+          "credential_not_found",
+        );
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
 );

@@ -264,7 +264,7 @@ const PreviewDownloadTool = safeBrowserTool(
 const PreviewAutofillTool = browserTool(
   Tool.make("preview_autofill", {
     description:
-      "Fill the current page's login form from the user's saved browser logins. Logins are bound to the exact page origin and profile; the password is typed directly into the page and never returned. Returns filled=false with a reason when no saved login matches, several match (pass username), or the page has no login fields.",
+      "Fill the current page's login form from the user's saved browser logins. Logins are bound to their exact origin and profile, including sign-in forms framed in the page; the password is typed directly into the form and never returned. Returns filled=false with a reason when no saved login matches, several match (pass username), or the page has no login fields.",
     parameters: PreviewAutomationAutofillInput,
     success: PreviewAutomationAutofillResult,
     failure: PreviewToolFailure,

@@ -17,9 +17,11 @@ export function CredentialsSettingsSection({
   readonly environmentId: EnvironmentId;
 }) {
   const projects = useProjects();
-  const projectName = (id: string) =>
+  const projectName = (id: string, repositoryKey?: string) =>
     projects.find((project) => project.environmentId === environmentId && project.id === id)
-      ?.title ?? "Unavailable project";
+      ?.title ??
+    repositoryKey ??
+    "Unavailable project";
   const canRead = useEnvironmentScope(environmentId, AuthAccessReadScope);
   const entries = useEnvironmentQuery(
     canRead ? serverEnvironment.credentials({ environmentId, input: {} }) : null,
@@ -73,7 +75,7 @@ export function CredentialsSettingsSection({
           <ListActionRow
             key={entry.id}
             label={entry.name}
-            description={`${entry.scope === "environment" ? "All projects" : `Project: ${projectName(entry.projectId)}`} · Tap to revoke`}
+            description={`${entry.scope === "environment" ? "All projects" : `Project: ${projectName(entry.projectId, entry.repositoryKey)}`} · Tap to revoke`}
             icon={{ ios: "lock", android: "lock" }}
             tone="danger"
             disabled={busy || !canRemove}

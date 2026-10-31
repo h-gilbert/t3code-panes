@@ -138,11 +138,7 @@ function PendingSecretRequestForm(props: {
           ) : null}
           {canGrantEnvironment ? (
             <Button
-              label={
-                scope === "project"
-                  ? "Reuse in this project only"
-                  : "Reuse in all projects on this environment"
-              }
+              label={scope === "project" ? "Reuse in this project only" : "Reuse in all projects"}
               tone="text"
               disabled={submitting}
               onPress={() => setScope(scope === "project" ? "environment" : "project")}

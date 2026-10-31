@@ -156,13 +156,13 @@ function PendingSecretRequestForm(props: {
                   setScope(event.currentTarget.checked ? "environment" : "project")
                 }
               />
-              Allow reuse by all projects on this environment
+              Allow reuse by all projects
             </label>
           ) : null}
           <p className="text-xs text-muted-foreground">
             {scope === "project"
               ? "Only agents in this project can reuse it."
-              : "Agents in any project on this environment can reuse it."}{" "}
+              : "Agents in any project can reuse it, including on machines that share this browser host."}{" "}
             Replace or revoke it in Settings → Sharing & access → Credentials.
           </p>
         </div>

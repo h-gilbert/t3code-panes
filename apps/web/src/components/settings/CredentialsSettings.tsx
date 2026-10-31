@@ -12,9 +12,11 @@ import { SettingsRow, SettingsSection } from "./settingsLayout";
 
 export function CredentialsSettings({ environmentId }: { readonly environmentId: EnvironmentId }) {
   const projects = useProjects();
-  const projectName = (id: string) =>
+  const projectName = (id: string, repositoryKey?: string) =>
     projects.find((project) => project.environmentId === environmentId && project.id === id)
-      ?.title ?? "Unavailable project";
+      ?.title ??
+    repositoryKey ??
+    "Unavailable project";
   const canRead = useEnvironmentScope(environmentId, AuthAccessReadScope);
   const query = useEnvironmentQuery(
     canRead ? serverEnvironment.credentials({ environmentId, input: {} }) : null,
@@ -67,7 +69,7 @@ export function CredentialsSettings({ environmentId }: { readonly environmentId:
       <SettingsRow
         title="Give credentials privately in a thread"
         description={
-          "Ask an agent to save a named login or token. Enter it in the private card and choose which projects may reuse it. To replace one, ask the agent to update it. Credentials are stored on the selected environment and are independent of browser profiles."
+          "Ask an agent to save a named login or token. Enter it in the private card and choose which projects may reuse it. To replace one, ask the agent to update it. Credentials are stored on the selected environment, or on its browser host when that is a linked machine, and are independent of browser profiles."
         }
       />
       {query.error !== null || error ? (
@@ -85,7 +87,7 @@ export function CredentialsSettings({ environmentId }: { readonly environmentId:
           <SettingsRow
             key={entry.id}
             title={entry.name}
-            description={`${entry.kind === "login" ? "Login" : "Secret"}${entry.website ? ` · ${entry.website}` : ""} · ${entry.scope === "environment" ? "All projects on this environment" : `Project: ${projectName(entry.projectId)}`}`}
+            description={`${entry.kind === "login" ? "Login" : "Secret"}${entry.website ? ` · ${entry.website}` : ""} · ${entry.scope === "environment" ? "All projects" : `Project: ${projectName(entry.projectId, entry.repositoryKey)}`}`}
             control={
               <Button
                 size="xs"

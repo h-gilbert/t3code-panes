@@ -5,7 +5,10 @@ import { pipe } from "effect/Function";
 import {
   CommandId,
   CredentialRequest,
+  type CredentialCaller,
   type CredentialMetadata,
+  type CredentialVaultPeerInput,
+  type CredentialVaultPeerResult,
   SecretRef,
   SecretRequestError,
   type ProjectId,
@@ -29,7 +32,9 @@ import * as Semaphore from "effect/Semaphore";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as CredentialVault from "./CredentialVault.ts";
 import * as Metrics from "../observability/Metrics.ts";
+import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import * as ProjectEnrichmentService from "../project/ProjectEnrichmentService.ts";
 
 const SECRET_REF_PREFIX = "secret-ref:";
 const storeName = (ref: SecretRef) => `secret-request-${ref.slice(SECRET_REF_PREFIX.length)}`;
@@ -62,11 +67,15 @@ const decodeStored = Schema.decodeUnknownOption(StoredSecret);
 export class SecretRequests extends Context.Service<
   SecretRequests,
   {
+    /** A named login for the thread's project, bound to its website's origin. */
     readonly browserCredential: (input: {
       threadId: ThreadId;
       name: string;
-      origin: string;
     }) => Effect.Effect<{ origin: string; username: string; password: string }, SecretRequestError>;
+    /** Runs a linked environment's vault call in this environment's own vault. */
+    readonly peerVault: (
+      input: CredentialVaultPeerInput,
+    ) => Effect.Effect<CredentialVaultPeerResult, SecretRequestError>;
     readonly listCredentials: (
       projectId?: ProjectId,
     ) => Effect.Effect<ReadonlyArray<CredentialMetadata>, SecretRequestError>;
@@ -102,12 +111,27 @@ const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const threadManagement = yield* ThreadManagementService.ThreadManagementService;
+  const projects = yield* ProjectStore.ProjectStoreV2;
+  const enrichment = yield* ProjectEnrichmentService.ProjectEnrichmentService;
   // Beside the store's own files so the same owner-only directory and cleanup rules apply.
   const filesDir = store.directory === undefined ? undefined : path.join(store.directory, "files");
 
   const salt = Buffer.from(
     yield* store.getOrCreateRandom("secret-request-salt", 32).pipe(Effect.orDie),
   ).toString("hex");
+
+  // Project grants follow the repository, so the same repository's project on a linked machine matches.
+  const callerFor = Effect.fn("SecretRequests.callerFor")(function* (projectId: ProjectId) {
+    const project = yield* projects.get(projectId).pipe(Effect.orElseSucceed(Option.none));
+    if (Option.isNone(project)) return { projectId } satisfies CredentialCaller;
+    const identity = yield* enrichment.readRepositoryIdentity(project.value.workspaceRoot);
+    return identity === null
+      ? ({ projectId } satisfies CredentialCaller)
+      : ({
+          projectId,
+          repositoryKey: identity.canonicalKey.toLowerCase(),
+        } satisfies CredentialCaller);
+  });
 
   const answerLock = yield* Semaphore.make(1);
   const answer: SecretRequests["Service"]["answer"] = Effect.fn("SecretRequests.answer")(function* (
@@ -153,7 +177,7 @@ const make = Effect.gen(function* () {
       if (item.credential !== undefined) {
         yield* vault.save({
           request: item.credential,
-          projectId: records.thread.projectId,
+          caller: yield* callerFor(records.thread.projectId),
           scope: input.answer.scope ?? "project",
           value: credentialValue ?? input.answer.secret,
         });
@@ -265,7 +289,7 @@ const make = Effect.gen(function* () {
       return yield* new SecretRequestError({ reason: "ref_expired" });
     }
     if (decoded.value.credential !== undefined) {
-      const value = yield* vault.get(decoded.value.credential, input.projectId);
+      const value = yield* vault.get(decoded.value.credential, yield* callerFor(input.projectId));
       if (Option.isNone(value)) return yield* new SecretRequestError({ reason: "ref_unavailable" });
       return value.value;
     }
@@ -390,36 +414,75 @@ const make = Effect.gen(function* () {
   )(function* (input) {
     const records = yield* threadManagement
       .getThreadRecords(input.threadId, [], { messageRoles: [] })
-      .pipe(Effect.mapError(() => new SecretRequestError({ reason: "load_failed" })));
-    const metadata = (yield* vault.list(records.thread.projectId)).find(
-      (entry) =>
-        entry.name === input.name &&
-        entry.kind === "login" &&
-        entry.website !== undefined &&
-        URL.canParse(entry.website) &&
-        new URL(entry.website).origin === input.origin,
+      .pipe(Effect.mapError((cause) => new SecretRequestError({ reason: "load_failed", cause })));
+    const caller = yield* callerFor(records.thread.projectId);
+    const metadata = (yield* vault.list(caller)).find(
+      (entry) => entry.name === input.name && entry.kind === "login",
     );
-    if (metadata === undefined || !/^https?:\/\//.test(input.origin))
-      return yield* new SecretRequestError({ reason: "credential_failed" });
+    if (metadata === undefined)
+      return yield* new SecretRequestError({ reason: "credential_not_found" });
+    const website = metadata.website === undefined ? null : URL.parse(metadata.website);
+    if (website === null || !/^https?:$/.test(website.protocol))
+      return yield* new SecretRequestError({ reason: "credential_no_website" });
     const stored = yield* vault.get(
-      {
-        name: metadata.name,
-        kind: "login",
-        ...(metadata.website === undefined ? {} : { website: metadata.website }),
-      },
-      records.thread.projectId,
+      { name: metadata.name, kind: "login", website: metadata.website },
+      caller,
     );
     if (Option.isNone(stored))
-      return yield* new SecretRequestError({ reason: "credential_failed" });
+      return yield* new SecretRequestError({ reason: "credential_not_found" });
     const login = yield* decodeLogin(stored.value).pipe(
-      Effect.mapError(() => new SecretRequestError({ reason: "credential_failed" })),
+      Effect.mapError(
+        () =>
+          new SecretRequestError({
+            reason: "vault_unreadable",
+            detail: "This saved login is not a username and password.",
+          }),
+      ),
     );
-    return { ...login, origin: input.origin };
+    // The browser host types it only into a document of this origin, framed or not.
+    return { ...login, origin: website.origin };
   });
+  const peerVault: SecretRequests["Service"]["peerVault"] = Effect.fn("SecretRequests.peerVault")(
+    function* (input) {
+      const invalid = new SecretRequestError({
+        reason: "load_failed",
+        detail: `The linked environment sent an incomplete ${input.op} request.`,
+      });
+      const local = vault.local;
+      switch (input.op) {
+        case "list":
+          return { credentials: yield* local.list(input.caller) };
+        case "get": {
+          if (input.caller === undefined || input.credential === undefined) return yield* invalid;
+          const value = yield* local.get(input.credential, input.caller);
+          return Option.isNone(value) ? {} : { value: value.value };
+        }
+        case "save":
+          if (
+            input.caller === undefined ||
+            input.credential === undefined ||
+            input.scope === undefined ||
+            input.value === undefined
+          )
+            return yield* invalid;
+          yield* local.save({
+            request: input.credential,
+            caller: input.caller,
+            scope: input.scope,
+            value: input.value,
+          });
+          return {};
+        case "remove":
+          if (input.id === undefined) return yield* invalid;
+          yield* local.remove(input.id);
+          return {};
+      }
+    },
+  );
   const reuseCredential: SecretRequests["Service"]["reuseCredential"] = Effect.fn(
     "SecretRequests.reuseCredential",
   )(function* (input) {
-    const value = yield* vault.get(input.credential, input.projectId);
+    const value = yield* vault.get(input.credential, yield* callerFor(input.projectId));
     if (Option.isNone(value)) return Option.none();
     const ref = SecretRef.make(`secret-ref:${NodeCrypto.randomBytes(16).toString("hex")}`);
     if (input.delivery === "file") {
@@ -454,7 +517,10 @@ const make = Effect.gen(function* () {
     saveToFile,
     reuseCredential,
     browserCredential,
-    listCredentials: vault.list,
+    peerVault,
+    listCredentials: Effect.fn("SecretRequests.listCredentials")(function* (projectId) {
+      return yield* vault.list(projectId === undefined ? undefined : yield* callerFor(projectId));
+    }),
     removeCredential: vault.remove,
   });
 });

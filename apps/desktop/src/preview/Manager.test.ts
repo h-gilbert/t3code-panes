@@ -6078,6 +6078,7 @@ describe("PreviewManager", () => {
               isDestroyed: () => false,
               getType: () => "webview",
               getURL: () => "https://example.com/login",
+              mainFrame: { url: "https://example.com/login", framesInSubtree: [] },
               getTitle: () => "Example",
               isLoading: () => false,
               isLoadingMainFrame: () => false,
@@ -6150,6 +6151,86 @@ describe("PreviewManager", () => {
         makeLayer(credentialLayer),
       );
     },
+  );
+
+  effectIt.effect("fills a vault login only into a frame of its own origin", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const sendCommand = vi.fn(async (_method: string, _params?: unknown) => undefined);
+        const loginFrame = {
+          url: "https://idmsa.apple.com/appleauth/auth/signin",
+          executeJavaScript: vi.fn(async (_expression: string) => ({
+            filled: true,
+            filledPassword: true,
+            filledUsername: true,
+          })),
+        };
+        const mainFrame = {
+          url: "https://appstoreconnect.apple.com/login",
+          framesInSubtree: [] as Array<unknown>,
+        };
+        mainFrame.framesInSubtree.push(mainFrame, loginFrame);
+        fromId.mockReturnValue({
+          id: 43,
+          isDestroyed: () => false,
+          getType: () => "webview",
+          getURL: () => mainFrame.url,
+          mainFrame,
+          getTitle: () => "App Store Connect",
+          isLoading: () => false,
+          isLoadingMainFrame: () => false,
+          isDevToolsOpened: () => false,
+          getZoomFactor: () => 1,
+          setZoomFactor: vi.fn(),
+          setAudioMuted: vi.fn(),
+          isCurrentlyAudible: () => false,
+          on: vi.fn(),
+          off: vi.fn(),
+          ipc: { on: vi.fn(), off: vi.fn() },
+          session: { on: vi.fn() },
+          send: webviewSend,
+          navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+          setIgnoreMenuShortcuts: vi.fn(),
+          setWindowOpenHandler: vi.fn(),
+          debugger: {
+            isAttached: () => false,
+            attach: vi.fn(),
+            sendCommand,
+            on: vi.fn(),
+            off: vi.fn(),
+          },
+        } as never);
+        yield* manager.createTab("tab_framed");
+        yield* manager.registerWebview("tab_framed", 43);
+        const credential = (origin: string) => ({
+          environmentId: "env_a",
+          profile: null,
+          credential: { origin, username: "dummy@example.com", password: "dummy-password" },
+        });
+
+        expect(
+          yield* manager.automationAutofill("tab_framed", credential("https://evil.example")),
+        ).toEqual({
+          filled: false,
+          reason: "no-credential",
+          origin: "https://appstoreconnect.apple.com",
+        });
+        expect(loginFrame.executeJavaScript).not.toHaveBeenCalled();
+
+        expect(
+          yield* manager.automationAutofill("tab_framed", credential("https://idmsa.apple.com")),
+        ).toEqual({
+          filled: true,
+          origin: "https://idmsa.apple.com",
+          username: "dummy@example.com",
+        });
+        expect(loginFrame.executeJavaScript).toHaveBeenCalledOnce();
+        expect(loginFrame.executeJavaScript.mock.calls[0]?.[0]).toContain(
+          'location.origin !== "https://idmsa.apple.com"',
+        );
+        expect(sendCommand).not.toHaveBeenCalledWith("Runtime.evaluate", expect.anything());
+      }),
+    ),
   );
 });
 

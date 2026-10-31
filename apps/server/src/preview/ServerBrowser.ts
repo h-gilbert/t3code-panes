@@ -2251,7 +2251,6 @@ const make = Effect.gen(function* () {
                 secrets.value.browserCredential({
                   threadId: ThreadId.make(tab.threadId),
                   name: credentialName,
-                  origin: new URL(tab.page.url()).origin,
                 }),
               );
         const filled = await runPromise(
@@ -2272,6 +2271,15 @@ const make = Effect.gen(function* () {
             },
           }),
         );
+        const outcome = filled as { filled?: boolean; reason?: string; origin?: string | null };
+        if (
+          credential !== undefined &&
+          outcome.filled !== true &&
+          outcome.reason === "no-credential"
+        )
+          throw new Error(
+            `The saved login "${credentialName}" is for ${credential.origin}, but neither this page (${outcome.origin ?? "no web page"}) nor a frame in it is from that site. Open its sign-in page first.`,
+          );
         return { tabId: tab.tabId, ...(filled as Record<string, unknown>) };
       }
       case "evaluate":

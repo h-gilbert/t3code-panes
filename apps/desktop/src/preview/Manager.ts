@@ -5278,9 +5278,49 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     );
   });
 
+  /** Credential origins of the page and its frames, top document first. */
+  const automationFrameOrigins = Effect.fn("PreviewManager.automationFrameOrigins")(function* (
+    tabId: string,
+  ) {
+    const wc = yield* requireWebContents(tabId);
+    return yield* attempt({ operation: "automationFrameOrigins", tabId }, () => {
+      const top = BrowserCredentials.normalizeCredentialOrigin(wc.mainFrame.url);
+      const origins = new Set(top === null ? [] : [top]);
+      for (const frame of wc.mainFrame.framesInSubtree) {
+        const origin = BrowserCredentials.normalizeCredentialOrigin(frame.url);
+        if (origin !== null) origins.add(origin);
+      }
+      return { top, origins: [...origins] };
+    });
+  });
+
+  const fillFrames = Effect.fn("PreviewManager.autofillFrames")(function* (
+    tabId: string,
+    wc: Electron.WebContents,
+    expression: string,
+    origin: string,
+  ) {
+    // Login forms are often framed cross-origin (idmsa.apple.com inside appstoreconnect.apple.com).
+    const frames = wc.mainFrame.framesInSubtree.filter(
+      (frame) =>
+        frame !== wc.mainFrame &&
+        BrowserCredentials.normalizeCredentialOrigin(frame.url) === origin,
+    );
+    for (const frame of frames) {
+      const outcome = decodeAutofillOutcome(
+        yield* attemptPromise({ operation: "autofill.frame", tabId }, () =>
+          frame.executeJavaScript(expression),
+        ),
+      );
+      if (outcome?.filled) return outcome;
+    }
+    return null;
+  });
+
   const automationAutofill = Effect.fn("PreviewManager.automationAutofillDocument")(function* (
     tabId: string,
     expression: string,
+    origin: string,
   ) {
     const wc = yield* requireWebContents(tabId);
     return yield* withControlSession(tabId, wc, "autofill", (send) =>
@@ -5288,9 +5328,10 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         if ((yield* Ref.get(arbitraryEvaluationTabIdsRef)).has(tabId)) {
           return yield* new PreviewAutomationCredentialAutofillBlockedError({ tabId });
         }
-        const outcome = decodeAutofillOutcome(
-          yield* performAutomationEvaluate(tabId, { expression }, send),
-        );
+        const outcome =
+          BrowserCredentials.normalizeCredentialOrigin(wc.mainFrame.url) === origin
+            ? decodeAutofillOutcome(yield* performAutomationEvaluate(tabId, { expression }, send))
+            : yield* fillFrames(tabId, wc, expression, origin);
         if (outcome?.filledPassword) {
           yield* Ref.update(
             credentialProtectedTabIdsRef,
@@ -5733,6 +5774,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
 
   return {
     automationAutofill,
+    automationFrameOrigins,
     automationClick,
     automationEvaluate,
     automationPress,
@@ -6355,18 +6397,33 @@ export const make = Effect.gen(function* PreviewManagerMake() {
   const autofill: PreviewManager["Service"]["automationAutofill"] = Effect.fn(
     "PreviewManager.automationAutofill",
   )(function* (tabId, input) {
-    const status = yield* operations.automationStatus(tabId);
-    const origin = status.url ? BrowserCredentials.normalizeCredentialOrigin(status.url) : null;
-    if (!origin) {
-      return { filled: false, reason: "no-credential", origin: null } as const;
+    const { top, origins } = yield* operations.automationFrameOrigins(tabId);
+    const fill = (
+      login: { readonly username: string; readonly password: string },
+      origin: string,
+    ) =>
+      operations
+        .automationAutofill(
+          tabId,
+          buildAutofillExpression(login.username, login.password, origin),
+          origin,
+        )
+        .pipe(
+          Effect.map((outcome) =>
+            outcome?.filled
+              ? ({ filled: true, origin, username: login.username } as const)
+              : ({ filled: false, reason: "no-fields", origin } as const),
+          ),
+        );
+    // A login is typed only into a document of its own origin, whether the page or a frame in it.
+    if (input.credential !== undefined) {
+      return origins.includes(input.credential.origin)
+        ? yield* fill(input.credential, input.credential.origin)
+        : ({ filled: false, reason: "no-credential", origin: top } as const);
     }
-    // The store re-checks (origin, profile) exactly; the password for one
-    // site can never be typed into another.
-    if (input.credential !== undefined && input.credential.origin !== origin)
-      return { filled: false, reason: "no-credential", origin } as const;
-    const resolved =
-      input.credential ??
-      (yield* browserCredentials
+    for (const origin of origins) {
+      // The store re-checks (origin, profile) exactly.
+      const resolved = yield* browserCredentials
         .resolveForFill({
           origin,
           environmentId: input.environmentId,
@@ -6378,17 +6435,12 @@ export const make = Effect.gen(function* PreviewManagerMake() {
           Effect.mapError(
             (cause) => new PreviewOperationError({ operation: "automationAutofill", cause }),
           ),
-        ));
-    if ("reason" in resolved) {
-      return { filled: false, reason: resolved.reason, origin } as const;
+        );
+      if (!("reason" in resolved)) return yield* fill(resolved, origin);
+      if (resolved.reason !== "no-credential")
+        return { filled: false, reason: resolved.reason, origin } as const;
     }
-    const outcome = yield* operations.automationAutofill(
-      tabId,
-      buildAutofillExpression(resolved.username, resolved.password, origin),
-    );
-    return outcome?.filled
-      ? ({ filled: true, origin, username: resolved.username } as const)
-      : ({ filled: false, reason: "no-fields", origin } as const);
+    return { filled: false, reason: "no-credential", origin: top } as const;
   });
 
   return PreviewManager.of({

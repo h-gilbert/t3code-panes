@@ -14,6 +14,8 @@ import {
   OrchestratorMcpDeleteScheduledTaskInput,
   OrchestratorMcpDeleteScheduledTaskResult,
   OrchestratorMcpEnvironmentTarget,
+  CredentialVaultPeerInput,
+  CredentialVaultPeerResult,
   OrchestratorMcpRequestSecretInput,
   OrchestratorMcpListCredentialsInput,
   OrchestratorMcpListCredentialsResult,
@@ -51,6 +53,7 @@ import * as PeerLinks from "../../../peer/PeerLinks.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as OrchestratorMcpService from "../../OrchestratorMcpService.ts";
 import * as ThreadMetadataMcpService from "../../ThreadMetadataMcpService.ts";
+import { CREDENTIAL_VAULT_PEER_TOOL } from "../../../secrets/LinkedCredentialVault.ts";
 
 const dependencies = [
   McpInvocationContext.McpInvocationContext,
@@ -199,7 +202,7 @@ const DeleteScheduledTaskTool = Tool.make("delete_scheduled_task", {
 
 const ListCredentialsTool = Tool.make("credentials_list", {
   description:
-    "List saved credential names and scopes available to this project, never values. Reuse one with request_secret and the same credential name, kind and website. Credentials stay on this environment.",
+    "List saved credential names and scopes available to this project, never values. Reuse one with request_secret and the same credential name, kind and website. Linked machines that share a browser host share its credentials.",
   parameters: OrchestratorMcpListCredentialsInput,
   success: OrchestratorMcpListCredentialsResult,
   failure: OrchestratorMcpFailure,
@@ -208,6 +211,18 @@ const ListCredentialsTool = Tool.make("credentials_list", {
 })
   .annotate(Tool.Title, "List saved credentials")
   .annotate(Tool.Readonly, true);
+
+// Hidden from agents: a linked environment's server calls it to share this vault.
+const CredentialVaultPeerTool = Tool.make(CREDENTIAL_VAULT_PEER_TOOL, {
+  description: "Linked T3 environments only: use this environment's credential vault.",
+  parameters: CredentialVaultPeerInput,
+  success: CredentialVaultPeerResult,
+  failure: OrchestratorMcpFailure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Title, "Linked credential vault")
+  .annotate(McpSchema.EnabledWhen, McpInvocationContext.onlyForLinks);
 
 const RequestSecretTool = Tool.make("request_secret", {
   description:
@@ -373,6 +388,7 @@ export const OrchestratorToolkit = Toolkit.make(
   DeleteScheduledTaskTool,
   RequestSecretTool,
   ListCredentialsTool,
+  CredentialVaultPeerTool,
   CreateThreadsTool,
   ThreadListTool,
   ThreadReadTool,

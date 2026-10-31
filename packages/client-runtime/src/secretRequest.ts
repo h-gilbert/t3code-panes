@@ -12,7 +12,7 @@ export const secretRequestPrivacyNote = (
   item.credential !== undefined
     ? item.delivery === "file"
       ? "Saved in this environment's vault. This agent's commands can read a private copy for 24 hours."
-      : "Saved credentials can be reused by authorized agents on this environment. Values stay out of chat."
+      : "Saved credentials can be reused by authorized agents. Values stay out of chat."
     : item.delivery === "file"
       ? "Kept out of chat, in a private file this agent's commands can read for 24 hours"
       : "Stored securely, never shown to the agent";

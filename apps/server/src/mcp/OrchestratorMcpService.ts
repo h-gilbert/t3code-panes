@@ -26,6 +26,8 @@ import {
   type OrchestratorMcpDeleteScheduledTaskInput,
   type OrchestratorMcpRequestSecretInput,
   type OrchestratorMcpListCredentialsResult,
+  type CredentialVaultPeerInput,
+  type CredentialVaultPeerResult,
   type OrchestratorMcpListCredentialsInput,
   type OrchestratorMcpRequestSecretResult,
   type OrchestratorMcpDeleteScheduledTaskResult,
@@ -194,6 +196,11 @@ export interface OrchestratorMcpServiceShape {
     scope: McpInvocationScope,
     input: OrchestratorMcpListCredentialsInput,
   ) => Effect.Effect<OrchestratorMcpListCredentialsResult, OrchestratorMcpFailure>;
+  /** A linked environment's call into this environment's vault; values go only to its server. */
+  readonly credentialVaultForLink: (
+    scope: McpInvocationScope,
+    input: CredentialVaultPeerInput,
+  ) => Effect.Effect<CredentialVaultPeerResult, OrchestratorMcpFailure>;
   readonly requestSecret: (
     scope: McpInvocationScope,
     input: OrchestratorMcpRequestSecretInput,
@@ -2001,6 +2008,20 @@ const make = Effect.gen(function* () {
         ),
       };
     }),
+    credentialVaultForLink: Effect.fn("OrchestratorMcpService.credentialVaultForLink")(
+      function* (scope, input) {
+        // Agents never reach this: only another environment's server holds a link token.
+        if (scope.client?.linked !== true) {
+          return yield* failure(
+            "capability_denied",
+            "Only a linked T3 Code environment can use this credential vault.",
+          );
+        }
+        return yield* secretRequests
+          .peerVault(input)
+          .pipe(Effect.mapError((error) => failure("orchestration_error", error.message)));
+      },
+    ),
     requestSecret: Effect.fn("OrchestratorMcpService.requestSecret")(function* (scope, input) {
       const { scope: threadScope, parent } = yield* loadThreadCaller(scope, "request_secret");
       const threadId = threadScope.thread.threadId;
