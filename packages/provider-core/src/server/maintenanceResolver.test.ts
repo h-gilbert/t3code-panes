@@ -908,7 +908,12 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
   it.effect("shares installer lookups only for the same executable and update target", () =>
     Effect.gen(function* () {
       let lookups = 0;
-      const capabilities = (executable: string, args: ReadonlyArray<string>, version: string) =>
+      const capabilities = (
+        executable: string,
+        args: ReadonlyArray<string>,
+        version: string,
+        env?: NodeJS.ProcessEnv,
+      ) =>
         makeProviderMaintenanceCapabilities({
           provider: driver("packageTool"),
           packageName: "@example/package-tool",
@@ -916,6 +921,7 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
           updateArgs: args,
           updateLockKey: "homebrew",
           latestVersion: null,
+          ...(env ? { env } : {}),
           lookupLatestVersion: Effect.sync(() => {
             lookups += 1;
             return version;
@@ -929,23 +935,30 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
         "3.0.0",
       );
       const otherBrew = capabilities("/usr/local/bin/brew", ["upgrade", "package-tool"], "4.0.0");
+      const otherHome = capabilities(
+        "/opt/homebrew/bin/brew",
+        ["upgrade", "package-tool"],
+        "6.0.0",
+        { CLAUDE_CONFIG_DIR: "/other-home" },
+      );
 
       expect(yield* resolveLatestProviderVersion(formula)).toBe("2.0.0");
       expect(yield* resolveLatestProviderVersion(cask)).toBe("3.0.0");
       expect(yield* resolveLatestProviderVersion(otherBrew)).toBe("4.0.0");
+      expect(yield* resolveLatestProviderVersion(otherHome)).toBe("6.0.0");
       const refreshed = capabilities(
         "/opt/homebrew/bin/brew",
         ["upgrade", "package-tool"],
         "5.0.0",
       );
       expect(yield* resolveLatestProviderVersion(refreshed)).toBe("2.0.0");
-      expect(lookups).toBe(3);
+      expect(lookups).toBe(4);
 
       yield* invalidateLatestProviderVersion(refreshed);
       expect(yield* resolveLatestProviderVersion(refreshed)).toBe("5.0.0");
       expect(yield* resolveLatestProviderVersion(cask)).toBe("3.0.0");
       expect(yield* resolveLatestProviderVersion(otherBrew)).toBe("4.0.0");
-      expect(lookups).toBe(4);
+      expect(lookups).toBe(5);
     }).pipe(
       Effect.provide(ProviderLatestVersions.layer),
       Effect.provideService(

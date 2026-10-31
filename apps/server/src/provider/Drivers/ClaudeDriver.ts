@@ -61,6 +61,7 @@ import {
   resolveClaudeHomePath,
 } from "./ClaudeHome.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { withClaudeNativeLatestVersion } from "./ClaudeMaintenance.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
@@ -90,16 +91,7 @@ const UPDATE = makePackageManagedProviderMaintenanceResolver({
   },
 });
 
-/**
- * Read the per-instance capabilities cache, dropping a failed probe instead of
- * retaining it for the rest of the TTL.
- *
- * A probe fails for transient reasons — most often a machine that slept while
- * the `claude` subprocess was still initializing, which lands as a timeout on
- * wake. Caching that `undefined` alongside successes pinned the provider to
- * "Limited" for five minutes after a lid close, so the next health check gets
- * to probe again.
- */
+// Failed probes after wake must not pin the provider to "Limited" for the cache TTL.
 export const readCapabilitiesCache = <Key, A>(
   cache: Cache.Cache<Key, A | undefined>,
   key: Key,
@@ -162,18 +154,20 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
       enabled,
       binaryPath: expandHomePath(config.binaryPath, yield* HostProcess.HomeDirectory),
     } satisfies ClaudeSettings;
+    const configDir = yield* resolveClaudeHomePath(effectiveConfig, processEnv);
     const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
       resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
         binaryPath: effectiveConfig.binaryPath,
         env: processEnv,
       }).pipe(
+        Effect.flatMap((capabilities) => withClaudeNativeLatestVersion(capabilities, configDir)),
+        Effect.provideService(HttpClient.HttpClient, httpClient),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.provideService(FileSystem.FileSystem, fileSystem),
         Effect.provideService(Path.Path, path),
       ),
     );
     const continuationGroupKey = yield* makeClaudeContinuationGroupKey(effectiveConfig, processEnv);
-    const configDir = yield* resolveClaudeHomePath(effectiveConfig, processEnv);
     const accountConfigPath = yield* ClaudeResetCredits.claudeAccountConfigPath(
       effectiveConfig.homePath.trim() || processEnv.CLAUDE_CONFIG_DIR?.trim()
         ? configDir
