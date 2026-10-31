@@ -395,6 +395,12 @@ function SidebarUpdateControl({ overlay = false }: { readonly overlay?: boolean 
   if (overlay && !showUpdateDetails) return null;
 
   const Container = overlay ? "div" : SidebarMenuItem;
+  const containerClassName = cn(
+    "shrink-0",
+    overlay
+      ? "pointer-events-auto max-w-[calc(100%-1.5rem)] rounded-full border border-border bg-background shadow-lg [-webkit-app-region:no-drag]"
+      : "ml-auto",
+  );
   const overlayLabel = isDownloading
     ? `Downloading update${state?.downloadPercent == null ? "" : ` ${Math.floor(state.downloadPercent)}%`}`
     : state?.status === "error"
@@ -433,7 +439,7 @@ function SidebarUpdateControl({ overlay = false }: { readonly overlay?: boolean 
           ? { status: "downloading", percent: state.downloadPercent }
           : { status: "waiting" };
     return (
-      <SidebarMenuItem className="ml-auto flex min-w-0 flex-1">
+      <Container className={cn(containerClassName, "flex min-w-0", !overlay && "flex-1")}>
         <SidebarUpdateCapsule
           run={run}
           local={local}
@@ -456,7 +462,7 @@ function SidebarUpdateControl({ overlay = false }: { readonly overlay?: boolean 
             : {})}
         />
         {confirmDialog}
-      </SidebarMenuItem>
+      </Container>
     );
   }
 
@@ -510,14 +516,7 @@ function SidebarUpdateControl({ overlay = false }: { readonly overlay?: boolean 
   );
 
   return (
-    <Container
-      className={cn(
-        "shrink-0",
-        overlay
-          ? "pointer-events-auto rounded-full border border-border bg-background shadow-lg [-webkit-app-region:no-drag]"
-          : "ml-auto",
-      )}
-    >
+    <Container className={containerClassName}>
       <Popover
         handle={releaseNotesPopoverHandle}
         open={releaseNotesOpen && showReleaseNotesPopover}
