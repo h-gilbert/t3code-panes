@@ -6,6 +6,7 @@ import {
 } from "@t3tools/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import type { OrchestrationV2Subagent } from "@t3tools/contracts";
+import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 
 import {
   isSidebarSubagentThread,
@@ -183,9 +184,11 @@ export function runningWorkspaceSubagentsByParent(
     if (
       thread.archivedAt !== null ||
       (!isSidebarSubagentThread(thread) && thread.delegatedFrom == null) ||
-      !["preparing", "queued", "starting", "running", "waiting"].includes(
+      (!["preparing", "queued", "starting", "running", "waiting"].includes(
         thread.source?.activityRunStatus ?? thread.source?.status ?? thread.runtime?.status ?? "",
-      )
+      ) &&
+        // A child whose turn ended but who waits on its background work is still running.
+        !backgroundWorkHoldsCompletion(thread.pendingBackgroundTasks ?? []))
     )
       continue;
     const seen = new Set([scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))]);

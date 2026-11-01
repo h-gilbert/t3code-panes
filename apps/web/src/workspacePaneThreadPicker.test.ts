@@ -229,6 +229,17 @@ describe("subagents in workspace lists", () => {
       source: { ...native.source, status: "completed" },
     } as EnvironmentThreadShell;
     expect(countRunningWorkspaceSubagents([completed]).size).toBe(0);
+    const awaitedTask = { taskId: "loop", description: "wait", kind: "command" } as const;
+    const held = {
+      ...completed,
+      runtime: { status: "idle" } as EnvironmentThreadShell["runtime"],
+      pendingBackgroundTasks: [{ ...awaitedTask, awaited: true }],
+    } as EnvironmentThreadShell;
+    expect(
+      countRunningWorkspaceSubagents([thread("parent", projectA), held]).get("local:parent"),
+    ).toBe(1);
+    const devServer = { ...held, pendingBackgroundTasks: [awaitedTask] } as EnvironmentThreadShell;
+    expect(countRunningWorkspaceSubagents([devServer]).size).toBe(0);
   });
 
   it("includes remote delegated work and its nested agents under the scoped parent", () => {
