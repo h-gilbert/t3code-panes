@@ -426,7 +426,12 @@ const routed = Effect.fn("McpToolAccess.routed")(function* <Tools extends Record
         yield* (remote as RemoteCheck<typeof params>)(params);
         if (remoteHandler !== undefined) return yield* remoteHandler(params, target);
         if (Option.isNone(forwarding)) return yield* linksUnavailable;
-        return yield* forwarding.value.call(scope, tool, target, { ...params, environmentId });
+        // Only RemoteDelegation, which calls PeerForwarding itself, may mark a thread
+        // there as a task of one here; an agent's own call never carries that link.
+        const { delegatedFrom: _delegatedFrom, ...forwarded } = params as {
+          readonly delegatedFrom?: unknown;
+        };
+        return yield* forwarding.value.call(scope, tool, target, { ...forwarded, environmentId });
       });
   }
   return handlers as Toolkit.HandlersFrom<Tools>;

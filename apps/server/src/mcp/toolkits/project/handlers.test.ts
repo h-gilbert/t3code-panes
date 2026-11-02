@@ -48,6 +48,7 @@ const clientLaunchHarness = (input: {
   readonly workspaceRoot?: string;
   readonly checkWorktreeBase?: ThreadLaunch.ThreadLaunchService["Service"]["checkWorktreeBase"];
   readonly webOrigin?: string;
+  readonly forwarded?: Array<unknown>;
 }) => {
   const projectId = ProjectId.make("project:client-target");
   const modelSelection = {
@@ -137,7 +138,18 @@ const clientLaunchHarness = (input: {
             : Option.none(),
         ),
     }),
-    Layer.mock(PeerForwarding.PeerForwarding)({}),
+    Layer.mock(PeerForwarding.PeerForwarding)({
+      call: (_scope, _tool, _environmentId, params) => {
+        input.forwarded?.push(params);
+        return Effect.succeed({
+          threadId: "thread:remote",
+          projectId,
+          modelSelection,
+          runId: null,
+          status: null,
+        } as never);
+      },
+    }),
     Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({ namedProjectsRoot: "/projects" }),
     DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer)),
   ).pipe(
@@ -241,6 +253,40 @@ it.effect(
       });
       expect(fromSettings.launched[0]?.modelSelection).toEqual(overrideModel);
     }),
+);
+
+it.effect("a launch on a linked environment never forwards a parent link", () =>
+  Effect.gen(function* () {
+    const forwarded: Array<unknown> = [];
+    const { projectId, dependencies } = clientLaunchHarness({
+      runtimeModeCeiling: "full-access",
+      launched: [],
+      forwarded,
+    });
+    const toolkit = yield* ProjectToolkit.pipe(
+      Effect.provide(
+        McpToolAccess.HandlersLayer.layer(ProjectHandlers.layer).pipe(Layer.provide(dependencies)),
+      ),
+    );
+    yield* toolkit
+      .handle("t3_thread_launch", {
+        projectId,
+        title: "Orchestrator",
+        environmentId: EnvironmentId.make("environment:fred"),
+        delegatedFrom: {
+          environmentId: EnvironmentId.make("environment"),
+          threadId: "thread:planner",
+          title: "Planner",
+        },
+      } as never)
+      .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
+    expect(forwarded).toHaveLength(1);
+    expect(forwarded[0]).toMatchObject({
+      title: "Orchestrator",
+      environmentId: "environment:fred",
+    });
+    expect(forwarded[0]).not.toHaveProperty("delegatedFrom");
+  }),
 );
 
 it.effect("a launch retried with the same clientRequestId replays the first one", () =>
