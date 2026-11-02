@@ -78,11 +78,15 @@ export function resolveThreadAgents(
   );
   const count = (turn?.subagents.length ?? 0) + delegatedThreads.length;
   const label = `${count} ${count === 1 ? "agent" : "agents"}`;
+  const turnSegment = resolveSubagentPillSegment(turn);
+  // The turn's own label carries live status; a plain count keeps children reachable after it.
   return {
     turn,
     delegatedThreads,
     agentsSegment:
-      children.length > 0 ? { label, accessibilityLabel: label } : resolveSubagentPillSegment(turn),
+      (delegatedThreads.length === 0 && turnSegment !== null) || children.length === 0
+        ? turnSegment
+        : { label, accessibilityLabel: label },
   };
 }
 
