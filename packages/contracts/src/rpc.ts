@@ -369,7 +369,12 @@ import {
   ScheduledTaskUpsertInput,
   ScheduledTaskMutationResult,
 } from "./scheduledTask.ts";
-import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
+import {
+  SecretRequestAnswerInput,
+  SecretRequestError,
+  CredentialsListResult,
+  CredentialRemoveInput,
+} from "./secretRequest.ts";
 import {
   ProjectCloneActionInput,
   ProjectCloneActionResult,
@@ -535,6 +540,8 @@ export const WS_METHODS = {
   scheduledTasksRunNow: "scheduledTasks.runNow",
   scheduledTasksRotateWebhookToken: "scheduledTasks.rotateWebhookToken",
   secretsAnswerRequest: "secrets.answerRequest",
+  credentialsList: "credentials.list",
+  credentialsRemove: "credentials.remove",
   guestShareCreate: "guestShare.create",
   scheduledTasksListWebhookDeliveries: "scheduledTasks.listWebhookDeliveries",
   scheduledTasksGetWebhookDelivery: "scheduledTasks.getWebhookDelivery",
@@ -1890,6 +1897,15 @@ const WsGuestShareCreateRpc = Rpc.make(WS_METHODS.guestShareCreate, {
   error: Schema.Union([GuestShareCreateError, EnvironmentAuthorizationError]),
 });
 
+const WsCredentialsListRpc = Rpc.make(WS_METHODS.credentialsList, {
+  payload: Schema.Struct({}),
+  success: CredentialsListResult,
+  error: Schema.Union([SecretRequestError, EnvironmentAuthorizationError]),
+});
+const WsCredentialsRemoveRpc = Rpc.make(WS_METHODS.credentialsRemove, {
+  payload: CredentialRemoveInput,
+  error: Schema.Union([SecretRequestError, EnvironmentAuthorizationError]),
+});
 const WsSecretsAnswerRequestRpc = Rpc.make(WS_METHODS.secretsAnswerRequest, {
   payload: SecretRequestAnswerInput,
   error: Schema.Union([SecretRequestError, EnvironmentAuthorizationError]),
@@ -1995,6 +2011,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsScheduledTasksRunNowRpc,
   WsScheduledTasksRotateWebhookTokenRpc,
   WsSecretsAnswerRequestRpc,
+  WsCredentialsListRpc,
+  WsCredentialsRemoveRpc,
   WsScheduledTasksListWebhookDeliveriesRpc,
   WsScheduledTasksGetWebhookDeliveryRpc,
   WsServerReportClientActivityRpc,

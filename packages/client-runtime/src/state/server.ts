@@ -1529,6 +1529,14 @@ export function createServerEnvironmentAtoms<R, E>(
     }),
     // Off the config lane: answering a card must not queue behind settings
     // edits. One answer per card at a time.
+    credentials: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:credentials:list",
+      tag: WS_METHODS.credentialsList,
+    }),
+    removeCredential: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:credentials:remove",
+      tag: WS_METHODS.credentialsRemove,
+    }),
     answerSecretRequest: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:secrets:answer-request",
       tag: WS_METHODS.secretsAnswerRequest,

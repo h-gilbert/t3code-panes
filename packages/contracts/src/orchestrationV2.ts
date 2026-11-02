@@ -1,3 +1,4 @@
+import { CredentialRequest } from "./secretRequest.ts";
 import { OrchestrationMessageContext } from "./composerContext.ts";
 import { withRecordIdTable } from "./orchestrationV2IdTable.ts";
 import * as DateTime from "effect/DateTime";
@@ -1510,6 +1511,7 @@ const OrchestrationV2SecretRequestFields = {
   reason: Schema.String,
   placeholder: Schema.optional(Schema.String),
   delivery: Schema.optional(OrchestrationV2SecretRequestDelivery),
+  credential: Schema.optional(CredentialRequest),
   secretStatus: OrchestrationV2SecretRequestStatus,
 } as const;
 
@@ -3460,6 +3462,7 @@ const OrchestrationV2InternalCommand = Schema.Union([
     reason: Schema.String,
     placeholder: Schema.optional(Schema.String),
     delivery: Schema.optional(OrchestrationV2SecretRequestDelivery),
+    credential: Schema.optional(CredentialRequest),
     secretStatus: OrchestrationV2SecretRequestStatus,
   }),
   /**

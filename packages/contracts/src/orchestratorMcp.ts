@@ -1,3 +1,4 @@
+import { CredentialRequest, CredentialsListResult } from "./secretRequest.ts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
@@ -725,7 +726,18 @@ export const OrchestratorMcpUpdateScheduledTaskInput = Schema.Struct({
 export type OrchestratorMcpUpdateScheduledTaskInput =
   typeof OrchestratorMcpUpdateScheduledTaskInput.Type;
 
+export const OrchestratorMcpListCredentialsInput = Schema.Struct({
+  query: Schema.optional(Schema.String),
+});
+export type OrchestratorMcpListCredentialsInput = typeof OrchestratorMcpListCredentialsInput.Type;
+export const OrchestratorMcpListCredentialsResult = CredentialsListResult;
+export type OrchestratorMcpListCredentialsResult = typeof OrchestratorMcpListCredentialsResult.Type;
+
 export const OrchestratorMcpRequestSecretInput = Schema.Struct({
+  credential: Schema.optional(CredentialRequest).annotate({
+    description:
+      "Save or reuse a named credential. login asks privately for username and password; secret asks for a token. Defaults to this project; the user may grant all projects on this environment. replace=true asks for a replacement instead of reusing. Login deliveries contain JSON {username,password}; token deliveries contain the raw value. Never print either.",
+  }),
   label: TrimmedNonEmptyString.annotate({
     description: "Card title, such as 'GitHub webhook secret'.",
   }),
