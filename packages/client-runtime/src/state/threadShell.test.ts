@@ -53,6 +53,66 @@ function makeHarness(environmentIds: ReadonlyArray<EnvironmentId> = [environment
 }
 
 describe("v2 thread shell lists", () => {
+  it("keeps delegated children reachable after completion without streaming list churn", () => {
+    const { registry, threads, snapshotAtom, catalogValueAtom } = makeHarness([
+      environmentId,
+      remoteEnvironmentId,
+    ]);
+    const parent = { environmentId, threadId: v2ThreadShell.id };
+    const child = {
+      ...v2ThreadShell,
+      id: ThreadId.make("delegated-child"),
+      title: "Finished work",
+      status: "completed" as const,
+      delegatedFrom: { ...parent, title: "Parent" },
+    };
+    const setChildren = (children: ReadonlyArray<OrchestrationV2ThreadShell>) =>
+      registry.set(snapshotAtom(remoteEnvironmentId), { ...v2ShellSnapshot, threads: children });
+    setChildren([
+      child,
+      { ...child, id: ThreadId.make("archived-child"), archivedAt: v2Now },
+      {
+        ...child,
+        id: ThreadId.make("other-parent"),
+        delegatedFrom: {
+          ...parent,
+          threadId: ThreadId.make("other"),
+          title: "Other",
+        },
+      },
+    ]);
+    const list = threads.delegatedChildrenAtom(parent);
+    const dispose = registry.mount(list);
+    try {
+      const before = registry.get(list);
+      expect(before).toEqual([
+        {
+          environmentId: remoteEnvironmentId,
+          threadId: child.id,
+          title: child.title,
+        },
+      ]);
+      setChildren([{ ...child, updatedAt: DateTime.add(v2Now, { seconds: 1 }), itemCount: 9 }]);
+      expect(registry.get(list)).toBe(before);
+      setChildren([{ ...child, title: "Renamed" }]);
+      expect(registry.get(list)[0]?.title).toBe("Renamed");
+      const catalog = registry.get(catalogValueAtom);
+      registry.set(catalogValueAtom, {
+        ...catalog,
+        entries: new Map(
+          [...catalog.entries].map(([id, entry]) => [
+            id,
+            { ...entry, enabled: id !== remoteEnvironmentId },
+          ]),
+        ),
+      });
+      expect(registry.get(list)).toEqual([]);
+    } finally {
+      dispose();
+      registry.dispose();
+    }
+  });
+
   it("preserves ordered reference arrays when a middle thread changes", () => {
     const { registry, threads, snapshotAtom } = makeHarness();
     const snapshot = {

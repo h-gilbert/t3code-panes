@@ -14,8 +14,14 @@ import type {
   OrchestrationV2Subagent,
   ServerProvider,
   ThreadId,
+  ScopedThreadRef,
 } from "@t3tools/contracts";
 import { resolveSelectableModel } from "@t3tools/shared/model";
+
+import {
+  resolveSubagentPillSegment,
+  type ThreadTurnSubagents,
+} from "@t3tools/client-runtime/state/thread-subagents";
 
 import { subagentCardDetail } from "./subagent-card-presentation";
 
@@ -51,6 +57,33 @@ export function subagentThreadTarget(
   return remote !== undefined && isKnownEnvironment(remote.environmentId)
     ? { environmentId: remote.environmentId, threadId: remote.threadId }
     : null;
+}
+
+export function resolveThreadAgents(
+  turn: ThreadTurnSubagents | null,
+  children: ReadonlyArray<ScopedThreadRef & { readonly title: string }>,
+  environmentId: EnvironmentId | undefined,
+) {
+  const represented = new Set(
+    (turn?.subagents ?? []).flatMap((agent) => {
+      const ref =
+        agent.childThreadId !== null
+          ? { environmentId, threadId: agent.childThreadId }
+          : agent.remoteChild;
+      return ref === undefined ? [] : [JSON.stringify([ref.environmentId, ref.threadId])];
+    }),
+  );
+  const delegatedThreads = children.filter(
+    (child) => !represented.has(JSON.stringify([child.environmentId, child.threadId])),
+  );
+  const count = (turn?.subagents.length ?? 0) + delegatedThreads.length;
+  const label = `${count} ${count === 1 ? "agent" : "agents"}`;
+  return {
+    turn,
+    delegatedThreads,
+    agentsSegment:
+      children.length > 0 ? { label, accessibilityLabel: label } : resolveSubagentPillSegment(turn),
+  };
 }
 
 function rowTitle(subagent: Pick<OrchestrationV2Subagent, "title" | "prompt">): string {

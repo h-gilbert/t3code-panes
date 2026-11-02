@@ -4,7 +4,9 @@ import {
   projectedSubagentsToRuntime,
 } from "@t3tools/client-runtime/state/subagentRuntime";
 import {
+  EnvironmentId,
   NodeId,
+  ProviderInstanceId,
   ProviderDriverKind,
   RunId,
   ThreadId,
@@ -14,6 +16,7 @@ import * as DateTime from "effect/DateTime";
 
 import {
   nextWorkflowSelection,
+  resolveThreadAgents,
   resolveSubagentRowPresentation,
   resolveSubagentStopTarget,
   workflowMemberDetail,
@@ -93,6 +96,59 @@ describe("resolveSubagentRowPresentation", () => {
     });
     expect(row.detail).toBe(`${"x".repeat(280)}…`);
     expect(row.statusLabel).toBe("Failed");
+  });
+});
+
+describe("resolveThreadAgents", () => {
+  it("keeps delegated threads reachable and lists a remote subagent only once", () => {
+    const environmentId = EnvironmentId.make("mac");
+    const remoteId = EnvironmentId.make("fred");
+    const children = ["remote-child", "finished-child"].map((id) => ({
+      environmentId: remoteId,
+      threadId: ThreadId.make(id),
+      title: id,
+    }));
+    expect(resolveThreadAgents(null, children, environmentId).agentsSegment?.label).toBe(
+      "2 agents",
+    );
+    const turn = {
+      runId: null,
+      turnActive: false,
+      latestTurn: false,
+      liveCount: 0,
+      settledCount: 1,
+      subagents: [
+        {
+          id: NodeId.make("remote-agent"),
+          threadId: ThreadId.make("parent"),
+          runId: null,
+          parentNodeId: NodeId.make("parent-node"),
+          origin: "app_owned" as const,
+          createdBy: "agent" as const,
+          driver: ProviderDriverKind.make("codex"),
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          providerThreadId: null,
+          childThreadId: null,
+          nativeTaskRef: null,
+          prompt: "Work",
+          title: "Remote",
+          model: null,
+          status: "completed" as const,
+          result: null,
+          startedAt: null,
+          completedAt: null,
+          updatedAt: DateTime.makeUnsafe("2026-08-01T10:00:00.000Z"),
+          remoteChild: { environmentId: remoteId, threadId: children[0]!.threadId, label: "Fred" },
+        },
+      ],
+    };
+    const merged = resolveThreadAgents(turn, children, environmentId);
+    expect(merged.delegatedThreads).toEqual([children[1]]);
+    expect(merged.agentsSegment?.label).toBe("2 agents");
+    expect(resolveThreadAgents(turn, [children[0]!], environmentId).agentsSegment?.label).toBe(
+      "1 agent",
+    );
+    expect(resolveThreadAgents(turn, [], environmentId).agentsSegment).toBeNull();
   });
 });
 

@@ -377,35 +377,74 @@ export function createEnvironmentThreadShellAtoms(input: {
     }).pipe(Atom.withLabel(`environment-quiet-thread-shell:${key}`));
   });
 
+  const childrenByParentAtom = Atom.make((get) => {
+    const children = new Map<
+      string,
+      Array<{ environmentId: EnvironmentId; thread: OrchestrationV2ThreadShell }>
+    >();
+    const addChild = (
+      parent: ScopedThreadRef,
+      environmentId: EnvironmentId,
+      thread: OrchestrationV2ThreadShell,
+    ) => {
+      const siblings = children.get(threadKey(parent));
+      if (siblings) siblings.push({ environmentId, thread });
+      else children.set(threadKey(parent), [{ environmentId, thread }]);
+    };
+    for (const environmentId of enabledEnvironmentIds(get(input.catalogValueAtom))) {
+      for (const thread of get(environmentThreadsAtom(environmentId))) {
+        const parent = thread.lineage.parentThreadId;
+        if (parent !== null && thread.lineage.relationshipToParent === "subagent") {
+          addChild({ environmentId, threadId: parent }, environmentId, thread);
+        }
+        if (
+          thread.delegatedFrom !== undefined &&
+          (thread.lineage.relationshipToParent !== "subagent" ||
+            parent !== thread.delegatedFrom.threadId ||
+            environmentId !== thread.delegatedFrom.environmentId)
+        ) {
+          addChild(thread.delegatedFrom, environmentId, thread);
+        }
+      }
+    }
+    return children;
+  });
+
+  const delegatedChildrenAtomFamily = Atom.family((key: string) => {
+    let previous: ReadonlyArray<ScopedThreadRef & { readonly title: string }> = [];
+    return Atom.make((get) => {
+      const next = (get(childrenByParentAtom).get(key) ?? []).flatMap(
+        ({ environmentId, thread }) =>
+          thread.archivedAt === null &&
+          thread.delegatedFrom !== undefined &&
+          threadKey(thread.delegatedFrom) === key
+            ? [{ environmentId, threadId: thread.id, title: thread.title }]
+            : [],
+      );
+      if (
+        previous.length === next.length &&
+        previous.every((child, index) => {
+          const other = next[index];
+          return (
+            child.environmentId === other?.environmentId &&
+            child.threadId === other?.threadId &&
+            child.title === other?.title
+          );
+        })
+      )
+        return previous;
+      previous = next;
+      return next;
+    }).pipe(Atom.withLabel(`environment-delegated-children:${key}`));
+  });
+
   // Child approvals and questions are hidden with their sidebar rows. Read their
   // shell summaries, without subscribing to every child transcript. A task
   // delegated to a linked environment is a child too, with its own subagents.
   const childThreadInputsAtomFamily = Atom.family((key: string) => {
     let previous: ReadonlyArray<EnvironmentThreadShell> = [];
     return Atom.make((get) => {
-      const children = new Map<
-        string,
-        Array<{ environmentId: EnvironmentId; thread: OrchestrationV2ThreadShell }>
-      >();
-      const addChild = (
-        parent: ScopedThreadRef,
-        environmentId: EnvironmentId,
-        thread: OrchestrationV2ThreadShell,
-      ) => {
-        const siblings = children.get(threadKey(parent));
-        if (siblings) siblings.push({ environmentId, thread });
-        else children.set(threadKey(parent), [{ environmentId, thread }]);
-      };
-      for (const environmentId of enabledEnvironmentIds(get(input.catalogValueAtom))) {
-        for (const thread of get(environmentThreadsAtom(environmentId))) {
-          const parent = thread.lineage.parentThreadId;
-          if (parent !== null && thread.lineage.relationshipToParent === "subagent") {
-            addChild({ environmentId, threadId: parent }, environmentId, thread);
-          } else if (thread.delegatedFrom !== undefined) {
-            addChild(thread.delegatedFrom, environmentId, thread);
-          }
-        }
-      }
+      const children = get(childrenByParentAtom);
       const seen = new Set<string>([key]);
       const pending = [key];
       const next: EnvironmentThreadShell[] = [];
@@ -582,6 +621,7 @@ export function createEnvironmentThreadShellAtoms(input: {
       threadShellsForProjectRefsAtomFamily(projectRefCollectionKey(refs)),
     threadShellAtom: (ref: ScopedThreadRef) => threadShellAtomFamily(threadKey(ref)),
     quietThreadShellAtom: (ref: ScopedThreadRef) => quietThreadShellAtomFamily(threadKey(ref)),
+    delegatedChildrenAtom: (ref: ScopedThreadRef) => delegatedChildrenAtomFamily(threadKey(ref)),
     childThreadInputsAtom: (ref: ScopedThreadRef) => childThreadInputsAtomFamily(threadKey(ref)),
   };
 }

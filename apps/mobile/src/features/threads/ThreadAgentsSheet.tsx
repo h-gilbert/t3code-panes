@@ -9,6 +9,7 @@ import {
   type EnvironmentId,
   type OrchestrationV2Subagent,
   type ThreadId,
+  type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { deriveSubagentElapsedMs, formatDuration } from "@t3tools/shared/orchestrationTiming";
 import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
@@ -21,8 +22,9 @@ import { ScreenStack } from "react-native-screens";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AndroidSheetHeader } from "../../components/ui/AndroidScreenHeader";
+import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
-import { environmentThreadDetails } from "../../state/threads";
+import { environmentThreadDetails, environmentThreadShells } from "../../state/threads";
 import { NativeStackScreenOptions, nativeHeaderScrollEdgeEffects } from "../../native/StackHeader";
 import { NativeHeader, NativeScreen } from "../../native/ThemedScreenStack";
 import { useEnvironments } from "../../state/environments";
@@ -32,7 +34,7 @@ import { SubagentStopButton } from "./SubagentStopButton";
 import { ThreadWorkflowGroup } from "./ThreadWorkflowGroup";
 import { ScreenContent } from "../../components/ui/ScreenContent";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
-import { subagentThreadTarget } from "./threadAgentsPresentation";
+import { resolveThreadAgents, subagentThreadTarget } from "./threadAgentsPresentation";
 
 import { useOpenThreadInspector } from "./thread-inspector-navigation";
 
@@ -44,11 +46,24 @@ const EMPTY_TURN_SUBAGENTS_ATOM = Atom.make<ThreadTurnSubagents | null>(null).pi
   Atom.withLabel("mobile-thread-turn-subagents:empty"),
 );
 
-export function useThreadTurnSubagents(target: AgentsTarget | null): ThreadTurnSubagents | null {
-  return useAtomValue(
+const EMPTY_DELEGATED_CHILDREN_ATOM = Atom.make<
+  ReadonlyArray<ScopedThreadRef & { readonly title: string }>
+>([]);
+
+export function useThreadAgents(target: AgentsTarget | null) {
+  const turn = useAtomValue(
     target === null
       ? EMPTY_TURN_SUBAGENTS_ATOM
       : environmentThreadDetails.turnSubagentsAtom(target),
+  );
+  const children = useAtomValue(
+    target === null
+      ? EMPTY_DELEGATED_CHILDREN_ATOM
+      : environmentThreadShells.delegatedChildrenAtom(target),
+  );
+  return useMemo(
+    () => resolveThreadAgents(turn, children, target?.environmentId),
+    [turn, children, target?.environmentId],
   );
 }
 
@@ -58,7 +73,8 @@ export function ThreadAgentsSheet({ route }: StaticScreenProps<AgentsTarget>) {
   const navigation = useNavigation();
   const openInspector = useOpenThreadInspector();
   const insets = useSafeAreaInsets();
-  const turn = useThreadTurnSubagents(target);
+  const { turn, delegatedThreads } = useThreadAgents(target);
+  const { presentationById } = useEnvironments();
   const subagents = turn?.subagents ?? [];
   const hasLiveAgent = (turn?.liveCount ?? 0) > 0;
   const workflowGroups = useMemo(
@@ -100,7 +116,7 @@ export function ThreadAgentsSheet({ route }: StaticScreenProps<AgentsTarget>) {
       contentContainerClassName="px-5 pb-6"
       contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 16) + 8 }}
     >
-      {subagents.length === 0 ? (
+      {subagents.length === 0 && delegatedThreads.length === 0 ? (
         <Text className="pt-6 text-center text-sm text-foreground-muted">
           No agents in this turn.
         </Text>
@@ -129,6 +145,25 @@ export function ThreadAgentsSheet({ route }: StaticScreenProps<AgentsTarget>) {
           );
         })
       )}
+      {delegatedThreads.map((child) => (
+        <Pressable
+          key={`${child.environmentId}:${child.threadId}`}
+          accessibilityRole="link"
+          accessibilityHint="Opens this agent's thread"
+          onPress={() => openChildThread(child)}
+          className="min-w-0 flex-row items-center gap-3 border-b border-border py-3.5 active:opacity-70"
+        >
+          <View className="min-w-0 flex-1 gap-1">
+            <Text numberOfLines={1} className="font-t3-medium text-sm text-foreground">
+              {child.title}
+            </Text>
+            <Text numberOfLines={1} className="text-xs text-foreground-muted">
+              {presentationById.get(child.environmentId)?.entry.target.label ?? child.environmentId}
+            </Text>
+          </View>
+          <SymbolView name="chevron.right" size={12} tintColorClassName="accent-icon-subtle" />
+        </Pressable>
+      ))}
     </ScrollView>
   );
 
