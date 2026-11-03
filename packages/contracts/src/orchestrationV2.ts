@@ -3017,6 +3017,8 @@ export const OrchestrationV2Command = Schema.Union([
     limitRecovery: Schema.optional(Schema.NullOr(OrchestrationV2LimitRecoveryUpdate)),
     /** Link (object) or unlink (null) a pull request; absent leaves it unchanged. */
     linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
+    /** Make a subagent or delegated thread standalone; its parent stops tracking it. */
+    detachFromParent: Schema.optional(Schema.Literal(true)),
   }),
   Schema.Struct({
     type: Schema.Literal("thread.pull-request.link"),

@@ -2949,6 +2949,20 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           cause: `Thread ${command.threadId} is no longer empty.`,
         });
     }
+    if (command.type === "thread.metadata.update" && command.detachFromParent === true) {
+      if (isProviderNativeSubagentThread(thread)) {
+        return yield* new OrchestratorSubagentThreadReadOnlyError({
+          commandId: command.commandId,
+          threadId: command.threadId,
+        });
+      }
+      if (thread.lineage.relationshipToParent !== "subagent" && thread.delegatedFrom === undefined)
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: `Thread ${command.threadId} has no parent thread to detach from.`,
+        });
+    }
     if (
       command.type === "thread.archive" &&
       command.ifSettledAt !== undefined &&
@@ -3398,7 +3412,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                     snooze: command.limitRecovery.snooze ?? previousRecovery?.snooze ?? false,
                     requestId: command.commandId,
                   };
-          return {
+          const updated: OrchestrationV2AppThread = {
             ...thread,
             ...(command.title === undefined
               ? {}
@@ -3454,6 +3468,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                 ? { titleRegeneration: null }
                 : {}),
             updatedAt: now,
+          };
+          if (command.detachFromParent !== true) return updated;
+          // The root stays, so the thread keeps its family; only the parent link goes.
+          const { delegatedFrom: _delegatedFrom, ...standalone } = updated;
+          return {
+            ...standalone,
+            lineage: { ...thread.lineage, parentThreadId: null, relationshipToParent: null },
+            forkedFrom: thread.forkedFrom?.type === "node" ? null : thread.forkedFrom,
           };
         }
         case "thread.pull-request.link":
@@ -3774,6 +3796,41 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       occurredAt: now,
       payload: updatedThread,
     });
+    const detachedParentId =
+      command.type === "thread.metadata.update" &&
+      command.detachFromParent === true &&
+      thread.lineage.relationshipToParent === "subagent"
+        ? thread.lineage.parentThreadId
+        : null;
+    if (command.type === "thread.metadata.update" && detachedParentId !== null) {
+      // The parent no longer waits for this thread or receives its later results.
+      const parent = yield* projectionStore
+        .getThreadRecords(detachedParentId, ["subagents", "nodes", "turnItems"], {
+          turnItemTypes: ["subagent"],
+        })
+        .pipe(
+          Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeed(null) }),
+          mapDispatchError(command),
+        );
+      for (const task of parent?.subagents ?? []) {
+        if (task.origin !== "app_owned" || task.childThreadId !== thread.id) continue;
+        const released = isOrchestrationV2WorkActive(task.status)
+          ? cancelledAppOwnedTask(task, now)
+          : task.completionDelivery?.state === "pending"
+            ? { ...task, completionDelivery: { state: "disposed" as const, observedByRunId: null } }
+            : null;
+        if (released === null || parent === null) continue;
+        yield* writeAppOwnedTask({
+          command,
+          threadId: detachedParentId,
+          events,
+          task: released,
+          nodes: parent.nodes,
+          turnItems: parent.turnItems,
+          now,
+        });
+      }
+    }
     // Archiving ends the guest share, so its waiting files go too.
     yield* releaseGuestAttachments(command, thread.guestShare, updatedThread.guestShare, effects);
 
@@ -11226,8 +11283,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const writeAppOwnedTask = Effect.fn("Orchestrator.writeAppOwnedTask")(function* (input: {
     readonly command: Extract<
       OrchestrationV2ServerCommand,
-      { readonly type: "run.interrupt" | "thread.stop" | "subagent.stop" }
+      {
+        readonly type: "run.interrupt" | "thread.stop" | "subagent.stop" | "thread.metadata.update";
+      }
     >;
+    /** The task's thread, when it is not the command's. */
+    readonly threadId?: ThreadId;
     readonly events: Ref.Ref<Array<OrchestrationV2DomainEvent>>;
     readonly task: OrchestrationV2Subagent;
     readonly nodes: ReadonlyArray<OrchestrationV2ExecutionNode>;
@@ -11235,10 +11296,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     readonly now: DateTime.Utc;
   }) {
     const { command, task, now } = input;
+    const threadId = input.threadId ?? command.threadId;
     const emitEvent = emit(input.events, command);
     yield* emitEvent({
       type: "subagent.updated",
-      threadId: command.threadId,
+      threadId,
       nodeId: task.id,
       occurredAt: now,
       payload: task,
@@ -11247,7 +11309,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     if (node !== undefined)
       yield* emitEvent({
         type: "node.updated",
-        threadId: command.threadId,
+        threadId,
         nodeId: node.id,
         occurredAt: now,
         payload: { ...node, status: task.status, completedAt: task.completedAt },
@@ -11256,7 +11318,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       if (item.type !== "subagent" || item.subagentId !== task.id) continue;
       yield* emitEvent({
         type: "turn-item.updated",
-        threadId: command.threadId,
+        threadId,
         nodeId: task.id,
         occurredAt: now,
         payload: { ...item, status: task.status, completedAt: task.completedAt, updatedAt: now },
@@ -13203,6 +13265,20 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       commandThreadId(command),
       dispatchWithReceiptEffect(command),
     );
+    if (command.type === "thread.metadata.update" && command.detachFromParent === true) {
+      const thread = yield* projectionStore
+        .getThread(command.threadId)
+        .pipe(
+          Effect.mapError(
+            (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+          ),
+        );
+      // Detaching rewrites the parent's task record, so it serializes on the parent first.
+      return yield* thread.lineage.relationshipToParent === "subagent" &&
+      thread.lineage.parentThreadId !== null
+        ? threadDispatch.withLock(thread.lineage.parentThreadId, dispatch)
+        : dispatch;
+    }
     // Answering a message-mode question can also start a follow-up.
     if (
       command.type !== "runtime-request.respond" &&

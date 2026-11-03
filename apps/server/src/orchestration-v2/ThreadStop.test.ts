@@ -2,6 +2,7 @@ import { assert, it } from "@effect/vitest";
 import {
   CommandId,
   ContextTransferId,
+  EnvironmentId,
   EventId,
   MessageId,
   NodeId,
@@ -648,6 +649,61 @@ it.effect("a repeated Stop that changes nothing still stops the delegated tasks"
       walks.map((row) => row.command_id),
       ["stop-again:first", "stop-again:second"],
     );
+  }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("detaching a child makes it standalone and ends the parent's task", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const parentThreadId = ThreadId.make("thread:detach-parent");
+    yield* createWatchingThread(parentThreadId, 1);
+    yield* send(parentThreadId, "parent", "start_immediately");
+    const childThreadId = yield* delegate(parentThreadId, "detached child");
+    const delegatedThreadId = ThreadId.make("thread:detach-delegated");
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("create:detach-delegated"),
+      threadId: delegatedThreadId,
+      projectId: ProjectId.make("project:thread-stop"),
+      title: "delegated",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "agent",
+      creationSource: "mcp",
+      linkOrigin: { sessionId: "peer", label: "Mac" },
+      delegatedFrom: {
+        environmentId: EnvironmentId.make("env:mac"),
+        threadId: ThreadId.make("thread:elsewhere"),
+        title: "Planner",
+      },
+    });
+    const detach = (threadId: ThreadId) =>
+      orchestrator.dispatch({
+        type: "thread.metadata.update",
+        commandId: CommandId.make(`detach:${threadId}`),
+        threadId,
+        detachFromParent: true,
+      });
+
+    yield* detach(childThreadId);
+    yield* detach(delegatedThreadId);
+
+    const child = (yield* orchestrator.getThreadProjection(childThreadId)).thread;
+    assert.deepEqual(
+      [child.lineage.parentThreadId, child.lineage.relationshipToParent, child.forkedFrom],
+      [null, null, null],
+    );
+    const task = (yield* orchestrator.getThreadProjection(parentThreadId)).subagents.find(
+      (candidate) => candidate.childThreadId === childThreadId,
+    )!;
+    assert.deepEqual([task.status, task.completionDelivery?.state], ["cancelled", "disposed"]);
+    const delegated = (yield* orchestrator.getThreadProjection(delegatedThreadId)).thread;
+    assert.isUndefined(delegated.delegatedFrom);
+    // A thread with no parent has nothing to detach from.
+    assert.isTrue(Exit.isFailure(yield* Effect.exit(detach(parentThreadId))));
   }).pipe(Effect.provide(layerTest)),
 );
 

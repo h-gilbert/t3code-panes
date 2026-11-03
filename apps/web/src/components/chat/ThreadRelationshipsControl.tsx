@@ -54,6 +54,7 @@ import {
   MoreHorizontalIcon,
   PlusIcon,
   SquareIcon,
+  UnlinkIcon,
   UnplugIcon,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
@@ -381,12 +382,13 @@ export function ThreadRelationshipsPanel(props: {
   const navigateInPane = useWorkspacePaneNavigation();
   const mergeBack = useAtomCommand(threadEnvironment.mergeBack);
   const stopSession = useAtomCommand(threadEnvironment.stopSession);
+  const updateMetadata = useAtomCommand(threadEnvironment.updateMetadata);
   const interruptTurn = useAtomCommand(threadEnvironment.interruptTurn);
   const stopWorkflowCommand = useAtomCommand(orchestrationEnvironment.stopWorkflow);
   const canOperateWorkflow = useAtomValue(
     orchestrationEnvironment.stopWorkflow.permissionAtom(props.environmentId),
   );
-  const [busyAction, setBusyAction] = useState<"merge" | "detach" | null>(null);
+  const [busyAction, setBusyAction] = useState<"merge" | "detach" | "standalone" | null>(null);
   const [stoppingId, setStoppingId] = useState<string | null>(null);
   // Derive graphs after hooks to preserve their compiler cache.
   const providers = providersByEnvironment.get(props.environmentId);
@@ -444,6 +446,12 @@ export function ThreadRelationshipsPanel(props: {
   });
   const canMerge = mergeTargetThreadId !== null && latestMergeBackRun !== null;
   const canDetach = projection ? canDetachThreadProviderSession(projection) : false;
+  // Provider-native subagents belong to their parent's conversation and cannot leave it.
+  const canMakeStandalone =
+    currentThread !== undefined &&
+    !isProviderNativeSubagentThread(currentThread) &&
+    (currentThread.lineage.relationshipToParent === "subagent" ||
+      currentThread.delegatedFrom !== undefined);
 
   const {
     related = [],
@@ -521,6 +529,19 @@ export function ThreadRelationshipsPanel(props: {
     setBusyAction(null);
   };
 
+  const makeStandalone = async () => {
+    if (!canMakeStandalone || busyAction !== null) return;
+    setBusyAction("standalone");
+    const result = await updateMetadata({
+      environmentId: props.environmentId,
+      input: { threadId: props.threadId, detachFromParent: true },
+    });
+    setBusyAction(null);
+    if (result._tag === "Failure") {
+      toastManager.add({ type: "error", title: "Could not make this thread standalone" });
+    }
+  };
+
   const stopSubagent = async (
     childThreadId: ThreadId,
     agent: Pick<OrchestrationV2Subagent, "id" | "threadId">,
@@ -563,13 +584,14 @@ export function ThreadRelationshipsPanel(props: {
       showHeading={
         runningCount > 0 ||
         canDetach ||
+        canMakeStandalone ||
         related.length > 0 ||
         active.length > 0 ||
         delegatedFrom !== undefined
       }
       data-thread-relationships-panel
       actions={
-        canDetach ? (
+        canDetach || canMakeStandalone ? (
           <Menu>
             <MenuTrigger
               render={
@@ -585,10 +607,18 @@ export function ThreadRelationshipsPanel(props: {
               <MoreHorizontalIcon className="size-3.5" />
             </MenuTrigger>
             <MenuPopup align="end" className="min-w-60 max-w-(--available-width)">
-              <MenuItem onClick={() => void detach()}>
-                <UnplugIcon className="size-3.5" />
-                Disconnect agent session
-              </MenuItem>
+              {canMakeStandalone ? (
+                <MenuItem onClick={() => void makeStandalone()}>
+                  <UnlinkIcon className="size-3.5" />
+                  Make standalone
+                </MenuItem>
+              ) : null}
+              {canDetach ? (
+                <MenuItem onClick={() => void detach()}>
+                  <UnplugIcon className="size-3.5" />
+                  Disconnect agent session
+                </MenuItem>
+              ) : null}
             </MenuPopup>
           </Menu>
         ) : null
