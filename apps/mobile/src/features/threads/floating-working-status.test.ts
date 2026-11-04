@@ -75,7 +75,7 @@ describe("backgroundFloatingStatus", () => {
       ],
       "Waiting on 2 subagents",
     ],
-    [[{ taskId: "watch", kind: "monitor" }], "Waiting on a monitor"],
+    [[{ taskId: "watch", kind: "monitor", awaited: true }], "Waiting on a monitor"],
   ] as const)("keeps post-turn work visible for %j", (tasks, label) => {
     expect(backgroundFloatingStatus({ tasks, failed: false })).toMatchObject({
       kind: "background",
