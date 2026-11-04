@@ -5,6 +5,6 @@ import { setActivePreviewTab } from "~/previewStateStore";
 
 export function showBrowserInset(threadRef: ScopedThreadRef, tabId: string): void {
   setActivePreviewTab(threadRef, tabId);
-  useRightPanelStore.getState().close(threadRef);
+  useRightPanelStore.getState().close(threadRef, { automatic: true });
   usePreviewMiniPlayerStore.getState().open(threadRef, browserMiniPlayerSource(tabId));
 }

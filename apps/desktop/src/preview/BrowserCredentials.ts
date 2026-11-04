@@ -3,7 +3,7 @@
  * Every fill must match the saved environment, exact origin and browser profile.
  */
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Base64 from "effect/encoding/Base64";
@@ -205,7 +205,7 @@ const make = Effect.gen(function* BrowserCredentialsMake() {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const safeStorage = yield* ElectronSafeStorage.ElectronSafeStorage;
-  const crypto = yield* Crypto.Crypto;
+  const random = yield* SecureRandom.SecureRandom;
   const storePath = path.join(environment.stateDir, CREDENTIALS_FILE_NAME);
   // Serializes read-modify-write cycles so concurrent saves cannot drop
   // each other's entries.
@@ -288,7 +288,7 @@ const make = Effect.gen(function* BrowserCredentialsMake() {
             ),
           ),
       );
-      const id = (yield* crypto.randomUUIDv4().pipe(Effect.orDie)).replace(/-/g, "");
+      const id = (yield* random.uuidV4()).replace(/-/g, "");
       const updatedAt = DateTime.formatIso(yield* DateTime.now);
       return yield* SynchronizedRef.modifyEffect(writeLock, () =>
         Effect.gen(function* () {

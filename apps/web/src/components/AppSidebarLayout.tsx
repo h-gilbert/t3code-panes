@@ -59,6 +59,8 @@ import {
   usePanelAnimationSettings,
   usePanelNavigationSuppression,
 } from "../panelAnimations";
+import { isElectron } from "../env";
+import { HistorySwipeNavigation } from "./HistorySwipeNavigation";
 import ThreadSidebar from "./Sidebar";
 import { SidebarBrandWidthProbe } from "./sidebar/SidebarChrome";
 import { isAppModalPage } from "./sidebar/mainAppLocation";
@@ -416,7 +418,11 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   });
   if (nextWorkspaceKey !== previousWorkspaceKey) setPreviousWorkspaceKey(nextWorkspaceKey);
   const retainedWorkspaceKey = nextWorkspaceKey ?? DEFAULT_WORKSPACE_KEY;
-  const threadTarget = useParams({ strict: false, select: resolveThreadRouteTarget });
+  const threadTarget = useParams({
+    strict: false,
+    // Route params can lag the location while the router commits a navigation.
+    select: (params) => resolveThreadRouteTarget(params, pathname),
+  });
   const isUtility =
     pathname === "/settings" ||
     pathname.startsWith("/settings/") ||
@@ -501,7 +507,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         data-panel-animations={routePanelAnimationsActive ? "true" : "false"}
         style={sidebarProviderStyle}
       >
-        <SidebarBrandWidthProbe onWidthChange={setBrandWidth} />
+        <SidebarBrandWidthProbe isElectron={isElectron} onWidthChange={setBrandWidth} />
         <Sidebar
           overlay
           side="left"
@@ -552,6 +558,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
             sidebarOpen || isUtility || (isOnWorkspace && isMacosDesktop && isWindowFullscreen)
           }
         />
+        {isElectron ? <HistorySwipeNavigation /> : null}
       </SidebarProvider>
     </PanelAnimationSuppressionProvider>
   );

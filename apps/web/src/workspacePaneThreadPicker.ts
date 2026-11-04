@@ -9,7 +9,7 @@ import type { OrchestrationV2Subagent } from "@t3tools/contracts";
 import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 
 import {
-  isSidebarSubagentThread,
+  isSidebarHiddenThread,
   resolveSidebarThreadStatus,
   sortThreadsForSidebar,
 } from "./components/Sidebar.logic";
@@ -107,7 +107,7 @@ export function buildWorkspaceThreadPickerItems(input: {
   );
   return sortThreadsForSidebar(
     input.threads.filter((thread) => {
-      if (thread.archivedAt !== null || thread.deletedAt != null || isSidebarSubagentThread(thread))
+      if (thread.archivedAt !== null || thread.deletedAt != null || isSidebarHiddenThread(thread))
         return false;
       if (thread.delegatedFrom != null && threadKeys.has(scopedThreadKey(thread.delegatedFrom)))
         return false;
@@ -183,7 +183,7 @@ export function runningWorkspaceSubagentsByParent(
   for (const thread of threads) {
     if (
       thread.archivedAt !== null ||
-      (!isSidebarSubagentThread(thread) && thread.delegatedFrom == null) ||
+      (!isSidebarHiddenThread(thread) && thread.delegatedFrom == null) ||
       (!["preparing", "queued", "starting", "running", "waiting"].includes(
         thread.source?.activityRunStatus ?? thread.source?.status ?? thread.runtime?.status ?? "",
       ) &&

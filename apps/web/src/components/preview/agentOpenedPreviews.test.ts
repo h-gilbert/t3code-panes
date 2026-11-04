@@ -194,14 +194,12 @@ describe("device reveal requests", () => {
 
   it("restores a device sidebar inset before discovery finishes", () => {
     setup();
-    useRightPanelStore
-      .getState()
-      .openDevice(ref, {
-        hostId: "local",
-        deviceId: "pixel",
-        platform: "android",
-        name: "Pixel 8",
-      });
+    useRightPanelStore.getState().openDevice(ref, {
+      hostId: "local",
+      deviceId: "pixel",
+      platform: "android",
+      name: "Pixel 8",
+    });
     restorePreviewPanelTabs();
     expect(miniPlayerSource()).toMatchObject({ kind: "device", deviceId: "pixel" });
     expect(useRightPanelStore.getState().byThreadKey[threadKey]?.isOpen).toBe(false);
@@ -209,15 +207,13 @@ describe("device reveal requests", () => {
 
   it("removes a restored physical-device inset while preserving its session", () => {
     setup();
-    usePreviewMiniPlayerStore
-      .getState()
-      .open(ref, {
-        kind: "device",
-        hostId: "local",
-        deviceId: "pixel",
-        platform: "android",
-        name: "Pixel 8",
-      });
+    usePreviewMiniPlayerStore.getState().open(ref, {
+      kind: "device",
+      hostId: "local",
+      deviceId: "pixel",
+      platform: "android",
+      name: "Pixel 8",
+    });
     const state = deviceState({ sessions: [session] });
     applyDeviceSnapshot(
       ref.environmentId,
@@ -328,9 +324,11 @@ describe("revealServerTabs", () => {
     expect(useRightPanelStore.getState().byThreadKey[threadKey]?.activeSurfaceId).not.toBe(
       browserSurfaceId,
     );
+    const userActionRevision = useRightPanelStore.getState().getUserActionRevision(ref);
     revealServerTabs(ref, [tab("tab_a", true)], { autoShowFloatingPreview: true });
     expect(useRightPanelStore.getState().byThreadKey[threadKey]?.isOpen).toBe(false);
     expect(floatingTabId()).toBe("tab_a");
+    expect(useRightPanelStore.getState().getUserActionRevision(ref)).toBe(userActionRevision);
   });
 });
 

@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -45,7 +46,7 @@ const layerWith = (encryptionAvailable: boolean, backend: string | null = null) 
     Layer.provideMerge(environmentLayer),
     Layer.provideMerge(safeStorageLayer(encryptionAvailable, backend)),
     Layer.provideMerge(Path.layer),
-    Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
   );
 
 describe("normalizeCredentialOrigin", () => {
@@ -138,7 +139,7 @@ describe("BrowserCredentials", () => {
         { reason: "no-credential" },
       );
       assert.strictEqual((yield* store.list).length, 3);
-      assert.include(files.get("/state/browser-credentials.json") ?? "", '\"version\":3');
+      assert.include(files.get("/state/browser-credentials.json") ?? "", '"version":3');
     }).pipe(Effect.provide(layerWith(true))),
   );
 

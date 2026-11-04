@@ -10,6 +10,7 @@ import {
   type ModelSelection,
   type RuntimeMode,
   type OrchestrationV2ThreadShell,
+  ThreadId,
 } from "@t3tools/contracts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -23,11 +24,13 @@ import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 
 import * as DocumentText from "../../../provider/DocumentText.ts";
+import { OrchestratorRuntimeModeAboveCeilingError } from "../../../orchestration-v2/Orchestrator.ts";
 import * as ThreadLaunch from "../../../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as ServerConfig from "../../../config.ts";
 import * as ServerSettings from "../../../serverSettings.ts";
 import * as Project from "../../../project/ProjectService.ts";
+import * as ProjectCloneTracker from "../../../project/ProjectCloneTracker.ts";
 import * as ManagedProjectFolders from "../../../project/ManagedProjectFolders.ts";
 import * as PeerForwarding from "../../../peer/PeerForwarding.ts";
 import * as GitVcsDriver from "../../../vcs/GitVcsDriver.ts";
@@ -49,6 +52,9 @@ const clientLaunchHarness = (input: {
   readonly checkWorktreeBase?: ThreadLaunch.ThreadLaunchService["Service"]["checkWorktreeBase"];
   readonly webOrigin?: string;
   readonly forwarded?: Array<unknown>;
+  readonly hostedAppUrl?: string;
+  /** The orchestrator refuses the new thread's mode, as under a managed ceiling. */
+  readonly refusedByCeiling?: true;
 }) => {
   const projectId = ProjectId.make("project:client-target");
   const modelSelection = {
@@ -77,7 +83,6 @@ const clientLaunchHarness = (input: {
             },
           }),
     }),
-    NodeCrypto.layer,
     Layer.succeed(McpInvocationContext.McpInvocationContext, {
       environmentId: EnvironmentId.make("environment"),
       requestNamespace: "client:session-1",
@@ -86,7 +91,7 @@ const clientLaunchHarness = (input: {
         sessionId: "session-1",
         label: "Claude Code",
         access: input.runtimeModeCeiling,
-        webOrigin: input.webOrigin,
+        hostedAppUrl: input.hostedAppUrl,
       },
       issuedAt: 0,
       capabilities: new Set(["orchestration" as const]),
@@ -111,6 +116,23 @@ const clientLaunchHarness = (input: {
       checkWorktreeBase: input.checkWorktreeBase ?? (() => Effect.void),
       launch: (launch) => {
         input.launched.push(launch);
+        if (input.refusedByCeiling) {
+          return Effect.fail(
+            new ThreadLaunch.ThreadLaunchError({
+              operation: "create-thread",
+              commandId: launch.commandId,
+              projectId: launch.projectId,
+              cause: new OrchestratorRuntimeModeAboveCeilingError({
+                commandId: launch.commandId,
+                threadId: launch.threadId ?? ThreadId.make("thread:refused"),
+                refused: "mode",
+                runtimeMode: launch.runtimeMode,
+                maxRuntimeMode: "approval-required",
+                organization: "Example Corp",
+              }),
+            }),
+          );
+        }
         return Effect.succeed({
           threadId: launch.threadId,
           projection: {
@@ -160,7 +182,7 @@ const clientLaunchHarness = (input: {
         Layer.provide(NodeServices.layer),
       ),
     ),
-    Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
   );
   return { projectId, modelSelection, projectDefaults, dependencies: layerDependencies };
 };
@@ -178,17 +200,19 @@ it.effect(
           readonly runtimeMode?: RuntimeMode;
           readonly targeted?: false;
           readonly overrideModel?: ModelSelection;
-          readonly webOrigin?: string;
+          readonly hostedAppUrl?: string;
+          readonly refusedByCeiling?: true;
         },
       ) {
-        const { targeted, overrideModel, webOrigin, ...input } = params;
+        const { targeted, overrideModel, hostedAppUrl, refusedByCeiling, ...input } = params;
         const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];
         const { projectId, modelSelection, dependencies } = clientLaunchHarness({
           runtimeModeCeiling,
           defaultRuntimeMode,
           launched,
           ...(overrideModel === undefined ? {} : { overrideModel }),
-          ...(webOrigin === undefined ? {} : { webOrigin }),
+          ...(hostedAppUrl === undefined ? {} : { hostedAppUrl }),
+          ...(refusedByCeiling === undefined ? {} : { refusedByCeiling }),
         });
         const toolkit = yield* ProjectToolkit.pipe(
           Effect.provide(
@@ -217,11 +241,11 @@ it.effect(
 
       const aboveCeiling = yield* launchWith("auto-accept-edits", "full-access", {
         title: "Fix",
-        webOrigin: "https://box.example.ts.net",
+        hostedAppUrl: "https://t3.example.com",
       });
       expect(aboveCeiling.launched[0]?.runtimeMode).toBe("auto-accept-edits");
       expect(aboveCeiling.result).toMatchObject({
-        link: `https://box.example.ts.net/environment/${encodeURIComponent(aboveCeiling.launched[0]?.threadId ?? "")}`,
+        link: `https://t3.example.com/threads/environment/${encodeURIComponent(aboveCeiling.launched[0]?.threadId ?? "")}`,
       });
 
       const requested = yield* launchWith("full-access", "approval-required", {
@@ -252,6 +276,16 @@ it.effect(
         overrideModel,
       });
       expect(fromSettings.launched[0]?.modelSelection).toEqual(overrideModel);
+
+      // An administrator's ceiling the orchestrator enforces is named, not reported as unavailable.
+      const managed = yield* launchWith("full-access", "full-access", {
+        title: "Fix",
+        refusedByCeiling: true,
+      });
+      expect(managed.result).toMatchObject({
+        code: "invalid_request",
+        message: "Example Corp limits threads to Supervised.",
+      });
     }),
 );
 
@@ -286,6 +320,63 @@ it.effect("a launch on a linked environment never forwards a parent link", () =>
       environmentId: "environment:fred",
     });
     expect(forwarded[0]).not.toHaveProperty("delegatedFrom");
+  }).pipe(Effect.scoped),
+);
+
+it.effect("a launch refuses unsupported inherited and explicit access modes", () =>
+  Effect.gen(function* () {
+    // Pi offers no Auto; a mode a provider lacks would run as Supervised.
+    const pi = ProviderInstanceId.make("pi");
+    const launchPi = Effect.fn("test.launchPi")(function* (runtimeMode?: RuntimeMode) {
+      const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];
+      const { projectId, dependencies } = clientLaunchHarness({
+        runtimeModeCeiling: "auto",
+        launched,
+        providers: [
+          {
+            instanceId: pi,
+            driver: ProviderDriverKind.make("pi"),
+            enabled: true,
+            installed: true,
+            status: "ready",
+            version: null,
+            auth: { status: "authenticated" },
+            checkedAt: "2026-01-01T00:00:00Z",
+            models: [],
+            slashCommands: [],
+            skills: [],
+            supportedRuntimeModes: ["approval-required", "auto-accept-edits", "full-access"],
+          },
+        ],
+      });
+      const toolkit = yield* ProjectToolkit.pipe(
+        Effect.provide(
+          McpToolAccess.HandlersLayer.layer(ProjectHandlers.layer).pipe(
+            Layer.provide(dependencies),
+          ),
+        ),
+      );
+      const result = yield* toolkit
+        .handle("t3_thread_launch", {
+          projectId,
+          title: "Fix",
+          modelSelection: { instanceId: pi, model: "pi-model" },
+          ...(runtimeMode === undefined ? {} : { runtimeMode }),
+        })
+        .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
+      return { result: result.at(-1)?.result, launched };
+    });
+
+    const inherited = yield* launchPi();
+    expect(inherited.result).toMatchObject({ code: "invalid_request" });
+    expect(inherited.launched).toHaveLength(0);
+
+    const requested = yield* launchPi("auto");
+    expect(requested.result).toMatchObject({ code: "invalid_request" });
+    expect(requested.launched).toHaveLength(0);
+
+    const offered = yield* launchPi("approval-required");
+    expect(offered.launched[0]?.runtimeMode).toBe("approval-required");
   }),
 );
 
@@ -575,5 +666,49 @@ it.effect("a client launches with the fallback for an exhausted default", () =>
       modelSelection: fallbackModel,
     });
     expect(launched[0]?.modelSelection).toEqual(fallbackModel);
+  }),
+);
+
+it.effect("deleting a project through MCP also discards its clone record", () =>
+  Effect.gen(function* () {
+    const discarded: Array<ProjectId> = [];
+    const harness = clientLaunchHarness({ runtimeModeCeiling: "full-access", launched: [] });
+    const dependencies = Layer.merge(
+      harness.dependencies,
+      Layer.mergeAll(
+        Layer.mock(Project.ProjectService)({
+          delete: (input) =>
+            Effect.succeed({
+              id: input.projectId,
+              title: "client-target",
+              workspaceRoot: "/projects/client-target",
+              repositoryIdentity: null,
+              faviconPath: null,
+              defaultModelSelection: null,
+              defaultThreadEnvMode: null,
+              autoPull: false,
+              projectIcon: null,
+              scripts: [],
+              createdAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+              deletedAt: "2026-01-01T00:00:00.000Z",
+            }),
+        }),
+        Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({
+          discard: (projectId) => Effect.sync(() => void discarded.push(projectId)),
+        }),
+      ),
+    );
+    const toolkit = yield* ProjectToolkit.pipe(
+      Effect.provide(
+        McpToolAccess.HandlersLayer.layer(ProjectHandlers.layer).pipe(Layer.provide(dependencies)),
+      ),
+    );
+
+    yield* toolkit
+      .handle("t3_project_delete", { projectId: harness.projectId })
+      .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
+
+    expect(discarded).toEqual([harness.projectId]);
   }),
 );

@@ -1,6 +1,6 @@
 import { fromLenientJson } from "@t3tools/shared/schemaJson";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -181,7 +181,7 @@ const make = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const crypto = yield* Crypto.Crypto;
+  const random = yield* SecureRandom.SecureRandom;
   const sessionPath = path.join(environment.stateDir, "window-session.json");
   const windowsRef = yield* SynchronizedRef.make<ReadonlyArray<DesktopWorkspaceWindowState>>([]);
 
@@ -193,16 +193,8 @@ const make = Effect.gen(function* () {
     SynchronizedRef.modifyEffect(windowsRef, (windows) => {
       const nextWindows = update(windows);
       if (nextWindows === windows) return Effect.succeed([undefined, windows] as const);
-      return crypto.randomUUIDv4().pipe(
+      return random.uuidV4().pipe(
         Effect.map((uuid) => uuid.replace(/-/g, "")),
-        Effect.mapError(
-          (cause) =>
-            new DesktopWindowSessionWriteError({
-              operation: "create-temporary-file-name",
-              path: sessionPath,
-              cause,
-            }),
-        ),
         Effect.flatMap((suffix) =>
           writeSession({ fileSystem, path, sessionPath, windows: nextWindows, suffix }),
         ),

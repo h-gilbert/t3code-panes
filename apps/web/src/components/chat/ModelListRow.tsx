@@ -1,5 +1,6 @@
 import { type ProviderDriverKind, type ProviderInstanceId } from "@t3tools/contracts";
 import { memo } from "react";
+import { CheckIcon } from "lucide-react";
 import { getProviderIndependentModelName, getProviderRowLabel } from "./providerIconUtils";
 import { ComboboxItem } from "../ui/combobox";
 import { Badge } from "../ui/badge";
@@ -21,7 +22,8 @@ export const ModelListRow = memo(function ModelListRow(props: {
   acpRegistryAgentId?: string | undefined;
   acpRegistryIconUrl?: string | undefined;
   isSelected: boolean;
-  showProvider: boolean;
+  /** Marks this instance apart from another of the same provider. */
+  showInstanceBadge: boolean;
   showNewBadge?: boolean;
   unavailable?: boolean;
   jumpLabel?: string | null;
@@ -32,11 +34,11 @@ export const ModelListRow = memo(function ModelListRow(props: {
     name: props.name,
     subProvider: props.subProvider,
   };
-  const providerLabel = getProviderRowLabel(props.providerDisplayName, props.subProvider);
 
   const row = (
     <ComboboxItem
       hideIndicator
+      selectedFill={false}
       index={props.index}
       value={modelPickerModelKey(props.instanceId, props.slug)}
       disabled={Boolean(props.disabledReason)}
@@ -67,24 +69,25 @@ export const ModelListRow = memo(function ModelListRow(props: {
             </Badge>
           ) : null}
         </div>
-        {props.showProvider && (
-          <div className="mt-1 flex items-center gap-1.5">
-            <ProviderInstanceIcon
-              driverKind={props.driverKind}
-              displayName={props.providerDisplayName}
-              acpRegistryAgentId={props.acpRegistryAgentId}
-              acpRegistryIconUrl={props.acpRegistryIconUrl}
-              className="size-3"
-              iconClassName="size-3"
-            />
-            <span className="truncate text-xs font-normal leading-snug text-muted-foreground/70">
-              {providerLabel}
-            </span>
-          </div>
-        )}
+        <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground/70">
+          <ProviderInstanceIcon
+            driverKind={props.driverKind}
+            displayName={props.providerDisplayName}
+            accentColor={props.providerAccentColor}
+            acpRegistryAgentId={props.acpRegistryAgentId}
+            acpRegistryIconUrl={props.acpRegistryIconUrl}
+            showBadge={props.showInstanceBadge}
+            className="size-3.5"
+            iconClassName="size-3.5"
+          />
+          <span className="truncate">
+            {getProviderRowLabel(props.providerDisplayName, props.subProvider)}
+          </span>
+        </div>
       </div>
 
       <div className="flex shrink-0 items-center gap-1.5">
+        {props.isSelected ? <CheckIcon className="size-3.5" aria-hidden /> : null}
         {props.jumpLabel ? <Kbd>{props.jumpLabel}</Kbd> : null}
       </div>
     </ComboboxItem>

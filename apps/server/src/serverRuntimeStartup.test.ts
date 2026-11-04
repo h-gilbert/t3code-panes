@@ -189,13 +189,8 @@ it.effect.each([
                 }),
         }),
         Layer.mock(ThreadManagement.ThreadManagementService)({
-          getShellSnapshot: () =>
-            Effect.succeed({
-              threads: [],
-              archivedThreads: [],
-              schemaVersion: 1,
-              snapshotSequence: 0,
-            }),
+          countThreads: () => Effect.succeed(0),
+          listActiveShellIndex: () => Effect.succeed([]),
         }),
         Layer.mock(ThreadLaunch.ThreadLaunchService)({
           launch: (input) => {
@@ -464,7 +459,7 @@ it.effect.each([
         },
       } as never),
       Effect.provideService(ThreadManagement.ThreadManagementService, {
-        getShellSnapshot: () => Effect.succeed({ threads: [] }),
+        listActiveShellIndex: () => Effect.succeed([]),
       } as never),
       Effect.provideService(ThreadLaunch.ThreadLaunchService, {
         launch: (input: NonNullable<typeof launched>) => {
@@ -511,7 +506,7 @@ it.effect("retains an existing project when bootstrap thread lookup fails", () =
         bootstrap: () => Effect.succeed({ project: { id: ProjectId.make("kept-project") } }),
       } as never),
       Effect.provideService(ThreadManagement.ThreadManagementService, {
-        getShellSnapshot: () => Effect.die("thread lookup failed"),
+        listActiveShellIndex: () => Effect.die("thread lookup failed"),
       } as never),
       Effect.provideService(ThreadLaunch.ThreadLaunchService, {
         launch: () => Effect.die("unused"),

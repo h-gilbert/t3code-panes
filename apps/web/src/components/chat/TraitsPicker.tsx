@@ -12,8 +12,7 @@ import {
   getTraitSelectChange,
   replaceDescriptorCurrentValue,
   selectableProviderOptionChoices,
-  REASONING_SELECT_DESCRIPTOR_IDS,
-  ULTRATHINK_PROMPT_PREFIX,
+  isReasoningSelect,
 } from "@t3tools/client-runtime/model-traits";
 import {
   type ModelSelection,
@@ -25,10 +24,9 @@ import {
   type ServerProviderModel,
 } from "@t3tools/contracts";
 
-import { memo, useRef, type ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 
-import { BotIcon, BrainIcon, GaugeIcon, SlidersHorizontalIcon, ZapIcon } from "lucide-react";
-import { UltrafastIcon } from "../Icons";
+import { GaugeIcon } from "lucide-react";
 import {
   Menu,
   MenuGroup,
@@ -43,15 +41,8 @@ import { getProviderModelCapabilities } from "../../providerModels";
 import { cn } from "~/lib/utils";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import {
-  ComposerControl,
-  ComposerControlChevron,
-  ComposerControlIcon,
-  type ComposerControlSize,
-} from "./ComposerControl";
-import { focusRequestedPermission, useComposerMenuProps } from "./composerEventScope";
+import { ComposerControl, ComposerControlIcon, type ComposerControlSize } from "./ComposerControl";
 import { useComposerMenuState } from "./useComposerMenuState";
-import { EffortGlyph, resolveEffortGlyph } from "./EffortGlyph";
 
 type ProviderOptions = ReadonlyArray<ProviderOptionSelection>;
 
@@ -198,12 +189,12 @@ function getSelectedTraits(
   };
 }
 
-function getTraitsSectionVisibility(input: {
+export function getTraitsSectionVisibility(input: {
   provider: ProviderDriverKind;
   models: ReadonlyArray<ServerProviderModel>;
   model: string | null | undefined;
   promptUltrathink?: PromptUltrathink | undefined;
-  modelOptions: ProviderOptions | null | undefined;
+  modelOptions?: ProviderOptions | null | undefined;
   allowPromptInjectedEffort?: boolean;
   planModeEnabled: boolean;
 }) {
@@ -266,10 +257,9 @@ export function getReasoningTraitStep(input: {
     input.planModeEnabled,
   );
   if (selected.modelIsUnavailable || selected.ultrathinkInBodyText) return null;
-  const descriptor = selected.selectDescriptors.find((entry) =>
-    REASONING_SELECT_DESCRIPTOR_IDS.has(entry.id),
-  );
-  if (!descriptor || descriptor.options.length < 2) return null;
+  const descriptor = selected.selectDescriptors.find(isReasoningSelect);
+  const choices = descriptor ? selectableProviderOptionChoices(descriptor) : [];
+  if (!descriptor || choices.length < 2) return null;
   const isPrimary = descriptor.id === selected.primarySelectDescriptor?.id;
   const current =
     isPrimary && selected.ultrathinkPromptControlled
@@ -279,41 +269,20 @@ export function getReasoningTraitStep(input: {
           { instanceId: input.instanceId, model: input.model, options: input.modelOptions ?? [] },
           input.reportedModelSelection,
         );
+  // Walk the full catalog order so a typed Ultrathink keeps its place, then land on a pickable level.
   const ordered = input.direction > 0 ? descriptor.options : descriptor.options.toReversed();
   const position =
     [current, getDescriptorStringValue(descriptor)]
       .map((value) => ordered.findIndex((option) => option.id === value))
       .find((index) => index >= 0) ?? -1;
-  for (const option of [
-    ...ordered.slice(position + 1),
-    ...ordered.slice(0, Math.max(position, 0)),
-  ]) {
-    const change = getTraitSelectChange(selected, descriptor, input.prompt, option.id);
-    if (!change) return null;
-    if ("modelOptions" in change) {
-      return change.modelOptions
-        ? { prompt: change.prompt, modelOptions: change.modelOptions }
-        : null;
-    }
-    // A slash command refuses the Ultrathink prefix, so skip that level.
-    if (change.prompt.startsWith(ULTRATHINK_PROMPT_PREFIX)) return change;
-  }
-  return null;
+  const next = [...ordered.slice(position + 1), ...ordered.slice(0, Math.max(position, 0))].find(
+    (option) => choices.includes(option),
+  );
+  const change = next && getTraitSelectChange(selected, descriptor, input.prompt, next.id);
+  return change?.modelOptions ? { prompt: change.prompt, modelOptions: change.modelOptions } : null;
 }
 
-export function shouldRenderTraitsControls(input: {
-  provider: ProviderDriverKind;
-  models: ReadonlyArray<ServerProviderModel>;
-  model: string | null | undefined;
-  promptUltrathink?: PromptUltrathink | undefined;
-  modelOptions: ProviderOptions | null | undefined;
-  allowPromptInjectedEffort?: boolean;
-  planModeEnabled: boolean;
-}): boolean {
-  return getTraitsSectionVisibility(input).hasAnyControls;
-}
-
-interface TraitsMenuContentProps {
+export interface TraitsMenuContentProps {
   provider: ProviderDriverKind;
   instanceId?: ProviderInstanceId;
   models: ReadonlyArray<ServerProviderModel>;
@@ -338,7 +307,10 @@ interface TraitsMenuContentProps {
   extraMenuHint?: string;
 }
 
-export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
+export type TraitsSelectionInput = TraitsMenuContentProps & TraitsPersistence;
+
+/** The model's traits with their shown values, and writers that persist a change. */
+export function useTraitsSelection({
   provider,
   instanceId,
   models,
@@ -349,9 +321,9 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
   reportedModelSelection,
   allowPromptInjectedEffort = true,
   planModeEnabled,
-  descriptorIds,
+  triggerClassName: _triggerClassName,
   ...persistence
-}: TraitsMenuContentProps & TraitsPersistence) {
+}: TraitsSelectionInput) {
   const modelSelection =
     instanceId && model ? { instanceId, model, options: modelOptions ?? [] } : null;
   const setProviderModelOptions = useComposerDraftStore((store) => store.setProviderModelOptions);
@@ -379,43 +351,53 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     allowPromptInjectedEffort,
     planModeEnabled,
   });
+  return {
+    ...selected,
+    /** The option a select shows, where an Ultrathink prompt owns the primary select. */
+    selectValue: (descriptor: Extract<ProviderOptionDescriptor, { type: "select" }>) =>
+      selected.ultrathinkPromptControlled && descriptor.id === selected.primarySelectDescriptor?.id
+        ? "ultrathink"
+        : (getDescriptorStringValue(descriptor, modelSelection, reportedModelSelection) ?? ""),
+    currentLabel: (descriptor: ProviderOptionDescriptor) =>
+      getProviderOptionCurrentLabel(descriptor, modelSelection, reportedModelSelection),
+    changeSelect: (
+      descriptor: Extract<ProviderOptionDescriptor, { type: "select" }>,
+      value: string,
+    ) => {
+      // Whether a pick applies, and the options it writes, do not depend on the prompt text.
+      const change = getTraitSelectChange(selected, descriptor, "", value);
+      if (!change) return;
+      onPromptEdit?.(
+        (prompt) => getTraitSelectChange(selected, descriptor, prompt, value)?.prompt ?? prompt,
+      );
+      updateModelOptions(change.modelOptions);
+    },
+    changeBoolean: (descriptorId: string, value: boolean) => {
+      updateModelOptions(
+        buildProviderOptionSelectionsFromDescriptors(
+          replaceDescriptorCurrentValue(selected.descriptors, descriptorId, value),
+        ),
+      );
+    },
+  };
+}
+
+export const ULTRATHINK_IN_BODY_NOTE =
+  'Your prompt contains "ultrathink" in the text. Remove it to change this option.';
+
+const TraitsMenuContent = memo(function TraitsMenuContentImpl(props: TraitsSelectionInput) {
+  const traits = useTraitsSelection(props);
   const {
     descriptors,
     selectDescriptors,
     booleanDescriptors,
     primarySelectDescriptor,
-    ultrathinkPromptControlled,
     ultrathinkInBodyText,
     hasAnyControls,
     modelIsUnavailable,
-  } = selected;
-  const updateDescriptors = (nextDescriptors: ReadonlyArray<ProviderOptionDescriptor>) => {
-    updateModelOptions(buildProviderOptionSelectionsFromDescriptors(nextDescriptors));
-  };
-  const visibleSelectDescriptors = descriptorIds
-    ? selectDescriptors.filter((descriptor) => descriptorIds.includes(descriptor.id))
-    : selectDescriptors;
-  const visibleBooleanDescriptors = descriptorIds
-    ? booleanDescriptors.filter((descriptor) => descriptorIds.includes(descriptor.id))
-    : booleanDescriptors;
+  } = traits;
 
-  const handleSelectChange = (
-    descriptor: Extract<ProviderOptionDescriptor, { type: "select" }>,
-    value: string,
-  ) => {
-    // Whether a pick applies, and the options it writes, do not depend on the prompt text.
-    const change = getTraitSelectChange(selected, descriptor, "", value);
-    if (!change) return;
-    onPromptEdit?.(
-      (prompt) => getTraitSelectChange(selected, descriptor, prompt, value)?.prompt ?? prompt,
-    );
-    if ("modelOptions" in change) updateModelOptions(change.modelOptions);
-  };
-
-  if (
-    !hasAnyControls ||
-    (visibleSelectDescriptors.length === 0 && visibleBooleanDescriptors.length === 0)
-  ) {
+  if (!hasAnyControls) {
     return null;
   }
 
@@ -423,11 +405,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     return (
       <>
         {descriptors.map((descriptor, index) => {
-          const value = getProviderOptionCurrentLabel(
-            descriptor,
-            modelSelection,
-            reportedModelSelection,
-          );
+          const value = traits.currentLabel(descriptor);
           if (!value) return null;
           return (
             <div key={descriptor.id}>
@@ -447,140 +425,71 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
 
   return (
     <>
-      {visibleSelectDescriptors.map((descriptor, index) => {
-        const selectedValue =
-          ultrathinkPromptControlled && descriptor.id === primarySelectDescriptor?.id
-            ? "ultrathink"
-            : (getDescriptorStringValue(descriptor, modelSelection, reportedModelSelection) ?? "");
-
-        return (
-          <div key={descriptor.id}>
-            {index > 0 ? <MenuDivider /> : null}
-            <MenuGroup>
-              <div className="px-2 pt-1.5 pb-1 font-medium text-muted-foreground text-xs">
-                {descriptor.label}
+      {selectDescriptors.map((descriptor, index) => (
+        <div key={descriptor.id}>
+          {index > 0 ? <MenuDivider /> : null}
+          <MenuGroup>
+            <div className="px-2 pt-1.5 pb-1 font-medium text-muted-foreground text-xs">
+              {descriptor.label}
+            </div>
+            {ultrathinkInBodyText && descriptor.id === primarySelectDescriptor?.id ? (
+              <div className="px-2 pb-1.5 text-muted-foreground/80 text-xs">
+                {ULTRATHINK_IN_BODY_NOTE}
               </div>
-              {ultrathinkInBodyText && descriptor.id === primarySelectDescriptor?.id ? (
-                <div className="px-2 pb-1.5 text-muted-foreground/80 text-xs">
-                  Your prompt contains &quot;ultrathink&quot; in the text. Remove it to change this
-                  option.
-                </div>
-              ) : null}
-              <MenuRadioGroup
-                value={selectedValue}
-                onValueChange={(value) => handleSelectChange(descriptor, value)}
-              >
-                {selectableProviderOptionChoices(descriptor).map((option) => (
-                  <MenuRadioItem
-                    key={option.id}
-                    value={option.id}
-                    hideIndicator
-                    closeOnClick
-                    disabled={ultrathinkInBodyText && descriptor.id === primarySelectDescriptor?.id}
-                  >
-                    <span className="flex w-full min-w-0 flex-col">
-                      <span className="flex min-w-0 items-center gap-1">
-                        <span className="min-w-0 truncate">{option.label}</span>
-                        {option.isDefault ? <DefaultBadge /> : null}
+            ) : null}
+            <MenuRadioGroup
+              value={traits.selectValue(descriptor)}
+              onValueChange={(value) => traits.changeSelect(descriptor, value)}
+            >
+              {selectableProviderOptionChoices(descriptor).map((option) => (
+                <MenuRadioItem
+                  key={option.id}
+                  value={option.id}
+                  hideIndicator
+                  closeOnClick
+                  disabled={ultrathinkInBodyText && descriptor.id === primarySelectDescriptor?.id}
+                >
+                  <span className="flex w-full min-w-0 flex-col">
+                    <span className="flex min-w-0 items-center gap-1">
+                      <span className="min-w-0 truncate">{option.label}</span>
+                      {option.isDefault ? <DefaultBadge /> : null}
+                    </span>
+                    {option.description ? (
+                      <span className="max-w-56 text-pretty text-muted-foreground/80 text-xs">
+                        {option.description}
                       </span>
-                      {option.description ? (
-                        <span className="max-w-56 text-pretty text-muted-foreground/80 text-xs">
-                          {option.description}
-                        </span>
-                      ) : null}
-                    </span>
-                  </MenuRadioItem>
-                ))}
-              </MenuRadioGroup>
-            </MenuGroup>
-          </div>
-        );
-      })}
-      {visibleBooleanDescriptors.map((descriptor, index) => {
-        const selectedValue = descriptor.currentValue === true ? "on" : "off";
-
-        return (
-          <div key={descriptor.id}>
-            {index > 0 || visibleSelectDescriptors.length > 0 ? <MenuDivider /> : null}
-            <MenuGroup>
-              <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">
-                {descriptor.label}
-              </div>
-              <MenuRadioGroup
-                value={selectedValue}
-                onValueChange={(value) => {
-                  updateDescriptors(
-                    replaceDescriptorCurrentValue(descriptors, descriptor.id, value === "on"),
-                  );
-                }}
-              >
-                {(["on", "off"] as const).map((value) => (
-                  <MenuRadioItem key={value} value={value} hideIndicator closeOnClick>
-                    <span className="flex w-full min-w-0 items-center justify-between gap-3">
-                      <span>{value === "on" ? "On" : "Off"}</span>
-                    </span>
-                  </MenuRadioItem>
-                ))}
-              </MenuRadioGroup>
-            </MenuGroup>
-          </div>
-        );
-      })}
+                    ) : null}
+                  </span>
+                </MenuRadioItem>
+              ))}
+            </MenuRadioGroup>
+          </MenuGroup>
+        </div>
+      ))}
+      {booleanDescriptors.map((descriptor, index) => (
+        <div key={descriptor.id}>
+          {index > 0 || selectDescriptors.length > 0 ? <MenuDivider /> : null}
+          <MenuGroup>
+            <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">
+              {descriptor.label}
+            </div>
+            <MenuRadioGroup
+              value={descriptor.currentValue === true ? "on" : "off"}
+              onValueChange={(value) => traits.changeBoolean(descriptor.id, value === "on")}
+            >
+              {(["on", "off"] as const).map((value) => (
+                <MenuRadioItem key={value} value={value} hideIndicator closeOnClick>
+                  <span className="flex w-full min-w-0 items-center justify-between gap-3">
+                    <span>{value === "on" ? "On" : "Off"}</span>
+                  </span>
+                </MenuRadioItem>
+              ))}
+            </MenuRadioGroup>
+          </MenuGroup>
+        </div>
+      ))}
     </>
   );
-});
-
-function compactTraitIcon(descriptor: ProviderOptionDescriptor) {
-  const key = `${descriptor.id} ${descriptor.label}`.toLowerCase();
-  if (key.includes("context")) return GaugeIcon;
-  if (key.includes("reason") || key.includes("think") || key.includes("effort")) return BrainIcon;
-  if (key.includes("agent")) return BotIcon;
-  if (key.includes("fast")) return ZapIcon;
-  return SlidersHorizontalIcon;
-}
-
-export const TraitsIconPickers = memo(function TraitsIconPickers(
-  props: TraitsMenuContentProps & TraitsPersistence,
-) {
-  const { descriptors } = getTraitsSectionVisibility({
-    provider: props.provider,
-    models: props.models,
-    model: props.model,
-    promptUltrathink: props.promptUltrathink,
-    modelOptions: props.modelOptions,
-    allowPromptInjectedEffort: props.allowPromptInjectedEffort ?? true,
-    planModeEnabled: props.planModeEnabled,
-  });
-
-  return descriptors.map((descriptor) => {
-    const Icon = compactTraitIcon(descriptor);
-    const currentLabel =
-      descriptor.type === "boolean"
-        ? descriptor.currentValue === true
-          ? "On"
-          : "Off"
-        : getProviderOptionCurrentLabel(descriptor);
-    const ariaLabel = currentLabel ? `${descriptor.label}: ${currentLabel}` : descriptor.label;
-    return (
-      <Menu key={descriptor.id}>
-        <MenuTrigger
-          render={
-            <ComposerControl
-              className="shrink-0 gap-0.5 px-1.5 text-secondary-label hover:text-foreground"
-              aria-label={ariaLabel}
-              title={ariaLabel}
-            />
-          }
-        >
-          <Icon className="size-3.5" aria-hidden />
-          <ComposerControlChevron />
-        </MenuTrigger>
-        <MenuPopup align="start">
-          <TraitsMenuContent {...props} descriptorIds={[descriptor.id]} />
-        </MenuPopup>
-      </Menu>
-    );
-  });
 });
 
 /**
@@ -644,7 +553,7 @@ export function buildTraitsTriggerDisplay(input: {
       if (
         reasoningLabelIndex === -1 &&
         descriptor.type === "select" &&
-        REASONING_SELECT_DESCRIPTOR_IDS.has(descriptor.id)
+        isReasoningSelect(descriptor)
       ) {
         reasoningLabelIndex = labels.length;
       }
@@ -662,114 +571,32 @@ export function buildTraitsTriggerDisplay(input: {
 }
 
 export const TraitsPicker = memo(function TraitsPicker({
-  provider,
-  instanceId,
-  models,
-  model,
-  promptUltrathink,
-  onPromptEdit,
-  modelOptions,
-  reportedModelSelection,
-  allowPromptInjectedEffort = true,
-  planModeEnabled,
-  triggerClassName,
-  isComposerOwned,
-  effortDisplay = "label",
-  extraMenuContent,
-  extraMenuOwnsModeShortcut,
-  extraMenuHint,
   size = "sm",
   hidden = false,
   disabled = false,
-  ...persistence
-}: TraitsMenuContentProps &
-  TraitsPersistence & {
-    size?: ComposerControlSize;
-    hidden?: boolean;
-    disabled?: boolean;
-  }) {
-  const composerFloatingLayerProps = useComposerMenuProps();
+  ...props
+}: TraitsSelectionInput & {
+  size?: ComposerControlSize;
+  hidden?: boolean;
+  disabled?: boolean;
+}) {
   const [isMenuOpen, setIsMenuOpen] = useComposerMenuState(hidden || disabled);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const { descriptors, primarySelectDescriptor, ultrathinkPromptControlled } =
-    getTraitsSectionVisibility({
-      provider,
-      models,
-      model,
-      promptUltrathink,
-      modelOptions,
-      allowPromptInjectedEffort,
-      planModeEnabled,
-    });
-  if (
-    !shouldRenderTraitsControls({
-      provider,
-      models,
-      model,
-      promptUltrathink,
-      modelOptions,
-      allowPromptInjectedEffort,
-      planModeEnabled,
-    })
-  ) {
+  const traits = useTraitsSelection(props);
+  if (!traits.hasAnyControls) {
     return null;
   }
-
-  const { label: triggerLabel, speedIcon } = buildTraitsTriggerDisplay({
-    provider,
-    descriptors,
-    primarySelectDescriptorId: primarySelectDescriptor?.id ?? null,
-    ultrathinkPromptControlled,
-    modelSelection: instanceId && model ? { instanceId, model, options: modelOptions ?? [] } : null,
-    reportedModelSelection,
+  const { label: triggerLabel } = buildTraitsTriggerDisplay({
+    provider: props.provider,
+    descriptors: traits.descriptors,
+    primarySelectDescriptorId: traits.primarySelectDescriptor?.id ?? null,
+    ultrathinkPromptControlled: traits.ultrathinkPromptControlled,
+    modelSelection:
+      props.instanceId && props.model
+        ? { instanceId: props.instanceId, model: props.model, options: props.modelOptions ?? [] }
+        : null,
+    reportedModelSelection: props.reportedModelSelection,
   });
-  const speedLabel = speedIcon === "ultrafast" ? "Ultrafast mode on" : "Fast mode on";
-  const _accessibleLabel = speedIcon ? `${triggerLabel}, ${speedLabel}` : triggerLabel;
-  const fastModeIcon = speedIcon ? (
-    <>
-      <ComposerControlIcon
-        icon={speedIcon === "ultrafast" ? UltrafastIcon : ZapIcon}
-        size={size}
-        className={cn(
-          "fill-current opacity-80",
-          size === "xs"
-            ? "text-current"
-            : provider === "claudeAgent"
-              ? "text-[#d97757]"
-              : "text-foreground",
-        )}
-      />
-      <span className="sr-only">{speedLabel}</span>
-    </>
-  ) : null;
-
-  const isCodexStyle = provider === "codex";
-  // In the composer the glyph has no word, so the tooltip and label name the control.
-  const triggerDescription = isComposerOwned
-    ? [`Effort: ${triggerLabel}`, speedLabel, extraMenuHint].filter(Boolean).join(" · ")
-    : triggerLabel;
-  const effortGlyph =
-    isComposerOwned &&
-    primarySelectDescriptor &&
-    REASONING_SELECT_DESCRIPTOR_IDS.has(primarySelectDescriptor.id)
-      ? resolveEffortGlyph(
-          primarySelectDescriptor,
-          ultrathinkPromptControlled
-            ? "ultrathink"
-            : getDescriptorStringValue(
-                primarySelectDescriptor,
-                instanceId && model ? { instanceId, model, options: modelOptions ?? [] } : null,
-                reportedModelSelection,
-              ),
-        )
-      : null;
-  // Workflow levels such as Ultracode always show their name; the setting names every level.
-  // Traits the bars cannot show, such as an agent mode, appear as words in the composer.
-  const effortWord = effortGlyph
-    ? (effortGlyph.special ?? (effortDisplay === "label" ? effortGlyph.label : null))
-    : isComposerOwned
-      ? triggerLabel
-      : null;
+  const isCodexStyle = props.provider === "codex";
 
   return (
     <Menu
@@ -777,7 +604,6 @@ export const TraitsPicker = memo(function TraitsPicker({
       onOpenChange={(open) => {
         setIsMenuOpen(open && !disabled);
       }}
-      onOpenChangeComplete={(open) => focusRequestedPermission(open, triggerRef.current)}
     >
       <Tooltip>
         <TooltipTrigger
@@ -785,66 +611,21 @@ export const TraitsPicker = memo(function TraitsPicker({
             <MenuTrigger
               render={
                 <ComposerControl
-                  ref={triggerRef}
                   disabled={disabled}
-                  aria-label={triggerDescription}
-                  data-composer-shortcut={
-                    isComposerOwned
-                      ? extraMenuOwnsModeShortcut
-                        ? "composer.effort composer.mode"
-                        : "composer.effort"
-                      : undefined
-                  }
+                  aria-label={triggerLabel}
                   size={size}
                   className={cn(
                     isCodexStyle
                       ? "min-w-0 max-w-40 shrink justify-start overflow-hidden whitespace-nowrap sm:max-w-48"
                       : "shrink-0 whitespace-nowrap",
-                    triggerClassName,
-                    // Effort reads on from the model name, "Opus 5.5 High", at about the space
-                    // inside the name: this cancels the model chip's end padding and the row gap.
-                    isComposerOwned && (effortWord !== null ? "-ms-1 ps-0" : "-ms-1 ps-0.5"),
-                    // The word is muted next to the model name and brightens like it on hover.
-                    effortWord !== null &&
-                      "text-muted-foreground hover:text-foreground data-pressed:text-foreground data-popup-open:text-foreground",
+                    props.triggerClassName,
                   )}
                 />
               }
             />
           }
         >
-          {effortGlyph ? (
-            <span className="flex items-center gap-1.5">
-              {effortWord === null ? (
-                <EffortGlyph count={effortGlyph.count} filled={effortGlyph.filled} size={size} />
-              ) : null}
-              {effortWord !== null ? (
-                <>
-                  <span data-composer-control-label>{effortWord}</span>
-                  {/* Icon-only footers hide labels and reveal this instead. */}
-                  <GaugeIcon
-                    aria-hidden="true"
-                    data-composer-control-compact-icon
-                    className="invisible absolute size-3.5"
-                  />
-                </>
-              ) : (
-                <span data-composer-control-label className="sr-only">
-                  {triggerLabel}
-                </span>
-              )}
-              {fastModeIcon}
-            </span>
-          ) : effortWord !== null ? (
-            <>
-              <span data-composer-control-label>{effortWord}</span>
-              <GaugeIcon
-                aria-hidden="true"
-                data-composer-control-compact-icon
-                className="invisible absolute size-3.5"
-              />
-            </>
-          ) : isCodexStyle ? (
+          {isCodexStyle ? (
             <span
               className={cn(
                 "flex min-w-0 w-full items-center",
@@ -863,28 +644,10 @@ export const TraitsPicker = memo(function TraitsPicker({
             </>
           )}
         </TooltipTrigger>
-        <TooltipPopup side="top">{triggerDescription}</TooltipPopup>
+        <TooltipPopup side="top">{triggerLabel}</TooltipPopup>
       </Tooltip>
-      <MenuPopup align="start" {...(isComposerOwned ? composerFloatingLayerProps : {})}>
-        <TraitsMenuContent
-          provider={provider}
-          {...(instanceId ? { instanceId } : {})}
-          models={models}
-          model={model}
-          promptUltrathink={promptUltrathink}
-          {...(onPromptEdit ? { onPromptEdit } : {})}
-          modelOptions={modelOptions}
-          reportedModelSelection={reportedModelSelection}
-          allowPromptInjectedEffort={allowPromptInjectedEffort}
-          planModeEnabled={planModeEnabled}
-          {...persistence}
-        />
-        {extraMenuContent ? (
-          <>
-            <MenuDivider />
-            {extraMenuContent}
-          </>
-        ) : null}
+      <MenuPopup align="start">
+        <TraitsMenuContent {...props} />
       </MenuPopup>
     </Menu>
   );

@@ -7,7 +7,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -45,7 +45,7 @@ const make = Effect.gen(function* () {
   const settings = yield* Settings.ServerSettingsService;
   const executor = yield* ThreadCommandExecutor.ThreadCommandExecutor;
   const environment = yield* Environment.ServerEnvironment;
-  const crypto = yield* Crypto.Crypto;
+  const crypto = yield* SecureRandom.SecureRandom;
 
   return AgentSettings.of({
     update: Effect.fn("AgentSettings.update")(function* (input) {
@@ -56,7 +56,7 @@ const make = Effect.gen(function* () {
         });
       }
       const descriptor = yield* environment.getDescriptor;
-      const id = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
+      const id = yield* crypto.uuidV4().pipe(Effect.orDie);
       const requestId = RuntimeRequestId.make(`settings:${id}`);
       const afterSequence = yield* threads
         .getThreadEventSequence(input.threadId)

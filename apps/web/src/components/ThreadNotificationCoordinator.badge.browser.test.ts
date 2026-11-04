@@ -259,3 +259,67 @@ it("keeps completions quiet through a continuation gap", async () => {
   await vi.advanceTimersByTimeAsync(1);
   expect(TestNotification.sent).toEqual([]);
 });
+it.each(["hasPendingApprovals", "hasPendingUserInput"] as const)(
+  "keeps offline completions quiet and notifies for %s once across reconnects",
+  async (flag) => {
+    await using app = setup();
+    const asking = { id: "asking", hasPendingApprovals: true };
+    const offline = { id: "offline", [flag]: true };
+    const done = {
+      id: "done",
+      latestTurn: {
+        turnId: "done-turn",
+        state: "completed",
+        completedAt: "2026-09-13T07:00:00.000Z",
+      },
+    };
+    state.shells.set("one", shell({ id: "working" }, { id: "asking" }, { id: "offline" }, done));
+    app.start();
+    using _timers = fakeTimers();
+    state.shells.set("one", shell({ id: "working" }, asking, { id: "offline" }, done));
+    state.shells.set("one", {
+      ...shell({ id: "working" }, asking, { id: "offline" }, done),
+      status: "cached",
+    });
+
+    const completed = {
+      id: "working",
+      latestTurn: { turnId: "turn", state: "completed", completedAt: "2026-09-13T07:05:00.000Z" },
+    };
+    state.shells.set("one", {
+      ...shell(completed, asking, offline, done),
+      status: "synchronizing",
+    });
+    state.shells.set("one", shell(completed, asking, offline, done));
+    await vi.advanceTimersByTimeAsync(WORKING_EXIT_GRACE_MS);
+
+    expect(TestNotification.sent.map(({ title }) => title)).toEqual([
+      "Approval needed",
+      flag === "hasPendingApprovals" ? "Approval needed" : "Input needed",
+    ]);
+    state.shells.set("one", { ...shell(completed, asking, offline, done), status: "cached" });
+    state.shells.set("one", shell(completed, asking, offline, done));
+    expect(TestNotification.sent.map(({ title }) => title)).toEqual([
+      "Approval needed",
+      flag === "hasPendingApprovals" ? "Approval needed" : "Input needed",
+    ]);
+  },
+);
+
+it.each([false, true])(
+  "keeps completions quiet across reconnects (continued: %s)",
+  async (continued) => {
+    await using app = setup();
+    app.start();
+    using _timers = fakeTimers();
+    const completed = shell({
+      latestTurn: { turnId: "turn", state: "completed", completedAt: "2026-09-13T07:05:00.000Z" },
+    });
+    state.shells.set("one", completed);
+    await vi.advanceTimersByTimeAsync(WORKING_EXIT_GRACE_MS);
+    state.shells.set("one", { ...completed, status: "cached" });
+    expect(TestNotification.sent.map(({ title }) => title)).toEqual([]);
+    state.shells.set("one", continued ? shell() : completed);
+    expect(TestNotification.sent.map(({ title }) => title)).toEqual([]);
+  },
+);

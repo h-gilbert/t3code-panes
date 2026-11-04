@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import type { EnvironmentId } from "@t3tools/contracts";
+import { type EnvironmentId, managedPolicyDeniedMessage } from "@t3tools/contracts";
 
 import {
   clearBrowserProfileData,
   removeBrowserProfileCredentials,
   importFailureReason,
+  importPolicyRefusal,
 } from "./IntegrationsSettings";
 
 const environmentId = "environment-a" as EnvironmentId;
@@ -88,5 +89,23 @@ describe("removeBrowserProfileCredentials", () => {
       "work",
     );
     expect(remove.mock.calls).toEqual([["managed"]]);
+  });
+});
+
+describe("importPolicyRefusal", () => {
+  it("recovers a managed policy's refusal from the IPC-wrapped message", () => {
+    const denied = managedPolicyDeniedMessage("Example Corp", "importing browser cookies");
+    expect(
+      importPolicyRefusal({
+        message: `Error invoking remote method 'desktop:preview-import-cookies': BrowserImportPolicyError: ${denied}`,
+      }),
+    ).toBe(denied);
+    const unreadable =
+      "The managed policy at C:\\Program Files\\T3Code\\policy.json could not be read, so importing browser cookies is not allowed.";
+    expect(importPolicyRefusal({ message: `Error: ${unreadable}` })).toBe(unreadable);
+  });
+
+  it("leaves other failures to their reason token", () => {
+    expect(importPolicyRefusal(failure("readFailed"))).toBeUndefined();
   });
 });

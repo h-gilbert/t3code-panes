@@ -1,5 +1,6 @@
 import { expect, it } from "@effect/vitest";
 import * as Context from "effect/Context";
+import * as Schema from "effect/Schema";
 import { Tool } from "effect/ai";
 
 import { PreviewStandardToolkit, PreviewToolkit } from "./tools.ts";
@@ -106,4 +107,18 @@ it("registers preview_autofill and its result never carries a password field", (
   const keys = Object.keys(resultSchema.properties ?? {});
   expect(keys).toContain("filled");
   expect(keys).not.toContain("password");
+});
+
+it("preview_open accepts a target while preserving open input constraints", () => {
+  const decode = Schema.decodeUnknownSync(PreviewToolkit.tools.preview_open.parametersSchema);
+  const target = { kind: "environment-port", port: 3000 };
+  expect(decode({ target })).toEqual({ target });
+  expect(decode({})).toEqual({});
+  expect(decode({ url: "https://example.com" })).toEqual({ url: "https://example.com" });
+  expect(decode({ url: "http://localhost:3000", target })).toEqual({
+    url: "http://localhost:3000",
+    target,
+  });
+  expect(() => decode({ target: { ...target, port: 0 } })).toThrow();
+  expect(() => decode({ target, tabId: "tab-1", reuseExistingTab: false })).toThrow();
 });

@@ -1,4 +1,6 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Layer from "effect/Layer";
 import { expect, it } from "@effect/vitest";
 import {
   PREVIEW_AUTOMATION_OPERATIONS,
@@ -23,13 +25,16 @@ import * as Fiber from "effect/Fiber";
 import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
 
+import { PreviewBrowserRootError } from "../preview/PreviewBrowserHost.ts";
 import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
 
 import * as Exit from "effect/Exit";
 import * as Scheduler from "effect/Scheduler";
 import * as TestClock from "effect/testing/TestClock";
 
-const makeBroker = PreviewAutomationBroker.make.pipe(Effect.provide(NodeServices.layer));
+const makeBroker = PreviewAutomationBroker.make.pipe(
+  Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+);
 
 const scope = {
   environmentId: EnvironmentId.make("environment-1"),
@@ -385,7 +390,7 @@ it.effect("preserves bounded request and remote selector diagnostics", () => {
         remoteDetailKind: "object",
       });
       expect(error.message).toBe(
-        `Preview automation click received an invalid locator (${locator.length} characters).`,
+        `Preview automation click received an invalid locator (${locator.length} characters). Use aria-ref=<ref> from the latest snapshot or a Playwright role/text selector; put CSS in selector.`,
       );
       expect(error.message).not.toContain("secret");
       expect(error.cause).toBe(remoteError);
@@ -2138,6 +2143,86 @@ it.effect("keeps each thread's current tab when threads share a provider session
         ["thread-2", "tab-thread-2"],
       ]);
       expect(routed[0]!.agentSessionId).not.toBe(routed[1]!.agentSessionId);
+    }),
+  ),
+);
+
+it.effect.each([
+  {
+    clientId: SERVER_BROWSER_AUTOMATION_CLIENT_ID,
+    shown: true,
+    message: "page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:4719/",
+  },
+  {
+    clientId: "client-1",
+    shown: false,
+    message: "page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:4719/",
+  },
+  {
+    clientId: SERVER_BROWSER_AUTOMATION_CLIENT_ID,
+    shown: true,
+    message: new PreviewBrowserRootError().message,
+  },
+])("preserves server browser failure guidance ($clientId)", ({ clientId, shown, message }) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* makeBroker;
+      const requests = requestsFrom(yield* broker.connect(makeHost({ clientId })));
+      yield* Stream.runForEach(requests, (request) =>
+        broker.respond({
+          clientId,
+          connectionId: request.connectionId,
+          requestId: request.requestId,
+          ok: false,
+          error: {
+            _tag: "PreviewAutomationExecutionError",
+            message,
+          },
+        }),
+      ).pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+      const error = yield* broker
+        .invoke<void>({ scope, operation: "open", input: {} })
+        .pipe(Effect.flip);
+      expect(error._tag).toBe("PreviewAutomationExecutionError");
+      expect(error.message.includes(message)).toBe(shown);
+    }),
+  ),
+);
+
+it.effect("names the click target that matched nothing when the server browser times out", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const broker = yield* makeBroker;
+      const clientId = SERVER_BROWSER_AUTOMATION_CLIENT_ID;
+      const requests = requestsFrom(yield* broker.connect(makeHost({ clientId })));
+      yield* Stream.runForEach(requests, (request) =>
+        broker.respond({
+          clientId,
+          connectionId: request.connectionId,
+          requestId: request.requestId,
+          ok: false,
+          error: {
+            _tag: "PreviewAutomationTimeoutError",
+            message: "No element matches the target.",
+            detail: { reason: 'No element matches ".definitely-no-such-t3-target".' },
+          },
+        }),
+      ).pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+
+      const error = yield* broker
+        .invoke<void>({
+          scope,
+          operation: "click",
+          input: { selector: ".definitely-no-such-t3-target", timeoutMs: 15_000 },
+        })
+        .pipe(Effect.flip);
+
+      expect(error._tag).toBe("PreviewAutomationTimeoutError");
+      expect(error.message).toBe(
+        'Preview automation click timed out after 15000ms. No element matches ".definitely-no-such-t3-target".',
+      );
     }),
   ),
 );

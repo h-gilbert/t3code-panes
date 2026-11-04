@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { AuthMcpClientAccess, AuthSessionId } from "@t3tools/contracts";
 import * as NetService from "@t3tools/shared/Net";
@@ -17,7 +18,12 @@ import { cli } from "../binCli.ts";
 import * as ServerConfig from "../config.ts";
 import { resolveCliAuthConfig } from "./config.ts";
 
-const layerCli = Layer.mergeAll(NodeServices.layer, NetService.layer, TestConsole.layer);
+const layerCli = Layer.mergeAll(
+  NodeServices.layer,
+  NodeCrypto.layer,
+  NetService.layer,
+  TestConsole.layer,
+);
 const decodeIssued = Schema.decodeUnknownSync(
   Schema.fromJsonString(
     Schema.Struct({

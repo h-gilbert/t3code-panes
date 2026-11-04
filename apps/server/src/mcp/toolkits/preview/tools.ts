@@ -1,4 +1,5 @@
 import {
+  BrowserNavigationTarget,
   PreviewAutomationAutofillInput,
   PreviewAutomationAutofillResult,
   ToolActivityIcon,
@@ -75,11 +76,23 @@ const PreviewStatusTool = Tool.make("preview_status", {
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, true);
 
+// `url` already covers websites, so open only adds the dev-server target.
+const EnvironmentPortTarget = BrowserNavigationTarget.members[1];
+
 const PreviewOpenTool = browserTool(
   Tool.make("preview_open", {
     description:
       "Initialize a collaborative browser tab with visibility controlled by the user’s auto-show preference, off by default. Use open=false for routine background automation and open=true when the user asks to see the page. Pass tabId to reuse a specific existing tab, set reuseExistingTab=false to create another tab, or omit both to use this agent session's current tab. Parallel subagents sharing a provider session must each open with reuseExistingTab=false and pass their returned tabId on every call. Pass profileId (an id or name from preview_status profiles) to open under a browser profile and its saved logins; omit it for the user's default profile. Another agent session's tabs can be read but not operated.",
-    parameters: PreviewAutomationOpenInput,
+    parameters: PreviewAutomationOpenInput.mapFields(
+      (fields) => ({
+        ...fields,
+        target: Schema.optional(EnvironmentPortTarget).annotate({
+          description:
+            "A dev server on this environment: kind environment-port, port, and optional path. Use instead of url.",
+        }),
+      }),
+      { unsafePreserveChecks: true },
+    ),
     success: PreviewAutomationStatus,
     failure: PreviewToolFailure,
     dependencies,

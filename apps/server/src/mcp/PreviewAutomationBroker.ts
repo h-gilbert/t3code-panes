@@ -36,7 +36,7 @@ import {
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import type * as Cause from "effect/Cause";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -121,17 +121,7 @@ interface HostAssignment {
   readonly tabSequence?: number;
 }
 
-/**
- * The provider session driving one browser tab for the duration of one request.
- *
- * Exclusivity is per tab and lasts exactly as long as the request in flight,
- * because a tab is the only thing two drivers can actually corrupt: one
- * webContents, one DOM, one navigation. It is deliberately not per environment
- * and has no idle window — that shape blocked sessions whose tabs never touched
- * each other, and held the block for seconds after the holder went quiet.
- * Cross-tab hazards are native focus, which the desktop host serialises around
- * the input dispatch itself.
- */
+// A request holds only its tab; the desktop host serializes native focus separately.
 interface HostHolder {
   readonly providerSessionId: string;
   readonly threadId: McpInvocationContext.McpThreadInvocationScope["thread"]["threadId"];
@@ -321,6 +311,14 @@ const readRemoteTimeoutMs = (detail: unknown): number | undefined => {
 
 const isFileActionReason = Schema.is(PreviewAutomationFileActionReason);
 /** Enough for a browser's own error line, such as a refused connection and its URL. */
+const readRemoteReason = (detail: unknown): string | undefined =>
+  typeof detail === "object" &&
+  detail !== null &&
+  "reason" in detail &&
+  typeof detail.reason === "string"
+    ? detail.reason
+    : undefined;
+
 const MAX_REASON_CHARS = 500;
 
 const classifyResponseError = (
@@ -421,9 +419,13 @@ const classifyResponseError = (
         reportedStages.includes(stage),
       );
       const remoteTimeoutMs = readRemoteTimeoutMs(error.detail);
+      const remoteReason = readRemoteReason(error.detail);
       return new PreviewAutomationTimeoutError({
         ...context,
         ...remoteDiagnostics,
+        ...(context.clientId === SERVER_BROWSER_AUTOMATION_CLIENT_ID && remoteReason !== undefined
+          ? { reason: remoteReason.slice(0, MAX_REASON_CHARS) }
+          : {}),
         ...(remoteTimeoutMs === undefined
           ? {}
           : { timeoutMs: Math.min(context.timeoutMs, remoteTimeoutMs) }),
@@ -525,7 +527,7 @@ const classifyResponseError = (
 };
 
 export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
-  const crypto = yield* Crypto.Crypto;
+  const random = yield* SecureRandom.SecureRandom;
   const state = yield* SynchronizedRef.make<BrokerState>({
     clients: new Map(),
     assignments: new Map(),
@@ -578,7 +580,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
   ) {
     const clientId = host.clientId;
     const queue = yield* Queue.unbounded<PreviewAutomationStreamEvent, Cause.Done>();
-    const connectionId = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
+    const connectionId = yield* random.uuidV4();
     yield* Queue.offer(queue, { type: "connected", connectionId });
     const connection: ClientConnection = {
       clientId,
@@ -701,12 +703,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
         const assigned = assignments.get(assignmentKey);
         const assignedConnection = assigned ? current.clients.get(assigned.clientId) : undefined;
         const hasLiveAssignment = assignedConnection?.environmentId === input.scope.environmentId;
-        // Keep one provider session on one physical desktop runtime so a
-        // multi-step browser interaction cannot jump between independent
-        // Electron cookie/DOM state. A live assignment that predates an
-        // operation is not silently moved to a newer client: the caller gets a
-        // capability failure and can deliberately start a fresh provider
-        // session. A dead lease is pruned above and may fail over.
+        // A live lease stays on its cookie and DOM runtime; only dead leases fail over.
         const ownsTargetTab = (host: ClientConnection, visibleOnly = false) =>
           host.liveTabs.some(
             (tab) =>

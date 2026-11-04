@@ -1,3 +1,5 @@
+import * as NetService from "@t3tools/shared/Net";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 // @effect-diagnostics nodeBuiltinImport:off - verifies OS locks across real processes.
 // @effect-diagnostics preferSchemaOverJson:off - quotes trusted literals in a child-process test script.
 import { assert, describe, it } from "@effect/vitest";
@@ -37,7 +39,9 @@ describe("server home ownership", () => {
     }).pipe(
       Effect.provide(
         ServerConfig.layerTest("/tmp", { prefix: "t3-home-startup-" }).pipe(
-          Layer.provideMerge(NodeServices.layer),
+          Layer.provideMerge(
+            Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer),
+          ),
         ),
       ),
     ),
@@ -58,7 +62,9 @@ describe("server home ownership", () => {
           yield* Scope.close(owner, Exit.void);
         }
         yield* acquireServerHomeLock(config);
-      }).pipe(Effect.provide(NodeServices.layer)),
+      }).pipe(
+        Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer)),
+      ),
   );
 
   it.effect("respects a live older server and releases the lock when startup is rejected", () =>
@@ -80,7 +86,7 @@ describe("server home ownership", () => {
       const fs = yield* FileSystem.FileSystem;
       yield* fs.remove(config.serverRuntimeStatePath);
       yield* acquireServerHomeLock(config);
-    }).pipe(Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer))),
   );
 
   it.effect(
@@ -110,7 +116,9 @@ describe("server home ownership", () => {
           serverRuntimeStatePath: path.join(linkedDir, "server-runtime.json"),
         }).pipe(Effect.scoped, Effect.flip);
         assert.equal(error._tag, "ServerHomeLockError");
-      }).pipe(Effect.provide(NodeServices.layer)),
+      }).pipe(
+        Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer)),
+      ),
   );
 
   it.effect("releases ownership after a process is killed without cleanup", () =>
@@ -156,6 +164,6 @@ describe("server home ownership", () => {
         yield* Effect.promise(() => exited);
       }
       yield* acquireServerHomeLock(config);
-    }).pipe(Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer))),
   );
 });

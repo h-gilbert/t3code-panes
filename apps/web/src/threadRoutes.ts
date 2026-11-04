@@ -89,7 +89,24 @@ export function resolveThreadRouteRef(
 
 export function resolveThreadRouteTarget(
   params: Partial<Record<"environmentId" | "threadId" | "draftId", string | undefined>>,
+  pathname?: string,
 ): ThreadRouteTarget | null {
+  if (pathname !== undefined) {
+    const expectedPath =
+      params.environmentId && params.threadId
+        ? `/${params.environmentId}/${params.threadId}`
+        : params.draftId
+          ? `/draft/${params.draftId}`
+          : null;
+    const currentPath = pathname.replace(/\/$/, "");
+    if (currentPath !== expectedPath) {
+      try {
+        if (decodeURIComponent(currentPath) !== expectedPath) return null;
+      } catch {
+        return null;
+      }
+    }
+  }
   if (params.environmentId && params.threadId) {
     return {
       kind: "server",

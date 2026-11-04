@@ -26,7 +26,6 @@ type EarlyLinuxElectronOptionsInput = EarlyDesktopSettingsInput;
 
 export interface EarlyLinuxElectronOptions {
   readonly isDevelopment: boolean;
-  readonly linuxWmClass: string;
   readonly linuxDesktopEntryName: string;
   readonly passwordStore: LinuxPasswordStoreSwitch | null;
 }
@@ -139,11 +138,8 @@ export function resolveLinuxDisableFeaturesSwitch(input: {
     : `${input.disableFeatures},${WAYLAND_COLOR_MANAGER_FEATURE}`;
 }
 
-// After a page has been hidden for five minutes, Chromium aligns its timers to
-// once a minute. The WebSocket heartbeat expects a frame every 15 seconds, so a
-// window left behind a sleeping display dropped every environment connection
-// each minute, and with it the browser host that remote environments use.
-// Ordinary hidden-window throttling, one wake-up per second, still applies.
+// Chromium's once-per-minute intensive throttling breaks the 15-second WebSocket heartbeat.
+// Keep ordinary hidden-window throttling while preserving remote connections and browser hosting.
 const INTENSIVE_WAKE_UP_THROTTLING_FEATURE = "IntensiveWakeUpThrottling";
 
 /**
@@ -166,7 +162,6 @@ export function resolveEarlyLinuxElectronOptions(
   const isDevelopment = isDevelopmentEnvironment(input.env);
   return {
     isDevelopment,
-    linuxWmClass: isDevelopment ? "t3code-dev" : "t3code",
     linuxDesktopEntryName: resolveLinuxDesktopEntryName(isDevelopment),
     passwordStore: resolveLinuxPasswordStoreSwitch({
       preference,

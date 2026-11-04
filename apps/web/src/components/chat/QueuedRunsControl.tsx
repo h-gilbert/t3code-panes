@@ -1,7 +1,10 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { deriveThreadQueueWorkflowState } from "@t3tools/client-runtime/state/thread-workflows";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
-import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
+import {
+  isAttachmentOnlyBootstrapPrompt,
+  replaceComposerContextReferences,
+} from "@t3tools/shared/composerContextReferences";
 import type {
   ChatAttachment as ContractChatAttachment,
   EnvironmentId,
@@ -216,16 +219,16 @@ export function QueuedRunsControl({
 
   const remove = async (runId: RunId) => {
     setBusyRunId(runId);
-    try {
-      if (props.onRestoreQueuedRun) await props.onRestoreQueuedRun(runId);
-      else
-        await cancel({
-          environmentId: props.environmentId,
-          input: { threadId: props.threadId, runId },
-        });
-    } finally {
-      setBusyRunId(null);
-    }
+    await Promise.resolve()
+      .then(async () => {
+        if (props.onRestoreQueuedRun) await props.onRestoreQueuedRun(runId);
+        else
+          await cancel({
+            environmentId: props.environmentId,
+            input: { threadId: props.threadId, runId },
+          });
+      })
+      .finally(() => setBusyRunId(null));
   };
 
   const collapsible = items.length > QUEUE_VISIBLE_ROWS;
@@ -243,11 +246,13 @@ export function QueuedRunsControl({
       </span>
       <ol className="flex flex-col items-end gap-3" id={queueListId}>
         {visibleItems.map((item, position) => {
-          const previewText = assistantCitationsToPlainText(
-            replaceComposerContextReferences(item.text, (reference) =>
-              reference.kind === "image" && item.thumbnails.length > 0 ? "" : reference.label,
-            ),
-          ).trim();
+          const previewText = isAttachmentOnlyBootstrapPrompt(item.text)
+            ? ""
+            : assistantCitationsToPlainText(
+                replaceComposerContextReferences(item.text, (reference) =>
+                  reference.kind === "image" && item.thumbnails.length > 0 ? "" : reference.label,
+                ),
+              ).trim();
           const isEditing = item.runId !== null && item.runId === props.editingRunId;
           return (
             <li
@@ -256,7 +261,7 @@ export function QueuedRunsControl({
               aria-posinset={position + 1}
               aria-setsize={items.length}
               aria-current={isEditing ? "true" : undefined}
-              className="group/queued flex w-full flex-col items-end gap-1 transition-opacity duration-150 ease-out starting:opacity-0 motion-reduce:transition-none"
+              className="group/queued flex w-full flex-col items-end gap-1"
             >
               <QueuedMessage
                 environmentId={props.environmentId}

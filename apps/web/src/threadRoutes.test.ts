@@ -25,6 +25,30 @@ describe("threadRoutes", () => {
     expect(isThreadRoutePathname("/env-2/thread-1", ref)).toBe(false);
     expect(isThreadRoutePathname("/draft/thread-1", ref)).toBe(false);
     expect(isThreadRoutePathname("/env-1/thread-1/extra", ref)).toBe(false);
+
+    const params = { environmentId: "env-1", threadId: "thread-1" };
+    expect(resolveThreadRouteTarget(params, "/env-1/thread-1")).toEqual({
+      kind: "server",
+      threadRef: ref,
+    });
+    expect(resolveThreadRouteTarget(params, "/workspace")).toBeNull();
+    expect(resolveThreadRouteTarget(params, "/settings/general")).toBeNull();
+    expect(resolveThreadRouteTarget(params, "/env-1/thread-2")).toBeNull();
+    expect(resolveThreadRouteTarget({ draftId: "draft-1" }, "/workspace")).toBeNull();
+    expect(resolveThreadRouteTarget({ draftId: "draft-1" }, "/draft/draft-1")).toEqual({
+      kind: "draft",
+      draftId: "draft-1",
+    });
+    expect(
+      resolveThreadRouteTarget(
+        { environmentId: "env-1", threadId: "thread:child%3A1" },
+        "/env-1/thread%3Achild%253A1",
+      ),
+    ).toEqual({
+      kind: "server",
+      threadRef: scopeThreadRef("env-1" as never, ThreadId.make("thread:child%3A1")),
+    });
+    expect(resolveThreadRouteTarget(params, "/env-1/%invalid")).toBeNull();
   });
 
   it("resolves the backing thread while a draft route is being promoted", () => {

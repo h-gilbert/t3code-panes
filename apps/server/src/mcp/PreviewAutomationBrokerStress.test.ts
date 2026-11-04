@@ -1,3 +1,5 @@
+import * as Layer from "effect/Layer";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import {
@@ -29,7 +31,9 @@ import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
 
 const environmentId = EnvironmentId.make("environment-1");
 
-const makeBroker = PreviewAutomationBroker.make.pipe(Effect.provide(NodeServices.layer));
+const makeBroker = PreviewAutomationBroker.make.pipe(
+  Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+);
 
 const makeScope = (index: number): McpInvocationContext.McpThreadInvocationScope => ({
   environmentId,
@@ -184,7 +188,6 @@ it.effect(
         }
       }),
     ),
-  { timeout: 60_000 },
 );
 
 it.effect("releases claims when contending requests are interrupted mid-flight", () =>

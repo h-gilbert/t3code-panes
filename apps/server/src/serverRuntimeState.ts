@@ -22,6 +22,16 @@ export const PersistedServerRuntimeState = Schema.Struct({
   startedAt: Schema.String,
   serviceManaged: Schema.optional(Schema.Boolean),
   serverVersion: Schema.optional(Schema.String),
+  // The managed policy this server loaded at startup, null for none; absent from older servers.
+  managedPolicy: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        source: Schema.String,
+        organization: Schema.String,
+        fingerprint: Schema.String,
+      }),
+    ),
+  ),
 });
 export type PersistedServerRuntimeState = typeof PersistedServerRuntimeState.Type;
 
@@ -58,6 +68,7 @@ export const makePersistedServerRuntimeState = (input: {
   >;
   readonly port: number;
   readonly serviceManaged?: boolean;
+  readonly managedPolicy?: PersistedServerRuntimeState["managedPolicy"];
 }): Effect.Effect<PersistedServerRuntimeState> =>
   Effect.map(DateTime.now, (now) => ({
     version: 1,
@@ -70,6 +81,7 @@ export const makePersistedServerRuntimeState = (input: {
     startedAt: DateTime.formatIso(now),
     ...(input.serviceManaged ? { serviceManaged: true } : {}),
     serverVersion: packageJson.version,
+    ...(input.managedPolicy === undefined ? {} : { managedPolicy: input.managedPolicy }),
   }));
 
 export const persistServerRuntimeState = (input: {
@@ -127,13 +139,8 @@ export const isProcessAlive = (pid: number): boolean => {
   }
 };
 
-/**
- * Advertise this server as the home's server. Clients and the SSH launcher
- * find a home's server through this one record, so a second server sharing the
- * home (hand-started or SSH-launched) must not displace a live one: doing so
- * hides the service, and the launcher keeps starting servers beside it. The
- * boot service follows the same rule. Startup ownership is acquired before any runtime layers are built.
- */
+// Never displace a live server's discovery record: SSH would lose it and launch duplicate servers.
+// Startup acquires ownership before building runtime layers.
 export const claimServerRuntimeState = Effect.fn("serverRuntimeState.claimServerRuntimeState")(
   function* (input: { readonly path: string; readonly state: PersistedServerRuntimeState }) {
     const existing = yield* readPersistedServerRuntimeState(input.path);

@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -21,13 +22,7 @@ const Started = Schema.Struct({
 });
 const decodeStarted = Schema.decodeUnknownSync(Schema.fromJsonString(Started));
 
-/**
- * The runner discovers Node by prepending the standard system directories, which
- * on a developer machine puts the real npm and npx ahead of the fixture's fakes
- * — the install would then reach the registry instead of the stub. Drop just
- * those lines so the fixture's PATH is authoritative; every other part of the
- * script, including the npx-before-npm fallback under test, runs unchanged.
- */
+// Keep fixture npm/npx ahead of real binaries so the runner cannot reach the registry.
 const withFixturePathOnly = (script: string) => {
   const isolated = script.replace(
     /^ *prepend_path_if_dir "(?:\/bin|\/usr\/bin|\/usr\/local\/bin|\/opt\/homebrew\/bin)"\n/gmu,
@@ -266,7 +261,7 @@ server.listen(0, "127.0.0.1", () => {
             assert.equal(yield* child.exitCode, 0);
             assert.equal(yield* fs.readFileString(signalPath), mode === "timeout" ? "2" : "1");
           }
-        }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+        }).pipe(Effect.provide([NodeServices.layer, NodeCrypto.layer]), Effect.scoped),
     );
   },
 );

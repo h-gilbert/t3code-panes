@@ -177,6 +177,29 @@ const DefinitionOverrides: Record<string, Schema.Json> = {
     type: "string",
     enum: ["started", "interacted", "interrupted", "completed"],
   },
+  // Newer custom Codex binaries emit partial answers before additional tools or text.
+  MessagePhase: {
+    description:
+      'Classifies an assistant message as interim commentary or final answer text.\n\nProviders do not emit this consistently, so callers must treat `None` as "phase unknown" and keep compatibility behavior for legacy models.',
+    oneOf: [
+      {
+        type: "string",
+        enum: ["commentary"],
+        description:
+          "Mid-turn assistant text (for example preamble/progress narration).\n\nAdditional tool calls or assistant output may follow before turn completion.",
+      },
+      {
+        type: "string",
+        enum: ["partial_answer"],
+        description: "Stable answer text that may be followed by more assistant output or tools.",
+      },
+      {
+        type: "string",
+        enum: ["final_answer"],
+        description: "The assistant's terminal answer text for the current turn.",
+      },
+    ],
+  },
 };
 
 const CodexErrorInfoCompatibilityValues = [
@@ -231,6 +254,22 @@ function applyCodex0151DefinitionCompatibility(
   return {
     ...definitionSchema,
     oneOf: [{ ...firstVariant, enum: nextEnum }, ...remainingVariants],
+  };
+}
+
+// Codex sends error codes this ref does not list yet (e.g. `modelNotFound`). A closed enum
+// fails the whole notification decode, which drops a failed `turn/completed` and leaves the turn running.
+const OpenStringEnumDefinitions = new Set(["CodexErrorInfo"]);
+
+function openStringEnum(schema: Schema.Json): Schema.Json {
+  if (!isJsonSchemaNode(schema) || !Array.isArray(schema.oneOf)) return schema;
+  return {
+    ...schema,
+    oneOf: schema.oneOf.map((variant: Schema.Json) =>
+      isJsonSchemaNode(variant) && variant.type === "string" && Array.isArray(variant.enum)
+        ? { type: "string" }
+        : variant,
+    ),
   };
 }
 
@@ -804,7 +843,9 @@ const generateFiles = Effect.fn("generateFiles")(function* () {
       }
       aggregateSchemas[localDefinitionNames.get(definitionName)!] = pipe(
         rewriteExternalRefs(
-          compatibleDefinitionSchema,
+          OpenStringEnumDefinitions.has(definitionName)
+            ? openStringEnum(compatibleDefinitionSchema)
+            : compatibleDefinitionSchema,
           localDefinitionNames,
           file.namespace,
           exportNameByQualifiedName,

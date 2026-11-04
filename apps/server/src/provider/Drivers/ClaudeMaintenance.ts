@@ -1,44 +1,126 @@
-import type { ProviderMaintenanceCapabilities } from "@t3tools/provider-core/server/maintenance";
+import { ProviderDriverKind } from "@t3tools/contracts";
+import {
+  makeCachedProviderMaintenanceResolution,
+  makePackageManagedProviderMaintenanceResolver,
+  normalizeCommandPath,
+  resolveProviderMaintenanceCapabilitiesEffect,
+  type ProviderMaintenanceCapabilities,
+  type ProviderMaintenanceResolverServices,
+} from "@t3tools/provider-core/server/maintenanceResolver";
+import * as HostProcess from "@t3tools/shared/HostProcess";
+import { fromLenientJson } from "@t3tools/shared/schemaJson";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { HttpClient } from "effect/http";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientResponse from "effect/http/HttpClientResponse";
+import { resolveClaudeHomePath } from "./ClaudeHome.ts";
 
-const ReleaseSettings = Schema.Struct({ autoUpdatesChannel: Schema.optional(Schema.String) });
-const decodeSettings = Schema.decodeUnknownEffect(Schema.fromJsonString(ReleaseSettings));
-const RELEASES_URL =
-  "https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases";
+const NATIVE_RELEASES = "https://downloads.claude.ai/claude-code-releases";
+const UpdateChannelSettings = fromLenientJson(
+  Schema.Struct({ autoUpdatesChannel: Schema.optional(Schema.Literals(["latest", "stable"])) }),
+);
+const NativeVersion = Schema.String.check(Schema.isPattern(/^\d+\.\d+\.\d+$/));
 
-export const withClaudeNativeLatestVersion = Effect.fn("withClaudeNativeLatestVersion")(function* (
-  capabilities: ProviderMaintenanceCapabilities,
-  configDir: string,
+const update = makePackageManagedProviderMaintenanceResolver({
+  provider: ProviderDriverKind.make("claudeAgent"),
+  npmPackageName: "@anthropic-ai/claude-code",
+  nativeUpdate: {
+    args: ["update"],
+    isCommandPath: (commandPath) => {
+      const normalized = normalizeCommandPath(commandPath);
+      return (
+        normalized.endsWith("/.local/bin/claude") ||
+        normalized.endsWith("/.local/bin/claude.exe") ||
+        normalized.includes("/.local/share/claude/")
+      );
+    },
+  },
+});
+
+const readUpdateChannel = Effect.fn("ClaudeMaintenance.readUpdateChannel")(function* (
+  configDir?: string,
 ) {
-  if (capabilities.update?.lockKey !== "claudeAgent-native") return capabilities;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const client = yield* HttpClient.HttpClient;
-  const lookupLatestVersion = Effect.gen(function* () {
-    const settings = yield* fs.readFileString(path.join(configDir, "settings.json")).pipe(
-      Effect.flatMap(decodeSettings),
-      Effect.orElseSucceed(() => null),
-    );
-    const channel = settings?.autoUpdatesChannel === "stable" ? "stable" : "latest";
-    const response = yield* client.get(`${RELEASES_URL}/${channel}`);
-    if (response.status < 200 || response.status >= 300) return null;
-    const version = (yield* response.text).trim();
-    return /^\d+\.\d+\.\d+$/.test(version) ? version : null;
-  }).pipe(
-    Effect.timeout(4_000),
-    Effect.orElseSucceed(() => null),
+  const environment = yield* HostProcess.Environment;
+  const platform = yield* HostProcess.Platform;
+  const managedDirectory =
+    platform === "darwin"
+      ? "/Library/Application Support/ClaudeCode"
+      : platform === "win32"
+        ? path.join(environment.PROGRAMFILES || "C:\\Program Files", "ClaudeCode")
+        : "/etc/claude-code";
+  const dropInDirectory = path.join(managedDirectory, "managed-settings.d");
+  const dropIns = yield* fs.readDirectory(dropInDirectory).pipe(Effect.orElseSucceed(() => []));
+  const configDirectory =
+    configDir ?? (yield* resolveClaudeHomePath({ homePath: "" }, environment));
+  const settingsPaths = [
+    path.join(configDirectory, "settings.json"),
+    path.join(managedDirectory, "managed-settings.json"),
+    ...dropIns
+      .filter((name) => name.endsWith(".json") && !name.startsWith("."))
+      .toSorted()
+      .map((name) => path.join(dropInDirectory, name)),
+  ];
+  const channels = yield* Effect.forEach(settingsPaths, (settingsPath) =>
+    fs.readFileString(settingsPath).pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(UpdateChannelSettings)),
+      Effect.map((settings) => settings.autoUpdatesChannel),
+      Effect.orElseSucceed(() => undefined),
+    ),
   );
+  return channels.findLast((channel) => channel !== undefined) ?? "latest";
+});
+
+const resolveClaudeMaintenance = Effect.fn("ClaudeMaintenance.resolve")(function* (
+  capabilities: ProviderMaintenanceCapabilities,
+  configDir?: string,
+) {
+  if (capabilities.update?.lockKey !== "claudeAgent-native") return capabilities;
+  const channel = yield* readUpdateChannel(configDir);
+  const client = yield* HttpClient.HttpClient;
+  const url = `${NATIVE_RELEASES}/${channel}`;
   return {
     ...capabilities,
     update: {
       ...capabilities.update,
-      env: { ...capabilities.update.env, CLAUDE_CONFIG_DIR: configDir },
+      ...(configDir ? { env: { ...capabilities.update.env, CLAUDE_CONFIG_DIR: configDir } } : {}),
     },
     latestVersion: null,
-    lookupLatestVersion,
+    latestVersionCacheKey: url,
+    lookupLatestVersion: client.get(url).pipe(
+      Effect.flatMap(HttpClientResponse.filterStatusOk),
+      Effect.flatMap((response) => response.text),
+      Effect.map((text) => text.trim()),
+      Effect.flatMap(Schema.decodeUnknownEffect(NativeVersion)),
+      Effect.timeoutOption("4 seconds"),
+      Effect.map(Option.getOrNull),
+      Effect.orElseSucceed(() => null),
+    ),
   };
 });
+
+export const makeClaudeMaintenanceResolution = Effect.fn("ClaudeMaintenance.make")(function* (
+  options: Parameters<typeof resolveProviderMaintenanceCapabilitiesEffect>[1],
+  configDir?: string,
+) {
+  const services = yield* Effect.context<
+    ProviderMaintenanceResolverServices | HttpClient.HttpClient
+  >();
+  const resolveInstallation = yield* makeCachedProviderMaintenanceResolution(
+    resolveProviderMaintenanceCapabilitiesEffect(update, options).pipe(
+      Effect.provideContext(services),
+    ),
+  );
+  const resolve: typeof resolveInstallation = (refreshOptions) =>
+    resolveInstallation(refreshOptions).pipe(
+      Effect.flatMap((capabilities) => resolveClaudeMaintenance(capabilities, configDir)),
+      Effect.provideContext(services),
+    );
+  return resolve;
+});
+
+export const withClaudeNativeLatestVersion = resolveClaudeMaintenance;
