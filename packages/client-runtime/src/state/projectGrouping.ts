@@ -212,12 +212,9 @@ export function deriveProjectGroupLabel(input: {
     input.members.map((member) => member.repositoryIdentity?.name),
   );
   const sharedTitle = sharedTitles[0];
-  if (
-    sharedTitles.length === 1 &&
-    sharedTitle !== undefined &&
-    !sharedDisplayNames.includes(sharedTitle) &&
-    !sharedRepositoryNames.includes(sharedTitle)
-  ) {
+  // Every copy agreeing on one title is the user's chosen name, even when it
+  // matches the bare repository name ("Dominion" for h-gilbert/Dominion).
+  if (sharedTitles.length === 1 && sharedTitle !== undefined) {
     return sharedTitle;
   }
   if (sharedDisplayNames.length === 1) {
