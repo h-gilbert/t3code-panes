@@ -127,6 +127,7 @@ export function projectDesktopState(
     state.hostWebContentsId != null &&
     state.hostWebContentsId !== hostWebContentsId;
   return {
+    viewerViewport: state.viewerViewport ?? null,
     hasWebContents: state.webContentsId !== null && !hostedElsewhere,
     hostedElsewhere,
     canGoBack: state.canGoBack,

@@ -626,6 +626,7 @@ export interface DesktopPreviewTabState {
   controller: "human" | "agent" | "none";
   /** A screenshot or stream of the guest is pending, so the client keeps it painting while hidden. */
   capturing: boolean;
+  viewerViewport?: { readonly width: number; readonly height: number } | null;
   favicon?: DesktopPreviewFavicon;
   updatedAt: string;
 }

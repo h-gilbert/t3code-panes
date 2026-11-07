@@ -490,7 +490,6 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
                   : null
               }
               visible
-              followSize={!compact}
               controlPosition="bottom"
               onPopup={(popupTabId) => showPreviewPopup(threadRef, popupTabId, "floating")}
               className="size-full"

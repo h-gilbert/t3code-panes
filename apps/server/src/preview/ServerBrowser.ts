@@ -719,7 +719,6 @@ const make = Effect.gen(function* () {
   const applySetting = async (tab: ServerTab, setting: PreviewViewportSetting) => {
     tab.setting = setting;
 
-    if (tab.desktop) return;
     const size =
       fixedViewportSize(setting) ??
       [...tab.viewers]
@@ -727,6 +726,15 @@ const make = Effect.gen(function* () {
         .filter((requested) => requested !== null)
         .sort((left, right) => right.order - left.order)[0] ??
       UNATTACHED_FILL_VIEWPORT;
+    if (tab.desktop) {
+      await runPromise(
+        desktopChannel.operation(tab, {
+          operation: "viewerViewport",
+          size: setting._tag === "fill" ? { width: size.width, height: size.height } : null,
+        }),
+      );
+      return;
+    }
     await tab.page.setViewportSize({ width: size.width, height: size.height });
     await applyZoom(tab);
     await broadcastViewport(tab);
@@ -2704,7 +2712,13 @@ const make = Effect.gen(function* () {
         const height = Math.min(Math.round(num(message.height)), 2160);
         if (width < 100 || height < 100) return;
         viewer.requestedSize = { width, height, order: ++viewerResizeOrder };
-        if (tab.setting._tag !== "fill" || tab.desktop) return;
+        if (tab.setting._tag !== "fill") return;
+        if (tab.desktop) {
+          await runPromise(
+            desktopChannel.operation(tab, { operation: "viewerViewport", size: { width, height } }),
+          );
+          return;
+        }
         const current = tab.page.viewportSize();
         if (current?.width === width && current.height === height) return;
         await tab.page.setViewportSize({ width, height });
@@ -2925,7 +2939,9 @@ const make = Effect.gen(function* () {
           const message = asRecord(raw);
           if (!message) return;
           try {
-            if (message.type === "takeControl") {
+            if (message.type === "resize") {
+              await tab.control.system(() => dispatchViewerInput(tab, session, viewer, message));
+            } else if (message.type === "takeControl") {
               const taking = tab.control.take(viewer.id);
               broadcastControl(tab);
               await taking;
