@@ -84,6 +84,9 @@ remains available, with pane markers for settled threads still visible in a pane
   CDP endpoint or assume the two hosts share a disk.
 - Keep persistent browser sessions, named profiles, ephemeral sessions, and
   keychain-backed saved logins with the existing autofill/script isolation.
+  Browser partitions present Chrome's UA and Client Hints together, including worker targets.
+  Hosted guests use a Retina backing surface with CSS scaling on 1x displays, keeping the page viewport unchanged and screencasts sharp.
+  An environment can select another desktop host even when it has its own desktop.
   An explicitly selected shared desktop host uses that host environment's existing
   profile partitions. Disconnection must fail rather than launch headless with
   different logins. The host lives in the desktop renderer, so a hidden window

@@ -149,6 +149,7 @@ const makeGuest = (
     return undefined;
   });
   return {
+    setZoomMode: vi.fn(),
     getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
 
     id: webContentsId,

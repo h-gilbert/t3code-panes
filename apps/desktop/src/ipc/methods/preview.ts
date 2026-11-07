@@ -135,11 +135,15 @@ const createTab = DesktopIpc.makeIpcMethod({
   payload: DesktopPreviewCreateTabInputSchema,
   result: Schema.Void,
   handler: Effect.fn("desktop.ipc.preview.createTab")(function* (
-    { tabId, zoomFactor, colorScheme, serverTab },
+    { tabId, zoomFactor, colorScheme, serverTab, nativeRenderScale },
     event,
   ) {
     const manager = yield* PreviewManager.PreviewManager;
-    yield* manager.createTab(tabId, { zoomFactor, colorScheme, serverTab }, event?.sender.id);
+    yield* manager.createTab(
+      tabId,
+      { zoomFactor, colorScheme, serverTab, nativeRenderScale },
+      event?.sender.id,
+    );
   }),
 });
 

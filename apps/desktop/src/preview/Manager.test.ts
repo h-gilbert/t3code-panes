@@ -355,6 +355,7 @@ const makeTestPreviewWebContents = (
 ) => {
   const setBackgroundThrottling = vi.fn<(enabled: boolean) => void>();
   return {
+    setZoomMode: vi.fn(),
     getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
 
     id,
@@ -550,6 +551,7 @@ const makeFaviconWebContents = (options?: {
   const off = vi.fn();
   const debuggerOff = vi.fn();
   const webContents = {
+    setZoomMode: vi.fn(),
     getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
 
     id: options?.id ?? 42,
@@ -1086,6 +1088,7 @@ describe("PreviewManager", () => {
         Effect.gen(function* () {
           const preview = makeFaviconWebContents();
           const keyboardTarget = Object.assign(preview.webContents, {
+            setZoomMode: vi.fn(),
             getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
 
             mainFrame: { framesInSubtree: [{ executeJavaScript: vi.fn(async () => true) }] },
@@ -1551,6 +1554,7 @@ describe("PreviewManager", () => {
         const loadURL = vi.fn(async () => undefined);
         const listeners = new Map<string, (...args: never[]) => void>();
         fromId.mockReturnValue({
+          setZoomMode: vi.fn(),
           getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
 
           id: 42,
@@ -1655,12 +1659,13 @@ describe("PreviewManager", () => {
           states.push(state);
         }),
       );
-      yield* manager.createTab("tab_server_navigation", { serverTab });
+      yield* manager.createTab("tab_server_navigation", { serverTab, nativeRenderScale: 2 });
       yield* manager.registerWebview("tab_server_navigation", 42);
       yield* Effect.promise(() => initializing.promise);
 
       yield* manager.navigate("tab_server_navigation", "https://example.org/");
       initialized.resolve();
+      expect(guest.setZoomFactor).toHaveBeenCalledWith(2);
 
       expect(states.at(-1)).toMatchObject({
         serverTab,
@@ -1670,10 +1675,6 @@ describe("PreviewManager", () => {
         type: "attached",
         ...serverTab,
       });
-      expect(guest.debugger.sendCommand).toHaveBeenCalledWith(
-        "Emulation.setDeviceMetricsOverride",
-        { width: 0, height: 0, deviceScaleFactor: 2, mobile: false },
-      );
       expect(guest.debugger.sendCommand).toHaveBeenCalledWith(
         "Emulation.setUserAgentOverride",
         expect.objectContaining({
@@ -1711,6 +1712,7 @@ describe("PreviewManager", () => {
           off: debuggerOff,
         };
         fromId.mockReturnValue({
+          setZoomMode: vi.fn(),
           getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
 
           id: 42,
@@ -2011,6 +2013,7 @@ describe("PreviewManager", () => {
         const listeners = new Map<string, (...args: unknown[]) => void>();
         const setZoomFactor = vi.fn();
         fromId.mockReturnValue({
+          setZoomMode: vi.fn(),
           getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
 
           id: 42,
@@ -2081,6 +2084,7 @@ describe("PreviewManager", () => {
 
         const replacementSetZoomFactor = vi.fn();
         fromId.mockReturnValue({
+          setZoomMode: vi.fn(),
           getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
 
           id: 43,
@@ -2125,6 +2129,7 @@ describe("PreviewManager", () => {
       Effect.gen(function* () {
         const setZoomFactor = vi.fn();
         fromId.mockReturnValue({
+          setZoomMode: vi.fn(),
           getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
 
           id: 42,
@@ -2172,6 +2177,7 @@ describe("PreviewManager", () => {
       Effect.gen(function* () {
         const setZoomFactor = vi.fn();
         fromId.mockReturnValue({
+          setZoomMode: vi.fn(),
           getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
 
           id: 42,
@@ -2230,6 +2236,7 @@ describe("PreviewManager", () => {
           return {
             sendCommand,
             wc: {
+              setZoomMode: vi.fn(),
               getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
 
               id,
@@ -2326,6 +2333,7 @@ describe("PreviewManager", () => {
     let chromiumDetaches = 0;
     let destroyed = false;
     const wc = {
+      setZoomMode: vi.fn(),
       getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
 
       id,
@@ -2449,6 +2457,7 @@ describe("PreviewManager", () => {
         audibleAfterFirstRead = true;
       },
       wc: {
+        setZoomMode: vi.fn(),
         getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
 
         id,
@@ -2626,6 +2635,7 @@ describe("PreviewManager", () => {
         let loading = false;
         const listeners = new Map<string, (...args: unknown[]) => void>();
         fromId.mockReturnValue({
+          setZoomMode: vi.fn(),
           getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
 
           id: 42,
@@ -2743,6 +2753,7 @@ describe("PreviewManager", () => {
         const capturePage = vi.fn(async () => ({ toPNG: () => png }));
         const listeners = new Map<string, (...args: never[]) => void>();
         fromId.mockReturnValue({
+          setZoomMode: vi.fn(),
           getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
 
           id: 42,
@@ -3735,6 +3746,7 @@ describe("PreviewManager", () => {
           sendCommand: typeof firstSendCommand,
         ) =>
           ({
+            setZoomMode: vi.fn(),
             getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
 
             id,
@@ -4098,6 +4110,7 @@ describe("PreviewManager", () => {
           getSize: () => ({ width: 1280, height: 720 }),
         }));
         fromId.mockReturnValue({
+          setZoomMode: vi.fn(),
           getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
 
           id: 42,
@@ -4684,6 +4697,7 @@ describe("PreviewManager", () => {
       Effect.gen(function* () {
         const listeners = new Map<string, (...args: unknown[]) => void>();
         fromId.mockReturnValue({
+          setZoomMode: vi.fn(),
           getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
 
           id: 42,
@@ -4833,6 +4847,7 @@ describe("PreviewManager", () => {
       Effect.gen(function* () {
         let onPicked: ((event: unknown, ...args: unknown[]) => void) | undefined;
         fromId.mockReturnValue({
+          setZoomMode: vi.fn(),
           getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
 
           id: 42,
@@ -5079,6 +5094,7 @@ describe("PreviewManager", () => {
       Effect.gen(function* () {
         let onPicked: ((event: unknown, ...args: unknown[]) => void) | undefined;
         fromId.mockReturnValue({
+          setZoomMode: vi.fn(),
           getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
 
           id: 42,
@@ -5163,6 +5179,7 @@ describe("PreviewManager", () => {
         const goForward = vi.fn();
         let canGoBack = true;
         fromId.mockReturnValue({
+          setZoomMode: vi.fn(),
           getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
 
           id: 42,
@@ -5309,6 +5326,7 @@ describe("PreviewManager", () => {
     } = {},
   ) =>
     ({
+      setZoomMode: vi.fn(),
       getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
 
       id,
@@ -5888,6 +5906,7 @@ describe("PreviewManager", () => {
           focus: restoreFocus,
         } as never);
         fromId.mockReturnValue({
+          setZoomMode: vi.fn(),
           getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
 
           id: 42,
@@ -6086,6 +6105,7 @@ describe("PreviewManager", () => {
           return undefined;
         });
         fromId.mockReturnValue({
+          setZoomMode: vi.fn(),
           getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
 
           id: 42,
@@ -6160,6 +6180,7 @@ describe("PreviewManager", () => {
           method === "Runtime.evaluate" ? { exceptionDetails } : undefined,
         );
         fromId.mockReturnValue({
+          setZoomMode: vi.fn(),
           getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
 
           id: 42,
@@ -6248,6 +6269,7 @@ describe("PreviewManager", () => {
               return { result: { value: "safe-after-navigation" } };
             });
             fromId.mockReturnValue({
+              setZoomMode: vi.fn(),
               getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
 
               id: 42,
@@ -6347,6 +6369,7 @@ describe("PreviewManager", () => {
         };
         mainFrame.framesInSubtree.push(mainFrame, loginFrame);
         fromId.mockReturnValue({
+          setZoomMode: vi.fn(),
           getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
 
           id: 43,
