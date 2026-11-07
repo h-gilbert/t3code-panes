@@ -48,7 +48,6 @@ export function acquireDesktopTab(
     readonly tabId: string;
     readonly environmentId?: string;
   },
-  nativeRenderScale = 1,
 ): AcquiredDesktopTab {
   const current =
     leases.get(tabId) ??
@@ -59,7 +58,6 @@ export function acquireDesktopTab(
       ready: enqueueDesktopTabOperation(tabId, async () =>
         previewBridge?.createTab(tabId, {
           ...browserDefaultTabState(await resolveBrowserDefaults()),
-          ...(serverTab === undefined ? {} : { nativeRenderScale }),
           ...(serverTab === undefined ? {} : { serverTab }),
         }),
       ),
