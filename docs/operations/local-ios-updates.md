@@ -78,6 +78,18 @@ cd ios
 pod install
 ```
 
+`prebuild --clean` resets the app target to automatic signing, which fails here because Xcode
+has no signed-in account. On both app-target build configurations, set
+`CODE_SIGN_STYLE = Manual`, `"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "Apple Development"` and
+`PROVISIONING_PROFILE_SPECIFIER = "T3 Code Development 20261016"` (the API-created certificate
+and profile, which include the iPhone).
+
+When `apps/mobile/ios` points to an external volume, set `PROJECT_ROOT` in its
+`.xcode.env.local` to the absolute, real `apps/mobile` source directory. Preserve the
+existing `NODE_BINARY` setting. Uniwind compares the CSS entry against the bundler
+working directory; bundling through the external symlink can silently omit native
+styles and produce a blank app. Restore this override after clean prebuilds.
+
 Run the mobile typecheck and focused tests for any adapted private changes.
 The ledger's focused tests run with `python3 scripts/ios-local_test.py` from
 the panes checkout.
