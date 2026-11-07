@@ -19,8 +19,7 @@ app inventory, compares the installed version with the last verified install, ch
 and lists upstream commits affecting mobile or its shared dependencies. Without
 `--fetch`, it uses the target recorded by the last update in `.t3/ios/upstream-target.json`.
 If no target is recorded, it resolves the latest stable release and requires its tag to have been fetched.
-The phone must be reachable
-and paired with this Mac. A matching version relies on using this build ledger;
+The phone must be reachable from and paired with Jeff, the native iOS build host. Use T3 device discovery and the assigned device; keep the signed-app identity and installation ledger intact. A matching version relies on using this build ledger;
 an app installed independently with the same version cannot be distinguished.
 
 The durable records are gitignored:
@@ -87,8 +86,7 @@ the phone connects to. A newer mobile build does not update those servers.
 ## Build and install
 
 Confirm Xcode's license and first-launch setup are complete. Accept a new license in
-Terminal when Xcode requests it. From the panes checkout, confirm no actual `xcodebuild`
-is running, then:
+Terminal when Xcode requests it. On Jeff, check the shared build-lock holder before compilation. A test-without-building runner, device stream or idle simulator does not hold the compile lock. Start the existing detached build helper and inspect its recorded build status. From the panes checkout:
 
 ```bash
 python3 scripts/ios-local.py build

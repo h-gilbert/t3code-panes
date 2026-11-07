@@ -32,18 +32,9 @@ when inspecting or seeding SQLite. Stop the test server before fixture writes.
 
 ## Launch T3 Code Dev
 
-From the checkout being tested on the selected device host, run:
+Use device_list/device_open to select the device host. Install an existing matching native client there without rebuilding. Any Android cache miss, Gradle invocation or SDK provisioning must run in an isolated Fred worktree through android-dev; iOS compilation runs only on Jeff through the shared compile lock. Then install the recorded artifact on the selected device host with its exact device target.
 
-```bash
-vp run mobile:install <ios|android> <device-id>
-```
-
-This installs the dev client for the checkout's native fingerprint: from the
-device, the local cache, or the shared cache in seconds, building once only
-when no machine has that fingerprint yet (5-15 minutes, logged to the file it
-names). The device id may be omitted when exactly one device is booted. It
-prints one JSON line; on failure it names the next command. Mobile verification
-includes that step unless the user prohibits it.
+Do not invoke `vp run mobile:install <ios|android> <device-id>` on a host where its cache-miss build would violate those rules. Check its cache/build behavior first.
 
 For a device you opened in an agent-device session elsewhere (a device pool,
 cloud, or remote host), run `vp run mobile:install <ios|android> --session <s>`

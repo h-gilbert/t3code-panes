@@ -94,7 +94,7 @@ The most common defect in this repo is a change that works on the path you teste
 ## Dev servers
 
 - `vp i` installs. Worktrees get this from the t3.json setup script; if module resolution looks broken, it probably did not run.
-- In this checkout, when the developer asks to "start the dev build" or "start the dev version" without naming a surface, launch the macOS Electron app with `vp run dev:desktop --home-dir .t3`. Keep that process alive for iteration. The explicit project-local `.t3` preserves the working desktop connection catalog, including Fred and its remote provider/model availability, and must override any ambient `T3CODE_HOME`. Use web or mobile instead only when the developer explicitly asks for that surface.
+- On Jeff, an unspecified dev-build request uses vp run dev:desktop --home-dir .t3. On Fred, use vp run dev --share with isolated worktree state and return its reachable preview URL. Run macOS desktop or native iOS verification on Jeff; never start development on the Air. Preserve connection catalogs and the running production server. Keep the explicit project-local `.t3` and its connection catalog; it must override ambient `T3CODE_HOME`.
 - Setup runs in the background. While `.t3/setup-running` names a live PID, wait for it and do not run `vp i`. It ends with `.t3/setup-done` or `.t3/setup-failed` (with the error tail). With no marker at all, setup never ran here, so run `vp i` yourself.
 - `vp run dev` starts server and web. In a worktree, state defaults to that worktree's gitignored `.t3`, which deliberately outranks an ambient `T3CODE_HOME` so you cannot land on shared state by accident. An explicit `--home-dir` still wins.
 - Ports derive from the worktree path and are stable across restarts, but read the real ones from the `[dev-runner]` line since occupied ports shift.
@@ -212,7 +212,7 @@ An empty database is a bad test. Seed your worktree's `.t3` with a copy of real 
 
 - Real agent turns cost money. To watch a turn stream through the pipeline and UI, use the free `Replay (dev)` provider that `vp run dev` registers; [test-t3-app](.agents/skills/test-t3-app/SKILL.md) shows how to start one. Use a real provider only when the change depends on that provider's behavior, and then pick its cheapest model, such as Haiku for Claude or Luna for Codex.
 
-For mobile verification, a missing or outdated native client is an install step, not a blocker. Run `vp run mobile:install <ios|android> [device-id]` on the device host before starting Metro; it targets the only booted simulator or connected Android device when the id is omitted. It installs the dev client for this checkout's native fingerprint from the shared cache in seconds and builds only when no machine has built it yet, so prefer it over `expo run:*`, `xcodebuild`, or `gradlew`, which rebuild from scratch. Its stdout is one JSON line; build output goes to the log it names. See `test-t3-mobile` for the full workflow.
+Use device_list/device_open to select the device host. Install an existing matching native client there without rebuilding. Any Android cache miss, Gradle invocation or SDK provisioning must run in an isolated Fred worktree through android-dev; iOS compilation runs only on Jeff through the shared compile lock. Then install the recorded artifact on the selected device host with its exact device target. See `test-t3-mobile` for the full workflow.
 
 ## Evals
 
