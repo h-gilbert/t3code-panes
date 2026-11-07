@@ -18,6 +18,9 @@ import * as Stream from "effect/Stream";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
 import * as DesktopTelemetryPublisher from "../telemetry/DesktopTelemetryPublisher.ts";
+import { hasActiveDesktopDownloads } from "./activeDownloads.ts";
+import { isForkReleaseVersion } from "@t3tools/shared/releaseVersion";
+import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopUpdates from "./DesktopUpdates.ts";
 import {
   nextRemoteDesktopUpdateStep,
@@ -47,11 +50,13 @@ type CommitClaim =
 export const listen: Effect.Effect<
   void,
   never,
+  | DesktopAppSettings.DesktopAppSettings
   | DesktopUpdates.DesktopUpdates
   | DesktopTelemetryPublisher.DesktopTelemetryPublisher
   | DesktopBackendPool.DesktopBackendPool
   | Scope.Scope
 > = Effect.gen(function* () {
+  const settings = yield* DesktopAppSettings.DesktopAppSettings;
   const updates = yield* DesktopUpdates.DesktopUpdates;
   const backends = yield* DesktopBackendPool.DesktopBackendPool;
   const publisher = yield* DesktopTelemetryPublisher.DesktopTelemetryPublisher;
@@ -158,6 +163,22 @@ export const listen: Effect.Effect<
         });
         if (!shouldStart) return;
 
+        const state = yield* updates.getState;
+        const refusal = !(yield* settings.get).allowConnectedUpdates
+          ? "Connected controllers are not allowed to install updates on this desktop."
+          : isForkReleaseVersion(request.targetVersion ?? "") &&
+              !isForkReleaseVersion(state.currentVersion)
+            ? "This desktop is not on the fork release channel."
+            : isForkReleaseVersion(state.currentVersion) &&
+                !isForkReleaseVersion(request.targetVersion ?? "")
+              ? "A fork desktop requires an exact fork release target."
+              : (yield* backends.list).length > 1
+                ? "This desktop runs multiple backends. Switch it on that machine so all activity can be checked."
+                : null;
+        if (refusal !== null) {
+          yield* publishReport(state, { outcome: "failed", reason: refusal }, request.requestId);
+          return;
+        }
         const now = yield* Clock.currentTimeMillis;
         const prepared = yield* Ref.modify(preparedUpdateRef, (current) =>
           Option.isSome(current) &&
@@ -166,7 +187,11 @@ export const listen: Effect.Effect<
             ? ([Option.none<typeof current.value>(), Option.none()] as const)
             : ([current, current] as const),
         );
-        if (Option.isSome(prepared) && prepared.value.status !== "failed") {
+        if (
+          Option.isSome(prepared) &&
+          prepared.value.status !== "failed" &&
+          !(isForkReleaseVersion(state.currentVersion) && prepared.value.status === "prepared")
+        ) {
           yield* publishReport(
             yield* updates.getState,
             {
@@ -252,6 +277,21 @@ export const listen: Effect.Effect<
         const step = Effect.fn("DesktopRemoteUpdates.step")(function* (
           state: DesktopUpdateState,
         ): Effect.fn.Return<boolean, never, Scope.Scope> {
+          if (
+            isForkReleaseVersion(state.currentVersion) &&
+            (state.downloadedVersion ?? state.availableVersion) !== null &&
+            (state.downloadedVersion ?? state.availableVersion) !== request.targetVersion
+          ) {
+            yield* publishReport(
+              state,
+              {
+                outcome: "failed",
+                reason: `The desktop feed did not offer the requested release ${request.targetVersion}.`,
+              },
+              request.requestId,
+            );
+            return true;
+          }
           const next = nextRemoteDesktopUpdateStep(state, attempts, disabledReason);
           switch (next.action) {
             case "wait":
@@ -279,6 +319,17 @@ export const listen: Effect.Effect<
               );
               return false;
             case "install": {
+              if (hasActiveDesktopDownloads()) {
+                yield* publisher.publishUpdateReport({
+                  version: 1,
+                  type: "desktopUpdateStatus",
+                  requestId: request.requestId,
+                  state,
+                  waitingForIdle: true,
+                });
+                yield* retryLater(state);
+                return false;
+              }
               // The download event fires before its action releases the
               // updater reservation. Wait until the prepared install can
               // be committed by the client in a separate RPC.
@@ -303,8 +354,9 @@ export const listen: Effect.Effect<
                   requestId: request.requestId,
                   downloadedVersion: state.downloadedVersion,
                   status: "prepared",
-                  expiresAt:
-                    (yield* Clock.currentTimeMillis) + Duration.toMillis(PREPARED_UPDATE_TTL),
+                  expiresAt: isForkReleaseVersion(state.currentVersion)
+                    ? Infinity
+                    : (yield* Clock.currentTimeMillis) + Duration.toMillis(PREPARED_UPDATE_TTL),
                 }),
               );
               yield* publishReport(state, { outcome: "ready-to-install" }, request.requestId);
@@ -427,6 +479,16 @@ export const listen: Effect.Effect<
 
   yield* Stream.runForEach(publisher.updateCommits, (commit) =>
     Effect.gen(function* () {
+      if (hasActiveDesktopDownloads() || (yield* updates.getState).status === "downloading") {
+        yield* publisher.publishUpdateReport({
+          version: 1,
+          type: "desktopUpdateStatus",
+          requestId: commit.requestId,
+          state: yield* updates.getState,
+          waitingForIdle: true,
+        });
+        return;
+      }
       const current = yield* updates.getState;
       const now = yield* Clock.currentTimeMillis;
       const claim = yield* Ref.modify(
@@ -482,6 +544,12 @@ export const listen: Effect.Effect<
         if (yield* recordPreparedFailure(commit.requestId, reason)) {
           yield* publishReport(current, { outcome: "failed", reason }, commit.requestId);
         }
+        return;
+      }
+      if (!(yield* settings.get).allowConnectedUpdates) {
+        const reason = "Connected controllers are not allowed to install updates on this desktop.";
+        yield* recordPreparedFailure(commit.requestId, reason);
+        yield* publishReport(current, { outcome: "failed", reason }, commit.requestId);
         return;
       }
       const result = yield* updates.installPrepared(claim.prepared.downloadedVersion);

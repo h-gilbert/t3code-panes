@@ -1,3 +1,4 @@
+import { ConnectedUpdatesSetting } from "./ConnectedUpdatesSetting";
 import { useAtomValue } from "@effect/atom-react";
 import { NotificationSettings } from "./NotificationSettings";
 import { PRIVACY_POLICY_URL } from "../../legalLinks";
@@ -423,6 +424,7 @@ function AboutVersionSection() {
           }
         />
       ) : null}
+      {hasDesktopBridge ? <ConnectedUpdatesSetting /> : null}
       {hasDesktopBridge ? <CliCommandSettingsRow /> : null}
       {switchChannel === null ? null : (
         <UpdateTrackSwitchDialog channel={switchChannel} onClose={() => setSwitchChannel(null)} />

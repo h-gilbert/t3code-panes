@@ -158,7 +158,7 @@ export interface DesktopTelemetryReceiverHealth {
 
 /** Moves the desktop app to `channel` and installs only `targetVersion`. */
 export interface DesktopTrackSwitch {
-  readonly channel: DesktopUpdateChannel;
+  readonly channel?: DesktopUpdateChannel;
   readonly targetVersion: string;
 }
 

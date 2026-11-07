@@ -7,6 +7,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
+import * as DesktopAppSettings from "../../settings/DesktopAppSettings.ts";
 import * as DesktopUpdates from "../../updates/DesktopUpdates.ts";
 import * as IpcChannels from "../channels.ts";
 import * as DesktopIpc from "../DesktopIpc.ts";
@@ -64,5 +65,16 @@ export const checkForUpdate = DesktopIpc.makeIpcMethod({
   handler: Effect.fn("desktop.ipc.updates.check")(function* () {
     const updates = yield* DesktopUpdates.DesktopUpdates;
     return yield* updates.check("web-ui");
+  }),
+});
+
+export const connectedUpdates = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.CONNECTED_UPDATES_CHANNEL,
+  payload: Schema.UndefinedOr(Schema.Boolean),
+  result: Schema.Boolean,
+  handler: Effect.fn("desktop.ipc.updates.connectedUpdates")(function* (enabled) {
+    const settings = yield* DesktopAppSettings.DesktopAppSettings;
+    if (enabled !== undefined) yield* settings.setAllowConnectedUpdates(enabled);
+    return (yield* settings.get).allowConnectedUpdates;
   }),
 });

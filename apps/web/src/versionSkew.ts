@@ -1,3 +1,4 @@
+import { isForkReleaseVersion } from "@t3tools/shared/releaseVersion";
 import type {
   EnvironmentId,
   ServerConfig,
@@ -44,18 +45,8 @@ function versionCore(version: string): string {
   return version.replace(/[-+].*$/, "");
 }
 
-/**
- * The skew a user can act on: the connected server runs an older T3 Code than
- * this client (or than `clientVersion`, the version this client is about to
- * update to), so the server is the side that needs updating.
- *
- * Two nightly builds, or two fork releases, compare their full versions,
- * including the date and run or release timestamp.
- * Other combinations compare their core `major.minor.patch` only, so a stable
- * build and a nightly build with the same core do not cause an update warning.
- * A server ahead of the client does not need an update. Versions that do not
- * parse as semver fall back to plain string inequality.
- */
+/** Compare full versions within Nightly or fork releases, otherwise compare cores.
+ * An ahead server needs no update; unparseable versions fall back to inequality. */
 export function resolveVersionMismatch(
   serverVersion: string | null | undefined,
   clientVersion: string = APP_VERSION,
@@ -106,7 +97,11 @@ export function resolveServerSelfUpdateCapability(
 export function supportsDesktopAppUpdate(
   serverConfig: Pick<ServerConfig, "environment"> | null | undefined,
 ): boolean {
-  return serverConfig?.environment.capabilities.desktopAppUpdate === true;
+  return (
+    serverConfig?.environment.capabilities.desktopAppUpdate === true &&
+    (!isForkReleaseVersion(serverConfig.environment.serverVersion) ||
+      serverConfig.environment.capabilities.desktopAppConnectedUpdates === true)
+  );
 }
 
 export function manualServerUpdateCommand(

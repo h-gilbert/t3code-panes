@@ -177,15 +177,16 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
       return yield* failWith(policyRefusal);
     }
     if (capability === "desktop-managed") {
+      if (isForkReleaseVersion(packageJson.version) && !isForkReleaseVersion(input.targetVersion)) {
+        return yield* failWith("A fork desktop cannot install a stock release.");
+      }
       const unsafeCrossing = input.channel === undefined ? null : crossesTrackUnsafely(input);
       if (unsafeCrossing !== null) return yield* failWith(unsafeCrossing);
       if (desktopAppUpdate.available) {
-        return yield* desktopAppUpdate.run(
-          reportProgress,
-          input.channel === undefined
-            ? undefined
-            : { channel: input.channel, targetVersion: input.targetVersion },
-        );
+        return yield* desktopAppUpdate.run(reportProgress, {
+          ...(input.channel === undefined ? {} : { channel: input.channel }),
+          targetVersion: input.targetVersion,
+        });
       }
       return yield* failWith(
         "This server is managed by the T3 Code desktop app on its machine; update the desktop app to update it.",

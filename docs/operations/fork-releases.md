@@ -53,9 +53,17 @@ it the same way.
 ## Update everywhere
 
 When an installed app sees the release, its update button installs it. Before restarting, it updates
-every connected saved server that is behind and can update itself (the managed service) to the same
-version, then restarts this app. The confirmation names those servers. Settings → Connections
-"Update all" updates servers alone.
+every connected saved server and desktop on the fork release channel that is behind to the same
+version, then restarts this app after the remote machines reconnect successfully. Settings → Connections
+"Update all" updates the remote machines without restarting this app.
+
+Remote desktop updates require full maintenance access and use that desktop's existing updater,
+feed and signature checks. They wait for active threads, pending approvals and browser downloads
+before installing. Progress and failures appear per machine. A failed remote update leaves this app
+running. Settings → About has "Allow connected controllers to install updates on this desktop",
+enabled by default; turn it off on a desktop to refuse remote installs. Desktops running multiple
+embedded backends require a local update because the requesting backend cannot check all of their
+activity. A desktop must first receive this support through its own update or a local promotion.
 
 A fork release only updates to another fork release. Local promotion builds
 (`-panes.<timestamp>.<digest>`) and the artifact builder's default `-panes.1` never self-update.

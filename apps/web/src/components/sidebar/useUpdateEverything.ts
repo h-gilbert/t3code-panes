@@ -28,7 +28,6 @@ import {
   setUpdateEverythingRun,
   settleUpdateRunMachine,
   showUpdateEverythingResult,
-  waitForServerUpdateHandoff,
   waitForUpdateRestart,
 } from "./updateEverythingRun";
 
@@ -198,11 +197,6 @@ export function useUpdateEverything(
               finishedServers.push(finished);
               return finished;
             });
-            await Promise.all(
-              servers.map((server, index) =>
-                waitForServerUpdateHandoff(server.environmentId, runs[index]!),
-              ),
-            );
             return runs;
           },
         });
@@ -213,7 +207,11 @@ export function useUpdateEverything(
             servers: finished,
             providers: outcome.providers,
           });
-        if (outcome.localReady && installLocal) {
+        if (
+          outcome.localReady &&
+          installLocal &&
+          finishedServers.every(({ outcome }) => outcome.status === "updated")
+        ) {
           if (await waitForUpdateRestart(UPDATE_RESTART_DELAY_MS)) {
             setUpdateEverythingRun(
               (run) => run && { ...run, phase: "installing", restartAt: null },

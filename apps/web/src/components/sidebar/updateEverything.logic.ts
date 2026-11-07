@@ -120,8 +120,11 @@ export function collectServerUpdateTargets(
     }
     const serverVersion = config.environment.serverVersion;
     if (
-      selfUpdate !== "desktop-managed" &&
-      cliReleaseChannelOf(serverVersion) !== cliReleaseChannelOf(targetVersion)
+      (selfUpdate !== "desktop-managed" ||
+        isForkReleaseVersion(targetVersion) ||
+        isForkReleaseVersion(serverVersion)) &&
+      (isForkReleaseVersion(serverVersion) !== isForkReleaseVersion(targetVersion) ||
+        cliReleaseChannelOf(serverVersion) !== cliReleaseChannelOf(targetVersion))
     ) {
       skip(`on the ${cliReleaseChannelOf(serverVersion)} channel`);
       continue;
@@ -363,7 +366,7 @@ export interface UpdateEverythingSteps<Providers, Servers> {
   /** Downloads this app's update. Resolves true when it is ready to install. */
   readonly downloadLocal?: () => Promise<boolean>;
   readonly updateProviders: () => Promise<Providers>;
-  readonly updateServers: () => Promise<Servers>;
+  readonly updateServers: () => Promise<ReadonlyArray<Promise<Servers>>>;
 }
 
 /** Finish provider installs before server restarts. Install this app last when localReady; failed
@@ -373,13 +376,14 @@ export async function runUpdateEverything<Providers, Servers>(
 ): Promise<{
   readonly localReady: boolean;
   readonly providers: Providers;
-  readonly servers: Servers;
+  readonly servers: ReadonlyArray<Servers>;
 }> {
   const [localReady, remote] = await Promise.all([
     steps.downloadLocal?.() ?? Promise.resolve(true),
-    steps
-      .updateProviders()
-      .then(async (providers) => ({ providers, servers: await steps.updateServers() })),
+    steps.updateProviders().then(async (providers) => ({
+      providers,
+      servers: await Promise.all(await steps.updateServers()),
+    })),
   ]);
   return { localReady, ...remote };
 }
@@ -422,13 +426,13 @@ export function resolveUpdateRunMachineStatus(
   if (machine.handedOffVersion !== null) return "restarting";
   if (phase === "providers" && machine.updatesProviders) return "providers";
   if (machine.server !== null && serverState.status === "running") {
-    return serverState.stage === "resuming" ? "restarting" : "downloading";
+    return serverState.stage === "resuming"
+      ? "restarting"
+      : serverState.stage === "waiting"
+        ? "waiting"
+        : "downloading";
   }
   return "waiting";
-}
-
-export function isServerUpdateHandedOff(state: ServerUpdateState): boolean {
-  return state.status === "running" && state.stage === "resuming";
 }
 
 export function closeFinishedUpdateRun(run: UpdateEverythingRun): UpdateEverythingRun | null {

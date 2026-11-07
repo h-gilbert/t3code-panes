@@ -32,7 +32,11 @@ function machine(
           repositoryIdentity: true,
           ...(selfUpdate ? { serverSelfUpdate: selfUpdate } : {}),
           ...(selfUpdate === "desktop-managed"
-            ? { desktopAppUpdate: true, desktopAppChannelSwitch: true }
+            ? {
+                desktopAppUpdate: true,
+                desktopAppConnectedUpdates: true,
+                desktopAppChannelSwitch: true,
+              }
             : {}),
         },
       },
@@ -45,6 +49,44 @@ function machine(
     ...overrides,
   };
 }
+
+it("selects only behind desktops on the same fork release channel", () => {
+  const target = "0.0.45-panes.1792017010552";
+  const result = collectServerUpdateTargets(
+    [
+      machine("jeff", "0.0.45-panes.1791926559361", "desktop-managed"),
+      machine("current", target, "desktop-managed"),
+      machine("newer", "0.0.45-panes.1792017010553", "desktop-managed"),
+      machine("stock", "0.0.40", "desktop-managed"),
+    ],
+    target,
+  );
+  expect(result.targets.map((entry) => entry.serverLabel)).toEqual(["jeff"]);
+  expect(result.skipped.map((entry) => entry.label)).toEqual(["stock"]);
+  const legacy = machine("legacy", "0.0.45-panes.1791926559361", "desktop-managed");
+  const config = legacy.serverConfig!;
+  const unsupported = collectServerUpdateTargets(
+    [
+      {
+        ...legacy,
+        serverConfig: {
+          ...config,
+          environment: {
+            ...config.environment,
+            capabilities: {
+              repositoryIdentity: true,
+              serverSelfUpdate: "desktop-managed",
+              desktopAppUpdate: true,
+            },
+          },
+        },
+      },
+    ],
+    target,
+  );
+  expect(unsupported.targets).toEqual([]);
+  expect(unsupported.skipped[0]?.reason).toBe("needs a newer desktop app");
+});
 
 describe("collectServerUpdateTargets", () => {
   it("updates remote servers that can move to the target and names every skipped one", () => {
@@ -341,6 +383,41 @@ describe("collectRestartingMachines", () => {
 });
 
 describe("runUpdateEverything", () => {
+  it("waits for both the desktop and server to finish before the local restart", async () => {
+    let finishDesktop = (_value: string) => {};
+    let finishServer = (_value: string) => {};
+    let markStarted = () => {};
+    const desktop = new Promise<string>((resolve) => {
+      finishDesktop = resolve;
+    });
+    const server = new Promise<string>((resolve) => {
+      finishServer = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const calls: string[] = [];
+    const run = runUpdateEverything({
+      updateProviders: async () => {
+        calls.push("providers");
+      },
+      updateServers: async () => {
+        markStarted();
+        return [desktop, server];
+      },
+    }).then((result) => {
+      calls.push("local restart");
+      return result;
+    });
+    await started;
+    finishDesktop("desktop reconnected");
+    await desktop;
+    expect(calls).toEqual(["providers"]);
+    finishServer("server reconnected");
+    expect((await run).servers).toEqual(["desktop reconnected", "server reconnected"]);
+    expect(calls).toEqual(["providers", "local restart"]);
+  });
+
   it("still updates remote machines when the local download fails", async () => {
     const calls: string[] = [];
     const result = await runUpdateEverything({
@@ -350,6 +427,7 @@ describe("runUpdateEverything", () => {
       },
       updateServers: async () => {
         calls.push("servers");
+        return [];
       },
     });
 

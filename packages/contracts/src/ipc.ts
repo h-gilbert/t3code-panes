@@ -1348,6 +1348,7 @@ export interface DesktopBridge {
   getWindowZoomFactor: () => number;
   getUpdateState: () => Promise<DesktopUpdateState>;
   /** `minimumVersion` is a track switch's checked release; nothing older is offered after. */
+  connectedUpdates: (enabled?: boolean) => Promise<boolean>;
   setUpdateChannel: (
     channel: DesktopUpdateChannel,
     minimumVersion?: string,

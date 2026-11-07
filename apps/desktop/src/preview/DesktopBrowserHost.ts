@@ -19,6 +19,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import { createCdpRelayConnection, type CdpRelayConnection } from "./CdpRelay.ts";
+import { trackDesktopDownload } from "../updates/activeDownloads.ts";
 import { BrowserUploads } from "./BrowserUploads.ts";
 
 const encodeEvent = Schema.encodeSync(Schema.fromJsonString(DesktopBrowserEvent));
@@ -459,6 +460,7 @@ export const make = Effect.gen(function* () {
 
   // CDP supplies the path before this runs; otherwise Electron opens a Save dialog.
   const placeDownload = (source: Electron.WebContents, item: Electron.DownloadItem) => {
+    trackDesktopDownload(item);
     const tab = [...tabs.values()].find(
       (candidate) => candidate.debuggee.webContents === source && candidate.downloadDirectory,
     );

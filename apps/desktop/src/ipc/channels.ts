@@ -153,3 +153,5 @@ export const PREVIEW_REMOTE_HOST_CONNECT_CHANNEL = "desktop:preview-remote-host-
 export const PREVIEW_REMOTE_HOST_DISCONNECT_CHANNEL = "desktop:preview-remote-host-disconnect";
 export const PREVIEW_REMOTE_HOST_COMMAND_CHANNEL = "desktop:preview-remote-host-command";
 export const PREVIEW_REMOTE_HOST_EVENT_CHANNEL = "desktop:preview-remote-host-event";
+
+export const CONNECTED_UPDATES_CHANNEL = "desktop:connected-updates";

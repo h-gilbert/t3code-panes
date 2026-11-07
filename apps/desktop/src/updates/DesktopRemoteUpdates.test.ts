@@ -15,11 +15,13 @@ import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
+import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as ElectronUpdater from "../electron/ElectronUpdater.ts";
 import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopTelemetryPublisher from "../telemetry/DesktopTelemetryPublisher.ts";
 import * as DesktopRemoteUpdates from "./DesktopRemoteUpdates.ts";
 import * as DesktopUpdates from "./DesktopUpdates.ts";
+import { trackDesktopDownload } from "./activeDownloads.ts";
 import { makeHarness } from "./updatesTestHarness.ts";
 
 // Updater runPromise handlers need real microtasks between test-runtime fiber yields.
@@ -43,7 +45,13 @@ function runRemoteUpdatesTest(
     readonly requests: Queue.Queue<DesktopTelemetryRequestDesktopUpdate>;
     readonly commits: Queue.Queue<DesktopTelemetryCommitDesktopUpdate>;
     readonly cancellations: Queue.Queue<DesktopTelemetryCancelDesktopUpdate>;
-  }) => Effect.Effect<void, never, DesktopUpdates.DesktopUpdates | DesktopState.DesktopState>,
+  }) => Effect.Effect<
+    void,
+    never,
+    | DesktopUpdates.DesktopUpdates
+    | DesktopState.DesktopState
+    | DesktopAppSettings.DesktopAppSettings
+  >,
 ) {
   return Effect.scoped(
     Effect.gen(function* () {
@@ -82,6 +90,67 @@ function terminalReports(reports: DesktopUpdateStatusReport[]): DesktopUpdateSta
 }
 
 describe("DesktopRemoteUpdates", () => {
+  it.effect("refuses preparation when the desktop owner disables controller updates", () => {
+    const harness = makeHarness();
+    return runRemoteUpdatesTest(harness, ({ reports, requests }) =>
+      Effect.gen(function* () {
+        const settings = yield* DesktopAppSettings.DesktopAppSettings;
+        yield* settings.setAllowConnectedUpdates(false).pipe(Effect.orDie);
+        yield* Queue.offer(requests, request("disabled"));
+        yield* settle;
+        assert.include(terminalReports(reports)[0]?.reason ?? "", "not allowed");
+        assert.equal(harness.checkCount(), 0);
+        assert.equal(harness.quitAndInstalls(), 0);
+      }),
+    );
+  });
+
+  it.effect("refuses a different release offered by the fork feed", () => {
+    const harness = makeHarness({ appVersion: "0.0.45-panes.1791926559361" });
+    return runRemoteUpdatesTest(harness, ({ reports, requests }) =>
+      Effect.gen(function* () {
+        yield* Queue.offer(requests, {
+          ...request("pinned"),
+          targetVersion: "0.0.45-panes.1792017010552",
+        });
+        yield* settle;
+        harness.emit("update-available", { version: "0.0.45-panes.1792017010553" });
+        yield* settle;
+        assert.include(terminalReports(reports)[0]?.reason ?? "", "requested release");
+        assert.equal(harness.downloadCount(), 0);
+        assert.equal(harness.quitAndInstalls(), 0);
+      }),
+    );
+  });
+
+  it.effect("defers preparation while a browser download is in progress", () => {
+    const harness = makeHarness();
+    return runRemoteUpdatesTest(harness, ({ reports, requests }) =>
+      Effect.gen(function* () {
+        let finish = () => {};
+        const item = {
+          once: (_event: string, done: () => void) => {
+            finish = done;
+          },
+        };
+        trackDesktopDownload(item as unknown as Electron.DownloadItem);
+        using _download = { [Symbol.dispose]: () => finish() };
+        yield* Queue.offer(requests, request("download-busy"));
+        yield* settle;
+        harness.emit("update-available", { version: "1.2.4" });
+        yield* settle;
+        harness.emit("update-downloaded", { version: "1.2.4" });
+        yield* settle;
+        assert.equal(terminalReports(reports).length, 0);
+        assert.isTrue(reports.some((report) => report.waitingForIdle));
+        finish();
+        yield* TestClock.adjust("250 millis");
+        yield* settle;
+        assert.equal(terminalReports(reports)[0]?.outcome, "ready-to-install");
+      }),
+    );
+  });
+
   it.effect("drives check, download, and install with no local confirmation", () => {
     const harness = makeHarness();
 
