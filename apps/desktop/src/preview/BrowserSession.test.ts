@@ -141,7 +141,7 @@ describe("BrowserSession", () => {
     }).pipe(Effect.provide(layer)),
   );
 
-  it.effect("keeps the guest's effective User-Agent equal to Electron's native one", () =>
+  it.effect("presents Chrome in default and named browser partitions", () =>
     Effect.gen(function* () {
       const nativeUserAgent =
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) T3Code(Alpha)/0.0.33 Chrome/146.0.7680.216 Electron/41.5.0 Safari/537.36";
@@ -170,7 +170,13 @@ describe("BrowserSession", () => {
 
       const browserSession = sessions.get(partition);
       assert.isDefined(browserSession);
-      assert.strictEqual(browserSession.getUserAgent(), nativeUserAgent);
+      assert.strictEqual(
+        browserSession.getUserAgent(),
+        nativeUserAgent.replace(/ T3Code[^\s]*| Electron\/[^\s]+/g, ""),
+      );
+      yield* browserSessions.getSession("named", true, "profile");
+      const named = sessions.get(yield* browserSessions.getPartition("named", true, "profile"));
+      assert.strictEqual(named?.getUserAgent(), browserSession.getUserAgent());
     }).pipe(Effect.provide(layer)),
   );
 

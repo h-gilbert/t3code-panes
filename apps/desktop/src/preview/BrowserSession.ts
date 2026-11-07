@@ -14,6 +14,8 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
 
+import { chromeUserAgent } from "./browserIdentity.ts";
+
 const PREVIEW_PARTITION_PREFIX = "persist:t3code-preview-";
 /** Ephemeral partitions omit persist: but retain a product prefix so the webview gate recognizes them. */
 const PREVIEW_EPHEMERAL_PARTITION_PREFIX = "t3code-preview-ephemeral-";
@@ -354,7 +356,7 @@ export const make = Effect.gen(function* BrowserSessionMake() {
                 },
               );
             };
-            // Rewriting Electron's native User-Agent makes Turnstile fail integrity checks with error 600010.
+            browserSession.setUserAgent(chromeUserAgent(browserSession.getUserAgent()));
             browserSession.setPermissionRequestHandler(
               (webContents, permission, callback, details) => {
                 if (permission === "openExternal") {

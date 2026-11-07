@@ -355,6 +355,8 @@ const makeTestPreviewWebContents = (
 ) => {
   const setBackgroundThrottling = vi.fn<(enabled: boolean) => void>();
   return {
+    getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
+
     id,
     mainFrame: { routingId: id },
     hostWebContents,
@@ -426,7 +428,7 @@ const setupServerStream = Effect.fn("test.setupServerStream")(function* () {
   const host = makeTestHostWebContents();
   const guest = Object.assign(makeTestPreviewWebContents(capturePage, 42, host), {
     isDevToolsOpened: () => false,
-    getUserAgent: () => "Electron",
+    getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Electron/44.10.1 Safari/537.36",
   });
   fromId.mockReturnValue(guest);
   const key = { environmentId: "remote", threadId: "thread", tabId: "server-tab" };
@@ -548,6 +550,8 @@ const makeFaviconWebContents = (options?: {
   const off = vi.fn();
   const debuggerOff = vi.fn();
   const webContents = {
+    getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
+
     id: options?.id ?? 42,
     isDestroyed: () => destroyed,
     getType: () => "webview",
@@ -1082,6 +1086,8 @@ describe("PreviewManager", () => {
         Effect.gen(function* () {
           const preview = makeFaviconWebContents();
           const keyboardTarget = Object.assign(preview.webContents, {
+            getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
+
             mainFrame: { framesInSubtree: [{ executeJavaScript: vi.fn(async () => true) }] },
             sendInputEvent: vi.fn(),
             debugger: {
@@ -1545,6 +1551,8 @@ describe("PreviewManager", () => {
         const loadURL = vi.fn(async () => undefined);
         const listeners = new Map<string, (...args: never[]) => void>();
         fromId.mockReturnValue({
+          getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
+
           id: 42,
           isDestroyed: () => false,
           getType: () => "webview",
@@ -1629,7 +1637,7 @@ describe("PreviewManager", () => {
       const initialized = Promise.withResolvers<void>();
       const guest = Object.assign(makeTestPreviewWebContents(vi.fn()), {
         isDevToolsOpened: () => false,
-        getUserAgent: () => "Electron",
+        getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Electron/44.10.1 Safari/537.36",
         loadURL: vi.fn(async () => undefined),
       });
       vi.mocked(guest.debugger.sendCommand).mockImplementation(async (method) => {
@@ -1662,6 +1670,19 @@ describe("PreviewManager", () => {
         type: "attached",
         ...serverTab,
       });
+      expect(guest.debugger.sendCommand).toHaveBeenCalledWith(
+        "Emulation.setDeviceMetricsOverride",
+        { width: 0, height: 0, deviceScaleFactor: 2, mobile: false },
+      );
+      expect(guest.debugger.sendCommand).toHaveBeenCalledWith(
+        "Emulation.setUserAgentOverride",
+        expect.objectContaining({
+          userAgent: "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
+          userAgentMetadata: expect.objectContaining({
+            brands: expect.arrayContaining([{ brand: "Google Chrome", version: "152" }]),
+          }),
+        }),
+      );
       yield* manager.closeTab("tab_server_navigation");
       expect(JSON.parse(yield* Queue.take(lines))).toMatchObject({
         type: "detached",
@@ -1690,6 +1711,8 @@ describe("PreviewManager", () => {
           off: debuggerOff,
         };
         fromId.mockReturnValue({
+          getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
+
           id: 42,
           isDestroyed: () => destroyed,
           getType: () => "webview",
@@ -1988,6 +2011,8 @@ describe("PreviewManager", () => {
         const listeners = new Map<string, (...args: unknown[]) => void>();
         const setZoomFactor = vi.fn();
         fromId.mockReturnValue({
+          getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
+
           id: 42,
           isDestroyed: () => false,
           getType: () => "webview",
@@ -2056,6 +2081,8 @@ describe("PreviewManager", () => {
 
         const replacementSetZoomFactor = vi.fn();
         fromId.mockReturnValue({
+          getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
+
           id: 43,
           isDestroyed: () => false,
           getType: () => "webview",
@@ -2098,6 +2125,8 @@ describe("PreviewManager", () => {
       Effect.gen(function* () {
         const setZoomFactor = vi.fn();
         fromId.mockReturnValue({
+          getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
+
           id: 42,
           isDestroyed: () => false,
           getType: () => "webview",
@@ -2143,6 +2172,8 @@ describe("PreviewManager", () => {
       Effect.gen(function* () {
         const setZoomFactor = vi.fn();
         fromId.mockReturnValue({
+          getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
+
           id: 42,
           isDestroyed: () => false,
           getType: () => "webview",
@@ -2199,6 +2230,8 @@ describe("PreviewManager", () => {
           return {
             sendCommand,
             wc: {
+              getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
+
               id,
               isDestroyed: () => false,
               isDevToolsOpened: () => false,
@@ -2293,6 +2326,8 @@ describe("PreviewManager", () => {
     let chromiumDetaches = 0;
     let destroyed = false;
     const wc = {
+      getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
+
       id,
       isDestroyed: () => destroyed,
       isDevToolsOpened: () => {
@@ -2414,6 +2449,8 @@ describe("PreviewManager", () => {
         audibleAfterFirstRead = true;
       },
       wc: {
+        getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
+
         id,
         isDestroyed: () => false,
         isDevToolsOpened: () => false,
@@ -2589,6 +2626,8 @@ describe("PreviewManager", () => {
         let loading = false;
         const listeners = new Map<string, (...args: unknown[]) => void>();
         fromId.mockReturnValue({
+          getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
+
           id: 42,
           isDestroyed: () => false,
           getType: () => "webview",
@@ -2704,6 +2743,8 @@ describe("PreviewManager", () => {
         const capturePage = vi.fn(async () => ({ toPNG: () => png }));
         const listeners = new Map<string, (...args: never[]) => void>();
         fromId.mockReturnValue({
+          getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
+
           id: 42,
           isDestroyed: () => false,
           getType: () => "webview",
@@ -3311,7 +3352,7 @@ describe("PreviewManager", () => {
       for (const [index, environmentId] of ["remote-a", "remote-b"].entries()) {
         const wc = Object.assign(makeTestPreviewWebContents(capturePage, 42 + index), {
           isDevToolsOpened: () => false,
-          getUserAgent: () => "Electron",
+          getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Electron/44.10.1 Safari/537.36",
         });
         fromId.mockReturnValue(wc);
         yield* manager.createTab(environmentId, { serverTab: { ...serverTab, environmentId } });
@@ -3376,7 +3417,7 @@ describe("PreviewManager", () => {
             expect(listeners.has("focusin")).toBe(true);
             delivered.push("Input.dispatchKeyEvent");
           },
-          getUserAgent: () => "Electron",
+          getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Electron/44.10.1 Safari/537.36",
           isDevToolsOpened: () => false,
         });
         vi.mocked(guest.debugger.sendCommand).mockImplementation(async (method) => {
@@ -3438,7 +3479,7 @@ describe("PreviewManager", () => {
       const started = Promise.withResolvers<void>();
       const guests = [42, 43].map((id) =>
         Object.assign(makeTestPreviewWebContents(vi.fn(), id), {
-          getUserAgent: () => "Electron",
+          getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Electron/44.10.1 Safari/537.36",
           isDevToolsOpened: () => false,
         }),
       );
@@ -3502,7 +3543,7 @@ describe("PreviewManager", () => {
       fromId.mockReturnValue(
         Object.assign(makeTestPreviewWebContents(capturePage, 42), {
           isDevToolsOpened: () => false,
-          getUserAgent: () => "Electron",
+          getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Electron/44.10.1 Safari/537.36",
         }),
       );
       const manager = yield* PreviewManager.PreviewManager;
@@ -3526,7 +3567,7 @@ describe("PreviewManager", () => {
           }, 42),
           {
             isDevToolsOpened: () => false,
-            getUserAgent: () => "Electron",
+            getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Electron/44.10.1 Safari/537.36",
             loadURL: vi.fn(async () => undefined),
           },
         );
@@ -3694,6 +3735,8 @@ describe("PreviewManager", () => {
           sendCommand: typeof firstSendCommand,
         ) =>
           ({
+            getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
+
             id,
             mainFrame: { routingId: id },
             hostWebContents: host,
@@ -4055,6 +4098,8 @@ describe("PreviewManager", () => {
           getSize: () => ({ width: 1280, height: 720 }),
         }));
         fromId.mockReturnValue({
+          getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
+
           id: 42,
           mainFrame: { routingId: 42 },
           hostWebContents: mainWindowWebContents,
@@ -4639,6 +4684,8 @@ describe("PreviewManager", () => {
       Effect.gen(function* () {
         const listeners = new Map<string, (...args: unknown[]) => void>();
         fromId.mockReturnValue({
+          getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
+
           id: 42,
           isDestroyed: () => false,
           getType: () => "webview",
@@ -4786,6 +4833,8 @@ describe("PreviewManager", () => {
       Effect.gen(function* () {
         let onPicked: ((event: unknown, ...args: unknown[]) => void) | undefined;
         fromId.mockReturnValue({
+          getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
+
           id: 42,
           isDestroyed: () => false,
           getType: () => "webview",
@@ -5030,6 +5079,8 @@ describe("PreviewManager", () => {
       Effect.gen(function* () {
         let onPicked: ((event: unknown, ...args: unknown[]) => void) | undefined;
         fromId.mockReturnValue({
+          getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
+
           id: 42,
           isDestroyed: () => false,
           getType: () => "webview",
@@ -5112,6 +5163,8 @@ describe("PreviewManager", () => {
         const goForward = vi.fn();
         let canGoBack = true;
         fromId.mockReturnValue({
+          getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
+
           id: 42,
           isDestroyed: () => false,
           getType: () => "webview",
@@ -5256,6 +5309,8 @@ describe("PreviewManager", () => {
     } = {},
   ) =>
     ({
+      getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
+
       id,
       isDestroyed: () => false,
       getType: () => "webview",
@@ -5833,6 +5888,8 @@ describe("PreviewManager", () => {
           focus: restoreFocus,
         } as never);
         fromId.mockReturnValue({
+          getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
+
           id: 42,
           mainFrame: { framesInSubtree: [frame] },
           isDestroyed: () => false,
@@ -6029,6 +6086,8 @@ describe("PreviewManager", () => {
           return undefined;
         });
         fromId.mockReturnValue({
+          getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
+
           id: 42,
           isDestroyed: () => false,
           getType: () => "webview",
@@ -6101,6 +6160,8 @@ describe("PreviewManager", () => {
           method === "Runtime.evaluate" ? { exceptionDetails } : undefined,
         );
         fromId.mockReturnValue({
+          getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
+
           id: 42,
           isDestroyed: () => false,
           getType: () => "webview",
@@ -6166,8 +6227,12 @@ describe("PreviewManager", () => {
               (...args: ReadonlyArray<unknown>) => void
             >();
             let autofillPending = true;
-            const sendCommand = vi.fn(async (method: string) => {
-              if (method !== "Runtime.evaluate") return undefined;
+            const sendCommand = vi.fn(async (method: string, params?: { expression?: string }) => {
+              if (
+                method !== "Runtime.evaluate" ||
+                params?.expression?.startsWith("navigator.userAgentData")
+              )
+                return undefined;
               if (autofillPending) {
                 autofillPending = false;
                 return {
@@ -6183,6 +6248,8 @@ describe("PreviewManager", () => {
               return { result: { value: "safe-after-navigation" } };
             });
             fromId.mockReturnValue({
+              getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
+
               id: 42,
               isDestroyed: () => false,
               getType: () => "webview",
@@ -6280,6 +6347,8 @@ describe("PreviewManager", () => {
         };
         mainFrame.framesInSubtree.push(mainFrame, loginFrame);
         fromId.mockReturnValue({
+          getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
+
           id: 43,
           isDestroyed: () => false,
           getType: () => "webview",
@@ -6337,7 +6406,14 @@ describe("PreviewManager", () => {
         expect(loginFrame.executeJavaScript.mock.calls[0]?.[0]).toContain(
           'location.origin !== "https://idmsa.apple.com"',
         );
-        expect(sendCommand).not.toHaveBeenCalledWith("Runtime.evaluate", expect.anything());
+        expect(sendCommand.mock.calls.filter(([method]) => method === "Runtime.evaluate")).toEqual([
+          [
+            "Runtime.evaluate",
+            expect.objectContaining({
+              expression: expect.stringMatching(/^navigator\.userAgentData/),
+            }),
+          ],
+        ]);
       }),
     ),
   );
@@ -6460,3 +6536,41 @@ describe("Preview automation diagnostics", () => {
     expect("locator" in error).toBe(false);
   });
 });
+
+effectIt.effect("applies Chrome identity to worker targets before releasing them", () =>
+  withManager((manager) =>
+    Effect.gen(function* () {
+      const guest = Object.assign(makeTestPreviewWebContents(vi.fn()), {
+        isDevToolsOpened: () => false,
+      });
+      const resumed = Promise.withResolvers<void>();
+      vi.mocked(guest.debugger.sendCommand).mockImplementation(async (method) => {
+        if (method === "Runtime.runIfWaitingForDebugger") resumed.resolve();
+        return undefined;
+      });
+      fromId.mockReturnValue(guest);
+      yield* manager.createTab("worker-identity");
+      yield* manager.registerWebview("worker-identity", 42);
+      yield* manager.setColorScheme("worker-identity", "light");
+      const onMessage = vi
+        .mocked(guest.debugger.on)
+        .mock.calls.find(([event]) => event === "message")?.[1];
+      expect(onMessage).toBeDefined();
+      onMessage!({} as Electron.Event, "Target.attachedToTarget", { sessionId: "worker-1" }, "");
+      yield* Effect.promise(() => resumed.promise);
+      expect(guest.debugger.sendCommand).toHaveBeenCalledWith(
+        "Network.setUserAgentOverride",
+        expect.objectContaining({
+          userAgentMetadata: expect.objectContaining({
+            brands: expect.arrayContaining([{ brand: "Google Chrome", version: "152" }]),
+          }),
+        }),
+        "worker-1",
+      );
+      const commands = vi.mocked(guest.debugger.sendCommand).mock.calls.map(([method]) => method);
+      expect(commands.indexOf("Network.setUserAgentOverride")).toBeLessThan(
+        commands.indexOf("Runtime.runIfWaitingForDebugger"),
+      );
+    }),
+  ),
+);
