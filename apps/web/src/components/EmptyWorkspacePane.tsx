@@ -100,12 +100,12 @@ export function EmptyWorkspacePane({
         .toLowerCase()
         .includes(projectQuery.trim().toLowerCase()),
   );
-  const scoped = threads.filter((thread) =>
-    allProjects ? thread.status === "open" : thread.projectKey === selectedProjectKey,
+  const scoped = threads.filter(
+    (thread) => allProjects || thread.projectKey === selectedProjectKey,
   );
   const visible = filterWorkspaceThreadPickerItems(threads, {
     projectKey: allProjects ? null : selectedProjectKey,
-    status: allProjects ? "open" : filter,
+    status: filter,
     query,
   });
   const ordered = [
@@ -379,7 +379,7 @@ export function EmptyWorkspacePane({
             >
               <LayersIcon className="size-3.5 shrink-0" aria-hidden />
               <span className="whitespace-nowrap text-xs font-medium @lg/thread-browser:flex-1">
-                All open threads
+                All threads
               </span>
               <span className="text-2xs tabular-nums text-muted-foreground">{openCount}</span>
             </button>
@@ -397,12 +397,10 @@ export function EmptyWorkspacePane({
           <div className="flex shrink-0 items-center gap-3 px-4 pb-3 pt-4 @lg/thread-browser:px-5">
             <div className="min-w-0 flex-1">
               <h2 className="truncate text-base font-semibold tracking-tight">
-                {selected?.displayName ?? "All open threads"}
+                {selected?.displayName ?? "All threads"}
               </h2>
               <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                {allProjects
-                  ? "Across connected projects and machines"
-                  : `${scoped.filter((thread) => thread.status === "open").length} open · ${scoped.filter((thread) => thread.status === "settled").length} settled`}
+                {`${scoped.filter((thread) => thread.status === "open").length} open · ${scoped.filter((thread) => thread.status === "settled").length} settled${allProjects ? " across connected projects and machines" : ""}`}
               </p>
             </div>
             {selected ? newThreadButton(selected) : null}
@@ -421,30 +419,28 @@ export function EmptyWorkspacePane({
                 }}
               />
             </div>
-            {!allProjects ? (
-              <div className="flex items-center gap-0.5" role="group" aria-label="Thread status">
-                {(
-                  [
-                    ["all", "All"],
-                    ["open", "Open"],
-                    ["settled", "History"],
-                  ] as const
-                ).map(([value, label]) => (
-                  <Button
-                    key={value}
-                    variant={filter === value ? "secondary" : "ghost-muted"}
-                    size="compact"
-                    aria-pressed={filter === value}
-                    onClick={() => {
-                      setVisibleLimit(100);
-                      setFilter(value);
-                    }}
-                  >
-                    {label}
-                  </Button>
-                ))}
-              </div>
-            ) : null}
+            <div className="flex items-center gap-0.5" role="group" aria-label="Thread status">
+              {(
+                [
+                  ["all", "All"],
+                  ["open", "Open"],
+                  ["settled", "History"],
+                ] as const
+              ).map(([value, label]) => (
+                <Button
+                  key={value}
+                  variant={filter === value ? "secondary" : "ghost-muted"}
+                  size="compact"
+                  aria-pressed={filter === value}
+                  onClick={() => {
+                    setVisibleLimit(100);
+                    setFilter(value);
+                  }}
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" aria-label="Threads">
             {openThreads.length > 0 ? <div>{renderThreads(openThreads)}</div> : null}
@@ -476,9 +472,11 @@ export function EmptyWorkspacePane({
                 <p className="text-sm font-medium">
                   {query
                     ? "No matching threads"
-                    : filter === "settled" && !allProjects
+                    : filter === "settled"
                       ? "No settled threads yet"
-                      : "No open threads"}
+                      : filter === "open"
+                        ? "No open threads"
+                        : "No threads yet"}
                 </p>
                 <p className="max-w-64 text-xs leading-5 text-muted-foreground">
                   {query
