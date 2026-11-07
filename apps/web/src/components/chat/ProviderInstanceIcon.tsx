@@ -132,7 +132,9 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
           style={{ borderColor: indicatorBackground }}
           aria-hidden
         >
-          {badgeContent === "initials" ? providerInstanceInitials(props.displayName ?? props.driverKind) : null}
+          {badgeContent === "initials"
+            ? providerInstanceInitials(props.displayName ?? props.driverKind)
+            : null}
         </span>
       ) : null}
     </span>
