@@ -21,7 +21,8 @@ export function ConnectedUpdatesSetting({
     <SettingsRow
       title="Allow connected controllers to install updates on this desktop"
       description={
-        error ?? "Connected controllers with full access can update this desktop when it is idle."
+        error ??
+        "Connected controllers with full access can update this desktop. Running threads continue after the restart."
       }
       control={
         <Switch

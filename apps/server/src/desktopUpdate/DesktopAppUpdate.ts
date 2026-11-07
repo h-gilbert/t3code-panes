@@ -12,8 +12,6 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
-import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
-import { isLiveSubagentShell } from "@t3tools/contracts";
 import * as Stream from "effect/Stream";
 
 import * as ServerConfig from "../config.ts";
@@ -52,19 +50,7 @@ export class DesktopAppUpdate extends Context.Service<
   }
 >()("t3/desktopUpdate/DesktopAppUpdate") {}
 
-const readBusyThreads = Effect.gen(function* () {
-  const projections = yield* ProjectionStore.ProjectionStoreV2;
-  const snapshot = yield* projections.getShellSnapshot({ unsettledOnly: true });
-  return [...snapshot.threads, ...snapshot.archivedThreads].filter(isLiveSubagentShell).length;
-}).pipe(
-  Effect.mapError(
-    (cause) => new ServerSelfUpdateError({ reason: "Cannot check desktop activity.", cause }),
-  ),
-);
-
-export const make = Effect.fn("desktopUpdate.desktopAppUpdate.make")(function* (
-  busyThreads: Effect.Effect<number, ServerSelfUpdateError>,
-) {
+export const make = Effect.fn("desktopUpdate.desktopAppUpdate.make")(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const random = yield* SecureRandom.SecureRandom;
   const receiver = yield* DesktopTelemetryReceiver.DesktopTelemetryReceiver;
@@ -75,15 +61,6 @@ export const make = Effect.fn("desktopUpdate.desktopAppUpdate.make")(function* (
     cause === undefined
       ? new ServerSelfUpdateError({ reason })
       : new ServerSelfUpdateError({ reason, cause });
-
-  const waitUntilIdle = Effect.fn("DesktopAppUpdate.waitUntilIdle")(function* (
-    progress: (stage: ServerSelfUpdateProgressStage) => Effect.Effect<void, ServerSelfUpdateError>,
-  ) {
-    while ((yield* busyThreads) > 0) {
-      yield* progress("waiting");
-      yield* Effect.sleep("2 seconds");
-    }
-  });
 
   const consumeReports = Effect.fn("DesktopAppUpdate.consumeReports")(function* (
     requestId: string,
@@ -131,7 +108,6 @@ export const make = Effect.fn("desktopUpdate.desktopAppUpdate.make")(function* (
 
     const report = terminal.value;
     if (report.outcome === "ready-to-install") {
-      yield* waitUntilIdle(reportProgress);
       yield* emitStage("installing");
       const targetVersion =
         report.state.downloadedVersion ??
@@ -171,7 +147,6 @@ export const make = Effect.fn("desktopUpdate.desktopAppUpdate.make")(function* (
 
       return yield* Effect.scoped(
         Effect.gen(function* () {
-          yield* waitUntilIdle(reportProgress);
           const requestId = yield* random
             .uuidV4()
             .pipe(
@@ -208,7 +183,6 @@ export const make = Effect.fn("desktopUpdate.desktopAppUpdate.make")(function* (
       return yield* failWith("This server cannot commit a desktop app update.");
     }
     while (true) {
-      yield* waitUntilIdle(() => Effect.void);
       const terminal = yield* Effect.scoped(
         Effect.gen(function* () {
           const { latest, changes } = yield* receiver.desktopUpdates;
@@ -253,12 +227,4 @@ export const make = Effect.fn("desktopUpdate.desktopAppUpdate.make")(function* (
   return DesktopAppUpdate.of({ available, run, commit });
 });
 
-export const layer = Layer.effect(
-  DesktopAppUpdate,
-  Effect.gen(function* () {
-    const projections = yield* ProjectionStore.ProjectionStoreV2;
-    return yield* make(
-      readBusyThreads.pipe(Effect.provideService(ProjectionStore.ProjectionStoreV2, projections)),
-    );
-  }),
-);
+export const layer = Layer.effect(DesktopAppUpdate, make());

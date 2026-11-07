@@ -58,10 +58,10 @@ version, then restarts this app after the remote machines reconnect successfully
 "Update all" updates the remote machines without restarting this app.
 
 Remote desktop updates require full maintenance access and use that desktop's existing updater,
-feed and signature checks. They wait for active threads, pending approvals and browser downloads
-before installing. Progress and failures appear per machine. A failed remote update leaves this app
-running. Settings → About has "Allow connected controllers to install updates on this desktop",
-enabled by default; turn it off on a desktop to refuse remote installs. Desktops running multiple
+feed and signature checks. They wait only for browser downloads to finish, not for running
+threads: those are interrupted and continue after the restart, as on this app. Progress and
+failures appear per machine. A failed remote update leaves this app running. Settings → About has
+"Allow connected controllers to install updates on this desktop", enabled by default; turn it off on a desktop to refuse remote installs. Desktops running multiple
 embedded backends require a local update because the requesting backend cannot check all of their
 activity. A desktop must first receive this support through its own update or a local promotion.
 
