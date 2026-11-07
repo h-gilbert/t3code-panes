@@ -275,6 +275,25 @@ describe("buildProjectGroups", () => {
     }
   });
 
+  it("labels a group by its shared title even when it matches the repository name", () => {
+    const projects = [
+      makeProject("t3code-a", "/work/a", { title: "t3code" }),
+      makeProject("t3code-b", "/work/b", { title: "t3code" }),
+    ];
+    const groups = buildProjectGroups({ projects, settings: settings("repository") });
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.label).toBe("t3code");
+  });
+
+  it("falls back to the repository name when copies have different titles", () => {
+    const projects = [
+      makeProject("t3code-a", "/work/a", { title: "Mine" }),
+      makeProject("t3code-b", "/work/b", { title: "Other" }),
+    ];
+    const groups = buildProjectGroups({ projects, settings: settings("repository") });
+    expect(groups[0]?.label).toBe("T3 Code");
+  });
+
   it("keeps a fork apart from its upstream checkout and labels it by its own remote", () => {
     const fork = makeProject("fork", "/work/t3code-fork", {
       repositoryIdentity: {

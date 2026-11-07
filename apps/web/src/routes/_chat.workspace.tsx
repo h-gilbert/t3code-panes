@@ -96,7 +96,10 @@ import { useLogicalProjectEnvironments } from "../hooks/useLogicalProjectEnviron
 import { EnvironmentMachineIcon } from "../components/EnvironmentMachineIcon";
 import { useNowMinute } from "../hooks/useNowMinute";
 import { useThreadActions } from "../hooks/useThreadActions";
-import { selectProjectGroupingSettings } from "@t3tools/client-runtime/state/project-grouping";
+import {
+  pickableProjectGroups,
+  selectProjectGroupingSettings,
+} from "@t3tools/client-runtime/state/project-grouping";
 import {
   markPromotedDraftThreadByRef,
   useComposerDraftStore,
@@ -435,9 +438,11 @@ function WorkspacePane({
     projects.find((project) => project.projectKey === projectKey) ?? null)();
   const [menuProjects, hiddenMenuProjects] = (() => {
     const hiddenKeys = new Set(hiddenPickerProjectKeys);
+    // Archived projects stay out of the pane menu, as they do in the sidebar.
+    const pickable = pickableProjectGroups(projects);
     return [
-      projects.filter((project) => project.isScratch || !hiddenKeys.has(project.projectKey)),
-      projects.filter((project) => !project.isScratch && hiddenKeys.has(project.projectKey)),
+      pickable.filter((project) => project.isScratch || !hiddenKeys.has(project.projectKey)),
+      pickable.filter((project) => !project.isScratch && hiddenKeys.has(project.projectKey)),
     ];
   })();
   const resolvePendingProject = useEffectEvent(() => {
