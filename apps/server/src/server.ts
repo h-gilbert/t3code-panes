@@ -284,6 +284,7 @@ const layerHostPowerMonitor = HostPowerMonitor.layer.pipe(
 
 // A fresh receiver layer would open a second reader on the desktop telemetry fd.
 const layerDesktopAppUpdate = DesktopAppUpdate.layer.pipe(
+  Layer.provide(ProjectionStoreV2.layer),
   Layer.provide(layerDesktopTelemetryReceiver),
 );
 

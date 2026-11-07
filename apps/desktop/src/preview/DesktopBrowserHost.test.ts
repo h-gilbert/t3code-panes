@@ -988,6 +988,7 @@ describe("DesktopBrowserHost", () => {
       const replies = yield* watchReplies(host);
       const paths: Array<string> = [];
       const item = {
+        once: vi.fn(),
         setSavePath: (path: string) => void paths.push(path),
       } as unknown as Electron.DownloadItem;
 
@@ -1208,10 +1209,11 @@ it.effect("stores remote downloads locally and only transfers registered files",
     let savedPath = "";
     expect(
       host.placeDownload(debuggee.tab.webContents, {
+        once: vi.fn(),
         setSavePath: (path: string) => {
           savedPath = path;
         },
-      } as Electron.DownloadItem),
+      } as unknown as Electron.DownloadItem),
     ).toBe(true);
     expect(savedPath).not.toContain("does-not-exist-on-mac");
     yield* Effect.promise(() => NodeFSP.writeFile(savedPath, "download content"));

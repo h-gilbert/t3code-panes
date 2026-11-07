@@ -7,19 +7,17 @@ import {
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as SecureRandom from "effect/crypto/SecureRandom";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
+import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
+import { isLiveSubagentShell } from "@t3tools/contracts";
 import * as Stream from "effect/Stream";
 
 import * as ServerConfig from "../config.ts";
 import * as DesktopTelemetryReceiver from "../resourceTelemetry/DesktopTelemetryReceiver.ts";
-
-const DESKTOP_UPDATE_TIMEOUT = Duration.minutes(20);
-const DESKTOP_INSTALL_TIMEOUT = Duration.minutes(2);
 
 function desktopUpdateProgressStage(
   state: DesktopUpdateState,
@@ -54,7 +52,19 @@ export class DesktopAppUpdate extends Context.Service<
   }
 >()("t3/desktopUpdate/DesktopAppUpdate") {}
 
-export const make = Effect.fn("desktopUpdate.desktopAppUpdate.make")(function* () {
+const readBusyThreads = Effect.gen(function* () {
+  const projections = yield* ProjectionStore.ProjectionStoreV2;
+  const snapshot = yield* projections.getShellSnapshot({ unsettledOnly: true });
+  return [...snapshot.threads, ...snapshot.archivedThreads].filter(isLiveSubagentShell).length;
+}).pipe(
+  Effect.mapError(
+    (cause) => new ServerSelfUpdateError({ reason: "Cannot check desktop activity.", cause }),
+  ),
+);
+
+export const make = Effect.fn("desktopUpdate.desktopAppUpdate.make")(function* (
+  busyThreads: Effect.Effect<number, ServerSelfUpdateError>,
+) {
   const config = yield* ServerConfig.ServerConfig;
   const random = yield* SecureRandom.SecureRandom;
   const receiver = yield* DesktopTelemetryReceiver.DesktopTelemetryReceiver;
@@ -65,6 +75,15 @@ export const make = Effect.fn("desktopUpdate.desktopAppUpdate.make")(function* (
     cause === undefined
       ? new ServerSelfUpdateError({ reason })
       : new ServerSelfUpdateError({ reason, cause });
+
+  const waitUntilIdle = Effect.fn("DesktopAppUpdate.waitUntilIdle")(function* (
+    progress: (stage: ServerSelfUpdateProgressStage) => Effect.Effect<void, ServerSelfUpdateError>,
+  ) {
+    while ((yield* busyThreads) > 0) {
+      yield* progress("waiting");
+      yield* Effect.sleep("2 seconds");
+    }
+  });
 
   const consumeReports = Effect.fn("DesktopAppUpdate.consumeReports")(function* (
     requestId: string,
@@ -93,9 +112,9 @@ export const make = Effect.fn("desktopUpdate.desktopAppUpdate.make")(function* (
       Stream.mapEffect(
         (report): Effect.Effect<Option.Option<DesktopUpdateStatusReport>, ServerSelfUpdateError> =>
           report.outcome === undefined
-            ? emitStage(desktopUpdateProgressStage(report.state)).pipe(
-                Effect.as(Option.none<DesktopUpdateStatusReport>()),
-              )
+            ? emitStage(
+                report.waitingForIdle ? "waiting" : desktopUpdateProgressStage(report.state),
+              ).pipe(Effect.as(Option.none<DesktopUpdateStatusReport>()))
             : Effect.succeedSome(report),
       ),
       Stream.filterMap(
@@ -112,6 +131,7 @@ export const make = Effect.fn("desktopUpdate.desktopAppUpdate.make")(function* (
 
     const report = terminal.value;
     if (report.outcome === "ready-to-install") {
+      yield* waitUntilIdle(reportProgress);
       yield* emitStage("installing");
       const targetVersion =
         report.state.downloadedVersion ??
@@ -151,6 +171,7 @@ export const make = Effect.fn("desktopUpdate.desktopAppUpdate.make")(function* (
 
       return yield* Effect.scoped(
         Effect.gen(function* () {
+          yield* waitUntilIdle(reportProgress);
           const requestId = yield* random
             .uuidV4()
             .pipe(
@@ -176,13 +197,7 @@ export const make = Effect.fn("desktopUpdate.desktopAppUpdate.make")(function* (
             Effect.onInterrupt(() => receiver.cancelDesktopUpdate(requestId).pipe(Effect.ignore)),
           );
         }),
-      ).pipe(
-        Effect.timeout(DESKTOP_UPDATE_TIMEOUT),
-        Effect.catchTags({
-          TimeoutError: () => failWith("The desktop app did not finish the update in time."),
-        }),
-        Effect.onError(() => Ref.set(inFlight, false)),
-      );
+      ).pipe(Effect.onError(() => Ref.set(inFlight, false)));
     },
   );
 
@@ -192,41 +207,58 @@ export const make = Effect.fn("desktopUpdate.desktopAppUpdate.make")(function* (
     if (!available) {
       return yield* failWith("This server cannot commit a desktop app update.");
     }
-    const terminal = yield* Effect.scoped(
-      Effect.gen(function* () {
-        const { latest, changes } = yield* receiver.desktopUpdates;
-        const reports = Option.match(latest, {
-          onNone: () => changes,
-          onSome: (report) => Stream.concat(Stream.make(report), changes),
-        });
-        yield* Effect.uninterruptible(
-          receiver.commitDesktopUpdate(requestId).pipe(
-            Effect.mapError((error) => failWith("Could not reach the T3 Code desktop app.", error)),
-            Effect.tap(() => onHandoffAccepted()),
-          ),
-        );
-        return yield* reports.pipe(
-          Stream.filter((report) => report.requestId === requestId && report.outcome === "failed"),
-          Stream.runHead,
-          Effect.timeout(DESKTOP_INSTALL_TIMEOUT),
-          Effect.catchTags({
-            TimeoutError: () =>
-              failWith("The desktop app did not report an install result in time."),
-          }),
-        );
-      }),
-    );
-    if (Option.isNone(terminal)) {
-      return yield* failWith("The desktop app stopped reporting the install.");
+    while (true) {
+      yield* waitUntilIdle(() => Effect.void);
+      const terminal = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const { latest, changes } = yield* receiver.desktopUpdates;
+          const reports = Option.match(latest, {
+            onNone: () => changes,
+            onSome: (report) =>
+              report.outcome === "failed" ? Stream.concat(Stream.make(report), changes) : changes,
+          });
+          yield* Effect.uninterruptible(
+            receiver.commitDesktopUpdate(requestId).pipe(
+              Effect.mapError((error) =>
+                failWith("Could not reach the T3 Code desktop app.", error),
+              ),
+              Effect.tap(() => onHandoffAccepted()),
+            ),
+          );
+          return yield* reports.pipe(
+            Stream.filter(
+              (report) =>
+                report.requestId === requestId &&
+                (report.outcome === "failed" || report.waitingForIdle === true),
+            ),
+            Stream.runHead,
+          );
+        }),
+      );
+      if (Option.isNone(terminal)) {
+        return yield* failWith("The desktop app stopped reporting the install.");
+      }
+      if (terminal.value.waitingForIdle) {
+        yield* Effect.sleep("2 seconds");
+        continue;
+      }
+      return yield* failWith(
+        terminal.value.reason ??
+          terminal.value.state.message ??
+          "The desktop app failed to install the update.",
+      );
     }
-    return yield* failWith(
-      terminal.value.reason ??
-        terminal.value.state.message ??
-        "The desktop app failed to install the update.",
-    );
   });
 
   return DesktopAppUpdate.of({ available, run, commit });
 });
 
-export const layer = Layer.effect(DesktopAppUpdate, make());
+export const layer = Layer.effect(
+  DesktopAppUpdate,
+  Effect.gen(function* () {
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    return yield* make(
+      readBusyThreads.pipe(Effect.provideService(ProjectionStore.ProjectionStoreV2, projections)),
+    );
+  }),
+);
