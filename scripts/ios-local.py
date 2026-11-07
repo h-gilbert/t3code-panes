@@ -193,7 +193,12 @@ def status(fetch):
 def build():
     check_source_policy()
     check_native_policy(SOURCE / 'apps/mobile/ios')
-    app = installed_app()
+    try:
+        app = installed_app()
+    except subprocess.CalledProcessError:
+        # The ledger still numbers builds when the phone is away (e.g. for an OTA install link).
+        print('Phone unreachable; numbering from the build ledger.')
+        app = None
     numbers = [int(app['bundleVersion']) if app and app['bundleVersion'].isdigit() else 1]
     for path in (STATE / 'builds').glob('*/record.json'):
         numbers.append(int(json.loads(path.read_text())['buildNumber']))
