@@ -8,6 +8,8 @@ import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as TestClock from "effect/testing/TestClock";
+import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 
 import * as ServerConfig from "../config.ts";
@@ -55,6 +57,7 @@ function report(
 }
 
 interface HarnessOptions {
+  readonly busyThreads?: Effect.Effect<number>;
   readonly mode?: "web" | "desktop";
   readonly controlFd?: number | undefined;
   readonly reports?: (requestId: string) => readonly DesktopUpdateStatusReport[];
@@ -87,7 +90,7 @@ const makeHarness = Effect.fn("test.make_desktop_app_update_harness")(function* 
     ),
   );
 
-  const service = yield* DesktopAppUpdate.make().pipe(
+  const service = yield* DesktopAppUpdate.make(options.busyThreads ?? Effect.succeed(0)).pipe(
     Effect.provide(
       Layer.mergeAll(
         DesktopTelemetryReceiver.layerTest({
@@ -102,10 +105,37 @@ const makeHarness = Effect.fn("test.make_desktop_app_update_harness")(function* 
       ),
     ),
   );
-  return { service };
+  return { service, requested: requestIdDeferred };
 });
 
 it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("desktop app update", (it) => {
+  it.effect("defers while turns or approvals are active, then retries when idle", () =>
+    Effect.gen(function* () {
+      const busy = yield* Ref.make(2);
+      const waiting = yield* Deferred.make<void>();
+      const { service, requested } = yield* makeHarness({
+        busyThreads: Ref.get(busy),
+        reports: (requestId) => [
+          report(requestId, makeState({ status: "downloaded", downloadedVersion: "1.2.4" }), {
+            outcome: "ready-to-install",
+          }),
+        ],
+      });
+      const run = yield* service
+        .run((stage) =>
+          stage === "waiting"
+            ? Deferred.succeed(waiting, undefined).pipe(Effect.asVoid)
+            : Effect.void,
+        )
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(waiting);
+      expect(yield* Deferred.isDone(requested)).toBe(false);
+      yield* Ref.set(busy, 0);
+      yield* TestClock.adjust("2 seconds");
+      expect((yield* Fiber.join(run)).targetVersion).toBe("1.2.4");
+    }),
+  );
+
   it.effect("collapses state reports into progress stages and succeeds on installing", () =>
     Effect.gen(function* () {
       const { service } = yield* makeHarness({
