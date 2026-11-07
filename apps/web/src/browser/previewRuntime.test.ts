@@ -85,3 +85,15 @@ it("hosts selected remote tabs on the primary desktop and keeps them on that hos
   expect(rendersServerTabNatively(remote, local, { runtime: "server" }, "other")).toBe(false);
   expect(alternatePreviewRuntime(remote, local, true, { runtime: "server" })).toBeNull();
 });
+
+it("streams the primary environment when it selects a different desktop host", () => {
+  state.desktop = true;
+  state.primary = local;
+  state.host = remote;
+  state.serverBrowser = new Set([local, remote]);
+  expect(previewRuntimeFor(local)).toBe("server");
+  expect(rendersServerTabNatively(local, local, { runtime: "server" }, remote)).toBe(false);
+  expect(rendersServerTabNatively(local, remote, { runtime: "server" }, remote)).toBe(true);
+  expect(rendersServerTabNatively(local, local, { runtime: "server" }, null)).toBe(true);
+  expect(alternatePreviewRuntime(local, local, true, { runtime: "server" })).toBeNull();
+});

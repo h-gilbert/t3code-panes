@@ -63,7 +63,7 @@ export function rendersServerTabNatively(
     snapshot?.runtime === "server" &&
     !snapshot.headless &&
     primaryEnvironmentId !== null &&
-    (environmentId === primaryEnvironmentId || hostEnvironmentId === primaryEnvironmentId)
+    (hostEnvironmentId ?? environmentId) === primaryEnvironmentId
   );
 }
 
