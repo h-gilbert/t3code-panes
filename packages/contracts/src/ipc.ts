@@ -1080,6 +1080,9 @@ export interface DesktopPreviewAutomationRelayRequest {
 /** Apply zoom and color scheme at creation to avoid flashing browser defaults. */
 export const DesktopPreviewCreateTabInputSchema = Schema.Struct({
   tabId: DesktopPreviewTabIdSchema,
+  nativeRenderScale: Schema.optional(
+    Schema.Number.check(Schema.isBetween({ minimum: 1, maximum: 2 })),
+  ),
   zoomFactor: Schema.optional(Schema.Number.check(Schema.isGreaterThan(0))),
   colorScheme: Schema.optional(DesktopPreviewColorSchemeSchema),
   serverTab: Schema.optional(
@@ -1092,6 +1095,7 @@ export const DesktopPreviewCreateTabInputSchema = Schema.Struct({
 });
 
 export interface DesktopPreviewTabDefaults {
+  readonly nativeRenderScale?: number | undefined;
   readonly zoomFactor?: number | undefined;
   readonly colorScheme?: DesktopPreviewColorScheme | undefined;
   /** A tab of the desktop's own server: the server drives it through the desktop browser channel. */

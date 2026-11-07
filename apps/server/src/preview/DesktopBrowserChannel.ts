@@ -26,6 +26,7 @@ import * as Ndjson from "effect/encoding/Ndjson";
 import * as NodeCrypto from "node:crypto";
 import * as NodeNet from "node:net";
 
+import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { writeAllToFileDescriptor } from "../resourceTelemetry/DesktopTelemetryReceiver.ts";
@@ -91,6 +92,8 @@ export class DesktopBrowserChannel extends Context.Service<
 const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const settings = yield* ServerSettings.ServerSettingsService;
+  const ownEnvironment = yield* (yield* ServerEnvironment.ServerEnvironmentIdentity)
+    .getEnvironmentId;
   const inputFd = config.desktopBrowserFd;
   const controlFd = config.desktopBrowserControlFd;
   const changes = yield* PubSub.unbounded<{ key: DesktopTabKey; attached: boolean }>();
@@ -112,23 +115,27 @@ const make = Effect.gen(function* () {
       }
     | undefined;
 
-  const command = (message: DesktopBrowserCommandType) =>
-    Effect.suspend(() => {
-      if (remoteHost) {
-        const commandId = NodeCrypto.randomUUID();
-        remoteHost.commands.set(commandId, message);
-        return Queue.offer(remoteHost.queue, { type: "command", commandId }).pipe(Effect.asVoid);
-      }
-      if (controlFd === undefined) return Effect.void;
-      return writeLock.withPermits(1)(
-        encodeCommand(message).pipe(
-          Effect.flatMap((line) => writeAllToFileDescriptor(controlFd, Buffer.from(`${line}\n`))),
-          Effect.catchCause((cause) =>
-            Effect.logWarning("desktop browser command failed", { cause }),
-          ),
+  const command = Effect.fn("DesktopBrowserChannel.command")(function* (
+    message: DesktopBrowserCommandType,
+  ) {
+    const selected = (yield* settings.getSettings.pipe(Effect.orDie)).browserHostEnvironmentId;
+    if (selected && selected !== ownEnvironment) {
+      if (!remoteHost || remoteHost.hostEnvironmentId !== selected) return;
+      const commandId = NodeCrypto.randomUUID();
+      remoteHost.commands.set(commandId, message);
+      yield* Queue.offer(remoteHost.queue, { type: "command", commandId });
+      return;
+    }
+    if (controlFd === undefined) return;
+    yield* writeLock.withPermits(1)(
+      encodeCommand(message).pipe(
+        Effect.flatMap((line) => writeAllToFileDescriptor(controlFd, Buffer.from(`${line}\n`))),
+        Effect.catchCause((cause) =>
+          Effect.logWarning("desktop browser command failed", { cause }),
         ),
-      );
-    });
+      ),
+    );
+  });
 
   const receive = (event: DesktopBrowserEvent) => {
     const key = { threadId: event.threadId, tabId: event.tabId };
@@ -184,7 +191,17 @@ const make = Effect.gen(function* () {
     }).pipe(
       Stream.pipeThroughChannel(Ndjson.decode({ ignoreEmptyLines: true })),
       Stream.mapEffect((value) => decodeEvent(value).pipe(Effect.option)),
-      Stream.runForEach((event) => (Option.isSome(event) ? receive(event.value) : Effect.void)),
+      Stream.runForEach((event) =>
+        Effect.gen(function* () {
+          const selected = yield* settings.getSettings;
+          if (
+            Option.isSome(event) &&
+            (!selected.browserHostEnvironmentId ||
+              selected.browserHostEnvironmentId === ownEnvironment)
+          )
+            yield* receive(event.value);
+        }),
+      ),
       Effect.catchCause((cause) => Effect.logWarning("desktop browser channel stopped", { cause })),
       Effect.forkScoped,
     );
@@ -298,7 +315,10 @@ const make = Effect.gen(function* () {
           writeLock.withPermits(1)(
             Effect.gen(function* () {
               const selected = yield* settings.getSettings.pipe(Effect.orDie);
-              if (inputFd !== undefined || selected.browserHostEnvironmentId !== hostEnvironmentId)
+              if (
+                hostEnvironmentId === ownEnvironment ||
+                selected.browserHostEnvironmentId !== hostEnvironmentId
+              )
                 return yield* new DesktopBrowserHostError({ reason: "not-selected" });
               if (remoteHost)
                 return yield* new DesktopBrowserHostError({ reason: "already-connected" });

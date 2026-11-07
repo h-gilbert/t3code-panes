@@ -1,5 +1,7 @@
 import { expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { EnvironmentId } from "@t3tools/contracts";
+import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
@@ -11,16 +13,33 @@ import * as Channel from "./DesktopBrowserChannel.ts";
 import { HttpServerRequest, HttpServerResponse } from "effect/http";
 import * as Transport from "./DesktopBrowserTransport.ts";
 
-const layer = Channel.layer.pipe(
-  Layer.provideMerge(ServerSettings.layerTest({ browserHostEnvironmentId: "mac" })),
-  Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-remote-browser-" })),
-  Layer.provide(NodeServices.layer),
-);
+const hostLayer = (desktopBrowserFd?: number) =>
+  Channel.layer.pipe(
+    Layer.provideMerge(ServerSettings.layerTest({ browserHostEnvironmentId: "mac" })),
+    Layer.provide(
+      Layer.effect(
+        ServerConfig.ServerConfig,
+        Effect.gen(function* () {
+          const config = yield* ServerConfig.ServerConfig;
+          return { ...config, desktopBrowserFd };
+        }),
+      ).pipe(
+        Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-remote-browser-" })),
+      ),
+    ),
+    Layer.provide(
+      Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
+        getEnvironmentId: Effect.succeed(EnvironmentId.make("air")),
+      }),
+    ),
+    Layer.provide(NodeServices.layer),
+  );
+const layer = hostLayer(123);
 const key = { threadId: "thread", tabId: "tab" };
 
-it.effect(
-  "binds a selected host to its authenticated session and releases tabs on disconnect",
-  () =>
+it.effect.each([undefined, 123])(
+  "binds a selected host and releases tabs with local desktop fd %s",
+  (desktopFd) =>
     Effect.gen(function* () {
       const channel = yield* Channel.DesktopBrowserChannel;
       const connected = yield* Deferred.make<string>();
@@ -47,12 +66,12 @@ it.effect(
       expect(duplicate.reason).toBe("already-connected");
       yield* Fiber.interrupt(host);
       expect(yield* channel.isAttached(key)).toBe(false);
-      expect(channel.available).toBe(false);
+      expect(channel.available).toBe(desktopFd !== undefined);
       const late = yield* channel
         .remoteEvent("owner", connectionId, { type: "attached", ...key })
         .pipe(Effect.flip);
       expect(late.reason).toBe("disconnected");
-    }).pipe(Effect.scoped, Effect.provide(layer)),
+    }).pipe(Effect.scoped, Effect.provide(hostLayer(desktopFd))),
 );
 
 it.effect("rejects unselected hosts and events after the host selection changes", () =>

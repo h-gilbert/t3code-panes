@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Native browser partition and transfer identities must retain their existing synchronous hashes.
+import { chromeIdentity, type NativeBrowserMetadata } from "./browserIdentity.ts";
 import { beginRendererFocusGuard } from "./PreserveRendererFocus.ts";
 import { playwrightInjectedRuntimeInstallExpression } from "./PlaywrightInjectedRuntime.ts";
 import {
@@ -585,9 +586,11 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   const fileSystem = yield* FileSystem.FileSystem;
   const rendererHistory = yield* DesktopRendererHistory.DesktopRendererHistory;
   const hostPlatform = yield* HostProcess.Platform;
+  const hostArchitecture = yield* HostProcess.Architecture;
   const path = yield* Path.Path;
   const random = yield* SecureRandom.SecureRandom;
   const parentScope = yield* Scope.Scope;
+  const nativeRenderScales = new Map<string, number>();
   const browserHost = yield* DesktopBrowserHost.DesktopBrowserHost;
   const passkeys = yield* PreviewPasskeys.PreviewPasskeys;
   const context = yield* Effect.context<never>();
@@ -1213,7 +1216,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     const wc = webContents.fromId(tab.webContentsId);
     if (!wc || wc.isDestroyed()) return;
     yield* attempt({ operation: "assertTabZoom", tabId, webContentsId: wc.id }, () =>
-      wc.setZoomFactor(tab.zoomFactor),
+      wc.setZoomFactor(tab.zoomFactor * (nativeRenderScales.get(tabId) ?? 1)),
     ).pipe(Effect.ignore);
   });
 
@@ -1490,6 +1493,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           const semaphore = yield* Semaphore.make(1);
           const scope = yield* Scope.fork(parentScope, "sequential");
           const wcDebugger = wc.debugger;
+          let identity = chromeIdentity(wc.getUserAgent(), hostArchitecture);
           const consoleReleases = yield* Queue.sliding<void>(1);
           // Console eviction leaves strong debugger handles; release the group because we keep only text.
           yield* Effect.forkIn(
@@ -1532,6 +1536,15 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
             }
           });
           const onMessage: BrowserControlSession["onMessage"] = (_event, method, params) => {
+            if (method === "Target.attachedToTarget" && typeof params["sessionId"] === "string") {
+              const child = params["sessionId"];
+              void wcDebugger
+                .sendCommand("Network.setUserAgentOverride", identity, child)
+                .finally(() => wcDebugger.sendCommand("Runtime.runIfWaitingForDebugger", {}, child))
+                .catch((cause: unknown) =>
+                  runFork(Effect.logWarning("Browser worker identity failed", { cause })),
+                );
+            }
             if (method === "Page.fileChooserOpened") {
               const tab = Array.from(SynchronizedRef.getUnsafe(tabsRef).values()).find(
                 (candidate) => candidate.webContentsId === wc.id,
@@ -1581,6 +1594,34 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
               wcDebugger.on("detach", onDetach);
               wcDebugger.attach("1.3");
             });
+            yield* attemptPromise(
+              { operation: "initializeDebugger.browserIdentity", webContentsId: wc.id },
+              async () => {
+                const metadata = (await wcDebugger.sendCommand("Runtime.evaluate", {
+                  expression:
+                    'navigator.userAgentData?.getHighEntropyValues(["architecture", "bitness", "model", "platformVersion", "fullVersionList"])',
+                  awaitPromise: true,
+                  returnByValue: true,
+                })) as { result?: { value?: NativeBrowserMetadata } } | undefined;
+                identity = chromeIdentity(
+                  wc.getUserAgent(),
+                  hostArchitecture,
+                  metadata?.result?.value,
+                );
+                await wcDebugger.sendCommand("Emulation.setUserAgentOverride", identity);
+                await wcDebugger.sendCommand("Target.setAutoAttach", {
+                  autoAttach: true,
+                  waitForDebuggerOnStart: true,
+                  flatten: true,
+                  filter: [
+                    { type: "iframe" },
+                    { type: "service_worker" },
+                    { type: "shared_worker" },
+                    { type: "worker" },
+                  ],
+                });
+              },
+            );
             // Set an opaque base before first paint or background-less dark pages retain white-on-white text.
             yield* attemptPromise(
               { operation: "initializeDebugger.defaultBackground", webContentsId: wc.id },
@@ -2002,7 +2043,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       runFork(
         Effect.all(
           [
-            syncState(false, true),
+            assertTabZoom(tabId).pipe(Effect.andThen(syncState(false, true))),
             Ref.update(credentialProtectedTabIdsRef, (protectedTabIds) => {
               if (!protectedTabIds.has(tabId)) return protectedTabIds;
               const next = new Set(protectedTabIds);
@@ -2533,6 +2574,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     hostWebContentsId?: number,
   ) {
     const updatedAt = yield* currentIso;
+    if (!nativeRenderScales.has(tabId))
+      nativeRenderScales.set(tabId, defaults?.serverTab ? (defaults.nativeRenderScale ?? 1) : 1);
     const existingTab = (yield* SynchronizedRef.get(tabsRef)).get(tabId);
     // The first window to create a tab owns it. A tab whose owner closed is
     // adopted by the next window that asks for it.
@@ -2625,6 +2668,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       return;
     }
     clearPendingRecording(tabId);
+    nativeRenderScales.delete(tabId);
     focusDiagnostics.delete(tabId);
     pendingFileChoosers.delete(tabId);
     agentDownloads.delete(tabId);
@@ -2793,9 +2837,10 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       return yield* new PreviewTabNotFoundError({ tabId });
     }
     // Restore the tab's zoom before publishing the guest so it never paints at inherited app zoom.
-    yield* attempt({ operation: "registerWebview.restoreZoomFactor", tabId, webContentsId }, () =>
-      wc.setZoomFactor(currentTab.zoomFactor),
-    );
+    yield* attempt({ operation: "registerWebview.restoreZoomFactor", tabId, webContentsId }, () => {
+      if (currentTab.serverTab) wc.setZoomMode("isolated");
+      wc.setZoomFactor(currentTab.zoomFactor * (nativeRenderScales.get(tabId) ?? 1));
+    });
     // Replacement guests start unmuted; restore mute before publishing them.
     yield* attempt({ operation: "registerWebview.restoreAudioMuted", tabId, webContentsId }, () =>
       wc.setAudioMuted(currentTab.audioMuted),
@@ -3360,7 +3405,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       const wc = webContents.fromId(tab.webContentsId);
       if (wc && !wc.isDestroyed()) {
         yield* attempt({ operation: "applyZoom", tabId, webContentsId: wc.id }, () =>
-          wc.setZoomFactor(next),
+          wc.setZoomFactor(next * (nativeRenderScales.get(tabId) ?? 1)),
         );
       }
     }

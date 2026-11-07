@@ -139,6 +139,7 @@ const makeGuest = (
         humanInput?.({}, { kind: "pointer", x: params.x, y: params.y, button: 0 });
         // A real CDP press/release pair straddles round trips, so hand the event
         // loop over here; a gated guest holds its window open indefinitely.
+        // oxlint-disable-next-line t3code/no-real-time-wait-in-tests -- yields a native input round trip, not elapsed time
         await (gate ? gate() : new Promise((resolve) => setImmediate(resolve)));
       } else {
         windows.push({ tabId, phase: "exit" });
@@ -148,6 +149,9 @@ const makeGuest = (
     return undefined;
   });
   return {
+    setZoomMode: vi.fn(),
+    getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
+
     id: webContentsId,
     isDestroyed: () => false,
     getType: () => "webview",

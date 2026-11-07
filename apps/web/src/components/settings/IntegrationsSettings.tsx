@@ -1120,12 +1120,18 @@ function BrowserHostSettings() {
   const settings = useScopedSettings();
   const update = useUpdateScopedSettings();
   const primary = usePrimaryEnvironment();
+  const { environments } = useEnvironments();
+  const configs = useServerConfigs();
+  const hosts = environments.filter(
+    (environment) =>
+      configs.get(environment.environmentId)?.environment.capabilities.desktopAppUpdate === true,
+  );
   const { scope } = useSettingsScope();
   const canChoose = isElectron && primary !== null && scope.kind === "environment";
   return (
     <SettingsRow
       title="Browser host"
-      description="Use this desktop's saved browser logins for agents in the selected environment. Keep this desktop connected. Close existing tabs before changing hosts."
+      description="Choose the desktop that runs browser tabs and shares its saved logins. Keep that desktop connected. Close existing tabs before changing hosts."
       control={
         <Select
           value={settings.browserHostEnvironmentId ?? "local"}
@@ -1139,11 +1145,13 @@ function BrowserHostSettings() {
           </SelectTrigger>
           <SelectPopup>
             <SelectItem value="local">This environment</SelectItem>
-            {primary && (
-              <SelectItem value={primary.environmentId}>{primary.label} desktop</SelectItem>
-            )}
+            {hosts.map((host) => (
+              <SelectItem key={host.environmentId} value={host.environmentId}>
+                {host.label} desktop
+              </SelectItem>
+            ))}
             {settings.browserHostEnvironmentId &&
-              settings.browserHostEnvironmentId !== primary?.environmentId && (
+              !hosts.some((host) => host.environmentId === settings.browserHostEnvironmentId) && (
                 <SelectItem value={settings.browserHostEnvironmentId}>
                   Selected desktop (unavailable here)
                 </SelectItem>
