@@ -1670,9 +1670,9 @@ describe("PreviewManager", () => {
         type: "attached",
         ...serverTab,
       });
-      expect(guest.debugger.sendCommand).toHaveBeenCalledWith(
+      expect(guest.debugger.sendCommand).not.toHaveBeenCalledWith(
         "Emulation.setDeviceMetricsOverride",
-        { width: 0, height: 0, deviceScaleFactor: 2, mobile: false },
+        expect.anything(),
       );
       expect(guest.debugger.sendCommand).toHaveBeenCalledWith(
         "Emulation.setUserAgentOverride",

@@ -3439,14 +3439,6 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         return;
       }
       if (afterAttach.serverTab) {
-        yield* attemptPromise({ operation: "hostedRenderScale", tabId, webContentsId: wc.id }, () =>
-          control.debugger.sendCommand("Emulation.setDeviceMetricsOverride", {
-            width: 0,
-            height: 0,
-            deviceScaleFactor: 2,
-            mobile: false,
-          }),
-        );
         yield* listenForAgentSignals;
         browserHost.attach(afterAttach.serverTab, {
           webContents: wc,
