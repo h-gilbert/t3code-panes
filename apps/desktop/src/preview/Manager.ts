@@ -1614,6 +1614,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
                   waitForDebuggerOnStart: true,
                   flatten: true,
                   filter: [
+                    { type: "iframe" },
                     { type: "service_worker" },
                     { type: "shared_worker" },
                     { type: "worker" },

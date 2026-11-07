@@ -6560,7 +6560,7 @@ describe("Preview automation diagnostics", () => {
   });
 });
 
-effectIt.effect("applies Chrome identity to worker targets before releasing them", () =>
+effectIt.effect("applies Chrome identity to frame and worker targets before releasing them", () =>
   withManager((manager) =>
     Effect.gen(function* () {
       const guest = Object.assign(makeTestPreviewWebContents(vi.fn()), {
@@ -6575,6 +6575,17 @@ effectIt.effect("applies Chrome identity to worker targets before releasing them
       yield* manager.createTab("worker-identity");
       yield* manager.registerWebview("worker-identity", 42);
       yield* manager.setColorScheme("worker-identity", "light");
+      expect(guest.debugger.sendCommand).toHaveBeenCalledWith("Target.setAutoAttach", {
+        autoAttach: true,
+        waitForDebuggerOnStart: true,
+        flatten: true,
+        filter: [
+          { type: "iframe" },
+          { type: "service_worker" },
+          { type: "shared_worker" },
+          { type: "worker" },
+        ],
+      });
       const onMessage = vi
         .mocked(guest.debugger.on)
         .mock.calls.find(([event]) => event === "message")?.[1];

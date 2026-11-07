@@ -356,6 +356,8 @@ export const make = Effect.gen(function* BrowserSessionMake() {
                 },
               );
             };
+            // Turnstile rejects rewritten UAs with 600010 unless CDP also overrides
+            // client hints in the guest and its cross-origin frames and workers.
             browserSession.setUserAgent(chromeUserAgent(browserSession.getUserAgent()));
             browserSession.setPermissionRequestHandler(
               (webContents, permission, callback, details) => {
