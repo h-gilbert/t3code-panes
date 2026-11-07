@@ -302,7 +302,19 @@ export function ServerBrowserSurface(props: {
     return count;
   };
 
-  const focusInput = () => inputRef.current?.focus({ preventScroll: true });
+  const publishSize = () => {
+    const size = sizeRef.current;
+    if (visible && followSize && size) clientRef.current?.send({ type: "resize", ...size });
+  };
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reasserts the visible viewer dimensions when its window gains focus
+  useEffect(() => {
+    window.addEventListener("focus", publishSize);
+    return () => window.removeEventListener("focus", publishSize);
+  }, [publishSize]);
+  const focusInput = () => {
+    publishSize();
+    inputRef.current?.focus({ preventScroll: true });
+  };
 
   useImperativeHandle(
     ref,
@@ -347,7 +359,12 @@ export function ServerBrowserSurface(props: {
       const previous = sizeRef.current;
       if (previous?.width === size.width && previous.height === size.height) return;
       sizeRef.current = size;
-      if (followSize) clientRef.current?.send({ type: "resize", ...size });
+      if (
+        visible &&
+        followSize &&
+        (document.hasFocus() || controlRef.current?.controller === "you")
+      )
+        clientRef.current?.send({ type: "resize", ...size });
       // Growing the cap reconnects the stream; wait until resizing settles.
       if (capTimer !== null) clearTimeout(capTimer);
       capTimer = setTimeout(growCap, previous === null ? 0 : RESIZE_THROTTLE_MS * 2);
@@ -361,7 +378,7 @@ export function ServerBrowserSurface(props: {
       if (timer !== null) clearTimeout(timer);
       if (capTimer !== null) clearTimeout(capTimer);
     };
-  }, [followSize]);
+  }, [followSize, visible]);
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- opens the preview stream client and paints its frames onto the canvas while visible
   useEffect(() => {
@@ -744,6 +761,8 @@ export function ServerBrowserSurface(props: {
     <div
       className={cn("relative flex flex-col overflow-hidden", className)}
       data-server-browser-surface={tabId}
+      onPointerDownCapture={publishSize}
+      onFocusCapture={publishSize}
       onMouseUp={handleMouseUp}
     >
       <div

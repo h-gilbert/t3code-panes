@@ -154,6 +154,7 @@ export interface PreviewTabState {
   audible: boolean;
   controller: "human" | "agent" | "none";
   capturing: boolean;
+  viewerViewport?: { readonly width: number; readonly height: number } | null;
   favicon?: DesktopPreviewFavicon;
   /** Set for a tab of the desktop's own server, which drives it over the browser channel. */
   serverTab?: {
@@ -3051,6 +3052,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         audible: current?.audible ?? false,
         controller: current?.controller ?? "none",
         capturing: current?.capturing ?? false,
+        viewerViewport: current?.viewerViewport ?? null,
         ...(current?.favicon ? { favicon: current.favicon } : {}),
         ...(current?.serverTab ? { serverTab: current.serverTab } : {}),
         updatedAt,
@@ -3445,9 +3447,11 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           debugger: control.debugger,
           operation: (request) =>
             runPromise(
-              request.operation === "evaluate"
-                ? automationEvaluate(tabId, request.input)
-                : autofill(tabId, request.input),
+              request.operation === "viewerViewport"
+                ? update(tabId, { viewerViewport: request.size })
+                : request.operation === "evaluate"
+                  ? automationEvaluate(tabId, request.input)
+                  : autofill(tabId, request.input),
             ),
           send: (method, params, sessionId) => {
             // Bringing an agent's guest forward must never activate a pane/window.

@@ -392,6 +392,10 @@ const dependencies = Layer.mergeAll(
     receiveRemoteEvent: () => Effect.die("unused"),
     remoteEvent: () => Effect.die("unused"),
     operation: (_key, request) => {
+      if (request.operation === "viewerViewport") {
+        if (request.size) Object.assign(desktopConnections[0]!.context.cssViewport, request.size);
+        return Effect.void;
+      }
       if (request.operation === "stageUpload") {
         desktopUploadChunks.push(request);
         return failDesktopUpload
@@ -2683,6 +2687,20 @@ it.live("drives the desktop's own page for a tab the desktop renders", () =>
       yield* viewer.input({ type: "takeControl" });
       yield* viewer.input({ type: "resize", width: 390, height: 844 });
       expect(page.setViewportSize).not.toHaveBeenCalled();
+      expect(desktopConnections[0]!.context.cssViewport).toEqual({ width: 390, height: 844 });
+      const other = yield* browser.attachViewer(viewerInput(opened.tabId, true));
+      yield* other.input({ type: "resize", width: 900, height: 650 });
+      expect(desktopConnections[0]!.context.cssViewport).toEqual({ width: 900, height: 650 });
+      yield* viewer.input({ type: "resize", width: 390, height: 844 });
+      expect(desktopConnections[0]!.context.cssViewport).toEqual({ width: 390, height: 844 });
+      yield* viewer.input({
+        type: "viewport",
+        setting: { _tag: "freeform", width: 600, height: 500 },
+      });
+      yield* other.input({ type: "resize", width: 1000, height: 700 });
+      expect(desktopConnections[0]!.context.cssViewport).toEqual({ width: 390, height: 844 });
+      yield* viewer.input({ type: "viewport", setting: { _tag: "fill" } });
+      expect(desktopConnections[0]!.context.cssViewport).toEqual({ width: 1000, height: 700 });
       yield* viewer.input({ type: "releaseControl" });
       const evaluated = yield* broker.invoke({
         scope: asSession("agent-desktop"),

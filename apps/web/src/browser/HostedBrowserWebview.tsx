@@ -281,7 +281,6 @@ export function HostedBrowserWebview(props: {
     };
   }, [clientSettingsHydrated, config, runtimeTabId, webviewGeneration]);
 
-
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- resets the native guest recovery budget when ownership returns to this window
   useEffect(() => {
     if (!hostedElsewhere) crashRecoveryRef.current = INITIAL_WEBVIEW_CRASH_RECOVERY_STATE;
@@ -345,21 +344,28 @@ export function HostedBrowserWebview(props: {
     setAspectRatioLocked(aspectRatio !== null);
   };
   const content = presentation.content;
+  const viewerViewport = useThreadPreviewState(threadRef).desktopByTabId[tabId]?.viewerViewport;
   const hiddenWidth =
     viewport._tag !== "fill"
       ? viewport.width * layoutZoomFactor
-      : content
-        ? content.width / content.scale
-        : (lastRect?.width ?? 1280);
+      : viewerViewport
+        ? viewerViewport.width * layoutZoomFactor
+        : content
+          ? content.width / content.scale
+          : (lastRect?.width ?? 1280);
   const hiddenHeight =
     viewport._tag !== "fill"
       ? viewport.height * layoutZoomFactor
-      : content
-        ? content.height / content.scale
-        : (lastRect?.height ?? 800);
+      : viewerViewport
+        ? viewerViewport.height * layoutZoomFactor
+        : content
+          ? content.height / content.scale
+          : (lastRect?.height ?? 800);
   // Build from primitives on each side of the resize hook to keep both objects cached.
   const containerSize =
-    active && lastRect ? lastRect : { width: hiddenWidth, height: hiddenHeight };
+    active && lastRect && !(viewport._tag === "fill" && viewerViewport)
+      ? lastRect
+      : { width: hiddenWidth, height: hiddenHeight };
   const deviceToolbarVisible =
     active &&
     viewport._tag !== "fill" &&

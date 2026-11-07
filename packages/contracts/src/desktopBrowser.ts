@@ -18,6 +18,10 @@ const TabKey = {
 /** Evaluation and autofill stay in the desktop; files cross in bounded chunks. */
 export const DesktopBrowserPrivateOperation = Schema.Union([
   Schema.Struct({
+    operation: Schema.Literal("viewerViewport"),
+    size: Schema.NullOr(Schema.Struct({ width: Schema.Int, height: Schema.Int })),
+  }),
+  Schema.Struct({
     operation: Schema.Literal("stageUpload"),
     id: TrimmedNonEmptyString,
     sourcePath: TrimmedNonEmptyString,

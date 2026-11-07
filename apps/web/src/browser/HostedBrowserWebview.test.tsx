@@ -9,6 +9,7 @@ import {
   type ClientSettings,
   type DesktopPreviewBridge,
 } from "@t3tools/contracts";
+// oxlint-disable-next-line t3code/require-disposable-render -- Electron guest lifecycle tests use react-test-renderer node mocks without a browser DOM.
 import { act } from "react";
 import * as CommandRuntime from "@t3tools/client-runtime/state/runtime";
 import { create, type ReactTestRenderer } from "react-test-renderer";
@@ -23,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   registerWebview: vi.fn<DesktopPreviewBridge["registerWebview"]>(),
   getPreviewConfig: vi.fn<DesktopPreviewBridge["getPreviewConfig"]>(),
   activeRecordings: new Set<string>(),
+  viewerViewport: null as { width: number; height: number } | null,
   resize: vi.fn(async (_input?: unknown) => ({ _tag: "Success", value: { tabId: "server-tab" } })),
   updateSnapshot: vi.fn(),
   claimTab: vi.fn<DesktopPreviewBridge["claimTab"]>(),
@@ -52,7 +54,13 @@ vi.mock("~/previewStateStore", async () => {
     useThreadPreviewState: () => {
       const hostedElsewhere = useSyncExternalStore(mocks.ownership.subscribe, mocks.ownership.get);
       return {
-        desktopByTabId: { "server-tab": { hasWebContents: !hostedElsewhere, hostedElsewhere } },
+        desktopByTabId: {
+          "server-tab": {
+            hasWebContents: !hostedElsewhere,
+            hostedElsewhere,
+            viewerViewport: mocks.viewerViewport,
+          },
+        },
       };
     },
   };
@@ -120,11 +128,13 @@ beforeEach(() => {
   mocks.registerWebview.mockReset().mockResolvedValue(undefined);
   mocks.claimTab.mockReset().mockResolvedValue(true);
   mocks.ownership.set(false);
+  mocks.viewerViewport = null;
   mocks.getPreviewConfig.mockReset().mockResolvedValue({
     partition: "persist:t3-preview-work",
     webPreferences: "contextIsolation=yes",
     preloadUrl: null,
   });
+  // oxlint-disable-next-line t3code/require-disposable-render -- react-test-renderer requires act mode for mocked Electron guest attachment.
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("window", globalThis);
   vi.stubGlobal("navigator", { platform: "Linux" });
@@ -308,6 +318,17 @@ describe("HostedBrowserWebview recovery", () => {
     });
     return { guests, guestAttributes, runtimeTabId };
   }
+
+  it("sizes a hidden fill guest from the viewer CSS viewport", async () => {
+    mocks.viewerViewport = { width: 390, height: 640 };
+    await mountTab();
+    const guest = renderer!.root.findByType("webview");
+    expect(guest.props["data-preview-css-width"]).toBe(390);
+    expect(guest.props["data-preview-css-height"]).toBe(640);
+    expect(guest.props.style.width).toBe(Math.round(390 * 1.25));
+    expect(guest.props.style.height).toBe(640 * 1.25);
+    expect(guest.props.style.transform).toBeUndefined();
+  });
 
   async function advance(ms: number) {
     await act(async () => {

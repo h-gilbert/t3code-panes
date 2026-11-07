@@ -18,6 +18,7 @@ export interface DesktopPreviewOverlay {
   hasWebContents: boolean;
   /** Another app window owns the tab, so this window shows no guest until it claims it. */
   hostedElsewhere?: boolean;
+  viewerViewport?: { readonly width: number; readonly height: number } | null;
   canGoBack: boolean;
   canGoForward: boolean;
   loading: boolean;
@@ -397,6 +398,8 @@ function isPreviewStateEqual(
       previous.audioMuted === next.audioMuted &&
       previous.audible === next.audible &&
       previous.controller === next.controller &&
+      previous.viewerViewport?.width === next.viewerViewport?.width &&
+      previous.viewerViewport?.height === next.viewerViewport?.height &&
       previous.favicon?.dataUrl === next.favicon?.dataUrl &&
       previous.favicon?.pageUrl === next.favicon?.pageUrl &&
       previous.favicon?.capturedAt === next.favicon?.capturedAt)
