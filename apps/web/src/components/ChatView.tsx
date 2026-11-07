@@ -1420,6 +1420,8 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
     !envLocked &&
     canAutoBalanceEnvironments &&
     loadBalancingSettings.loadBalancingEnabled &&
+    (draftThread?.environmentSelection === "auto" ||
+      activeProjectSettings.settings.preferredThreadEnvironmentId !== activeThreadEnvironmentId) &&
     draftThread?.environmentSelection !== "manual" &&
     (!composerHasAttachments || Boolean(draftThread?.loadBalancedEnvironmentId)) &&
     (!draftThread?.branch || draftThread.environmentSelection === "auto") &&

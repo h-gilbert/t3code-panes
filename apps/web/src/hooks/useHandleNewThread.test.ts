@@ -275,6 +275,20 @@ vi.mock("./useSettings", () => ({ getClientSettings: () => ({}) }));
 import { useNewThreadHandler } from "./useHandleNewThread";
 
 describe("useNewThreadHandler", () => {
+  it("keeps an explicit machine choice pinned in the created draft", async () => {
+    testState.reset(null);
+    await useNewThreadHandler()(
+      { environmentId: "environment-ssh", projectId: "project-remote" } as never,
+      { environmentSelection: "manual" },
+    );
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledWith(
+      "remote-project",
+      { environmentId: "environment-ssh", projectId: "project-remote" },
+      "draft-delayed",
+      expect.objectContaining({ environmentSelection: "manual" }),
+    );
+  });
+
   it("preserves an explicit model choice when reusing a draft", async () => {
     testState.reset({
       draftId: "draft-existing",

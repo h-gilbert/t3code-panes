@@ -1,3 +1,6 @@
+import { environmentServerConfigsAtom } from "../state/server";
+import type { ServerConfig } from "@t3tools/contracts";
+import { canStartThreadOnEnvironment } from "@t3tools/client-runtime/preferred-thread-environment";
 import { RegistryContext } from "@effect/atom-react";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { availableScratchWorkspaceRoot } from "@t3tools/client-runtime/operations/projects";
@@ -36,6 +39,7 @@ type ScratchEnvironment = Pick<EnvironmentPresentation, "connection" | "serverCo
 
 export function createScratchProjectActions(input: {
   readonly environments: () => Iterable<ScratchEnvironment>;
+  readonly serverConfigs?: () => ReadonlyMap<EnvironmentId, ServerConfig>;
   readonly primaryEnvironmentId: () => EnvironmentId | null;
   readonly registry: AtomRegistry.AtomRegistry;
   readonly handleNewThread: NewThreadHandler;
@@ -48,9 +52,27 @@ export function createScratchProjectActions(input: {
     return availableScratchWorkspaceRoot(environment?.connection.phase, environment?.serverConfig);
   };
 
-  // The primary (local) environment wins; `fallback` only applies when it offers no scratch root.
   const scratchEnvironmentId = (fallback: EnvironmentId | null): EnvironmentId | null => {
     const primary = input.primaryEnvironmentId();
+    const entries = [...input.environments()];
+    const source =
+      entries.find((entry) => entry.environmentId === primary) ??
+      entries.find((entry) => entry.environmentId === fallback);
+    const preferred = entries.find(
+      (entry) =>
+        entry.environmentId === source?.serverConfig?.settings?.preferredThreadEnvironmentId,
+    );
+    if (
+      preferred &&
+      scratchWorkspaceRootFor(preferred.environmentId) !== null &&
+      canStartThreadOnEnvironment(
+        input.serverConfigs?.().get(preferred.environmentId),
+        preferred.connection.phase === "connected",
+        null,
+      )
+    ) {
+      return preferred.environmentId;
+    }
     if (primary !== null && scratchWorkspaceRootFor(primary) !== null) return primary;
     if (fallback !== null && scratchWorkspaceRootFor(fallback) !== null) return fallback;
     const offering = [...input.environments()].filter(
@@ -81,7 +103,9 @@ export function createScratchProjectActions(input: {
     const project = await openScratchProject(environmentId);
     if (project) {
       await input
-        .handleNewThread(scopeProjectRef(project.environmentId, project.id))
+        .handleNewThread(scopeProjectRef(project.environmentId, project.id), {
+          environmentSelection: "manual",
+        })
         .catch((error: unknown) =>
           reportScratchFailure("Could not start without a project", error),
         );
@@ -98,6 +122,7 @@ export function useScratchProject() {
   const handleNewThread = useNewThreadHandler();
   return createScratchProjectActions({
     environments: () => environments,
+    serverConfigs: () => registry.get(environmentServerConfigsAtom),
     primaryEnvironmentId: () => primaryEnvironmentId,
     registry,
     handleNewThread,

@@ -1,3 +1,4 @@
+import { PreferredThreadEnvironmentSettings } from "./PreferredThreadEnvironmentSettings";
 import { CredentialsSettings } from "./CredentialsSettings";
 import { SessionPermissions } from "./SessionPermissions";
 import { ChevronRightIcon, EllipsisIcon } from "lucide-react";
@@ -1564,6 +1565,7 @@ export function ConnectionsSettings({ view }: { readonly view: "environments" | 
           isSearchTarget={index === 0}
         />
       ))}
+      <PreferredThreadEnvironmentSettings environments={loadBalancingEnvironments} />
       <LoadBalancingSettings environments={loadBalancingEnvironments} />
       <PullRequestRoutingSettings environments={loadBalancingEnvironments} />
     </SettingsPageContainer>

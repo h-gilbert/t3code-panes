@@ -609,3 +609,14 @@ describe("server model preferences", () => {
     expect(decodeServerSettingsPatch(input)).toEqual(input);
   });
 });
+
+describe("preferred new-thread environment setting", () => {
+  it("accepts a destination and allows clearing the preference", () => {
+    for (const preferredThreadEnvironmentId of ["jeff-environment", null]) {
+      expect(decodeServerSettingsPatch({ preferredThreadEnvironmentId })).toEqual({
+        preferredThreadEnvironmentId,
+      });
+    }
+    expect(() => decodeServerSettingsPatch({ preferredThreadEnvironmentId: "" })).toThrow();
+  });
+});

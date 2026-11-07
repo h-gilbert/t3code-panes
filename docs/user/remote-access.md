@@ -149,6 +149,21 @@ shown there apply only to the route marked **In use**; other routes are not
 checked. Direct pairing and T3 Connect have separate sessions and may grant
 different permissions.
 
+### Prefer a machine for new threads
+
+On web and desktop, choose **Settings → Environments → New threads → Preferred
+environment** to start new threads on a particular machine whenever it is connected
+and has the matching project and an available provider. This also applies to
+threads without a project. When the preferred machine is unavailable, T3 uses its
+usual destination. It does not clone or move a project automatically.
+
+The preference is saved across currently connected environments and used by web,
+desktop and mobile clients running a version that supports it. Offline environments
+are not updated until you reconnect and apply the setting again. Explicit machine,
+branch and worktree choices take precedence; existing threads stay where they are.
+The preference takes priority over automatic load balancing, but you can still
+choose **Auto balance** in the composer.
+
 ### Balance new threads across machines
 
 Auto balance is off by default. On web and desktop, enable it in

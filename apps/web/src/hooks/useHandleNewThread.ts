@@ -1,3 +1,4 @@
+import { preferredThreadProject } from "@t3tools/client-runtime/preferred-thread-environment";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
 import { useCurrentThreadTarget } from "./useCurrentThreadTarget";
 import {
@@ -58,6 +59,7 @@ import { getClientSettings } from "./useSettings";
 import { readUnloadedThreadCount } from "../state/olderSettledShelf";
 
 interface NewThreadWorkspaceOptions {
+  environmentSelection?: "manual";
   branch?: string | null;
   worktreePath?: string | null;
   envMode?: DraftThreadEnvMode;
@@ -66,6 +68,9 @@ interface NewThreadWorkspaceOptions {
 
 function pickExplicitWorkspaceOptions(options: NewThreadWorkspaceOptions | undefined) {
   return {
+    ...(options?.environmentSelection
+      ? { environmentSelection: options.environmentSelection }
+      : {}),
     ...(options?.branch !== undefined ? { branch: options.branch } : {}),
     ...(options?.worktreePath !== undefined ? { worktreePath: options.worktreePath } : {}),
     ...(options?.envMode !== undefined ? { envMode: options.envMode } : {}),
@@ -97,6 +102,7 @@ export function createNewThreadHandler(router: AnyRouter) {
   return (
     projectRef: ScopedProjectRef,
     options?: {
+      environmentSelection?: "manual";
       branch?: string | null;
       worktreePath?: string | null;
       envMode?: DraftThreadEnvMode;
@@ -113,6 +119,38 @@ export function createNewThreadHandler(router: AnyRouter) {
     const projectGroupingSettings = selectProjectGroupingSettings(getClientSettings());
     // Read at call time; status pushes replace the config map and would recreate every sidebar handler.
     const environmentServerConfigs = appAtomRegistry.get(environmentServerConfigsAtom);
+    const requestedProject = projects.find(
+      (candidate) =>
+        candidate.environmentId === projectRef.environmentId &&
+        candidate.id === projectRef.projectId,
+    );
+    if (
+      requestedProject &&
+      environmentServerConfigs.get(projectRef.environmentId)?.settings.preferredThreadEnvironmentId
+    ) {
+      const stored = useComposerDraftStore
+        .getState()
+        .getDraftSessionByLogicalProjectKey(
+          deriveLogicalProjectKeyFromSettings(requestedProject, projectGroupingSettings),
+        );
+      const preferred = preferredThreadProject({
+        project: requestedProject,
+        projects,
+        grouping: projectGroupingSettings,
+        preferredEnvironmentId: environmentServerConfigs.get(projectRef.environmentId)?.settings
+          .preferredThreadEnvironmentId,
+        connectedEnvironmentIds: new Set(
+          appAtomRegistry.get(environmentSummaries.connectedEnvironmentIdsAtom),
+        ),
+        serverConfigs: environmentServerConfigs,
+        pinned:
+          options?.environmentSelection === "manual" ||
+          Boolean(options?.branch || options?.worktreePath) ||
+          Boolean(!options?.freshDraft && stored && !stored.promotedTo) ||
+          options?.carryComposerContent === true,
+      });
+      projectRef = scopeProjectRef(preferred.environmentId, preferred.id);
+    }
     const targetServerSettings =
       environmentServerConfigs.get(projectRef.environmentId)?.settings ?? DEFAULT_SERVER_SETTINGS;
     const {
@@ -366,6 +404,9 @@ export function createNewThreadHandler(router: AnyRouter) {
           emptyStoredDraftThread.draftId,
           {
             threadId: emptyStoredDraftThread.threadId,
+            ...(options?.environmentSelection
+              ? { environmentSelection: options.environmentSelection }
+              : {}),
             ...workspaceContext,
             ...(!isDraftAlreadyOpen ? { runtimeMode: defaultRuntimeMode } : {}),
             ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
@@ -467,6 +508,9 @@ export function createNewThreadHandler(router: AnyRouter) {
         threadId,
         createdAt,
         preservePreviousDraft: requestedFreshDraft !== undefined,
+        ...(options?.environmentSelection
+          ? { environmentSelection: options.environmentSelection }
+          : {}),
         branch: options?.branch ?? null,
         worktreePath: options?.worktreePath ?? null,
         envMode: initialEnvMode,

@@ -1,3 +1,8 @@
+import { useMobileProjectGroupingSettings } from "../../state/project-grouping";
+import {
+  preferredThreadProject,
+  canStartThreadOnEnvironment,
+} from "@t3tools/client-runtime/preferred-thread-environment";
 import { isDraftThreadRoute } from "./thread-route-state";
 import * as Dialog from "../../components/ui/Dialog";
 import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
@@ -175,6 +180,12 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
   const screenTitle = incomingShare ? "Start a task" : "Choose project";
   const projectEmptyState = deriveProjectEmptyState(catalogState);
   const serverConfigs = useServerConfigs();
+  const groupingSettings = useMobileProjectGroupingSettings();
+  const preferredEnvironmentId = (
+    selectedEnvironmentId
+      ? serverConfigs.get(selectedEnvironmentId)
+      : serverConfigs.values().next().value
+  )?.settings.preferredThreadEnvironmentId;
   const listScopes = pickableProjectGroups(projectScopes).filter(
     (scope) =>
       !scope.projects.every((project) =>
@@ -204,7 +215,16 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
       ? resolveNewTaskScratchOption({
           environments: connectedEnvironments,
           serverConfigs,
-          selectedEnvironmentId,
+          selectedEnvironmentId:
+            connectedEnvironments.find(
+              (environment) =>
+                environment.environmentId === preferredEnvironmentId &&
+                canStartThreadOnEnvironment(
+                  serverConfigs.get(environment.environmentId),
+                  environment.connectionState === "connected",
+                  null,
+                ),
+            )?.environmentId ?? selectedEnvironmentId,
         })
       : null;
   const canStartScratch = scratchOption?.ready === true;
@@ -467,11 +487,19 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
             >
               {visibleScopes.map((scope, scopeIndex) => {
                 const hasMultipleProjects = scope.projects.length > 1;
-                const selectionTarget = getProjectScopeSelectionTarget(
+                const fallbackTarget = getProjectScopeSelectionTarget(
                   scope,
                   selectedEnvironmentId,
                   connectedEnvironmentIds,
                 );
+                const selectionTarget = preferredThreadProject({
+                  project: fallbackTarget,
+                  projects: scope.projects,
+                  preferredEnvironmentId,
+                  connectedEnvironmentIds,
+                  serverConfigs,
+                  grouping: groupingSettings,
+                });
                 if (Platform.OS === "android") {
                   return (
                     <NavigationRow

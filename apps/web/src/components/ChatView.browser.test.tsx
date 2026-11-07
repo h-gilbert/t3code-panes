@@ -13,6 +13,7 @@ import "~/components/ChatView";
 import { DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { __setClientSettingsForTests } from "~/hooks/useSettings";
 import { getRouter } from "~/router";
+import { waitForProject } from "~/state/entities";
 import {
   ENVIRONMENT_ID,
   PROJECT_ID,
@@ -56,8 +57,8 @@ it("a new draft does not load its reserved thread before the server lists it", a
     router: false,
   });
   await expect.element(page.getByTestId("composer-editor")).toBeVisible();
-  // The shell snapshot has arrived once the sidebar lists the project, so the connection is up.
-  await expect.element(page.getByText("render", { exact: true }).first()).toBeVisible();
+  // Wait for the shell snapshot independently of the pane layout and hidden sidebar.
+  await waitForProject(scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID));
 
   const threadRequests = fetchSpy.mock.calls
     .map(([input]) => String(input instanceof Request ? input.url : input))

@@ -122,15 +122,17 @@ export function useNewProject() {
       return null;
     });
     if (project === null) return true;
-    await handleNewThread(projectRef).catch((error: unknown) => {
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Failed to open project",
-          description: errorMessage(error),
-        }),
-      );
-    });
+    await handleNewThread(projectRef, { environmentSelection: "manual" }).catch(
+      (error: unknown) => {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Failed to open project",
+            description: errorMessage(error),
+          }),
+        );
+      },
+    );
     return true;
   };
 }

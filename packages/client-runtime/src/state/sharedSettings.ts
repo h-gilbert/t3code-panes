@@ -11,6 +11,7 @@ import * as Struct from "effect/Struct";
 import type { EnvironmentConnectionPhase } from "../connection/presentation.ts";
 
 const SHARED_SERVER_SETTING_KEYS = [
+  "preferredThreadEnvironmentId",
   "continueThreadsAfterServerUpdate",
   "sidebarAutoSettleAfterDays",
   "sidebarAutoSettleOnMerge",

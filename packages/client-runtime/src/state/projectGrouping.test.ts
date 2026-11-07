@@ -1,3 +1,13 @@
+import {
+  DEFAULT_SERVER_SETTINGS,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ServerProvider,
+} from "@t3tools/contracts";
+import {
+  preferredThreadProject,
+  canStartThreadOnEnvironment,
+} from "../preferredThreadEnvironment.ts";
 import { EnvironmentId, ProjectId, SourceControlProviderKind } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -419,5 +429,90 @@ describe("sortProjectsByGroupOrder", () => {
       [{ memberProjectRefs: [ref("shared", remote)] }, { memberProjectRefs: [ref("shared")] }],
     );
     expect(sorted.map((entry) => entry.environmentId)).toEqual([remote, environmentId]);
+  });
+});
+
+describe("preferred new-thread environment", () => {
+  function setup() {
+    const local = makeProject("local", "/air/repo");
+    const preferred = makeProject("preferred", "/jeff/repo", {
+      environmentId: EnvironmentId.make("jeff"),
+    });
+    const provider: ServerProvider = {
+      instanceId: ProviderInstanceId.make("codex"),
+      driver: ProviderDriverKind.make("codex"),
+      enabled: true,
+      installed: true,
+      status: "ready",
+      auth: { status: "authenticated" },
+      version: "1.0.0",
+      slashCommands: [],
+      skills: [],
+      checkedAt: "2026-11-07T00:00:00.000Z",
+      models: [],
+    };
+    const config = { settings: DEFAULT_SERVER_SETTINGS, providers: [provider] };
+    const input = {
+      project: local,
+      projects: [local, preferred],
+      preferredEnvironmentId: preferred.environmentId,
+      connectedEnvironmentIds: new Set([local.environmentId, preferred.environmentId]),
+      serverConfigs: new Map([[preferred.environmentId, config]]),
+      grouping: settings("repository"),
+    };
+    return { local, preferred, provider, config, input };
+  }
+
+  it("prefers a connected matching checkout independently of the client's current machine", () => {
+    const { input, preferred, local } = setup();
+    expect(preferredThreadProject(input)).toBe(preferred);
+    expect(preferredThreadProject({ ...input, pinned: true })).toBe(local);
+    expect(preferredThreadProject({ ...input, preferredEnvironmentId: null })).toBe(local);
+    expect(preferredThreadProject({ ...input, connectedEnvironmentIds: new Set() })).toBe(local);
+    expect(preferredThreadProject({ ...input, projects: [local] })).toBe(local);
+    expect(
+      preferredThreadProject({
+        ...input,
+        projects: [local, { ...preferred, archivedAt: "2026-11-07" }],
+      }),
+    ).toBe(local);
+    expect(
+      preferredThreadProject({
+        ...input,
+        projects: [
+          local,
+          {
+            ...preferred,
+            repositoryIdentity: { ...repositoryIdentity, canonicalKey: "github.com/another/repo" },
+          },
+        ],
+      }),
+    ).toBe(local);
+  });
+
+  it("falls back when the provider or selected model cannot run on the preferred machine", () => {
+    const { input, local, config, provider, preferred } = setup();
+    for (const patch of [
+      { installed: false },
+      { status: "error" as const },
+      { auth: { status: "unauthenticated" as const } },
+    ]) {
+      expect(
+        preferredThreadProject({
+          ...input,
+          serverConfigs: new Map([
+            [preferred.environmentId, { ...config, providers: [{ ...provider, ...patch }] }],
+          ]),
+        }),
+      ).toBe(local);
+    }
+    expect(
+      preferredThreadProject({
+        ...input,
+        selection: { instanceId: provider.instanceId, model: "missing-model" },
+      }),
+    ).toBe(local);
+    expect(canStartThreadOnEnvironment(undefined, true, null)).toBe(false);
+    expect(canStartThreadOnEnvironment(config, true, null)).toBe(true);
   });
 });

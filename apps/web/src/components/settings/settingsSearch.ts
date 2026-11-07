@@ -1167,6 +1167,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["add pair backend host code ssh config agent tunnel saved t3 connect"],
   },
   {
+    id: "preferred-thread-environment",
+    title: "Preferred environment for new threads",
+    to: "/settings/connections",
+    searchTerms: ["default location machine host shared new thread destination"],
+  },
+  {
     id: "load-balancing",
     title: "Load balancing",
     to: "/settings/connections",
