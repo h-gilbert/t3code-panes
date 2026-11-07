@@ -8,6 +8,7 @@ import * as Stream from "effect/Stream";
 import { HttpClient } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 
+import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
@@ -26,6 +27,10 @@ function layerPool(labelRef: Ref.Ref<string>): Layer.Layer<DesktopBackendPool.De
     Layer.provideMerge(
       Layer.mergeAll(
         FileSystem.layerNoop({}),
+        Layer.succeed(
+          DesktopEnvironment.DesktopEnvironment,
+          {} as DesktopEnvironment.DesktopEnvironment["Service"],
+        ),
         Layer.succeed(
           ChildProcessSpawner.ChildProcessSpawner,
           ChildProcessSpawner.make(() => Effect.die("unexpected child process spawn")),
