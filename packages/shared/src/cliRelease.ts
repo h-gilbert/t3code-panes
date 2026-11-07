@@ -71,9 +71,12 @@ export function releaseAssetUrl(baseUrl: string, ...segments: ReadonlyArray<stri
 export function cliReleaseAssetUrl(
   version: string,
   fileName: string,
-  baseUrl: string | undefined = CLI_RELEASE_DEFAULT_BASE_URL,
+  baseUrl?: string | undefined,
 ): string {
-  return releaseAssetUrl(baseUrl?.trim() || CLI_RELEASE_DEFAULT_BASE_URL, `v${version}`, fileName);
+  const defaultBaseUrl = isForkReleaseVersion(version)
+    ? FORK_RELEASE_DEFAULT_BASE_URL
+    : CLI_RELEASE_DEFAULT_BASE_URL;
+  return releaseAssetUrl(baseUrl?.trim() || defaultBaseUrl, `v${version}`, fileName);
 }
 
 export function parseChecksums(text: string): ReadonlyMap<string, string> {

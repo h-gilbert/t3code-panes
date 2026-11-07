@@ -103,6 +103,34 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
     }),
   );
 
+  it.effect("installs a fork release from the fork without an explicit feed override", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-fork-runtime-" });
+      const forkVersion = "0.1.7-panes.1794010606420";
+      const forkArchive = `t3-${forkVersion}-linux-x64.tar.gz`;
+      const checksum = `${yield* archiveHex(archiveBytes)}  ${forkArchive}\n`;
+      const requests: string[] = [];
+      const runtime = yield* ensurePinnedRuntimeInstalled({
+        baseDir,
+        version: forkVersion,
+        fs,
+        path,
+        platform: "linux",
+        arch: "x64",
+        httpClient: releaseHttpClient(checksum, requests),
+        runner: extractingRunner(fs, path),
+        validate: () => Effect.void,
+      });
+      assert.deepEqual(requests, [
+        `https://github.com/h-gilbert/t3code-panes/releases/download/v${forkVersion}/SHA256SUMS`,
+        `https://github.com/h-gilbert/t3code-panes/releases/download/v${forkVersion}/${forkArchive}`,
+      ]);
+      assert.equal(yield* fs.readFileString(runtime.sentinelPath), `${forkVersion}\n`);
+    }),
+  );
+
   it.effect("cleans up an interrupted download without reporting verification or extraction", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

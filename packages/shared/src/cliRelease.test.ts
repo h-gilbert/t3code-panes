@@ -4,6 +4,7 @@ import {
   cliArchiveFileName,
   cliArchivePlatformKey,
   cliReleaseDownloadBaseUrl,
+  cliReleaseAssetUrl,
   cliArchiveTarCommand,
   newestCliReleaseVersion,
   parseChecksums,
@@ -37,6 +38,23 @@ describe("cliRelease", () => {
     );
     expect(cliReleaseDownloadBaseUrl("1.2.3", "https://mirror.example/t3/")).toBe(
       "https://mirror.example/t3/v1.2.3",
+    );
+  });
+
+  it("downloads fork checksums and archives from the fork, preserving mirror overrides", () => {
+    const fork = "0.1.7-panes.1794010606420";
+    for (const file of ["SHA256SUMS", `t3-${fork}-linux-x64.tar.gz`]) {
+      for (const base of [undefined, "", "  "]) {
+        expect(cliReleaseAssetUrl(fork, file, base)).toBe(
+          `https://github.com/h-gilbert/t3code-panes/releases/download/v${fork}/${file}`,
+        );
+      }
+      expect(cliReleaseAssetUrl(fork, file, "https://mirror.example/t3/?token=abc")).toBe(
+        `https://mirror.example/t3/v${fork}/${file}?token=abc`,
+      );
+    }
+    expect(cliReleaseAssetUrl("1.2.3", "SHA256SUMS")).toBe(
+      "https://github.com/pingdotgg/t3code/releases/download/v1.2.3/SHA256SUMS",
     );
   });
 
