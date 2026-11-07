@@ -88,9 +88,9 @@ function UpdateEverythingDialogContent({
   return (
     <>
       <AlertDialogHeader>
-        <AlertDialogTitle>{summary}?</AlertDialogTitle>
+        <AlertDialogTitle>Update everywhere?</AlertDialogTitle>
         <AlertDialogDescription className="whitespace-pre-line">
-          {lines.join("\n")}
+          {[summary, ...lines].join("\n")}
         </AlertDialogDescription>
         {running > 0 ? (
           <p className="pt-2 text-sm">
@@ -109,7 +109,7 @@ function UpdateEverythingDialogContent({
       </AlertDialogHeader>
       <AlertDialogFooter>
         <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
-        <Button onClick={onConfirm}>Update</Button>
+        <Button onClick={onConfirm}>Update everywhere</Button>
       </AlertDialogFooter>
     </>
   );

@@ -246,7 +246,7 @@ function SidebarUpdateControl({ overlay = false }: { readonly overlay?: boolean 
   const idleTooltip =
     !showUpdateDetails && !showCheckIcon ? getDesktopUpdateIdleTooltip(state) : null;
   const tooltip = runsEverything
-    ? everything.summary
+    ? `Update everywhere: ${everything.summary}`
     : showUpdateDetails
       ? state
         ? getDesktopUpdateButtonTooltip(state)
@@ -398,11 +398,13 @@ function SidebarUpdateControl({ overlay = false }: { readonly overlay?: boolean 
   const Container = overlay ? "div" : SidebarMenuItem;
   const overlayLabel = isDownloading
     ? `Downloading update${state?.downloadPercent == null ? "" : ` ${Math.floor(state.downloadPercent)}%`}`
-    : state?.status === "error"
-      ? "Retry update"
-      : action === "install"
-        ? "Restart to update"
-        : "Download update";
+    : runsEverything
+      ? "Update everywhere"
+      : state?.status === "error"
+        ? "Retry update"
+        : action === "install"
+          ? "Restart to update"
+          : "Download update";
   if (!isElectron && !runsEverything && !isRunningEverything) return null;
 
   const statusIcon = (
