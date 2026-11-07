@@ -337,7 +337,6 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ipcRenderer.invoke(IpcChannels.PREVIEW_CREATE_TAB_CHANNEL, {
         tabId,
         zoomFactor: defaults?.zoomFactor,
-        nativeRenderScale: defaults?.nativeRenderScale,
         serverTab: defaults?.serverTab,
         colorScheme: defaults?.colorScheme,
       }),

@@ -100,8 +100,6 @@ export function HostedBrowserWebview(props: {
     profileId,
     browserScope,
   );
-  const displayScale = window.devicePixelRatio / (window.desktopBridge?.getWindowZoomFactor() ?? 1);
-  const nativeRenderScale = serverDriven ? Math.max(1, Math.min(2, 2 / displayScale)) : 1;
   const [initialSrc] = useState(() => initialUrl ?? "about:blank");
   const tabLeaseRef = useRef<AcquiredDesktopTab | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -138,17 +136,16 @@ export function HostedBrowserWebview(props: {
   useEffect(() => {
     if (!clientSettingsHydrated) return;
     crashRecoveryRef.current = INITIAL_WEBVIEW_CRASH_RECOVERY_STATE;
-    const lease = serverDriven
-      ? acquireDesktopTab(
-          runtimeTabId,
-          {
+    const lease = acquireDesktopTab(
+      runtimeTabId,
+      serverDriven
+        ? {
             threadId: threadRef.threadId,
             tabId,
             ...(remoteHosted ? { environmentId: threadRef.environmentId } : {}),
-          },
-          nativeRenderScale,
-        )
-      : acquireDesktopTab(runtimeTabId, undefined);
+          }
+        : undefined,
+    );
     tabLeaseRef.current = lease;
     return () => {
       if (tabLeaseRef.current === lease) tabLeaseRef.current = null;
@@ -162,7 +159,6 @@ export function HostedBrowserWebview(props: {
     threadRef.threadId,
     threadRef.environmentId,
     remoteHosted,
-    nativeRenderScale,
   ]);
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- applies the server color scheme to the desktop preview tab through the desktop bridge
@@ -284,6 +280,7 @@ export function HostedBrowserWebview(props: {
       webview.removeEventListener("focus", dismissHostPopups);
     };
   }, [clientSettingsHydrated, config, runtimeTabId, webviewGeneration]);
+
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- resets the native guest recovery budget when ownership returns to this window
   useEffect(() => {
@@ -431,10 +428,7 @@ export function HostedBrowserWebview(props: {
     cornerRadius: presentation.cornerRadius,
     zIndex: presentation.zIndex,
     rect: lastRect,
-    hiddenSize: {
-      width: hiddenWidth * nativeRenderScale,
-      height: hiddenHeight * nativeRenderScale,
-    },
+    hiddenSize: { width: hiddenWidth, height: hiddenHeight },
   });
 
   return (
@@ -491,9 +485,9 @@ export function HostedBrowserWebview(props: {
           style={{
             left: layout.viewportX,
             top: layout.viewportY,
-            width: (layout.viewportWidth / layout.viewportScale) * nativeRenderScale,
-            height: (layout.viewportHeight / layout.viewportScale) * nativeRenderScale,
-            transform: active ? `scale(${layout.viewportScale / nativeRenderScale})` : undefined,
+            width: layout.viewportWidth / layout.viewportScale,
+            height: layout.viewportHeight / layout.viewportScale,
+            transform: layout.viewportScale < 1 ? `scale(${layout.viewportScale})` : undefined,
             transformOrigin: "top left",
           }}
         />

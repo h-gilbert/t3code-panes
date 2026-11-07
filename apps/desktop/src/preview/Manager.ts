@@ -590,7 +590,6 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   const path = yield* Path.Path;
   const random = yield* SecureRandom.SecureRandom;
   const parentScope = yield* Scope.Scope;
-  const nativeRenderScales = new Map<string, number>();
   const browserHost = yield* DesktopBrowserHost.DesktopBrowserHost;
   const passkeys = yield* PreviewPasskeys.PreviewPasskeys;
   const context = yield* Effect.context<never>();
@@ -1216,7 +1215,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     const wc = webContents.fromId(tab.webContentsId);
     if (!wc || wc.isDestroyed()) return;
     yield* attempt({ operation: "assertTabZoom", tabId, webContentsId: wc.id }, () =>
-      wc.setZoomFactor(tab.zoomFactor * (nativeRenderScales.get(tabId) ?? 1)),
+      wc.setZoomFactor(tab.zoomFactor),
     ).pipe(Effect.ignore);
   });
 
@@ -2043,7 +2042,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       runFork(
         Effect.all(
           [
-            assertTabZoom(tabId).pipe(Effect.andThen(syncState(false, true))),
+            syncState(false, true),
             Ref.update(credentialProtectedTabIdsRef, (protectedTabIds) => {
               if (!protectedTabIds.has(tabId)) return protectedTabIds;
               const next = new Set(protectedTabIds);
@@ -2574,8 +2573,6 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     hostWebContentsId?: number,
   ) {
     const updatedAt = yield* currentIso;
-    if (!nativeRenderScales.has(tabId))
-      nativeRenderScales.set(tabId, defaults?.serverTab ? (defaults.nativeRenderScale ?? 1) : 1);
     const existingTab = (yield* SynchronizedRef.get(tabsRef)).get(tabId);
     // The first window to create a tab owns it. A tab whose owner closed is
     // adopted by the next window that asks for it.
@@ -2668,7 +2665,6 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       return;
     }
     clearPendingRecording(tabId);
-    nativeRenderScales.delete(tabId);
     focusDiagnostics.delete(tabId);
     pendingFileChoosers.delete(tabId);
     agentDownloads.delete(tabId);
@@ -2837,10 +2833,9 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       return yield* new PreviewTabNotFoundError({ tabId });
     }
     // Restore the tab's zoom before publishing the guest so it never paints at inherited app zoom.
-    yield* attempt({ operation: "registerWebview.restoreZoomFactor", tabId, webContentsId }, () => {
-      if (currentTab.serverTab) wc.setZoomMode("isolated");
-      wc.setZoomFactor(currentTab.zoomFactor * (nativeRenderScales.get(tabId) ?? 1));
-    });
+    yield* attempt({ operation: "registerWebview.restoreZoomFactor", tabId, webContentsId }, () =>
+      wc.setZoomFactor(currentTab.zoomFactor),
+    );
     // Replacement guests start unmuted; restore mute before publishing them.
     yield* attempt({ operation: "registerWebview.restoreAudioMuted", tabId, webContentsId }, () =>
       wc.setAudioMuted(currentTab.audioMuted),
@@ -3405,7 +3400,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       const wc = webContents.fromId(tab.webContentsId);
       if (wc && !wc.isDestroyed()) {
         yield* attempt({ operation: "applyZoom", tabId, webContentsId: wc.id }, () =>
-          wc.setZoomFactor(next * (nativeRenderScales.get(tabId) ?? 1)),
+          wc.setZoomFactor(next),
         );
       }
     }
@@ -3444,6 +3439,14 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         return;
       }
       if (afterAttach.serverTab) {
+        yield* attemptPromise({ operation: "hostedRenderScale", tabId, webContentsId: wc.id }, () =>
+          control.debugger.sendCommand("Emulation.setDeviceMetricsOverride", {
+            width: 0,
+            height: 0,
+            deviceScaleFactor: 2,
+            mobile: false,
+          }),
+        );
         yield* listenForAgentSignals;
         browserHost.attach(afterAttach.serverTab, {
           webContents: wc,
