@@ -100,16 +100,14 @@ export function buildWorkspaceThreadPickerItems(input: {
   );
 
   const runningCounts = countRunningWorkspaceSubagents(input.threads);
-  const threadKeys = new Set(
-    input.threads
-      .filter((thread) => thread.archivedAt === null && thread.deletedAt == null)
-      .map((thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))),
-  );
   return sortThreadsForSidebar(
     input.threads.filter((thread) => {
-      if (thread.archivedAt !== null || thread.deletedAt != null || isSidebarHiddenThread(thread))
-        return false;
-      if (thread.delegatedFrom != null && threadKeys.has(scopedThreadKey(thread.delegatedFrom)))
+      if (
+        thread.archivedAt !== null ||
+        thread.deletedAt != null ||
+        isSidebarHiddenThread(thread) ||
+        thread.delegatedFrom != null
+      )
         return false;
       return projectByRef.has(
         scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)),

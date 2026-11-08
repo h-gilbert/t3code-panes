@@ -267,6 +267,23 @@ describe("subagents in workspace lists", () => {
         paneTargets: [],
       }),
     ).toEqual([]);
+    // Launched delegates have root lineage; they stay hidden while the parent's machine is offline.
+    const launched = {
+      ...remote,
+      lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: remote.id },
+    };
+    expect(
+      buildWorkspaceThreadPickerItems({
+        threads: [launched],
+        projects: [
+          {
+            ...projects[0]!,
+            memberProjectRefs: [{ environmentId: remote.environmentId, projectId: projectA }],
+          },
+        ],
+        paneTargets: [],
+      }),
+    ).toEqual([]);
     const nested = {
       ...child("nested", "agent"),
       environmentId: remote.environmentId,
