@@ -94,6 +94,32 @@ describe("resolveHostedBrowserWebviewWrapperStyle", () => {
     });
   });
 
+  it("shrinks a capture-active webview larger than the window to fit inside it", () => {
+    const style = resolveHostedBrowserWebviewWrapperStyle({
+      active: false,
+      renderingActive: true,
+      rect: null,
+      hiddenSize: { width: 2400, height: 1300 },
+      windowSize: { width: 1100, height: 780 },
+    });
+
+    expect(style).toMatchObject({
+      width: 2400,
+      height: 1300,
+      transform: `scale(${1100 / 2400})`,
+      transformOrigin: "0 0",
+    });
+    expect(
+      resolveHostedBrowserWebviewWrapperStyle({
+        active: false,
+        renderingActive: true,
+        rect: null,
+        hiddenSize: { width: 1280, height: 800 },
+        windowSize: { width: 1440, height: 900 },
+      }),
+    ).not.toHaveProperty("transform");
+  });
+
   it("keeps an inactive webview paintable without marking it as rendering-active", () => {
     const style = resolveHostedBrowserWebviewWrapperStyle({
       active: false,
