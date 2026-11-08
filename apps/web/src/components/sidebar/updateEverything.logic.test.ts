@@ -8,6 +8,7 @@ import {
   collectServerUpdateTargets,
   describeUpdateCapsule,
   describeUpdateEverything,
+  resolveUpdateRunMachineStatus,
   runUpdateEverything,
   serverUpdateNeedsNpmPublication,
   type UpdateEverythingMachine,
@@ -503,5 +504,29 @@ describe("describeUpdateCapsule", () => {
     expect(describeUpdateCapsule({ ...run, trackSwitch: true }, [failed], null, 0).action).toBe(
       "dismiss",
     );
+  });
+
+  it("counts a failed machine as done once its server reports the target version", () => {
+    const idle = { status: "idle" as const };
+    const machine = {
+      environmentId: EnvironmentId.make("remote"),
+      label: "remote",
+      updatesProviders: false,
+      server: {
+        environmentId: EnvironmentId.make("remote"),
+        serverLabel: "remote",
+        selfUpdate: "desktop-managed" as const,
+        targetVersion: "0.1.7-panes.2",
+      },
+      handedOffVersion: null,
+      startedAt: 0,
+      result: "failed" as const,
+      failure: "Electron updater failed to download the update",
+      providerFailure: null,
+    };
+
+    expect(resolveUpdateRunMachineStatus(machine, "servers", idle, "0.1.7-panes.1")).toBe("failed");
+    expect(resolveUpdateRunMachineStatus(machine, "servers", idle, null)).toBe("failed");
+    expect(resolveUpdateRunMachineStatus(machine, "servers", idle, "0.1.7-panes.2")).toBe("done");
   });
 });

@@ -1,9 +1,9 @@
 import { useAtomValue } from "@effect/atom-react";
-import { type ReactNode, useSyncExternalStore } from "react";
+import { type ReactNode, useEffect, useSyncExternalStore } from "react";
 
 import { cn } from "~/lib/utils";
 import { environmentIdsKey } from "~/state/environmentAtomList";
-import { environmentUpdateStatesAtom } from "~/state/server";
+import { environmentServerConfigsAtom, environmentUpdateStatesAtom } from "~/state/server";
 import { useServerUpdate } from "../ServerUpdateAction";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
@@ -33,14 +33,17 @@ function useNow(intervalMs: number | null): number {
 }
 
 function useUpdateRunMachineViews(run: UpdateEverythingRun): ReadonlyArray<UpdateRunMachineView> {
-  const updateStates = useAtomValue(
-    environmentUpdateStatesAtom(
-      environmentIdsKey(run.machines.map(({ environmentId }) => environmentId)),
-    ),
-  );
+  const environmentIds = environmentIdsKey(run.machines.map(({ environmentId }) => environmentId));
+  const updateStates = useAtomValue(environmentUpdateStatesAtom(environmentIds));
+  const serverConfigs = useAtomValue(environmentServerConfigsAtom);
   return run.machines.map((machine, index) => ({
     machine,
-    status: resolveUpdateRunMachineStatus(machine, run.phase, updateStates[index]!),
+    status: resolveUpdateRunMachineStatus(
+      machine,
+      run.phase,
+      updateStates[index]!,
+      serverConfigs.get(machine.environmentId)?.environment.serverVersion ?? null,
+    ),
   }));
 }
 
@@ -75,6 +78,12 @@ export function SidebarUpdateCapsule({
   const updateServer = useServerUpdate();
   const failed = machines.some(({ status }) => status === "failed");
   const settled = !hasActiveMachine && run.localVersion === null;
+  const allCurrent =
+    settled && run.phase === "servers" && machines.every(({ status }) => status === "done");
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- a failed machine reaching the target version arrives from its server, not from this run.
+  useEffect(() => {
+    if (allCurrent) dismissSettledUpdateRunMachines();
+  }, [allCurrent]);
 
   const actionLabel =
     view.action === "later" ? "Later" : view.action === "retry" ? "Retry" : "Dismiss";

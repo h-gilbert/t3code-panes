@@ -421,7 +421,17 @@ export function resolveUpdateRunMachineStatus(
   machine: UpdateRunMachine,
   phase: UpdateEverythingRun["phase"],
   serverState: ServerUpdateState,
+  serverVersion: string | null,
 ): UpdateRunMachineStatus {
+  // A failed attempt is moot once the machine reaches the target some other way.
+  if (
+    machine.result === "failed" &&
+    machine.server !== null &&
+    serverVersion !== null &&
+    resolveVersionMismatch(serverVersion, machine.server.targetVersion) === null
+  ) {
+    return "done";
+  }
   if (machine.result !== null) return machine.result;
   if (machine.handedOffVersion !== null) return "restarting";
   if (phase === "providers" && machine.updatesProviders) return "providers";
