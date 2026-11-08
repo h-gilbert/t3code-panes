@@ -8,6 +8,7 @@ import {
   ServerSettingsPatch,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
+import * as Struct from "effect/Struct";
 import { Tool, Toolkit } from "effect/ai";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
@@ -71,11 +72,22 @@ const EnvironmentPreferencesTool = Tool.make("t3_environment_preferences_update"
   }),
   success: Schema.Struct({ applied: Schema.Boolean }),
 }).annotate(Tool.Destructive, true);
+// Credentials go through request_secret and voice preferences are set by the user in Settings.
+const AgentSettingsPatch = ServerSettingsPatch.mapFields(
+  Struct.omit([
+    "cloudSpeechCredentials",
+    "speechAcceleration",
+    "speechModelId",
+    "speechModelUnloadTimeout",
+    "speechPostProcessingModelSelection",
+    "speechProjectCustomWords",
+  ]),
+);
 const SettingsUpdateTool = Tool.make("t3_settings_update", {
   ...shared,
   description:
     "Propose changes to this environment's T3 Code settings. Explain the reason and pass a patch using the normal settings schema. T3 shows the exact changes and waits for the user to approve this specific request, including in full access. Rejection changes nothing. Requires a live T3 thread. Omitted fields are preserved. Device/browser access changes may require a new turn to refresh available tools. Never edit the live settings file directly.",
-  parameters: Schema.Struct({ reason: Schema.String, patch: ServerSettingsPatch }),
+  parameters: Schema.Struct({ reason: Schema.String, patch: AgentSettingsPatch }),
   success: Schema.Struct({ applied: Schema.Boolean }),
 }).annotate(Tool.Destructive, true);
 export const EnvironmentToolkit = Toolkit.make(
