@@ -6472,6 +6472,85 @@ describe("PreviewManager", () => {
       }),
     ),
   );
+  effectIt.effect("fills a vault login framed by a page of the same origin", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        // The page's own document holds only hidden inputs, as on Apple's sign-in page.
+        const sendCommand = vi.fn(async (method: string, _params?: unknown) =>
+          method === "Runtime.evaluate"
+            ? { result: { value: { filled: false, filledPassword: false, filledUsername: false } } }
+            : undefined,
+        );
+        const loginFrame = {
+          url: "https://idmsa.apple.com/appleauth/auth/signin",
+          executeJavaScript: vi.fn(async (_expression: string) => ({
+            filled: true,
+            filledPassword: true,
+            filledUsername: true,
+          })),
+        };
+        const mainFrame = {
+          url: "https://idmsa.apple.com/IDMSWebAuth/signin",
+          framesInSubtree: [] as Array<unknown>,
+        };
+        mainFrame.framesInSubtree.push(mainFrame, loginFrame);
+        fromId.mockReturnValue({
+          getUserAgent: () => "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
+
+          id: 44,
+          isDestroyed: () => false,
+          getType: () => "webview",
+          getURL: () => mainFrame.url,
+          mainFrame,
+          getTitle: () => "Sign In - Apple",
+          isLoading: () => false,
+          isLoadingMainFrame: () => false,
+          isDevToolsOpened: () => false,
+          getZoomFactor: () => 1,
+          setZoomFactor: vi.fn(),
+          setAudioMuted: vi.fn(),
+          isCurrentlyAudible: () => false,
+          on: vi.fn(),
+          off: vi.fn(),
+          ipc: { on: vi.fn(), off: vi.fn() },
+          session: { on: vi.fn() },
+          send: webviewSend,
+          navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+          setIgnoreMenuShortcuts: vi.fn(),
+          setWindowOpenHandler: vi.fn(),
+          debugger: {
+            isAttached: () => false,
+            attach: vi.fn(),
+            sendCommand,
+            on: vi.fn(),
+            off: vi.fn(),
+          },
+        } as never);
+        yield* manager.createTab("tab_same_origin_frame");
+        yield* manager.registerWebview("tab_same_origin_frame", 44);
+        const credential = (origin: string) => ({
+          environmentId: "env_a",
+          profile: null,
+          credential: { origin, username: "dummy@example.com", password: "dummy-password" },
+        });
+
+        expect(
+          yield* manager.automationAutofill(
+            "tab_same_origin_frame",
+            credential("https://idmsa.apple.com"),
+          ),
+        ).toEqual({
+          filled: true,
+          origin: "https://idmsa.apple.com",
+          username: "dummy@example.com",
+        });
+        expect(loginFrame.executeJavaScript).toHaveBeenCalledOnce();
+        expect(loginFrame.executeJavaScript.mock.calls[0]?.[0]).toContain(
+          'location.origin !== "https://idmsa.apple.com"',
+        );
+      }),
+    ),
+  );
 });
 
 describe("PreviewOperationError", () => {

@@ -5407,7 +5407,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     expression: string,
     origin: string,
   ) {
-    // Login forms are often framed cross-origin (idmsa.apple.com inside appstoreconnect.apple.com).
+    // Login forms are often framed (idmsa.apple.com inside appstoreconnect.apple.com or itself).
     const frames = wc.mainFrame.framesInSubtree.filter(
       (frame) =>
         frame !== wc.mainFrame &&
@@ -5435,10 +5435,12 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         if ((yield* Ref.get(arbitraryEvaluationTabIdsRef)).has(tabId)) {
           return yield* new PreviewAutomationCredentialAutofillBlockedError({ tabId });
         }
-        const outcome =
+        const page =
           BrowserCredentials.normalizeCredentialOrigin(wc.mainFrame.url) === origin
             ? decodeAutofillOutcome(yield* performAutomationEvaluate(tabId, { expression }, send))
-            : yield* fillFrames(tabId, wc, expression, origin);
+            : null;
+        // Apple's sign-in page frames its form from its own origin.
+        const outcome = page?.filled ? page : yield* fillFrames(tabId, wc, expression, origin);
         if (outcome?.filledPassword) {
           yield* Ref.update(
             credentialProtectedTabIdsRef,
