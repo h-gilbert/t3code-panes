@@ -164,21 +164,10 @@ export const layer = Layer.effect(
       )
       .pipe(Effect.andThen(electronApp.quit));
 
-    // An SSH client restarts this home's server whenever it cannot reach one, so it can win
-    // the lock while this app relaunches. Its server has no window here; offer to replace it.
+    // An SSH client starts this home's server whenever it cannot reach one, so it can win the
+    // lock while this app is closed. That server has no window here; the app is the owner.
     const takeOverSshLaunchedHome = Effect.fn("desktop.backendPool.takeOverSshLaunchedHome")(
-      function* (
-        pid: number,
-      ): Effect.fn.Return<void, ElectronDialog.ElectronDialogShowMessageBoxError> {
-        const choice = yield* electronDialog.showMessageBox({
-          type: "question",
-          buttons: ["Stop It and Open T3 Code", "Quit"],
-          defaultId: 0,
-          cancelId: 1,
-          message: "A server started from another computer is using this T3 home",
-          detail: `Another computer connected over SSH and started a T3 server here (PID ${pid}). T3 Code can't open while it runs.\n\nStop it to open T3 Code. Agents running on that server will stop, and the other computer will reconnect to T3 Code here.`,
-        });
-        if (choice.response !== 0) return yield* electronApp.quit;
+      function* (pid: number) {
         if (!(yield* SshLaunchedHomeOwner.stop(pid))) return yield* showHomeUnavailable;
         yield* primary.start;
       },
@@ -194,7 +183,7 @@ export const layer = Layer.effect(
         Effect.orElseSucceed(() => Option.none<number>()),
       );
       if (Option.isNone(owner)) return yield* showHomeUnavailable;
-      yield* takeOverSshLaunchedHome(owner.value).pipe(Effect.catch(() => showHomeUnavailable));
+      yield* takeOverSshLaunchedHome(owner.value);
     });
 
     const primary = yield* DesktopBackendManager.makeBackendInstance({
