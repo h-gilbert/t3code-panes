@@ -359,11 +359,9 @@ export function ServerBrowserSurface(props: {
       const previous = sizeRef.current;
       if (previous?.width === size.width && previous.height === size.height) return;
       sizeRef.current = size;
-      if (
-        visible &&
-        followSize &&
-        (document.hasFocus() || controlRef.current?.controller === "you")
-      )
+      // Switching inset, floating and fullscreen resizes the surface on screen, whoever holds
+      // the page; a window nobody can see keeps the size it last published.
+      if (visible && followSize && document.visibilityState === "visible")
         clientRef.current?.send({ type: "resize", ...size });
       // Growing the cap reconnects the stream; wait until resizing settles.
       if (capTimer !== null) clearTimeout(capTimer);
@@ -431,9 +429,10 @@ export function ServerBrowserSurface(props: {
             next.dialog?.defaultValue !== previous?.dialog?.defaultValue
           )
             setPromptText(next.dialog?.defaultValue ?? "");
-          if (next.controller !== "you") {
-            clearInput();
-          } else if (previous?.controller !== "you") {
+          if (next.controller !== "you") clearInput();
+          // A newly shown or reconnected surface, and one that just took control, asserts its
+          // size before any click: the page otherwise keeps the last surface's viewport.
+          if (previous === null || (next.controller === "you" && previous.controller !== "you")) {
             const size = sizeRef.current;
             if (followSize && size) client.send({ type: "resize", ...size });
           }

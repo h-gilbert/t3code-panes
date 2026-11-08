@@ -91,6 +91,20 @@ describe("preview stream control", () => {
     client.stop();
   });
 
+  it("sends the viewer's size while the agent or another viewer holds the page", () => {
+    const { client, socket } = connect();
+    socket.control(agent);
+    expect(client.send({ type: "resize", width: 1100, height: 675 })).toBe(true);
+    socket.control({ ...agent, controller: "another-viewer", generation: 2 });
+    expect(client.send({ type: "resize", width: 800, height: 455 })).toBe(true);
+    expect(client.send({ type: "reload" })).toBe(false);
+    expect(socket.sent).toEqual([
+      '{"type":"resize","width":1100,"height":675}',
+      '{"type":"resize","width":800,"height":455}',
+    ]);
+    client.stop();
+  });
+
   it("revokes input immediately on release and exposes pending dialog state", () => {
     const { client, socket, onControl } = connect();
     const owned = {

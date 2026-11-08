@@ -798,6 +798,46 @@ it.live("text-only snapshots return refs without attempting a stalled screenshot
   ).pipe(Effect.provide(layer)),
 );
 
+it.live("an unanswered first still neither blocks a viewer nor the next viewer's still", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { browser, tabId } = yield* ready;
+      const context = contexts[0]!;
+      const newSession = context.newCDPSession;
+      const stalled = Promise.withResolvers<void>();
+      // The first viewer's screenshot straddles a new document and is never answered.
+      context.newCDPSession = async (target) => {
+        const session = await newSession(target);
+        const original = session.send.getMockImplementation()!;
+        session.send.mockImplementation((method, input) => {
+          if (method !== "Page.captureScreenshot") return original(method, input);
+          stalled.resolve();
+          return new Promise<never>(() => {});
+        });
+        context.newCDPSession = newSession;
+        return session;
+      };
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      yield* Effect.addFinalizer(() => Effect.sync(() => vi.useRealTimers()));
+
+      const attaching = yield* browser
+        .attachViewer(viewerInput(tabId, true))
+        .pipe(Effect.forkScoped);
+      yield* Effect.promise(() => stalled.promise);
+      yield* Effect.promise(() => vi.advanceTimersByTimeAsync(3_000));
+      // Connected with its control state, without the still.
+      const first = yield* Fiber.join(attaching);
+      const firstOutput = (yield* Queue.takeAll(first.output)).map((item) => item._tag);
+      expect(firstOutput).toContain("control");
+      expect(firstOutput).not.toContain("frame");
+
+      // The stalled still gave up its capture lock, so the next viewer starts from one.
+      const second = yield* browser.attachViewer(viewerInput(tabId, true));
+      expect((yield* Queue.takeAll(second.output)).map((item) => item._tag)).toContain("frame");
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
 it.live.each(["text", "accessibility", "screenshot"] as const)(
   "a stalled snapshot $0 read times out without blocking the next action",
   (stage) =>
