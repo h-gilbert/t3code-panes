@@ -1674,14 +1674,10 @@ describe("PreviewManager", () => {
         "Emulation.setDeviceMetricsOverride",
         expect.anything(),
       );
-      expect(guest.debugger.sendCommand).toHaveBeenCalledWith(
+      // Google sign-in rejects Electron presenting as Chrome; guests keep their native identity.
+      expect(guest.debugger.sendCommand).not.toHaveBeenCalledWith(
         "Emulation.setUserAgentOverride",
-        expect.objectContaining({
-          userAgent: "Mozilla/5.0 Chrome/152.0.7977.169 Safari/537.36",
-          userAgentMetadata: expect.objectContaining({
-            brands: expect.arrayContaining([{ brand: "Google Chrome", version: "152" }]),
-          }),
-        }),
+        expect.anything(),
       );
       yield* manager.closeTab("tab_server_navigation");
       expect(JSON.parse(yield* Queue.take(lines))).toMatchObject({
@@ -6470,14 +6466,9 @@ describe("PreviewManager", () => {
         expect(loginFrame.executeJavaScript.mock.calls[0]?.[0]).toContain(
           'location.origin !== "https://idmsa.apple.com"',
         );
-        expect(sendCommand.mock.calls.filter(([method]) => method === "Runtime.evaluate")).toEqual([
-          [
-            "Runtime.evaluate",
-            expect.objectContaining({
-              expression: expect.stringMatching(/^navigator\.userAgentData/),
-            }),
-          ],
-        ]);
+        expect(sendCommand.mock.calls.filter(([method]) => method === "Runtime.evaluate")).toEqual(
+          [],
+        );
       }),
     ),
   );
@@ -6601,7 +6592,7 @@ describe("Preview automation diagnostics", () => {
   });
 });
 
-effectIt.effect("applies Chrome identity to frame and worker targets before releasing them", () =>
+effectIt.effect("arms cross-site frame targets for nested frames before releasing them", () =>
   withManager((manager) =>
     Effect.gen(function* () {
       const guest = Object.assign(makeTestPreviewWebContents(vi.fn()), {
@@ -6609,61 +6600,44 @@ effectIt.effect("applies Chrome identity to frame and worker targets before rele
       });
       vi.mocked(guest.debugger.sendCommand).mockResolvedValue(undefined);
       fromId.mockReturnValue(guest);
-      yield* manager.createTab("worker-identity");
-      yield* manager.registerWebview("worker-identity", 42);
-      yield* manager.setColorScheme("worker-identity", "light");
-      expect(guest.debugger.sendCommand).toHaveBeenCalledWith("Target.setAutoAttach", {
+      yield* manager.createTab("frame-attach");
+      yield* manager.registerWebview("frame-attach", 42);
+      yield* manager.setColorScheme("frame-attach", "light");
+      const frameAutoAttach = {
         autoAttach: true,
         waitForDebuggerOnStart: true,
         flatten: true,
-        filter: [
-          { type: "iframe" },
-          { type: "service_worker" },
-          { type: "shared_worker" },
-          { type: "worker" },
-        ],
-      });
+        filter: [{ type: "iframe" }],
+      };
+      expect(guest.debugger.sendCommand).toHaveBeenCalledWith(
+        "Target.setAutoAttach",
+        frameAutoAttach,
+      );
       const onMessage = vi
         .mocked(guest.debugger.on)
         .mock.calls.find(([event]) => event === "message")?.[1];
       expect(onMessage).toBeDefined();
-      const pageIdentity = vi
-        .mocked(guest.debugger.sendCommand)
-        .mock.calls.find(([method]) => method === "Emulation.setUserAgentOverride")?.[1];
-      for (const type of ["iframe", "worker", "shared_worker", "service_worker"]) {
-        const sessionId = `${type}-1`;
-        const finished = Promise.withResolvers<void>();
-        vi.mocked(guest.debugger.sendCommand).mockImplementation(async (method, _params, child) => {
-          // Worker renderers expose Emulation directly, not the page's Network alias.
-          if (method === "Network.setUserAgentOverride") throw new Error("Method not found");
-          if (method === "Runtime.runIfWaitingForDebugger" && child === sessionId)
-            finished.resolve();
-          return undefined;
-        });
-        onMessage!(
-          {} as Electron.Event,
-          "Target.attachedToTarget",
-          { sessionId, targetInfo: { type }, waitingForDebugger: true },
-          type === "worker" ? "iframe-1" : "",
-        );
-        yield* Effect.promise(() => finished.promise);
-        const commands = vi
+      const sessionId = "iframe-1";
+      const finished = Promise.withResolvers<void>();
+      vi.mocked(guest.debugger.sendCommand).mockImplementation(async (method, _params, child) => {
+        if (method === "Runtime.runIfWaitingForDebugger" && child === sessionId) finished.resolve();
+        return undefined;
+      });
+      onMessage!(
+        {} as Electron.Event,
+        "Target.attachedToTarget",
+        { sessionId, targetInfo: { type: "iframe" }, waitingForDebugger: true },
+        "",
+      );
+      yield* Effect.promise(() => finished.promise);
+      expect(
+        vi
           .mocked(guest.debugger.sendCommand)
-          .mock.calls.filter(([, , child]) => child === sessionId);
-        expect(commands).toEqual([
-          ["Emulation.setUserAgentOverride", pageIdentity, sessionId],
-          [
-            "Target.setAutoAttach",
-            expect.objectContaining({
-              autoAttach: true,
-              waitForDebuggerOnStart: true,
-              flatten: true,
-            }),
-            sessionId,
-          ],
-          ["Runtime.runIfWaitingForDebugger", {}, sessionId],
-        ]);
-      }
+          .mock.calls.filter(([, , child]) => child === sessionId),
+      ).toEqual([
+        ["Target.setAutoAttach", frameAutoAttach, sessionId],
+        ["Runtime.runIfWaitingForDebugger", {}, sessionId],
+      ]);
     }),
   ),
 );

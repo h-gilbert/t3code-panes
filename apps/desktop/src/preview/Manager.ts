@@ -1,5 +1,4 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Native browser partition and transfer identities must retain their existing synchronous hashes.
-import { chromeIdentity, type NativeBrowserMetadata } from "./browserIdentity.ts";
 import { beginRendererFocusGuard } from "./PreserveRendererFocus.ts";
 import { playwrightInjectedRuntimeInstallExpression } from "./PlaywrightInjectedRuntime.ts";
 import {
@@ -601,7 +600,6 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   const fileSystem = yield* FileSystem.FileSystem;
   const rendererHistory = yield* DesktopRendererHistory.DesktopRendererHistory;
   const hostPlatform = yield* HostProcess.Platform;
-  const hostArchitecture = yield* HostProcess.Architecture;
   const path = yield* Path.Path;
   const random = yield* SecureRandom.SecureRandom;
   const parentScope = yield* Scope.Scope;
@@ -1507,17 +1505,12 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           const semaphore = yield* Semaphore.make(1);
           const scope = yield* Scope.fork(parentScope, "sequential");
           const wcDebugger = wc.debugger;
-          let identity = chromeIdentity(wc.getUserAgent(), hostArchitecture);
-          const identityAutoAttach = {
+          // Cross-site frames take input only through their own sessions (see GuestInput).
+          const frameAutoAttach = {
             autoAttach: true,
             waitForDebuggerOnStart: true,
             flatten: true,
-            filter: [
-              { type: "iframe" },
-              { type: "service_worker" },
-              { type: "shared_worker" },
-              { type: "worker" },
-            ],
+            filter: [{ type: "iframe" }],
           };
           const consoleReleases = yield* Queue.sliding<void>(1);
           // Console eviction leaves strong debugger handles; release the group because we keep only text.
@@ -1564,16 +1557,12 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
             trackFrameTarget(wcDebugger, method, params);
             if (method === "Target.attachedToTarget" && typeof params["sessionId"] === "string") {
               const child = params["sessionId"];
-              // Workers lack the browser-side Emulation handler that redirects the Network alias.
+              // Auto-attach covers direct children only; arm descendants before their creator runs.
               void wcDebugger
-                .sendCommand("Emulation.setUserAgentOverride", identity, child)
-                // Auto-attach covers direct children only; arm descendants before their creator runs.
-                .then(() =>
-                  wcDebugger.sendCommand("Target.setAutoAttach", identityAutoAttach, child),
-                )
+                .sendCommand("Target.setAutoAttach", frameAutoAttach, child)
                 .finally(() => wcDebugger.sendCommand("Runtime.runIfWaitingForDebugger", {}, child))
                 .catch((cause: unknown) =>
-                  runFork(Effect.logWarning("Browser worker identity failed", { cause })),
+                  runFork(Effect.logWarning("Browser frame attach failed", { cause })),
                 );
             }
             if (method === "Page.fileChooserOpened") {
@@ -1626,22 +1615,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
               wcDebugger.attach("1.3");
             });
             yield* attemptPromise(
-              { operation: "initializeDebugger.browserIdentity", webContentsId: wc.id },
-              async () => {
-                const metadata = (await wcDebugger.sendCommand("Runtime.evaluate", {
-                  expression:
-                    'navigator.userAgentData?.getHighEntropyValues(["architecture", "bitness", "model", "platformVersion", "fullVersionList"])',
-                  awaitPromise: true,
-                  returnByValue: true,
-                })) as { result?: { value?: NativeBrowserMetadata } } | undefined;
-                identity = chromeIdentity(
-                  wc.getUserAgent(),
-                  hostArchitecture,
-                  metadata?.result?.value,
-                );
-                await wcDebugger.sendCommand("Emulation.setUserAgentOverride", identity);
-                await wcDebugger.sendCommand("Target.setAutoAttach", identityAutoAttach);
-              },
+              { operation: "initializeDebugger.frameAutoAttach", webContentsId: wc.id },
+              () => wcDebugger.sendCommand("Target.setAutoAttach", frameAutoAttach),
             );
             // Set an opaque base before first paint or background-less dark pages retain white-on-white text.
             yield* attemptPromise(

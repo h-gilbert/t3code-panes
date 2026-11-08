@@ -14,8 +14,6 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
 
-import { chromeUserAgent } from "./browserIdentity.ts";
-
 const PREVIEW_PARTITION_PREFIX = "persist:t3code-preview-";
 /** Ephemeral partitions omit persist: but retain a product prefix so the webview gate recognizes them. */
 const PREVIEW_EPHEMERAL_PARTITION_PREFIX = "t3code-preview-ephemeral-";
@@ -59,6 +57,9 @@ const externalProtocolPromptUrl = (rawUrl: string | undefined): string | null =>
     return null;
   }
 };
+
+// Teams sends Electron User-Agents to an error page before sign-in. Electron allows one listener per session.
+const TEAMS_URL_PATTERNS = ["https://teams.cloud.microsoft/*", "https://teams.microsoft.com/*"];
 
 const MAX_PROMPT_URL_LENGTH = 300;
 
@@ -356,9 +357,6 @@ export const make = Effect.gen(function* BrowserSessionMake() {
                 },
               );
             };
-            // Turnstile rejects rewritten UAs with 600010 unless CDP also overrides
-            // client hints in the guest and its cross-origin frames and workers.
-            browserSession.setUserAgent(chromeUserAgent(browserSession.getUserAgent()));
             browserSession.setPermissionRequestHandler(
               (webContents, permission, callback, details) => {
                 if (permission === "openExternal") {
@@ -385,6 +383,25 @@ export const make = Effect.gen(function* BrowserSessionMake() {
                 permission === "clipboard-read"
                   ? clipboardReadDecisions.get(permissionOrigin(requestingOrigin) ?? "") === true
                   : ALLOWED_PREVIEW_PERMISSIONS.has(permission),
+            );
+            browserSession.webRequest.onBeforeSendHeaders(
+              { urls: TEAMS_URL_PATTERNS },
+              ({ requestHeaders }, callback) => {
+                const userAgent = Object.entries(requestHeaders).find(
+                  ([name]) => name.toLowerCase() === "user-agent",
+                );
+                if (userAgent === undefined) {
+                  callback({});
+                  return;
+                }
+                const [name, value] = userAgent;
+                callback({
+                  requestHeaders: {
+                    ...requestHeaders,
+                    [name]: value.replace(/ Electron\/\S+/, ""),
+                  },
+                });
+              },
             );
             const next = new Map(sessions);
             next.set(partition, browserSession);
