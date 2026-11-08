@@ -130,29 +130,25 @@ export function start(configuration: DeviceStreamConfiguration) {
   const unauthorized = () => {
     if (activeClient === client) post({ type: "unauthorized" });
   };
-  const client = createDeviceStreamClient(
-    { ...configuration, preferMjpeg: platform === "ios" },
-    canvas,
-    {
-      onStatus: reportStatus,
-      onScreen: layout,
-      onMjpegFallback: () => {
-        canvas.style.display = "none";
-        image.style.display = "block";
-      },
-      onCanvasVideo: () => {
-        image.style.display = "none";
-        canvas.style.display = "";
-      },
-      onUnauthorized: unauthorized,
-      onInputConnected: (connected, detail) => {
-        inputConnected = connected;
-        inputStatus.textContent = detail ?? "Reconnecting device controls...";
-        inputStatus.style.display = streaming && !connected ? "block" : "none";
-        post({ type: "input", connected, ...(detail ? { detail } : {}) });
-      },
+  const client = createDeviceStreamClient(configuration, canvas, {
+    onStatus: reportStatus,
+    onScreen: layout,
+    onMjpegFallback: () => {
+      canvas.style.display = "none";
+      image.style.display = "block";
     },
-  );
+    onCanvasVideo: () => {
+      image.style.display = "none";
+      canvas.style.display = "";
+    },
+    onUnauthorized: unauthorized,
+    onInputConnected: (connected, detail) => {
+      inputConnected = connected;
+      inputStatus.textContent = detail ?? "Reconnecting device controls...";
+      inputStatus.style.display = streaming && !connected ? "block" : "none";
+      post({ type: "input", connected, ...(detail ? { detail } : {}) });
+    },
+  });
   activeClient = client;
   client.setMjpegImage(image);
   if (configuration.physical) {

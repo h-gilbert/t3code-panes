@@ -5,7 +5,12 @@ import { render } from "../../../test/render";
 import { SecretRequestCard } from "./SecretRequestCard";
 
 const state = vi.hoisted(() => ({ answer: vi.fn() }));
-vi.mock("../../state/server", () => ({ serverEnvironment: { answerSecretRequest: {} } }));
+vi.mock("../../state/server", async () => {
+  const { Atom } = await import("effect/reactivity");
+  const noConfig = Atom.make(null);
+  return { serverEnvironment: { answerSecretRequest: {}, configValueAtom: () => noConfig } };
+});
+vi.mock("../settings/SecretSourceInput", () => ({ SecretSourceSelect: () => null }));
 vi.mock("../../state/session", () => ({ useEnvironmentScope: () => true }));
 vi.mock("../../state/use-atom-command", () => ({ useAtomCommand: () => state.answer }));
 

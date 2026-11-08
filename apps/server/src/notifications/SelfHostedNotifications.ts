@@ -11,7 +11,6 @@ import {
   type RelayDeviceRegistrationRequest as RelayDeviceRegistrationRequestType,
 } from "@t3tools/contracts/relay";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
-import type * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -86,6 +85,7 @@ const SelfHostedNotificationOperation = Schema.Literals([
   "unregister-device",
   "register-live-activity",
   "read-aggregate",
+  "deliver",
 ]);
 
 export class SelfHostedNotificationError extends Schema.TaggedError<SelfHostedNotificationError>()(
@@ -496,21 +496,23 @@ const make = Effect.gen(function* () {
     const deliveries: Array<
       Effect.Effect<
         { readonly kind: "device" | "activity"; readonly result: ApnsResult },
-        Cause.UnknownError
+        SelfHostedNotificationError
       >
     > = [];
     if (notification && registration.device.pushToken) {
       deliveries.push(
-        Effect.tryPromise(() =>
-          sendApns({
-            credentials: targetCredentials,
-            token: registration.device.pushToken!,
-            pushType: "alert",
-            priority: "10",
-            nowSeconds: Math.floor(now.epochMilliseconds / 1_000),
-            payload: makeNotificationPayload(notification),
-          }).then((result) => ({ kind: "device" as const, result })),
-        ),
+        Effect.tryPromise({
+          try: () =>
+            sendApns({
+              credentials: targetCredentials,
+              token: registration.device.pushToken!,
+              pushType: "alert",
+              priority: "10",
+              nowSeconds: Math.floor(now.epochMilliseconds / 1_000),
+              payload: makeNotificationPayload(notification),
+            }).then((result) => ({ kind: "device" as const, result })),
+          catch: (cause) => new SelfHostedNotificationError({ operation: "deliver", cause }),
+        }),
       );
     }
     const results = yield* Effect.all(deliveries, { concurrency: 2 });

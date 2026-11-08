@@ -202,16 +202,22 @@ describe("DesktopSettings", () => {
     withSettings(
       Effect.gen(function* () {
         const settings = yield* DesktopAppSettings.DesktopAppSettings;
-        yield* writeSettingsPatch({
-          mainWindowBounds: { x: 10.5, y: 20, width: 839, height: 620 },
-          mainWindowMaximized: true,
-          serverExposureMode: "network-accessible",
-        });
+        for (const bounds of [
+          { x: 10.5, y: 20, width: 400, height: 360 },
+          { x: 10, y: 20, width: 399, height: 360 },
+          { x: 10, y: 20, width: 400, height: 359 },
+        ]) {
+          yield* writeSettingsPatch({
+            mainWindowBounds: bounds,
+            mainWindowMaximized: true,
+            serverExposureMode: "network-accessible",
+          });
 
-        const loaded = yield* settings.load;
-        assert.isNull(loaded.mainWindowBounds);
-        assert.isFalse(loaded.mainWindowMaximized);
-        assert.equal(loaded.serverExposureMode, "network-accessible");
+          const loaded = yield* settings.load;
+          assert.isNull(loaded.mainWindowBounds);
+          assert.isFalse(loaded.mainWindowMaximized);
+          assert.equal(loaded.serverExposureMode, "network-accessible");
+        }
       }),
     ),
   );
@@ -225,7 +231,7 @@ describe("DesktopSettings", () => {
 
         yield* settings.setAllowConnectedUpdates(false);
         assert.isFalse((yield* settings.load).allowConnectedUpdates);
-        yield* settings.setMainWindowBounds({ x: -1200, y: 40, width: 1440, height: 960 }, true);
+        yield* settings.setMainWindowBounds({ x: -1200, y: 40, width: 400, height: 360 }, true);
         yield* settings.setServerExposureMode("network-accessible");
 
         const persisted = yield* decodeDesktopSettingsPatch(
@@ -233,10 +239,17 @@ describe("DesktopSettings", () => {
         );
         assert.deepEqual(persisted, {
           allowConnectedUpdates: false,
-          mainWindowBounds: { x: -1200, y: 40, width: 1440, height: 960 },
+          mainWindowBounds: { x: -1200, y: 40, width: 400, height: 360 },
           mainWindowMaximized: true,
           serverExposureMode: "network-accessible",
         } satisfies typeof DesktopSettingsPatch.Type);
+
+        const restored = yield* Effect.gen(function* () {
+          const freshSettings = yield* DesktopAppSettings.DesktopAppSettings;
+          return yield* freshSettings.load;
+        }).pipe(Effect.provide(DesktopAppSettings.layer));
+        assert.deepEqual(restored.mainWindowBounds, persisted.mainWindowBounds);
+        assert.isTrue(restored.mainWindowMaximized);
       }),
     ),
   );

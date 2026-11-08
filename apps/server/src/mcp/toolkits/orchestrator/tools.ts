@@ -226,7 +226,7 @@ const CredentialVaultPeerTool = Tool.make(CREDENTIAL_VAULT_PEER_TOOL, {
 
 const RequestSecretTool = Tool.make("request_secret", {
   description:
-    'Ask the user to enter a secret in a private card and wait. You never see the value. Returns a one-use `secretRef` for a tool that accepts it, or with `delivery: "file"` a private file path to read inside a shell command. For reusable credentials, set credential:{name,kind:"login"|"secret",website?}. Reuses an authorized saved entry; otherwise opens a private form. credential.replace=true requests a replacement. Login deliveries are JSON {username,password}; token deliveries are raw. Never print or return file contents. Asked how to provide a secret: call this now, do not explain instead. Pasted secret for a child or script: pass value; never retrieve one from old threads.',
+    'Ask for one secret per card; never combine values (a login card takes its username and password together). Open it, don\'t offer it. You never see the value. Returns one-use `secretRef`, or `delivery: "file"` a file read only in its command, e.g. `adb pair <ip:port> "$(cat <file>)"`. For reusable credentials, set credential:{name,kind:"login"|"secret",website?}. Reuses an authorized saved entry; otherwise opens a private form. credential.replace=true requests a replacement. Login deliveries are JSON {username,password}; token deliveries are raw. Never print or return file contents. Asked how: call now. Pasted secret for child/script: `value`. Never from an old thread.',
   parameters: OrchestratorMcpRequestSecretInput,
   success: OrchestratorMcpRequestSecretResult,
   failure: OrchestratorMcpFailure,
