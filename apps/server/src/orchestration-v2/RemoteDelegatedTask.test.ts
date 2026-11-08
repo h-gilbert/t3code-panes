@@ -216,10 +216,23 @@ it.layer(layerTest)("a delegated task in a linked environment", (it) => {
       assert.equal(projection.subagents.length, 1);
       const [task] = projection.subagents;
       assert.equal(task?.childThreadId, null);
-      assert.deepEqual(task?.remoteChild, remoteChild);
+      assert.deepEqual(task?.remoteChild, { ...remoteChild, settledThere: false });
       assert.equal(task?.status, "running");
+      yield* orchestrator.dispatch({
+        type: "delegated_task.remote.progress",
+        commandId: CommandId.make("command:remote-waiting"),
+        parentThreadId: parent.threadId,
+        taskId: task!.id,
+        status: "waiting",
+      });
+      const waiting = yield* orchestrator.getThreadProjection(parent.threadId);
+      assert.equal(waiting.subagents[0]?.status, "waiting");
+      assert.equal(waiting.turnItems.find((item) => item.type === "subagent")?.status, "waiting");
       const item = projection.turnItems.find((candidate) => candidate.type === "subagent");
-      assert.deepEqual(item?.type === "subagent" ? item.remoteChild : undefined, remoteChild);
+      assert.deepEqual(item?.type === "subagent" ? item.remoteChild : undefined, {
+        ...remoteChild,
+        settledThere: false,
+      });
       // No thread was created here for the child.
       assert.equal(yield* orchestrator.getThreadShell(remoteChild.threadId), null);
     }),
@@ -288,7 +301,20 @@ it.layer(layerTest)("a delegated task in a linked environment", (it) => {
       assert.equal(settled.result, "Original result.");
       assert.equal(settled.status, "completed");
       assert.equal(settled.remoteChild?.stoppedThere, true);
+      assert.deepEqual(yield* openFor, [{ parentThreadId: parent.threadId, taskId: task.id }]);
+      yield* orchestrator.dispatch({
+        ...complete,
+        commandId: CommandId.make("command:remote-settled:2"),
+        stoppedThere: "stopped",
+        stopCount: 2,
+        settledThere: true,
+      });
       assert.deepEqual(yield* openFor, []);
+      const transfers = (yield* orchestrator.getThreadProjection(parent.threadId)).contextTransfers;
+      assert.equal(transfers.length, 1);
+      assert.equal(transfers[0]?.type, "subagent_result");
+      assert.equal(transfers[0]?.sourceEnvironmentId, remoteChild.environmentId);
+      assert.equal(transfers[0]?.sourceThreadId, remoteChild.threadId);
     }),
   );
 
@@ -393,7 +419,18 @@ it.layer(layerTest)("a delegated task in a linked environment", (it) => {
       assert.equal(task?.result, "All 412 tests pass on the box.");
       // The live parent run claimed it, so task_status acknowledges it as for a local child.
       assert.equal(task?.completionDelivery?.state, "claimed");
-      // Nothing is left for the follower to pick up after a restart.
+      // Delivery survives a restart that happens before the worker acknowledges settlement.
+      assert.deepEqual(yield* openFor, [{ parentThreadId: parent.threadId, taskId: taskId! }]);
+      yield* orchestrator.dispatch({
+        type: "delegated_task.remote.complete",
+        commandId: CommandId.make("command:settle:completes"),
+        parentThreadId: parent.threadId,
+        taskId: taskId!,
+        status: "completed",
+        result: task!.result!,
+        stoppedThere: "stopped",
+        settledThere: true,
+      });
       assert.deepEqual(yield* openFor, []);
       const item = projection.turnItems.find(
         (candidate) => candidate.type === "subagent" && candidate.subagentId === taskId,

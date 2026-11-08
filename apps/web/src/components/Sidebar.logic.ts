@@ -608,7 +608,12 @@ export function resolveSidebarRowThreadId(
   const visited = new Set<ThreadId>();
   let thread = findThread(threadId);
   while (thread !== undefined && isSidebarHiddenThread(thread)) {
-    if (thread.lineage.parentThreadId === null || visited.has(thread.id)) return threadId;
+    if (
+      thread.lineage.parentEnvironmentId !== undefined ||
+      thread.lineage.parentThreadId === null ||
+      visited.has(thread.id)
+    )
+      return threadId;
     visited.add(thread.id);
     thread = findThread(thread.lineage.parentThreadId);
   }

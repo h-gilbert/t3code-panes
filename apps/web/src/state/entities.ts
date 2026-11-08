@@ -414,6 +414,7 @@ export function readThreadShells(): ReadonlyArray<EnvironmentThreadShell> {
 function shellParentThreadId(
   thread: Pick<OrchestrationV2ThreadShell, "forkedFrom" | "lineage">,
 ): ThreadId | null {
+  if (thread.lineage.parentEnvironmentId !== undefined) return null;
   return thread.forkedFrom?.type === "run"
     ? thread.forkedFrom.threadId
     : thread.lineage.parentThreadId;

@@ -206,13 +206,19 @@ const make = Effect.gen(function* () {
           threadId: input.threadId,
           ...(runId === undefined ? {} : { runId }),
           timeoutMs: chunk,
+          ...(input.afterSequence === undefined ? {} : { afterSequence: input.afterSequence }),
           ...(input.untilDelegatedWorkSettled === undefined
             ? {}
             : { untilDelegatedWorkSettled: input.untilDelegatedWorkSettled }),
         },
       );
       remaining -= chunk;
-      if (!result.timedOut || remaining <= 0) return result;
+      if (
+        !result.timedOut ||
+        remaining <= 0 ||
+        (input.afterSequence !== undefined && result.eventSequence !== undefined)
+      )
+        return result;
       // Later pieces wait for the run the first one picked, not a newer one.
       runId = result.runId ?? undefined;
     }

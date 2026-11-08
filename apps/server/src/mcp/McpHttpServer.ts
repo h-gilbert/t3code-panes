@@ -921,13 +921,18 @@ const withToolAnalytics =
     const depthOf =
       /* Request instrumentation already owns the span; keep this helper in that context. */
       Effect.fnUntraced(function* (thread: AgentThread) {
-        let depth = 0;
+        let depth = thread.lineage.parentEnvironmentId === undefined ? 0 : 1;
         let parentId =
-          thread.lineage.relationshipToParent === "subagent" ? thread.lineage.parentThreadId : null;
+          thread.lineage.parentEnvironmentId === undefined &&
+          thread.lineage.relationshipToParent === "subagent"
+            ? thread.lineage.parentThreadId
+            : null;
         while (parentId !== null && depth < MAX_REPORTED_DEPTH) {
           depth += 1;
           const parent = yield* shellOf(parentId);
+          if (parent?.lineage.parentEnvironmentId !== undefined) depth += 1;
           parentId =
+            parent?.lineage.parentEnvironmentId === undefined &&
             parent?.lineage.relationshipToParent === "subagent"
               ? parent.lineage.parentThreadId
               : null;

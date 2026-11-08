@@ -155,6 +155,7 @@ export type OrchestrationV2ProviderRef = typeof OrchestrationV2ProviderRef.Type;
 
 export const OrchestrationV2AppThreadLineage = Schema.Struct({
   parentThreadId: Schema.NullOr(ThreadId),
+  parentEnvironmentId: Schema.optional(EnvironmentId),
   relationshipToParent: Schema.NullOr(Schema.Literals(["fork", "subagent"])),
   rootThreadId: ThreadId,
   sideChat: Schema.optional(Schema.Boolean),
@@ -235,6 +236,7 @@ export const OrchestrationV2ContextTransfer = Schema.Struct({
   id: ContextTransferId,
   type: OrchestrationV2ContextTransferType,
   sourceThreadId: ThreadId,
+  sourceEnvironmentId: Schema.optional(EnvironmentId),
   targetThreadId: ThreadId,
   sourcePoint: OrchestrationV2ContextSourcePoint,
   basePoint: Schema.NullOr(OrchestrationV2ContextSourcePoint),
@@ -882,6 +884,7 @@ export const OrchestrationV2RemoteTaskChild = Schema.Struct({
    * restarts. `false`: a Stop here owes one to a task that already had its result.
    */
   stoppedThere: Schema.optional(Schema.Boolean),
+  settledThere: Schema.optional(Schema.Boolean),
   /**
    * Stops asked for here once the task had its result. The count names the
    * one owed, so each reaches the thread there once however often it is sent.
@@ -1039,6 +1042,7 @@ export const OrchestrationV2PendingBackgroundTask = kindUnionWithFallback(
       /** The owning provider thread's instance, populated in derived pending work. */
       providerInstanceId: Schema.optional(ProviderInstanceId),
       childThreadId: Schema.optional(ThreadId),
+      childEnvironmentId: Schema.optional(EnvironmentId),
     }),
     Schema.Struct({ ...PendingBackgroundTaskFields, kind: Schema.Literal("command") }),
     Schema.Struct({ ...PendingBackgroundTaskFields, kind: Schema.Literal("monitor") }),
@@ -1264,6 +1268,7 @@ export type OrchestrationV2RuntimeRequest = typeof OrchestrationV2RuntimeRequest
 const SubagentNotificationSource = Schema.Struct({
   kind: Schema.Literal("subagent"),
   childThreadId: Schema.optional(ThreadId),
+  childEnvironmentId: Schema.optional(EnvironmentId),
 });
 const CommandNotificationSource = Schema.Struct({ kind: Schema.Literal("command") });
 
@@ -1274,6 +1279,7 @@ export const OrchestrationV2NotificationSource = kindUnionWithFallback(
       kind: Schema.Literal("delegated_task"),
       taskIds: Schema.Array(NodeId),
       childThreadId: Schema.optional(ThreadId),
+      childEnvironmentId: Schema.optional(EnvironmentId),
     }),
     Schema.Struct({
       kind: Schema.Literal("background_task"),
@@ -3492,6 +3498,13 @@ const OrchestrationV2InternalCommand = Schema.Union([
    * and without it (a Stop or cancel here) the task owes a stop there instead.
    */
   Schema.Struct({
+    type: Schema.Literal("delegated_task.remote.progress"),
+    commandId: CommandId,
+    parentThreadId: ThreadId,
+    taskId: NodeId,
+    status: Schema.Literals(["pending", "running", "waiting"]),
+  }),
+  Schema.Struct({
     type: Schema.Literal("delegated_task.remote.complete"),
     commandId: CommandId,
     parentThreadId: ThreadId,
@@ -3505,6 +3518,7 @@ const OrchestrationV2InternalCommand = Schema.Union([
      * the stop owed for whatever follows it.
      */
     stoppedThere: Schema.optional(Schema.Literals(["ran-out", "stopped"])),
+    settledThere: Schema.optional(Schema.Literal(true)),
     /** The stop generation this report acknowledges; absent for the original unnumbered stop. */
     stopCount: Schema.optional(NonNegativeInt),
   }),

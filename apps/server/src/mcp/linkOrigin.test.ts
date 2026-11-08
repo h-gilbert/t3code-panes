@@ -7,6 +7,7 @@ import {
   ContextTransferId,
   EnvironmentId,
   NodeId,
+  isListedThreadLineage,
   type OrchestrationV2Run,
   ProjectId,
   ProviderDriverKind,
@@ -331,7 +332,18 @@ it.layer(Layer.provideMerge(layerTools, layerOrchestration))("work a link starts
         title: "Laptop parent",
       };
       const task = yield* launch(laptop, "Delegated from the laptop", { delegatedFrom });
-      assert.deepEqual((yield* projections.getThreadShell(task))?.delegatedFrom, delegatedFrom);
+      const remoteAgent = (yield* projections.getThreadShell(task))!;
+      assert.deepEqual(remoteAgent.delegatedFrom, delegatedFrom);
+      assert.equal(remoteAgent.lineage.relationshipToParent, "subagent");
+      assert.equal(remoteAgent.lineage.parentThreadId, delegatedFrom.threadId);
+      assert.equal(remoteAgent.lineage.parentEnvironmentId, delegatedFrom.environmentId);
+      assert.isFalse(isListedThreadLineage(remoteAgent.lineage));
+      assert.equal(
+        (yield* projections.listActiveShellIndex()).find((row) => row.id === task)?.lineage
+          .parentEnvironmentId,
+        delegatedFrom.environmentId,
+      );
+      assert.isNull((yield* projections.getThreadShell(plain))!.lineage.relationshipToParent);
       const claimed = yield* launch(claudeCode, "Claims a parent", { delegatedFrom });
       assert.equal((yield* projections.getThreadShell(claimed))?.delegatedFrom, undefined);
     }),

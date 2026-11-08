@@ -28,12 +28,14 @@ import * as Stream from "effect/Stream";
 import type * as Tool from "effect/ai/Tool";
 
 import type * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
+import { ThreadToolkit } from "../mcp/toolkits/thread/tools.ts";
 import { ProjectToolkit } from "../mcp/toolkits/project/tools.ts";
 import {
   resolveInteractionMode,
   resolveRuntimeMode,
   taskPrompt,
 } from "../mcp/delegatedTaskModes.ts";
+import { delegatedTaskQuestionCommand } from "../orchestration-v2/delegatedTaskQuestion.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
@@ -223,7 +225,7 @@ const make = Effect.gen(function* () {
         return yield* new OrchestratorMcpFailure({
           code: "invalid_request",
           message:
-            'A task in a linked environment runs in that project\'s checkout; isolation "worktree" is not supported there. Omit isolation, or use t3_thread_launch with environmentId and a worktree workspaceStrategy.',
+            'A task in a linked environment runs in that project\'s checkout; isolation "worktree" is not supported there. Omit isolation and select target.projectId for the intended checkout.',
         });
       }
       // The provider and model inherit as they do for a task here. Another
@@ -375,6 +377,7 @@ const make = Effect.gen(function* () {
     result: string,
     stoppedThere: "ran-out" | "stopped" | undefined,
     stopCount?: number,
+    settledThere?: true,
   ) {
     const attempt = yield* random.uuidV4();
     yield* threads
@@ -387,6 +390,7 @@ const make = Effect.gen(function* () {
         result,
         ...(stoppedThere === undefined ? {} : { stoppedThere }),
         ...(stopCount === undefined ? {} : { stopCount }),
+        ...(settledThere === undefined ? {} : { settledThere }),
       })
       .pipe(
         Effect.catch((error) =>
@@ -529,7 +533,7 @@ const make = Effect.gen(function* () {
           // Gone there, or no link to reach it by: nothing left to stop there.
           const { task } = yield* readTask(parentThreadId, taskId);
           const stopCount = task?.remoteChild?.stopCount;
-          yield* complete(parentThreadId, taskId, "failed", reason, "stopped", stopCount);
+          yield* complete(parentThreadId, taskId, "failed", reason, "stopped", stopCount, true);
         }),
       }),
       Effect.retry(followRetry),
@@ -584,7 +588,7 @@ const make = Effect.gen(function* () {
         );
         return yield* settled(parentThreadId, taskId);
       }
-      return true;
+      return yield* settled(parentThreadId, taskId);
     }
     const endedHere = threads
       .streamStoredEventsFrom({
@@ -613,11 +617,55 @@ const make = Effect.gen(function* () {
         // tasks to wake it for the answer, which a task here waits for too.
         // An older peer ignores this and reports the run alone.
         untilDelegatedWorkSettled: true,
+        afterSequence: following.get(taskId)?.sequence ?? 0,
       })
       .pipe(Effect.raceFirst(endedHere));
     // The next look reads the result and stops it there.
     if ("endedHere" in waited) return false;
-    if (waited.timedOut) return false;
+    const follower = following.get(taskId);
+    if (follower !== undefined && waited.eventSequence !== undefined)
+      follower.sequence = waited.eventSequence;
+    for (const request of waited.runtimeRequests ?? []) {
+      if (request.kind !== "user_input") continue;
+      const question = delegatedTaskQuestionCommand(task, request);
+      if (request.status === "pending") {
+        yield* threads.dispatch(question);
+        follower?.questions.add(request.id);
+      } else if (follower?.questions.delete(request.id)) {
+        const parent = yield* threads.getThreadRecords(parentThreadId, ["runs"]);
+        const queued = parent.runs.find(
+          (run) => run.status === "queued" && run.userMessageId === question.messageId,
+        );
+        if (queued !== undefined)
+          yield* threads.dispatch({
+            type: "queued-run.cancel",
+            commandId: CommandId.make(
+              `server:delegated-task-question-cancel:${parentThreadId}:${request.id}`,
+            ),
+            threadId: parentThreadId,
+            runId: queued.id,
+          });
+      }
+    }
+    if (waited.timedOut) {
+      const status =
+        waited.status === "waiting"
+          ? "waiting"
+          : waited.status === "queued" || waited.status === "preparing"
+            ? "pending"
+            : "running";
+      if (task.status !== status)
+        yield* threads.dispatch({
+          type: "delegated_task.remote.progress",
+          commandId: CommandId.make(
+            `command:remote-task-progress:${taskId}:${yield* random.uuidV4()}`,
+          ),
+          parentThreadId,
+          taskId,
+          status,
+        });
+      return false;
+    }
     // A task recorded without its run waits on the thread's latest; a
     // thread there with none has nothing left to wait for.
     if (waited.runId === null) {
@@ -653,12 +701,42 @@ const make = Effect.gen(function* () {
    * its result, and still owes a stop there for what may follow the run;
    * the next look sends it.
    */
-  const settled = (parentThreadId: ThreadId, taskId: NodeId) =>
-    readTask(parentThreadId, taskId).pipe(
-      Effect.map(({ task }) => task?.remoteChild?.stoppedThere === true),
+  const settled = Effect.fn("RemoteDelegation.settled")(function* (
+    parentThreadId: ThreadId,
+    taskId: NodeId,
+  ) {
+    const { thread, task } = yield* readTask(parentThreadId, taskId);
+    const remote = task?.remoteChild;
+    if (remote?.stoppedThere !== true) return false;
+    if (remote.settledThere === true || task?.result == null) return true;
+    const scope = followScope(
+      { threadId: parentThreadId, providerInstanceId: thread.providerInstanceId },
+      remote,
     );
+    yield* forwarding
+      .call(scope, ThreadToolkit.tools.t3_thread_organize, remote.environmentId, {
+        threadId: remote.threadId,
+        action: "settle",
+      })
+      .pipe(
+        Effect.catchIf(
+          (error) => isFinal(error) || isModeRefusal(error),
+          () => Effect.void,
+        ),
+      );
+    yield* complete(
+      parentThreadId,
+      taskId,
+      terminalStatus(task.status),
+      task.result,
+      "stopped",
+      remote.stopCount,
+      true,
+    );
+    return true;
+  });
 
-  const following = new Map<NodeId, { again: boolean }>();
+  const following = new Map<NodeId, { again: boolean; sequence: number; questions: Set<string> }>();
 
   /**
    * `follow`, at most once per task. Asked again while it runs, say by a
@@ -672,7 +750,7 @@ const make = Effect.gen(function* () {
         running.again = true;
         return Effect.void;
       }
-      const state = { again: false };
+      const state = { again: false, sequence: 0, questions: new Set<string>() };
       following.set(taskId, state);
       return follow(parentThreadId, taskId).pipe(
         // Checked and released in one step, so a request between them is never lost.

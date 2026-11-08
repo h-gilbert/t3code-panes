@@ -196,7 +196,10 @@ export function runningWorkspaceSubagentsByParent(
     while (child !== undefined) {
       const parent =
         child.lineage.relationshipToParent === "subagent" && child.lineage.parentThreadId
-          ? scopeThreadRef(child.environmentId, child.lineage.parentThreadId)
+          ? scopeThreadRef(
+              child.lineage.parentEnvironmentId ?? child.environmentId,
+              child.lineage.parentThreadId,
+            )
           : child.delegatedFrom;
       if (parent == null) break;
       const parentKey = scopedThreadKey(parent);

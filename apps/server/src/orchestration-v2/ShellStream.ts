@@ -132,7 +132,8 @@ function hiddenChildAncestorIds(
   const ancestorIds = new Set<string>();
   for (const thread of threads) {
     if (isListedThreadLineage(thread.lineage)) continue;
-    if (thread.lineage.parentThreadId !== null) ancestorIds.add(thread.lineage.parentThreadId);
+    if (thread.lineage.parentEnvironmentId === undefined && thread.lineage.parentThreadId !== null)
+      ancestorIds.add(thread.lineage.parentThreadId);
     ancestorIds.add(thread.lineage.rootThreadId);
   }
   return ancestorIds;

@@ -418,7 +418,9 @@ export function ThreadRelationshipsPanel(props: {
   const parentThreadId =
     currentThread?.forkedFrom?.type === "run"
       ? currentThread.forkedFrom.threadId
-      : currentThread?.lineage.parentThreadId;
+      : currentThread?.lineage.parentEnvironmentId === undefined
+        ? currentThread?.lineage.parentThreadId
+        : null;
   const parentShell = parentThreadId
     ? (relationshipShells.find((thread) => thread.id === parentThreadId) ??
       archivedShells?.find((thread) => thread.id === parentThreadId))

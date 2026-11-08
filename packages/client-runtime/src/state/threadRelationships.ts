@@ -86,6 +86,7 @@ export function deriveThreadRelationshipGraph(input: {
       ? [...threads, { ...selectedThread, activityRunStatus: null, status: null }]
       : threads;
   for (const thread of lineageThreads) {
+    if (thread.lineage.parentEnvironmentId !== undefined) continue;
     const parentThreadId =
       thread.forkedFrom?.type === "run"
         ? thread.forkedFrom.threadId
@@ -116,6 +117,7 @@ export function deriveThreadRelationshipGraph(input: {
       });
     }
     for (const transfer of input.projection.contextTransfers) {
+      if (transfer.sourceEnvironmentId !== undefined) continue;
       if (transfer.sourceThreadId === transfer.targetThreadId) continue;
       addEdge({
         sourceThreadId: transfer.sourceThreadId,

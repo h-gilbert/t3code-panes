@@ -1,5 +1,6 @@
 import type {
   OrchestrationV2PendingBackgroundTask,
+  OrchestrationV2RemoteTaskChild,
   OrchestrationV2ProviderThread,
   OrchestrationV2Run,
   OrchestrationV2TurnItem,
@@ -136,6 +137,7 @@ type PendingBackgroundWorkTurnItem = {
   readonly monitor?: boolean | undefined;
   readonly prompt?: string | undefined;
   readonly childThreadId?: ThreadId | null;
+  readonly remoteChild?: OrchestrationV2RemoteTaskChild | undefined;
 };
 
 function isLatestRunSettledForBackgroundWait(
@@ -189,7 +191,14 @@ function pendingTaskFromTurnItem(
         ...(item.owningProviderInstanceId === undefined
           ? {}
           : { providerInstanceId: item.owningProviderInstanceId }),
-        ...(item.childThreadId == null ? {} : { childThreadId: item.childThreadId }),
+        ...(item.remoteChild === undefined
+          ? item.childThreadId == null
+            ? {}
+            : { childThreadId: item.childThreadId }
+          : {
+              childThreadId: item.remoteChild.threadId,
+              childEnvironmentId: item.remoteChild.environmentId,
+            }),
       };
     case "command_execution":
       return { ...named, kind: item.monitor === true ? "monitor" : "command" };

@@ -883,7 +883,8 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
     activeThread?.lineage.relationshipToParent === "subagent"
       ? activeThread.lineage.parentThreadId
       : null;
-  const parentSubagentEnvironmentId = activeThread?.environmentId ?? null;
+  const parentSubagentEnvironmentId =
+    activeThread?.lineage.parentEnvironmentId ?? activeThread?.environmentId ?? null;
   const parentSubagentThreadRef = (() => {
     if (parentSubagentEnvironmentId === null || parentSubagentThreadId === null) {
       return null;
