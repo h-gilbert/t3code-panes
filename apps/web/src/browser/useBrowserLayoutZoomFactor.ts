@@ -13,3 +13,13 @@ export function useBrowserLayoutZoomFactor(previewZoomFactor: number) {
   const windowZoomFactor = useSyncExternalStore(subscribeToWindowZoom, readWindowZoomFactor);
   return resolveBrowserLayoutZoomFactor(previewZoomFactor, windowZoomFactor);
 }
+
+const readWindowSize = () => `${window.innerWidth}x${window.innerHeight}`;
+
+/** The window's CSS viewport, updated on resize. */
+export function useWindowSize() {
+  const [width, height] = useSyncExternalStore(subscribeToWindowZoom, readWindowSize)
+    .split("x")
+    .map(Number);
+  return { width: width!, height: height! };
+}

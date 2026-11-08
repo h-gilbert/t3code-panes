@@ -1,5 +1,6 @@
 vi.mock("./useBrowserLayoutZoomFactor", () => ({
   useBrowserLayoutZoomFactor: (factor: number) => factor,
+  useWindowSize: () => ({ width: 3840, height: 2160 }),
 }));
 import {
   DEFAULT_CLIENT_SETTINGS,
