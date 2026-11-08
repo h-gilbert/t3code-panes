@@ -3,7 +3,6 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import * as PreviewManager from "../../preview/Manager.ts";
 import * as DesktopClientSettings from "../../settings/DesktopClientSettings.ts";
 import * as DesktopSnapShot from "../../snapShot/DesktopSnapShot.ts";
 import * as IpcChannels from "../channels.ts";
@@ -28,7 +27,5 @@ export const setClientSettings = DesktopIpc.makeIpcMethod({
     const snapShot = yield* DesktopSnapShot.DesktopSnapShot;
     yield* clientSettings.set(settings);
     yield* snapShot.configure(settings);
-    // Looking up a browser session applies a changed proxy to every open one.
-    yield* (yield* PreviewManager.PreviewManager).getBrowserSession();
   }),
 });
