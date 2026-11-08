@@ -5,7 +5,11 @@ import {
   secretRequestDisplay,
   secretRequestFailureMessage,
   secretRequestPrivacyNote,
+  secretRequestReference,
+  secretRequestSources,
   type SecretRequestItem,
+  type SecretRequestReply,
+  type SecretRequestSource,
 } from "@t3tools/client-runtime/secret-request";
 import {
   isAtomCommandInterrupted,
@@ -14,17 +18,20 @@ import {
 import {
   AuthAccessWriteScope,
   type EnvironmentId,
-  type SecretRequestAnswerInput,
   type OrchestrationV2ProjectedTurnItem,
+  type SecretProviderId,
 } from "@t3tools/contracts";
+import { useAtomValue } from "@effect/atom-react";
 import { CheckIcon, LockIcon, MinusIcon, ShieldCheckIcon } from "lucide-react";
 import { useId, useRef, useState, type FormEvent } from "react";
 
+import { isSecretsFeatureEnabled } from "../../env";
 import { useEnvironmentScope } from "../../state/session";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { SecretSourceSelect } from "../settings/SecretSourceInput";
 import { WorkLogRow } from "./WorkLog";
 
 export function SecretRequestCard(props: {
@@ -56,6 +63,15 @@ export function SecretRequestCard(props: {
   return <PendingSecretRequestForm environmentId={props.environmentId} item={item} />;
 }
 
+const NO_SOURCES: ReadonlyArray<SecretRequestSource> = [];
+
+function useSecretRequestSources(environmentId: EnvironmentId) {
+  const config = useAtomValue(serverEnvironment.configValueAtom(environmentId));
+  return isSecretsFeatureEnabled
+    ? secretRequestSources(config, config?.settings.secretProviders ?? {})
+    : NO_SOURCES;
+}
+
 function PendingSecretRequestForm(props: {
   readonly environmentId: EnvironmentId;
   readonly item: SecretRequestItem;
@@ -71,22 +87,21 @@ function PendingSecretRequestForm(props: {
     reportFailure: false,
     reportDefect: false,
   });
+  const allSources = useSecretRequestSources(props.environmentId);
+  // Saved credentials hold their own value in the vault, so they never come from a reference.
+  const sources = item.credential === undefined ? allSources : NO_SOURCES;
+  const [sourceId, setSourceId] = useState<SecretProviderId | null>(null);
+  const source = sources.find((candidate) => candidate.id === sourceId) ?? null;
   const [secret, setSecret] = useState("");
   const [username, setUsername] = useState("");
   const [scope, setScope] = useState<"project" | "environment">("project");
-  const saveAnswer = (): SecretRequestAnswerInput["answer"] => ({
-    type: "save",
-    secret,
-    ...(item.credential === undefined
-      ? {}
-      : { scope, ...(item.credential.kind === "login" ? { username: username.trim() } : {}) }),
-  });
+  const [reference, setReference] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Enter and click can both submit before a render.
   const inFlight = useRef(false);
 
-  const send = async (reply: SecretRequestAnswerInput["answer"]) => {
+  const send = async (reply: SecretRequestReply) => {
     const input = secretRequestAnswerInput(item, reply);
     if (input === null || inFlight.current) return;
     inFlight.current = true;
@@ -99,6 +114,7 @@ function PendingSecretRequestForm(props: {
     if (result._tag === "Success") {
       setSecret("");
       setUsername("");
+      setReference("");
       return;
     }
     if (!isAtomCommandInterrupted(result)) {
@@ -108,8 +124,22 @@ function PendingSecretRequestForm(props: {
 
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    void send(saveAnswer());
+    if (source === null) {
+      void send({
+        type: "save",
+        secret,
+        ...(item.credential === undefined
+          ? {}
+          : { scope, ...(item.credential.kind === "login" ? { username: username.trim() } : {}) }),
+      });
+    } else if (secretRequestReference(source, reference) === undefined) {
+      setError(source.invalidReferenceMessage);
+    } else {
+      void send({ type: "reference", source, reference });
+    }
   };
+  const draft = source === null ? secret : reference;
+  const describedBy = error !== null ? `${privacyId} ${errorId}` : privacyId;
 
   return (
     <form
@@ -174,34 +204,70 @@ function PendingSecretRequestForm(props: {
         </div>
       ) : null}
       <div className="flex min-w-0 items-center gap-2">
-        <div className="min-w-0 flex-1">
-          <Input
-            id={inputId}
-            type="password"
-            autoComplete="off"
-            autoCorrect="off"
-            autoCapitalize="off"
-            spellCheck={false}
-            data-1p-ignore
-            data-lpignore="true"
-            data-bwignore
-            placeholder={
-              item.placeholder ??
-              (item.credential?.kind === "login" ? "Password" : SECRET_REQUEST_DEFAULT_PLACEHOLDER)
-            }
-            value={secret}
+        {sources.length > 0 ? (
+          <SecretSourceSelect
+            value={source?.id ?? null}
+            sources={sources}
+            label={item.label}
             disabled={submitting}
-            aria-invalid={error !== null || undefined}
-            aria-describedby={error !== null ? `${privacyId} ${errorId}` : privacyId}
-            onChange={(event) => setSecret(event.currentTarget.value)}
+            onValueChange={(next) => {
+              setSourceId(next);
+              setError(null);
+            }}
           />
+        ) : null}
+        <div className="min-w-0 flex-1">
+          {source === null ? (
+            <Input
+              id={inputId}
+              // A CSS-masked text field still exposes its value to screen readers.
+              type="password"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              data-1p-ignore
+              data-lpignore="true"
+              data-bwignore
+              placeholder={
+                item.placeholder ??
+                (item.credential?.kind === "login"
+                  ? "Password"
+                  : SECRET_REQUEST_DEFAULT_PLACEHOLDER)
+              }
+              value={secret}
+              disabled={submitting}
+              aria-invalid={error !== null || undefined}
+              aria-describedby={describedBy}
+              onChange={(event) => setSecret(event.currentTarget.value)}
+            />
+          ) : (
+            <Input
+              id={inputId}
+              font="mono"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              placeholder={source.referencePlaceholder}
+              value={reference}
+              disabled={submitting}
+              aria-invalid={error !== null || undefined}
+              aria-describedby={describedBy}
+              onChange={(event) => {
+                setReference(event.currentTarget.value);
+                setError(null);
+              }}
+            />
+          )}
         </div>
         <Button
           type="submit"
           disabled={
             submitting ||
-            secret.length === 0 ||
-            (item.credential?.kind === "login" && username.trim().length === 0)
+            draft.length === 0 ||
+            (source !== null && draft.trim().length === 0) ||
+            (source === null && item.credential?.kind === "login" && username.trim().length === 0)
           }
         >
           Save securely

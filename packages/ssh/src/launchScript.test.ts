@@ -12,6 +12,9 @@ import * as NodeEvents from "node:events";
 
 import { buildRemoteLaunchScript } from "./tunnel.ts";
 
+// Read outside Effect code so the spawned shells can find `node` and coreutils.
+const HOST_PATH = process.env.PATH ?? "";
+
 const decodeLaunchResult = Schema.decodeUnknownEffect(
   Schema.fromJsonString(
     Schema.Struct({
@@ -82,7 +85,7 @@ it.effect.each(["plain", "quoted", "launchd"] as const)(
         );
         const result = NodeChildProcess.spawnSync("/bin/sh", ["-s", "--", "test-key"], {
           input: buildRemoteLaunchScript({ nodeScriptPath: serverPath }),
-          env: { HOME: home, PATH: process.env.PATH ?? "" },
+          env: { HOME: home, PATH: HOST_PATH },
           encoding: "utf8",
           timeout: 10_000,
         });
@@ -116,7 +119,7 @@ it.effect("reuses the boot service even when stale managed metadata has no PID",
       yield* Effect.promise(() => NodeEvents.EventEmitter.once(service, "message"));
       const result = NodeChildProcess.spawnSync("/bin/sh", ["-s", "--", "test-key"], {
         input: buildRemoteLaunchScript({ nodeScriptPath: serverPath }),
-        env: { HOME: home, PATH: process.env.PATH ?? "" },
+        env: { HOME: home, PATH: HOST_PATH },
         encoding: "utf8",
         timeout: 30_000,
       });
@@ -167,7 +170,7 @@ it.effect("refuses to retire a live duplicate and switch to a stale service", ()
       NodeFS.writeFileSync(NodePath.join(stateDir, "port"), String(duplicatePort));
       const result = NodeChildProcess.spawnSync("/bin/sh", ["-s", "--", "test-key"], {
         input: buildRemoteLaunchScript({ nodeScriptPath: serverPath }),
-        env: { HOME: home, PATH: process.env.PATH ?? "" },
+        env: { HOME: home, PATH: HOST_PATH },
         encoding: "utf8",
         timeout: 30_000,
       });
@@ -235,7 +238,7 @@ it.effect("adopts a service that appears while the SSH contender is starting", (
           'wait_ready "60000"',
           'wait_ready "1000"',
         ),
-        env: { HOME: home, PATH: process.env.PATH ?? "" },
+        env: { HOME: home, PATH: HOST_PATH },
         encoding: "utf8",
         timeout: 30_000,
       });
@@ -275,7 +278,7 @@ it.effect(
       const launch = () => {
         const result = NodeChildProcess.spawnSync("/bin/sh", ["-s", "--", "test-key"], {
           input: buildRemoteLaunchScript({ nodeScriptPath: serverPath }),
-          env: { HOME: home, PATH: process.env.PATH ?? "" },
+          env: { HOME: home, PATH: HOST_PATH },
           encoding: "utf8",
           timeout: 30_000,
         });

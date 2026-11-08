@@ -9,11 +9,8 @@ import * as Effect from "effect/Effect";
 import { Argument, Command } from "effect/cli";
 
 /**
- * Small helpers the SSH launch script needs on the remote host. The script
- * used to run these as inline `node -` snippets; archive-distributed runtimes
- * have no Node on the remote, so the executable provides them instead. Output
- * and exit codes match the snippets exactly because the shell script parses
- * them.
+ * Helpers the SSH launch script runs on remote hosts that have no Node. The
+ * script parses their output and exit codes, so keep both stable.
  */
 
 const canBind = (port: number) =>
@@ -107,7 +104,7 @@ const runtimePort = Command.make("runtime-port", {
   Command.withHandler(({ runtimeFile }) =>
     Effect.sync(() => {
       try {
-        // @effect-diagnostics-next-line preferSchemaOverJson:off - mirrors the shell snippet's loose parse.
+        // @effect-diagnostics-next-line globalJsonInEffect:off - mirrors the shell snippet's loose parse.
         const runtime = JSON.parse(NodeFS.readFileSync(runtimeFile, "utf8")) as {
           pid?: unknown;
           port?: unknown;

@@ -35,6 +35,7 @@ const AgentAwarenessOperation = Schema.Literals([
   "read-device-unregistration-relay-token",
   "load-device-registration-identifier",
   "load-device-unregistration-identifier",
+  "load-registration-record",
 ]);
 
 export class AgentAwarenessOperationError extends Schema.TaggedError<AgentAwarenessOperationError>()(
@@ -50,6 +51,11 @@ export class AgentAwarenessOperationError extends Schema.TaggedError<AgentAwaren
 }
 
 const environmentConnections = new Map<EnvironmentId, SavedRemoteConnection>();
+
+export type AgentAwarenessRegistrationError =
+  | AgentAwarenessOperationError
+  | ManagedRelay.ManagedRelayClientError;
+
 let pushTokenSubscription: { remove: () => void } | null = null;
 let directNotificationPermissionRequested = false;
 
@@ -275,7 +281,7 @@ function registrationSignature(body: RelayDeviceRegistrationRequest): string {
 const registerDeviceWithRelay = Effect.fn("remoteRegistration.registerDeviceWithRelay")(function* (
   body: RelayDeviceRegistrationRequest,
   expectedGeneration: number,
-): Effect.fn.Return<void, unknown, ManagedRelay.ManagedRelayClient> {
+): Effect.fn.Return<void, AgentAwarenessRegistrationError, ManagedRelay.ManagedRelayClient> {
   if (expectedGeneration !== deviceRegistrationGeneration) {
     return;
   }
@@ -302,7 +308,8 @@ const registerDeviceWithRelay = Effect.fn("remoteRegistration.registerDeviceWith
   const identity = relayTokenProviderIdentity ?? "";
   const persisted = yield* Effect.tryPromise({
     try: () => loadAgentAwarenessRegistrationRecord(),
-    catch: (cause) => cause,
+    catch: (cause) =>
+      new AgentAwarenessOperationError({ operation: "load-registration-record", cause }),
   }).pipe(Effect.orElseSucceed(() => null));
   if (expectedGeneration !== deviceRegistrationGeneration) {
     // Signed out while the record loaded — do not resurrect the cleared
@@ -344,7 +351,7 @@ const unregisterDeviceWithRelay = Effect.fn("remoteRegistration.unregisterDevice
   function* (input: {
     readonly deviceId: string;
     readonly tokenProvider: () => Promise<string | null>;
-  }): Effect.fn.Return<void, unknown, ManagedRelay.ManagedRelayClient> {
+  }): Effect.fn.Return<void, AgentAwarenessRegistrationError, ManagedRelay.ManagedRelayClient> {
     if (!readRelayConfig()) return;
     const token = yield* Effect.tryPromise({
       try: input.tokenProvider,
@@ -455,7 +462,7 @@ function enqueueDeviceRegistration(input: DeviceRegistrationInput, context: stri
 const registerDevice = Effect.fn("remoteRegistration.registerDevice")(function* (
   input: DeviceRegistrationInput = {},
   expectedGeneration = deviceRegistrationGeneration,
-): Effect.fn.Return<void, unknown, ManagedRelay.ManagedRelayClient> {
+): Effect.fn.Return<void, AgentAwarenessRegistrationError, ManagedRelay.ManagedRelayClient> {
   if (!canRegisterAgentAwarenessDevice()) {
     logRegistrationDebug("device registration skipped; platform does not support it");
     return;
@@ -519,7 +526,7 @@ const registerDevice = Effect.fn("remoteRegistration.registerDevice")(function* 
 
 function registerDeviceForCurrentUser(): Effect.Effect<
   void,
-  unknown,
+  AgentAwarenessRegistrationError,
   ManagedRelay.ManagedRelayClient
 > {
   return registerDevice(undefined);

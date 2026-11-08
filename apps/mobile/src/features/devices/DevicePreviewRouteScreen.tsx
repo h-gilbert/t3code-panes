@@ -23,6 +23,8 @@ import {
   androidHeaderMenuActions,
   findHeaderMenuAction,
 } from "../../components/ui/headerMenu.android";
+import { AppBar } from "../../components/ui/AppBar";
+import { useBarOverlap } from "../../components/ui/useBarInset";
 import type { AppBarMenuItem } from "../../components/ui/AppBar.types";
 import { useAppForeground } from "../../lib/appState";
 import { uuidv4 } from "../../lib/uuid";
@@ -79,6 +81,7 @@ export function DevicePreviewScreen({
 }) {
   const embedded = onMaximize !== undefined;
   const insets = useSafeAreaInsets();
+  const barOverlap = useBarOverlap();
   const { themeVariables } = useAppearancePreferences();
   const focused = useIsFocused();
   const foreground = useAppForeground();
@@ -237,20 +240,19 @@ export function DevicePreviewScreen({
     <View className="flex-1" style={{ backgroundColor: themeVariables["--color-sheet-solid"] }}>
       {!embedded ? <StatusBar hidden animated /> : null}
       {embedded ? (
-        <View
-          className="flex-row items-center gap-1 px-2 pb-2"
-          style={{ paddingTop: Math.max(insets.top, 8) }}
-        >
-          <SheetCloseButton accessibilityLabel="Close device preview" onClose={onClose} />
-          <AppText numberOfLines={1} className="min-w-0 flex-1 font-t3-medium text-sm">
-            {preview?.name ?? "Devices"}
-          </AppText>
-          <ControlPill
-            accessibilityLabel="Maximize device"
-            icon="arrow.up.left.and.arrow.down.right"
-            onPress={() => onMaximize(preview?.key ?? null)}
+        <>
+          <AppBar
+            title={preview?.name ?? "Devices"}
+            actions={[
+              {
+                accessibilityLabel: "Maximize device",
+                icon: "arrow.up.left.and.arrow.down.right",
+                onPress: () => onMaximize(preview?.key ?? null),
+              },
+            ]}
           />
-        </View>
+          <View style={{ height: barOverlap }} />
+        </>
       ) : null}
       {inputDetail ? (
         <AppText className="px-6 py-2 text-center text-sm text-foreground-muted">

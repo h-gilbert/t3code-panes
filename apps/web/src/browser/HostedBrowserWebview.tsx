@@ -190,6 +190,10 @@ export function HostedBrowserWebview(props: {
       setWebviewGeneration((generation) => generation + 1);
     }
   }
+  const active = presentation.visible && presentation.rect !== null;
+  // Another window owns the guest while it is hosted elsewhere, so this one never reports it shown.
+  const shown = !hostedElsewhere && (active || pictureInPicture);
+  const reportedShown = useEffectEvent(() => serverDriven && shown);
   const remountCrashedWebview = useEffectEvent(() => {
     setRecoverySrc(initialUrl ?? initialSrc);
     setWebviewGeneration((generation) => generation + 1);
@@ -214,6 +218,7 @@ export function HostedBrowserWebview(props: {
       const webContentsId = webview.getWebContentsId();
       if (Number.isInteger(webContentsId) && webContentsId > 0) {
         await bridge.registerWebview(runtimeTabId, webContentsId);
+        withDesktopTab(runtimeTabId, () => bridge.setShown(runtimeTabId, reportedShown()));
       }
     };
     const register = () => {
@@ -331,7 +336,6 @@ export function HostedBrowserWebview(props: {
     recordingActive,
   ]);
 
-  const active = presentation.visible && presentation.rect !== null;
   const lastRect = presentation.rect;
   const layoutZoomFactor = useBrowserLayoutZoomFactor(zoomFactor);
   const viewportWidth = viewport._tag === "fill" ? null : viewport.width;
@@ -422,6 +426,14 @@ export function HostedBrowserWebview(props: {
     wrapper.scrollTo({ left: 0, top: 0 });
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- A new tab or viewport size starts the canvas scrolled to its origin.
   }, [runtimeTabId, viewport._tag, viewportHeight, viewportWidth]);
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Report the mounted webview's visibility to the desktop host.
+  useEffect(() => {
+    const bridge = window.desktopBridge?.preview;
+    if (!clientSettingsHydrated || !bridge || !serverDriven) return;
+    withDesktopTab(runtimeTabId, () => bridge.setShown(runtimeTabId, shown));
+    return () => withDesktopTab(runtimeTabId, () => bridge.setShown(runtimeTabId, false));
+  }, [clientSettingsHydrated, runtimeTabId, serverDriven, shown]);
 
   if (!clientSettingsHydrated || !config || hostedElsewhere) return null;
 

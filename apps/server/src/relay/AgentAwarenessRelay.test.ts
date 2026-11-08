@@ -1,10 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off -- The relay signature fixture uses Node Ed25519 key generation and signing.
-import * as NodeCrypto from "node:crypto";
-import { RELAY_ACTIVITY_PUBLISH_TYP, verifyRelayJwt } from "@t3tools/shared/relayJwt";
-import {
-  type RelayAgentActivityPublishProofPayload,
-  RelayAgentActivityState,
-} from "@t3tools/contracts/relay";
+import { RelayAgentActivityState } from "@t3tools/contracts/relay";
 import {
   isAgentActivityPublishingEnabledValue,
   PUBLISH_AGENT_ACTIVITY_SECRET,
@@ -42,6 +36,7 @@ import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 
+import * as EnvironmentKeys from "../cloud/environmentKeys.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
@@ -211,6 +206,7 @@ const makeTestRelay = Effect.fnUntraced(function* (
     listActiveShellIndex: () => Effect.succeed([]),
     listOlderSettledThreads: unused,
     readShellSnapshot: unused,
+    getThreadTitles: unused,
     ensureLegacyTranscript: unused,
     dispatch: unused,
     searchThread: () => Effect.die("unused"),
@@ -285,6 +281,7 @@ const makeTestRelay = Effect.fnUntraced(function* (
     deletedAt: null,
   };
   const relay = yield* AgentAwarenessRelay.make.pipe(
+    Effect.provide(EnvironmentKeys.layer),
     Effect.provideService(ServerSecretStore.ServerSecretStore, secrets),
     Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
     Effect.provideService(ServerEnvironment.ServerEnvironment, {
@@ -990,45 +987,6 @@ it("requires an explicit opt-in before publishing agent activity", () => {
   expect(isAgentActivityPublishingEnabledValue("true")).toBe(true);
 });
 
-it.effect("signs the activity publish JWT and rejects tampering", () =>
-  Effect.gen(function* () {
-    const keyPair = NodeCrypto.generateKeyPairSync("ed25519", {
-      privateKeyEncoding: { format: "pem", type: "pkcs8" },
-      publicKeyEncoding: { format: "pem", type: "spki" },
-    });
-    const payload = {
-      iss: "t3-env:env",
-      aud: "https://relay.example.test",
-      sub: "env",
-      jti: "nonce-1",
-      iat: 100,
-      exp: 200,
-      environmentId: state.environmentId,
-      threadId: state.threadId,
-      state,
-    } satisfies RelayAgentActivityPublishProofPayload;
-    const proof = yield* AgentAwarenessRelay.signRelayAgentActivityPublishProof({
-      privateKey: keyPair.privateKey,
-      payload,
-    });
-    const verify = (token: string) =>
-      verifyRelayJwt({
-        publicKey: keyPair.publicKey,
-        token,
-        typ: RELAY_ACTIVITY_PUBLISH_TYP,
-        issuer: "t3-env:env",
-        audience: "https://relay.example.test",
-        nowEpochSeconds: 150,
-      });
-
-    expect(yield* verify(proof)).toMatchObject({ jti: "nonce-1", state });
-
-    const [header, body, signature = ""] = proof.split(".");
-    const corruptedSignature = `${signature.startsWith("a") ? "b" : "a"}${signature.slice(1)}`;
-    const rejection = yield* Effect.flip(verify(`${header}.${body}.${corruptedSignature}`));
-    expect(rejection).toBeDefined();
-  }).pipe(Effect.provide(EffectNodeCrypto.layer)),
-);
 it("resolves a missing thread or project to a tombstone", () => {
   expect(
     AgentAwarenessRelay.resolveAgentAwarenessRelayPublishSnapshot({

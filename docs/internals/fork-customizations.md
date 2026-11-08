@@ -71,6 +71,15 @@ remains available, with pane markers for settled threads still visible in a pane
   pane. Preserve intentional human focus when the user clicks into the browser.
 - The preview header stays reachable. Its close button immediately ends the browser session.
   Agent `preview_close` also ends the shared session across connected clients.
+- Preview sessions present as Chrome on every site: the User-Agent drops the T3Code and
+  Electron tokens, and CDP overrides client hints in guests and their cross-origin frames
+  and workers, which Turnstile requires once the UA is rewritten. Upstream's Teams-only
+  header rewrite is redundant with this and stays out (`apps/desktop/src/preview/BrowserSession.ts`).
+- A desktop selected as another environment's browser host renders that environment's
+  tabs and routes their events by environment id, including the `shown` reports the
+  server uses to reclaim idle agent tabs (`apps/server/src/preview/DesktopBrowserChannel.ts`,
+  `apps/desktop/src/preview/DesktopBrowserHost.ts`). A window showing a tab hosted
+  elsewhere never reports it shown.
 - Localhost URLs on remote environments resolve to that environment's private
   host, preserving port, path, query, and fragment. Local environments remain
   local. Unsupported public relay port routing must report an error.
@@ -169,6 +178,10 @@ already contains text. Preserve this when integrating upstream composer changes.
   `docs/operations/local-ios-updates.md` and its existing policy checks. Send the private
   `ios` origin only when the destination advertises `iosTurnOrigin`; older servers reject
   that value, so use `mobile` there.
+- Secret requests can save a reusable login or token to the environment's credential
+  vault, shared through the browser host. Saved values keep their exact bytes; never trim
+  them. Upstream's secret-provider references answer one-off secrets only, so credential
+  cards on web and mobile always take a typed value.
 - Updating source does not authorize replacing or restarting the installed app.
   Follow `docs/operations/fork-releases.md` for an authorized release and
   `docs/operations/local-desktop-promotion.md` for a requested one-off local install.

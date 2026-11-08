@@ -1,3 +1,4 @@
+// @effect-diagnostics processEnvInEffect:off -- isolates real git from the developer's global config by swapping process env around each case.
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
