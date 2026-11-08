@@ -35,3 +35,9 @@ export type DesktopBackendBootstrap = typeof DesktopBackendBootstrap.Type;
 
 /** Written to `<t3Home>/runtime` before update shutdown so the backend retains its managed tunnel. */
 export const DESKTOP_UPDATE_RESTART_MARKER_FILE = "desktop-update-restart";
+
+/**
+ * `<t3Home>/runtime/<this>` holds "<desktop pid> <hold-until epoch seconds>". While the pid
+ * lives or the deadline is ahead, SSH launchers must not start a server in that home.
+ */
+export const DESKTOP_HOME_HOLD_FILE = "desktop-home-hold";

@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off - runs the generated launch script with a real shell and Node server.
 import { assert, it } from "@effect/vitest";
+import { DESKTOP_HOME_HOLD_FILE } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -55,28 +56,38 @@ const freeLoopbackPort = Effect.promise(
     }),
 );
 
-it.effect.each(["plain", "quoted", "launchd"] as const)(
-  "does not start a competing server while a boot service is down (%s)",
+it.effect.each(["plain", "quoted", "launchd", "desktop open", "desktop restarting"] as const)(
+  "does not start a competing server while the home's owner is down (%s)",
   (kind) =>
     Effect.gen(function* () {
       if ((yield* HostProcess.Platform) === "win32") return;
       if (kind === "launchd" && !NodeFS.existsSync("/usr/libexec/PlistBuddy")) return;
       const home = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-ssh-service-gap-"));
       try {
-        const unit = NodePath.join(
-          home,
-          kind === "launchd"
-            ? "Library/LaunchAgents/com.t3tools.t3code.service.plist"
-            : ".config/systemd/user/t3code.service",
-        );
-        NodeFS.mkdirSync(NodePath.dirname(unit), { recursive: true });
         const baseDir = NodePath.join(home, ".t3");
-        NodeFS.writeFileSync(
-          unit,
-          kind === "launchd"
-            ? `<?xml version="1.0"?><plist version="1.0"><dict><key>EnvironmentVariables</key><dict><key>T3CODE_HOME</key><string>${baseDir}</string></dict></dict></plist>`
-            : `Environment=T3CODE_HOME=${kind === "quoted" ? JSON.stringify(baseDir) : baseDir}\n`,
-        );
+        if (kind === "desktop open" || kind === "desktop restarting") {
+          const hold = NodePath.join(baseDir, "runtime", DESKTOP_HOME_HOLD_FILE);
+          NodeFS.mkdirSync(NodePath.dirname(hold), { recursive: true });
+          // A dead desktop whose update deadline (year 2100) is still ahead.
+          NodeFS.writeFileSync(
+            hold,
+            kind === "desktop open" ? `${process.pid} 0\n` : "999999999 4102444800\n",
+          );
+        } else {
+          const unit = NodePath.join(
+            home,
+            kind === "launchd"
+              ? "Library/LaunchAgents/com.t3tools.t3code.service.plist"
+              : ".config/systemd/user/t3code.service",
+          );
+          NodeFS.mkdirSync(NodePath.dirname(unit), { recursive: true });
+          NodeFS.writeFileSync(
+            unit,
+            kind === "launchd"
+              ? `<?xml version="1.0"?><plist version="1.0"><dict><key>EnvironmentVariables</key><dict><key>T3CODE_HOME</key><string>${baseDir}</string></dict></dict></plist>`
+              : `Environment=T3CODE_HOME=${kind === "quoted" ? JSON.stringify(baseDir) : baseDir}\n`,
+          );
+        }
         const serverPath = NodePath.join(home, "must-not-start.mjs");
         const marker = NodePath.join(home, "started");
         NodeFS.writeFileSync(
@@ -90,7 +101,12 @@ it.effect.each(["plain", "quoted", "launchd"] as const)(
           timeout: 10_000,
         });
         assert.equal(result.status, 1);
-        assert.include(result.stderr, "background service owns this home");
+        assert.include(
+          result.stderr,
+          kind.startsWith("desktop")
+            ? "T3 Code is open or restarting"
+            : "background service owns this home",
+        );
         assert.isFalse(NodeFS.existsSync(marker));
         assert.isFalse(NodeFS.existsSync(NodePath.join(home, ".t3/ssh-launch/test-key/pid")));
       } finally {
@@ -257,50 +273,47 @@ it.effect("adopts a service that appears while the SSH contender is starting", (
   }),
 );
 
-it.effect(
-  "reconnecting keeps the managed server that owns the home's runtime record",
-  () =>
-    Effect.gen(function* () {
-      if ((yield* HostProcess.Platform) === "win32") return;
-      const home = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-ssh-launch-"));
-      const serverPath = NodePath.join(home, "fake-server.mjs");
-      NodeFS.writeFileSync(serverPath, FAKE_SERVER);
-      const stateDir = NodePath.join(home, ".t3", "ssh-launch", "test-key");
-      // A boot service for another home must not prevent an SSH-owned server.
-      const unit = NodePath.join(home, ".config/systemd/user/t3code.service");
-      NodeFS.mkdirSync(NodePath.dirname(unit), { recursive: true });
-      NodeFS.writeFileSync(unit, `Environment=T3CODE_HOME=${NodePath.join(home, "other")}\n`);
-      // Seed the launcher's preferred port with a free one so the script
-      // never probes a real T3 server on the default port.
-      NodeFS.mkdirSync(stateDir, { recursive: true });
-      NodeFS.writeFileSync(NodePath.join(stateDir, "port"), String(yield* freeLoopbackPort));
-      const launchedPids = new Set<number>();
-      const launch = () => {
-        const result = NodeChildProcess.spawnSync("/bin/sh", ["-s", "--", "test-key"], {
-          input: buildRemoteLaunchScript({ nodeScriptPath: serverPath }),
-          env: { HOME: home, PATH: HOST_PATH },
-          encoding: "utf8",
-          timeout: 30_000,
-        });
-        const pid = Number(NodeFS.readFileSync(NodePath.join(stateDir, "pid"), "utf8"));
-        launchedPids.add(pid);
-        assert.equal(result.status, 0, result.stderr);
-        return { pid, launch: JSON.parse(result.stdout.trim().split("\n").at(-1) ?? "") };
-      };
-      try {
-        const first = launch();
-        const second = launch();
+it.effect("reconnecting keeps the managed server that owns the home's runtime record", () =>
+  Effect.gen(function* () {
+    if ((yield* HostProcess.Platform) === "win32") return;
+    const home = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-ssh-launch-"));
+    const serverPath = NodePath.join(home, "fake-server.mjs");
+    NodeFS.writeFileSync(serverPath, FAKE_SERVER);
+    const stateDir = NodePath.join(home, ".t3", "ssh-launch", "test-key");
+    // A boot service for another home must not prevent an SSH-owned server.
+    const unit = NodePath.join(home, ".config/systemd/user/t3code.service");
+    NodeFS.mkdirSync(NodePath.dirname(unit), { recursive: true });
+    NodeFS.writeFileSync(unit, `Environment=T3CODE_HOME=${NodePath.join(home, "other")}\n`);
+    // Seed the launcher's preferred port with a free one so the script
+    // never probes a real T3 server on the default port.
+    NodeFS.mkdirSync(stateDir, { recursive: true });
+    NodeFS.writeFileSync(NodePath.join(stateDir, "port"), String(yield* freeLoopbackPort));
+    const launchedPids = new Set<number>();
+    const launch = () => {
+      const result = NodeChildProcess.spawnSync("/bin/sh", ["-s", "--", "test-key"], {
+        input: buildRemoteLaunchScript({ nodeScriptPath: serverPath }),
+        env: { HOME: home, PATH: HOST_PATH },
+        encoding: "utf8",
+        timeout: 30_000,
+      });
+      const pid = Number(NodeFS.readFileSync(NodePath.join(stateDir, "pid"), "utf8"));
+      launchedPids.add(pid);
+      assert.equal(result.status, 0, result.stderr);
+      return { pid, launch: JSON.parse(result.stdout.trim().split("\n").at(-1) ?? "") };
+    };
+    try {
+      const first = launch();
+      const second = launch();
 
-        assert.equal(second.pid, first.pid);
-        assert.isTrue(isAlive(first.pid));
-        assert.deepEqual(second.launch, first.launch);
-        assert.equal(first.launch.serverKind, "managed");
-      } finally {
-        for (const pid of launchedPids) {
-          if (isAlive(pid)) process.kill(pid);
-        }
-        NodeFS.rmSync(home, { recursive: true, force: true });
+      assert.equal(second.pid, first.pid);
+      assert.isTrue(isAlive(first.pid));
+      assert.deepEqual(second.launch, first.launch);
+      assert.equal(first.launch.serverKind, "managed");
+    } finally {
+      for (const pid of launchedPids) {
+        if (isAlive(pid)) process.kill(pid);
       }
-    }),
-  60_000,
+      NodeFS.rmSync(home, { recursive: true, force: true });
+    }
+  }),
 );

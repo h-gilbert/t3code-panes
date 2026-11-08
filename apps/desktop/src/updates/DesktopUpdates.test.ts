@@ -482,9 +482,11 @@ describe("DesktopUpdates", () => {
 
   it.effect("marks the backend stop for an install as an update restart", () => {
     let markersAtStop: ReadonlyArray<string> = [];
+    let holdAtStop: string | undefined;
     const harness = makeHarness({
       stopBackend: Effect.sync(() => {
         markersAtStop = [...harness.updateRestartMarkers];
+        holdAtStop = harness.homeHold();
       }),
     });
 
@@ -500,6 +502,10 @@ describe("DesktopUpdates", () => {
         assert.deepEqual(markersAtStop, [
           environment.path.join(environment.baseDir, "runtime", DESKTOP_UPDATE_RESTART_MARKER_FILE),
         ]);
+        // SSH clients must not take the home while the updated app relaunches.
+        const [pid, until] = (holdAtStop ?? "").trim().split(" ");
+        assert.equal(pid, String(process.pid));
+        assert.isAbove(Number(until), 0);
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
@@ -585,6 +591,7 @@ describe("DesktopUpdates", () => {
 
           yield* Fiber.interrupt(installFiber);
           assert.equal(harness.updateRestartMarkers.size, 0);
+          assert.equal(harness.homeHold(), `${process.pid} 0\n`);
         }),
       ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
     }),

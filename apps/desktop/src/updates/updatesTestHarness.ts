@@ -1,6 +1,6 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import type { DesktopUpdateState } from "@t3tools/contracts";
+import { DESKTOP_HOME_HOLD_FILE, type DesktopUpdateState } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as PlatformError from "effect/PlatformError";
@@ -240,6 +240,7 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
 
   const updateRestartMarkers = new Set<string>();
   const installRecords = new Map<string, string>();
+  let homeHold: string | undefined;
   let previousInstallRecord = options.installRecord;
   const isInstallRecord = (path: string) =>
     path.endsWith(DesktopUpdates.DESKTOP_UPDATE_INSTALL_RECORD_FILE);
@@ -264,6 +265,7 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
     writeFileString: (path, data) =>
       Effect.sync(() => {
         if (isInstallRecord(path)) installRecords.set(path, data);
+        else if (path.endsWith(DESKTOP_HOME_HOLD_FILE)) homeHold = data;
         else updateRestartMarkers.add(path);
       }),
     remove: (path) =>
@@ -301,6 +303,7 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
     installSteps,
     updateRestartMarkers,
     installRecords,
+    homeHold: () => homeHold,
     previousInstallRecord: () => previousInstallRecord,
     downloadCount: () => downloadCount,
     feedUrls: (): ElectronUpdater.ElectronUpdaterFeedUrl[] => feedUrls,
