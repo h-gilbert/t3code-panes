@@ -71,10 +71,10 @@ remains available, with pane markers for settled threads still visible in a pane
   pane. Preserve intentional human focus when the user clicks into the browser.
 - The preview header stays reachable. Its close button immediately ends the browser session.
   Agent `preview_close` also ends the shared session across connected clients.
-- Preview sessions present as Chrome on every site: the User-Agent drops the T3Code and
-  Electron tokens, and CDP overrides client hints in guests and their cross-origin frames
-  and workers, which Turnstile requires once the UA is rewritten. Upstream's Teams-only
-  header rewrite is redundant with this and stays out (`apps/desktop/src/preview/BrowserSession.ts`).
+- Preview sessions keep Electron's native identity, apart from upstream's Teams-only header
+  rewrite. Do not make them present as Chrome: Google's sign-in rejects Electron's Chromium
+  claiming to be Chrome ("This browser or app may not be secure"), and Turnstile fails a
+  rewritten User-Agent unless every frame and worker matches.
 - A desktop selected as another environment's browser host renders that environment's
   tabs and routes their events by environment id, including the `shown` reports the
   server uses to reclaim idle agent tabs (`apps/server/src/preview/DesktopBrowserChannel.ts`,
