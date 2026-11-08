@@ -16,7 +16,6 @@ import { ChildProcessSpawner } from "effect/process";
 
 import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
 import * as DesktopBackendManager from "./DesktopBackendManager.ts";
-import * as DesktopHomeHold from "./DesktopHomeHold.ts";
 import * as SshLaunchedHomeOwner from "./SshLaunchedHomeOwner.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
@@ -117,10 +116,6 @@ export const layer = Layer.effect(
     // Parent instance scopes to the pool so shutdown runs stop finalizers before the OS kills backends.
     const layerScope = yield* Scope.Scope;
     const factoryContext = yield* Effect.context<BackendInstanceFactoryRequirements>();
-    yield* Effect.acquireRelease(
-      DesktopHomeHold.hold(environment.baseDir).pipe(Effect.provide(factoryContext)),
-      () => DesktopHomeHold.release(environment.baseDir).pipe(Effect.provide(factoryContext)),
-    ).pipe(Effect.provideService(Path.Path, environment.path));
 
     // Persist fatal Windows fallbacks; transient transport failures must preserve the user's WSL preference.
     const handlePrimaryPreflightFailure = Effect.fn("desktop.backendPool.primaryPreflightFailed")(

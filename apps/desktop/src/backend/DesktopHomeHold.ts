@@ -20,28 +20,29 @@ const write = Effect.fn("desktop.homeHold.write")(function* (baseDir: string, un
   yield* fs.writeFileString(file, `${process.pid} ${until}\n`);
 });
 
+// Best effort: a missing hold only reopens the race, so it must never fail startup or quit.
+const bestEffort = Effect.ignoreCause({ log: "Warn", message: "desktop home hold failed" });
+
 /**
  * Tells SSH launchers (packages/ssh tunnel.ts) that this app owns the home while it lives,
  * so a remote client reconnecting during startup or a takeover adopts the app's server
  * instead of winning the home lock first.
  */
-export const hold = (baseDir: string) => write(baseDir, 0).pipe(Effect.ignore);
+export const hold = (baseDir: string) => write(baseDir, 0).pipe(bestEffort);
 
 /** Outlives this process so the relaunched app can reclaim the home after an update. */
-export const holdThroughRestart = Effect.fn("desktop.homeHold.holdThroughRestart")(function* (
-  baseDir: string,
-) {
-  const now = yield* Clock.currentTimeMillis;
-  yield* write(baseDir, Math.ceil((now + Duration.toMillis(RESTART_HOLD)) / 1000)).pipe(
-    Effect.ignore,
+export const holdThroughRestart = (baseDir: string) =>
+  Clock.currentTimeMillis.pipe(
+    Effect.flatMap((now) =>
+      write(baseDir, Math.ceil((now + Duration.toMillis(RESTART_HOLD)) / 1000)),
+    ),
+    bestEffort,
   );
-});
 
 /** A normal quit hands the home back to SSH clients; a restart hold is left to expire. */
 export const release = Effect.fn("desktop.homeHold.release")(function* (baseDir: string) {
   const fs = yield* FileSystem.FileSystem;
   const { file } = yield* holdPath(baseDir);
   const text = yield* fs.readFileString(file).pipe(Effect.orElseSucceed(() => ""));
-  if (text.trim() === `${process.pid} 0`)
-    yield* fs.remove(file, { force: true }).pipe(Effect.ignore);
-});
+  if (text.trim() === `${process.pid} 0`) yield* fs.remove(file, { force: true });
+}, bestEffort);
