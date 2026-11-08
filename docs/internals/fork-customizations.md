@@ -182,6 +182,12 @@ already contains text. Preserve this when integrating upstream composer changes.
   vault, shared through the browser host. Saved values keep their exact bytes; never trim
   them. Upstream's secret-provider references answer one-off secrets only, so credential
   cards on web and mobile always take a typed value.
+- A watched pull request that merges wakes the watching thread once ("merged, stopped
+  watching"), the same way a closed one does. Upstream ends the watch silently, assuming
+  the agent merged it, but here merges land through an outside merge gate and the agent
+  has cleanup left to do. Settled threads and subagents still end quietly. See `merged` in
+  `apps/server/src/orchestration-v2/PullRequestWatchReactor.ts` and its test in
+  `runtimeLayer.test.ts`.
 - Updating source does not authorize replacing or restarting the installed app.
   Follow `docs/operations/fork-releases.md` for an authorized release and
   `docs/operations/local-desktop-promotion.md` for a requested one-off local install.

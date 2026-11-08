@@ -3505,6 +3505,95 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
     }),
   );
 
+  // Fork: merges often land outside the agent (a merge gate), so a merge wakes the watcher.
+  it.effect("a merge wakes the watcher once and ends the watch", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const threadId = ThreadId.make("runtime-pull-request-watch-merged");
+      const projectId = ProjectId.make("pr-watch-merged-project");
+      yield* seedProject({
+        projectId,
+        title: "Watch merged",
+        workspaceRoot: "/workspace/watch-merged",
+        defaultModelSelection: null,
+        createdAt: "2026-10-01T00:00:00.000Z",
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("pr-watch-merged-create"),
+        threadId,
+        projectId,
+        title: "Watch merged",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.pull-request.watch",
+        commandId: CommandId.make("pr-watch-merged-start"),
+        threadId,
+        host: "github.com",
+        repository: "pingdotgg/t3code",
+        number: 14,
+        watching: true,
+        link: { url: "https://github.com/pingdotgg/t3code/pull/14", source: "agent" },
+      });
+      let merged = false;
+      const reactor = yield* PullRequestWatchReactor.make.pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            NodeServices.layer,
+            NodeCrypto.layer,
+            Layer.mock(PullRequestService.PullRequestService)({
+              detail: () =>
+                Effect.sync(() => ({
+                  ...watchedPullRequestDetail({
+                    projectId,
+                    number: 14,
+                    at: "2026-10-02T12:00:00.000Z",
+                  }),
+                  ...(merged
+                    ? { state: "merged" as const, mergedAt: "2026-10-02T12:30:00.000Z" }
+                    : {}),
+                  headSha: "ad70160aaa",
+                  checks: [],
+                })),
+              activity: () =>
+                Effect.succeed({
+                  comments: [],
+                  commentCount: 0,
+                  commentsTruncated: false,
+                  reviewThreads: [],
+                  commits: [],
+                }),
+            }),
+          ),
+        ),
+      );
+      const summaries = Effect.map(
+        orchestrator.getThreadRecords(threadId, ["messages"]),
+        ({ messages }) => messages.flatMap((message) => message.notification?.summary ?? []),
+      );
+      yield* reactor.sweep;
+      assert.deepEqual(yield* summaries, []);
+
+      merged = true;
+      // A quiet PR without fingerprints is reread every 10 minutes.
+      yield* TestClock.adjust("10 minutes");
+      yield* reactor.sweep;
+      assert.deepEqual(yield* summaries, ["#14: merged, stopped watching"]);
+      assert.isUndefined((yield* orchestrator.getThreadShell(threadId))?.pullRequests?.[0]?.watch);
+
+      yield* TestClock.adjust("10 minutes");
+      yield* reactor.sweep;
+      assert.deepEqual(yield* summaries, ["#14: merged, stopped watching"]);
+    }),
+  );
+
   it.effect("finishes owed checks once after pending sweeps, a restart, and a re-watch", () =>
     Effect.gen(function* () {
       const orchestrator = yield* Orchestrator.OrchestratorV2;
