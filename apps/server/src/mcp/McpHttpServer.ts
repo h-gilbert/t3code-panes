@@ -165,6 +165,8 @@ const parseModeLimit = (value: string) => {
   return rest.length === 0 ? decodeModeLimit({ runtimeMode, interactionMode }) : Option.none();
 };
 
+const decodeCallerThread = Schema.decodeUnknownOption(ThreadId);
+
 const invalidModeLimit = HttpServerResponse.jsonUnsafe(
   {
     error: "invalid_mode_limit",
@@ -181,9 +183,19 @@ const withModeLimit = (
   const header = request.headers[McpInvocationContext.MODE_LIMIT_HEADER];
   if (header === undefined || invocation.client === undefined) return invocation;
   const limit = parseModeLimit(header);
-  return Option.isNone(limit)
-    ? undefined
-    : { ...invocation, client: { ...invocation.client, narrowedTo: limit.value } };
+  if (Option.isNone(limit)) return undefined;
+  const callerThread =
+    invocation.client.linked === true
+      ? decodeCallerThread(request.headers[McpInvocationContext.CALLER_THREAD_HEADER])
+      : Option.none();
+  return {
+    ...invocation,
+    client: {
+      ...invocation.client,
+      narrowedTo: limit.value,
+      ...(Option.isSome(callerThread) ? { callerThreadId: callerThread.value } : {}),
+    },
+  };
 };
 
 // The Linked environments beta is off here: links wait until it is on again.

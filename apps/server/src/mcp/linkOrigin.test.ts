@@ -6,6 +6,7 @@ import {
   CommandId,
   ContextTransferId,
   EnvironmentId,
+  EventId,
   NodeId,
   isListedThreadLineage,
   type OrchestrationV2Run,
@@ -15,12 +16,14 @@ import {
   RunId,
   ThreadId,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { McpSchema, McpServer } from "effect/ai";
 
 import * as ServerConfig from "../config.ts";
 import { CodexProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/CodexAdapterV2.ts";
+import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
@@ -392,6 +395,96 @@ it.layer(Layer.provideMerge(layerTools, layerOrchestration))("work a link starts
       // Reads are not fenced.
       const read = yield* call(laptop, "t3_thread_read", { threadId: users });
       assert.equal(read.isError, false);
+    }),
+  );
+
+  it.effect("reaches the full-access parent of a child it runs there, and only that parent", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const sink = yield* EventSink.EventSinkV2;
+      const now = yield* DateTime.now;
+      const parentThreadId = ThreadId.make("thread:full-access-parent");
+      const childThreadId = ThreadId.make("thread:child-on-the-laptop");
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("create:full-access-parent"),
+        threadId: parentThreadId,
+        projectId,
+        title: "Delegates to the laptop",
+        modelSelection: { instanceId, model: "gpt-5" },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdBy: "user",
+        creationSource: "web",
+      });
+      const taskId = NodeId.make("node:remote-task");
+      yield* sink.write({
+        commandId: CommandId.make("seed:remote-task"),
+        events: [
+          {
+            id: EventId.make("event:remote-task"),
+            type: "subagent.updated",
+            threadId: parentThreadId,
+            occurredAt: now,
+            payload: {
+              id: taskId,
+              threadId: parentThreadId,
+              runId: null,
+              parentNodeId: NodeId.make("node:parent-root"),
+              origin: "app_owned",
+              createdBy: "agent",
+              driver: ProviderDriverKind.make("remote"),
+              providerInstanceId: instanceId,
+              providerThreadId: null,
+              childThreadId: null,
+              remoteChild: {
+                environmentId: EnvironmentId.make("environment:laptop"),
+                threadId: childThreadId,
+                label: "Laptop",
+              },
+              nativeTaskRef: null,
+              prompt: "Ask the parent first.",
+              title: null,
+              model: "gpt-5",
+              status: "running",
+              result: null,
+              startedAt: now,
+              completedAt: null,
+              updatedAt: now,
+            },
+          },
+        ],
+      });
+      // The child runs at full access there; the link back here was paired at `auto`.
+      const fromLaptop = (callerThreadId?: ThreadId) => ({
+        ...laptop,
+        client: {
+          ...laptop.client!,
+          narrowedTo: { runtimeMode: "full-access", interactionMode: "default" } as const,
+          ...(callerThreadId === undefined ? {} : { callerThreadId }),
+        },
+      });
+      const send = (scope: McpInvocationContext.McpInvocationScope) =>
+        call(scope, "t3_thread_send", { threadId: parentThreadId, message: "A question." });
+
+      const asked = yield* send(fromLaptop(childThreadId));
+      assert.equal(asked.isError, false, JSON.stringify(asked.content));
+      // Any other caller over that link is still held to its access.
+      assert.equal(failureCode(yield* send(fromLaptop())), "runtime_mode_escalation_denied");
+      assert.equal(
+        failureCode(yield* send(fromLaptop(ThreadId.make("thread:someone-else")))),
+        "runtime_mode_escalation_denied",
+      );
+      // The parent relationship does not reach the user's other threads.
+      const users = yield* usersOwnThread;
+      const other = yield* call(fromLaptop(childThreadId), "t3_thread_update", {
+        threadId: users,
+        action: "rename",
+        title: "Renamed by the child",
+      });
+      assert.equal(failureCode(other), "capability_denied");
     }),
   );
 
