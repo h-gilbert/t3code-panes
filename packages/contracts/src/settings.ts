@@ -1259,10 +1259,6 @@ export const ServerSettings = Schema.Struct({
   browserHostEnvironmentId: Schema.NullOr(TrimmedNonEmptyString).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
-  /** Null uses the browser host's vault; this environment's own id keeps its own. */
-  credentialVaultEnvironmentId: Schema.NullOr(TrimmedNonEmptyString).pipe(
-    Schema.withDecodingDefault(Effect.succeed(null)),
-  ),
   // Null means unmigrated; empty is authoritative and must not resurrect cleared preferences.
   favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   providerModelPreferences: Schema.NullOr(ProviderModelPreferences).pipe(
@@ -1663,7 +1659,6 @@ const ModelSelectionPatch = Schema.Struct({
 
 export const ServerSettingsPatch = Schema.Struct({
   browserHostEnvironmentId: Schema.optionalKey(Schema.NullOr(TrimmedNonEmptyString)),
-  credentialVaultEnvironmentId: Schema.optionalKey(Schema.NullOr(TrimmedNonEmptyString)),
   setModelFavorites: Schema.optionalKey(
     Schema.Array(Schema.Struct({ ...ModelFavorite.fields, favorite: Schema.Boolean })),
   ),

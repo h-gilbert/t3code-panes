@@ -21,13 +21,13 @@ const hostFailed = (detail: string) =>
   new SecretRequestError({ reason: "vault_host_failed", detail });
 
 /**
- * An environment can use another linked environment's vault, by default its browser host's, so
+ * An environment whose browser host is another, linked environment shares that host's vault, so
  * a login saved once serves both. Values cross only the authenticated link, one per call.
  */
 export class LinkedCredentialVault extends Context.Service<
   LinkedCredentialVault,
   {
-    /** The linked environment whose vault this environment uses, if any. */
+    /** The linked browser host whose vault this environment uses, if any. */
     readonly host: Effect.Effect<Option.Option<EnvironmentId>, SecretRequestError>;
     readonly call: (
       host: EnvironmentId,
@@ -43,12 +43,11 @@ const make = Effect.gen(function* () {
   const client = yield* PeerMcpClient.PeerMcpClient;
   return LinkedCredentialVault.of({
     host: Effect.gen(function* () {
-      const current = yield* settings.getSettings;
-      const selected = current.credentialVaultEnvironmentId ?? current.browserHostEnvironmentId;
+      const selected = (yield* settings.getSettings).browserHostEnvironmentId;
       if (selected === null || selected === (yield* environment.getEnvironmentId)) {
         return Option.none();
       }
-      // Without a link to that environment, this environment keeps its own vault.
+      // Without a link to the browser host, this environment keeps its own vault.
       if (!(yield* links.enabled)) return Option.none();
       const link = yield* links.get(EnvironmentId.make(selected));
       return Option.map(link, (found) => found.environmentId);
