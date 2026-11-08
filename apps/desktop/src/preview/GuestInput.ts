@@ -84,6 +84,92 @@ export const toKeyboardInputEvents = (
   }
 };
 
+/** Cross-site frames run in their own process, so input for them must go to their own CDP session. */
+const frameSessions = new WeakMap<Electron.Debugger, Map<string, string>>();
+
+/** Records auto-attached cross-site frame sessions, keyed by frame id. */
+export const trackFrameTarget = (
+  debuggee: Electron.Debugger,
+  method: string,
+  params: Record<string, unknown>,
+) => {
+  if (method === "Target.attachedToTarget") {
+    const info = params["targetInfo"] as
+      | { readonly type?: string; readonly targetId?: string }
+      | undefined;
+    const sessionId = params["sessionId"];
+    if (
+      info?.type !== "iframe" ||
+      typeof info.targetId !== "string" ||
+      typeof sessionId !== "string"
+    )
+      return;
+    let frames = frameSessions.get(debuggee);
+    if (!frames) frameSessions.set(debuggee, (frames = new Map()));
+    frames.set(info.targetId, sessionId);
+  } else if (method === "Target.detachedFromTarget") {
+    const frames = frameSessions.get(debuggee);
+    if (!frames) return;
+    for (const [frameId, sessionId] of frames)
+      if (sessionId === params["sessionId"]) frames.delete(frameId);
+  }
+};
+
+type NodeInfo = { readonly node?: { readonly frameId?: string } };
+type BoxModel = { readonly model?: { readonly content?: ReadonlyArray<number> } };
+
+/** The frame session under a point, with the point in that frame's coordinates. */
+const routePoint = async (
+  debuggee: Electron.Debugger,
+  frames: Map<string, string>,
+  sessionId: string | undefined,
+  x: number,
+  y: number,
+  depth = 0,
+): Promise<{ sessionId: string | undefined; x: number; y: number }> => {
+  if (depth > 4) return { sessionId, x, y };
+  const hit = (await debuggee
+    .sendCommand(
+      "DOM.getNodeForLocation",
+      { x: Math.round(x), y: Math.round(y), ignorePointerEventsNone: true },
+      sessionId,
+    )
+    .catch(() => null)) as { readonly backendNodeId?: number } | null;
+  if (!hit?.backendNodeId) return { sessionId, x, y };
+  const described = (await debuggee
+    .sendCommand("DOM.describeNode", { backendNodeId: hit.backendNodeId }, sessionId)
+    .catch(() => null)) as NodeInfo | null;
+  const child = described?.node?.frameId ? frames.get(described.node.frameId) : undefined;
+  if (!child) return { sessionId, x, y };
+  const box = (await debuggee
+    .sendCommand("DOM.getBoxModel", { backendNodeId: hit.backendNodeId }, sessionId)
+    .catch(() => null)) as BoxModel | null;
+  const content = box?.model?.content;
+  if (!content) return { sessionId, x, y };
+  return routePoint(debuggee, frames, child, x - content[0]!, y - content[1]!, depth + 1);
+};
+
+/** The session of the cross-site frame holding focus, if any. */
+const focusedFrameSession = async (
+  debuggee: Electron.Debugger,
+  frames: Map<string, string>,
+  sessionId: string | undefined = undefined,
+  depth = 0,
+): Promise<string | undefined> => {
+  if (depth > 4) return sessionId;
+  const active = (await debuggee
+    .sendCommand("Runtime.evaluate", { expression: "document.activeElement" }, sessionId)
+    .catch(() => null)) as { readonly result?: { readonly objectId?: string } } | null;
+  const objectId = active?.result?.objectId;
+  if (!objectId) return sessionId;
+  const described = (await debuggee
+    .sendCommand("DOM.describeNode", { objectId }, sessionId)
+    .catch(() => null)) as NodeInfo | null;
+  void debuggee.sendCommand("Runtime.releaseObject", { objectId }, sessionId).catch(() => {});
+  const child = described?.node?.frameId ? frames.get(described.node.frameId) : undefined;
+  return child ? focusedFrameSession(debuggee, frames, child, depth + 1) : sessionId;
+};
+
 const evaluate = async (debuggee: Electron.Debugger, expression: string) => {
   const reply = (await debuggee.sendCommand("Runtime.evaluate", {
     expression,
@@ -175,6 +261,21 @@ export const sendPageCommand = async (
   params: Record<string, unknown>,
   sessionId?: string,
 ): Promise<unknown> => {
+  const frames = frameSessions.get(debuggee);
+  if (method === "Input.dispatchMouseEvent" && sessionId === undefined && frames?.size) {
+    const x = Number(params["x"]),
+      y = Number(params["y"]);
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+      const route = await routePoint(debuggee, frames, undefined, x, y);
+      return sendPointerCommand(
+        webContents,
+        debuggee,
+        method,
+        { ...params, x: route.x, y: route.y },
+        route.sessionId,
+      );
+    }
+  }
   if (method === "Input.dispatchMouseEvent" || method === "Input.dispatchTouchEvent") {
     return sendPointerCommand(webContents, debuggee, method, params, sessionId);
   }
@@ -189,7 +290,9 @@ export const sendPageCommand = async (
     return debuggee.sendCommand(method, params);
   }
   if ((await evaluate(debuggee, `${FOCUSED_DOCUMENT} !== null`)) !== true) {
-    throw new Error(CROSS_SITE_FOCUS_MESSAGE);
+    const target = frames?.size ? await focusedFrameSession(debuggee, frames) : undefined;
+    if (target === undefined) throw new Error(CROSS_SITE_FOCUS_MESSAGE);
+    return debuggee.sendCommand(method, params, target);
   }
   switch (method) {
     case "Input.insertText":

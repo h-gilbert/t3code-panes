@@ -16,7 +16,7 @@ import {
  */
 import * as NodeCrypto from "node:crypto";
 import * as NodeZlib from "node:zlib";
-import { sendPageCommand } from "./GuestInput.ts";
+import { sendPageCommand, trackFrameTarget } from "./GuestInput.ts";
 import {
   DesktopPreviewAnnotationVoiceEventSchema,
   DesktopPreviewRecordingInputSchema,
@@ -1550,6 +1550,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
             }
           });
           const onMessage: BrowserControlSession["onMessage"] = (_event, method, params) => {
+            trackFrameTarget(wcDebugger, method, params);
             if (method === "Target.attachedToTarget" && typeof params["sessionId"] === "string") {
               const child = params["sessionId"];
               void wcDebugger
