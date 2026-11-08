@@ -1,4 +1,5 @@
 import type {
+  EnvironmentId,
   OrchestrationV2ConversationMessage,
   OrchestrationV2Notification,
   OrchestrationV2NotificationSource,
@@ -12,7 +13,11 @@ type NotificationOutcome = OrchestrationV2Notification["outcome"];
 export type BackgroundWork = {
   readonly label?: string | undefined;
 } & (
-  | { readonly kind: "subagent"; readonly childThreadId?: ThreadId | undefined }
+  | {
+      readonly kind: "subagent";
+      readonly childThreadId?: ThreadId | undefined;
+      readonly childEnvironmentId?: EnvironmentId | undefined;
+    }
   | { readonly kind: "command"; readonly exitCode?: number | undefined }
   | { readonly kind: "monitor" }
   | { readonly kind: "background_task" }
@@ -160,7 +165,14 @@ function delegatedTaskReport(
     kind: "subagent",
     label: task?.title?.trim() || task?.prompt,
     outcome,
-    ...(task?.childThreadId == null ? {} : { childThreadId: task.childThreadId }),
+    ...(task?.remoteChild !== undefined
+      ? {
+          childThreadId: task.remoteChild.threadId,
+          childEnvironmentId: task.remoteChild.environmentId,
+        }
+      : task?.childThreadId == null
+        ? {}
+        : { childThreadId: task.childThreadId }),
   };
 }
 
@@ -185,6 +197,9 @@ function delegatedCompletionNotification(
         kind: "delegated_task",
         taskIds,
         ...(only.childThreadId === undefined ? {} : { childThreadId: only.childThreadId }),
+        ...(only.childEnvironmentId === undefined
+          ? {}
+          : { childEnvironmentId: only.childEnvironmentId }),
       },
       outcome,
       summary: `Delegated task${label === undefined ? "" : ` "${label}"`} ${verb}`,

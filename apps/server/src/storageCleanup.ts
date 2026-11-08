@@ -207,7 +207,10 @@ function worktreeOwner<T extends Pick<OrchestrationV2ThreadShell, "id" | "lineag
 ) {
   if (threads.length === 1) return threads[0];
   const byId = new Map(threads.map((thread) => [thread.id, thread]));
-  const tops = threads.filter((thread) => !byId.has(thread.lineage.parentThreadId!));
+  const tops = threads.filter(
+    (thread) =>
+      thread.lineage.parentEnvironmentId !== undefined || !byId.has(thread.lineage.parentThreadId!),
+  );
   if (tops.length !== 1) return undefined;
   const owner = tops[0]!;
   for (const thread of threads) {
@@ -222,7 +225,10 @@ function worktreeOwner<T extends Pick<OrchestrationV2ThreadShell, "id" | "lineag
       )
         return undefined;
       seen.add(current.id);
-      const parent = byId.get(current.lineage.parentThreadId!);
+      const parent =
+        current.lineage.parentEnvironmentId === undefined
+          ? byId.get(current.lineage.parentThreadId!)
+          : undefined;
       if (parent === undefined) return undefined;
       current = parent;
     }
@@ -245,7 +251,10 @@ function worktreeSettlementChain(
       current.pinnedAt != null
     )
       return [];
-    const parent = byId.get(current.lineage.parentThreadId!);
+    const parent =
+      current.lineage.parentEnvironmentId === undefined
+        ? byId.get(current.lineage.parentThreadId!)
+        : undefined;
     if (
       parent === undefined ||
       chain.some((member) => member.id === parent.id) ||

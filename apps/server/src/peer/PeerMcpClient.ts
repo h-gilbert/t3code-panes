@@ -4,6 +4,7 @@ import {
   type PeerLinkError,
   type ProviderInteractionMode,
   type RuntimeMode,
+  type ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -41,6 +42,8 @@ export class PeerMcpClient extends Context.Service<
       readonly tool: string;
       readonly arguments: Record<string, unknown>;
       readonly limits: PeerCallLimits;
+      /** Sent when the caller is that environment's remote child, so it can reach its parent. */
+      readonly callerThreadId?: ThreadId | undefined;
       readonly success: S;
     }) => Effect.Effect<S["Type"], OrchestratorMcpFailure>;
   }
@@ -172,7 +175,14 @@ const make = Effect.gen(function* () {
             method: "tools/call",
             params: { name: input.tool, arguments: input.arguments },
           },
-          { ...limitHeader, "mcp-session-id": sessionId, "mcp-protocol-version": PROTOCOL_VERSION },
+          {
+            ...limitHeader,
+            ...(input.callerThreadId === undefined
+              ? {}
+              : { [McpInvocationContext.CALLER_THREAD_HEADER]: input.callerThreadId }),
+            "mcp-session-id": sessionId,
+            "mcp-protocol-version": PROTOCOL_VERSION,
+          },
         );
       const existing = (yield* Ref.get(sessions)).get(sessionKey);
       const sessionId = existing ?? (yield* openSession(resolved.url, resolved.token, limitHeader));

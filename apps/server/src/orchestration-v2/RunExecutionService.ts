@@ -383,6 +383,7 @@ export function routeProviderEvent(
         return [true, state];
       }
       const isOwnedSubagent =
+        event.appThread.lineage.parentEnvironmentId === undefined &&
         event.appThread.lineage.relationshipToParent === "subagent" &&
         event.appThread.lineage.parentThreadId !== null &&
         ownsThread(event.appThread.lineage.parentThreadId) &&

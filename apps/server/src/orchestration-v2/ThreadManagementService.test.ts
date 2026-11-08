@@ -212,17 +212,18 @@ it.effect("waitForThread follows a restart continuation instead of the cut run",
       restartContinuationOfRunId?: RunId;
     }> = [{ id: runId, status: "cancelled" }];
     let pending = true;
+    let sequence = 0;
     const stored = (sequence: number, event: object) =>
       ({ sequence, event: { threadId, ...event } }) as unknown as OrchestrationV2StoredEvent;
     const layerTest = ThreadManagementService.layer.pipe(
       Layer.provide(Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({})),
       Layer.provide(
         Layer.mock(Orchestrator.OrchestratorV2)({
-          getThreadEventSequence: () => Effect.succeed(0),
+          getThreadEventSequence: () => Effect.sync(() => sequence),
           restartContinuationPending: (run) => Effect.succeed(pending && run.id === runId),
           awaitRestartContinuation: () => Effect.never,
           streamStoredEventsFrom: (input) =>
-            input?.eventType === "run.updated"
+            input?.eventType === undefined || input.eventType === "run.updated"
               ? Stream.fromEffect(Deferred.succeed(subscribed, undefined)).pipe(
                   Stream.drain,
                   Stream.concat(Stream.fromQueue(events)),
@@ -265,6 +266,18 @@ it.effect("waitForThread follows a restart continuation instead of the cut run",
     expect(result).toMatchObject({
       timedOut: false,
       run: { id: continuationId, status: "completed" },
+    });
+    const watch = yield* service
+      .waitForThread({ projectId, threadId, runId, timeoutMs: 60 * 60 * 1_000, afterSequence: 1 })
+      .pipe(Effect.forkChild);
+    sequence = 3;
+    yield* Queue.offer(
+      events,
+      stored(3, { type: "runtime-request.updated", payload: { status: "pending" } }),
+    );
+    expect(yield* Fiber.join(watch)).toMatchObject({
+      eventSequence: 3,
+      run: { id: continuationId },
     });
   }),
 );

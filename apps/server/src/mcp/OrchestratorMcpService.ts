@@ -577,6 +577,7 @@ function directAppOwnedChildTasks(
   returnedRunIds: ReadonlySet<RunId | null>,
 ): ReadonlyArray<OrchestrationV2Subagent> {
   if (
+    target.thread.lineage.parentEnvironmentId !== undefined ||
     target.thread.lineage.parentThreadId !== parent.thread.id ||
     target.thread.lineage.relationshipToParent !== "subagent"
   ) {
@@ -839,6 +840,9 @@ function listItemFromShell(
     ...threadSettlement(shell),
     ...threadSnooze(shell, nowMs),
     parentThreadId: shell.lineage.parentThreadId,
+    ...(shell.lineage.parentEnvironmentId === undefined
+      ? {}
+      : { parentEnvironmentId: shell.lineage.parentEnvironmentId }),
     relationshipToParent: shell.lineage.relationshipToParent,
     itemCount: shell.visibleItemCount,
     createdAt: DateTime.formatIso(shell.createdAt),
@@ -882,6 +886,9 @@ function threadDetail(
     branch: projection.thread.branch,
     worktreePath: projection.thread.worktreePath,
     parentThreadId: projection.thread.lineage.parentThreadId,
+    ...(projection.thread.lineage.parentEnvironmentId === undefined
+      ? {}
+      : { parentEnvironmentId: projection.thread.lineage.parentEnvironmentId }),
     relationshipToParent: projection.thread.lineage.relationshipToParent,
     runCount: projection.runs.length,
     itemCount,
@@ -3258,6 +3265,7 @@ const make = Effect.gen(function* () {
           projectId: target.thread.projectId,
           threadId: input.threadId,
           ...(input.runId === undefined ? {} : { runId: input.runId }),
+          ...(input.afterSequence === undefined ? {} : { afterSequence: input.afterSequence }),
           timeoutMs: Math.min(
             MAX_WAIT_TIMEOUT_MS,
             Math.max(1, input.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS),
@@ -3293,6 +3301,16 @@ const make = Effect.gen(function* () {
         runId: result.run?.id ?? null,
         status,
         timedOut: result.timedOut,
+        ...(input.afterSequence === undefined
+          ? {}
+          : {
+              ...(result.eventSequence === undefined
+                ? {}
+                : { eventSequence: result.eventSequence }),
+              runtimeRequests: (yield* threadManagement
+                .getThreadRecords(input.threadId, ["runtimeRequests"])
+                .pipe(Effect.mapError(threadManagementFailure))).runtimeRequests,
+            }),
         ...(wakesCaller ? { next: ORCHESTRATOR_MCP_RUNNING_TASK_NEXT } : {}),
         ...(result.resultRun === undefined
           ? {}

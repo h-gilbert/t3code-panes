@@ -33,11 +33,14 @@ export function ThreadBackgroundWorkSheet({ route }: StaticScreenProps<Backgroun
     environmentThreadShells.threadShellAtom(scopeThreadRef(target.environmentId, target.threadId)),
   );
   const presentation = presentPendingBackgroundWork(thread?.pendingBackgroundTasks ?? []);
-  const openThread = (threadId: ThreadId) => {
+  const openThread = (threadId: ThreadId, environmentId?: EnvironmentId) => {
     void Haptics.selectionAsync();
     // A thread replaces the leaf sheet so workspace back navigation still works.
     navigation.dispatch(
-      StackActions.replace("Thread", { environmentId: target.environmentId, threadId }),
+      StackActions.replace("Thread", {
+        environmentId: environmentId ?? target.environmentId,
+        threadId,
+      }),
     );
   };
   const content = (
@@ -69,7 +72,7 @@ export function ThreadBackgroundWorkSheet({ route }: StaticScreenProps<Backgroun
 
 function BackgroundWorkRow(props: {
   readonly item: PendingBackgroundWorkItem;
-  readonly onOpen: (threadId: ThreadId) => void;
+  readonly onOpen: (threadId: ThreadId, environmentId?: EnvironmentId) => void;
 }) {
   const { item } = props;
   const childThreadId = item.childThreadId;
@@ -98,7 +101,7 @@ function BackgroundWorkRow(props: {
     <Pressable
       accessibilityRole="link"
       accessibilityLabel={`Open subagent ${item.label}`}
-      onPress={() => props.onOpen(childThreadId)}
+      onPress={() => props.onOpen(childThreadId, item.childEnvironmentId)}
       className="active:opacity-70"
     >
       {row}

@@ -12,6 +12,7 @@ import {
   SearchIcon,
 } from "lucide-react";
 import type { SidebarProjectSnapshot } from "../sidebarProjectGrouping";
+import type { SidebarThreadStatus } from "./Sidebar.logic";
 import {
   filterWorkspaceThreadPickerItems,
   type WorkspaceThreadPickerItem,
@@ -36,7 +37,8 @@ import {
 const ROW =
   "flex min-w-0 items-center gap-2 rounded-md px-2.5 py-2 text-left outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring";
 
-const ACTIVITY = {
+const ACTIVITY: Record<SidebarThreadStatus, { label: string; dot: string }> = {
+  preparing: { label: "Setting up", dot: "bg-primary" },
   working: { label: "Running", dot: "bg-primary" },
   approval: { label: "Needs approval", dot: "bg-warning" },
   input: { label: "Needs input", dot: "bg-warning" },

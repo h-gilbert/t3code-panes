@@ -1,5 +1,5 @@
 import type { ProjectThreadAwarenessV2Input } from "@t3tools/shared/agentAwareness";
-import { pendingGuestMessageCount } from "@t3tools/contracts";
+import { EnvironmentId, pendingGuestMessageCount } from "@t3tools/contracts";
 import { applyThreadPullRequestLinkUpdate } from "../sourceControl/threadPullRequests.ts";
 import { projectTurnItemForWire } from "./WireProjection.ts";
 import * as Stream from "effect/Stream";
@@ -4076,6 +4076,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 AND NOT EXISTS (
                   SELECT 1 FROM orchestration_v2_projection_threads parent
                   WHERE json_extract(t.payload_json, '$.lineage.relationshipToParent') = 'subagent'
+                    AND json_extract(t.payload_json, '$.lineage.parentEnvironmentId') IS NULL
                     AND parent.thread_id = json_extract(t.payload_json, '$.lineage.parentThreadId')
                     AND (
                       json_extract(parent.payload_json, '$.settledOverride') = 'settled'
@@ -6739,6 +6740,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             AND json_type(payload_json, '$.remoteChild.stoppedThere') IS NOT 'true'
           )
           OR json_type(payload_json, '$.remoteChild.stoppedThere') = 'false'
+          OR json_type(payload_json, '$.remoteChild.settledThere') = 'false'
         )
     `.pipe(
       Effect.map((rows) =>
@@ -7250,6 +7252,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         readonly project_id: string;
         readonly relationship_to_parent: string | null;
         readonly parent_thread_id: string | null;
+        readonly parent_environment_id: string | null;
         readonly root_thread_id: string;
         readonly side_chat: number | null;
         readonly settled_override: string | null;
@@ -7263,6 +7266,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           t.project_id,
           json_extract(t.payload_json, '$.lineage.relationshipToParent') AS relationship_to_parent,
           json_extract(t.payload_json, '$.lineage.parentThreadId') AS parent_thread_id,
+          json_extract(t.payload_json, '$.lineage.parentEnvironmentId') AS parent_environment_id,
           json_extract(t.payload_json, '$.lineage.rootThreadId') AS root_thread_id,
           json_extract(t.payload_json, '$.lineage.sideChat') AS side_chat,
           json_extract(t.payload_json, '$.settledOverride') AS settled_override,
@@ -7314,6 +7318,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         lineage: {
           parentThreadId:
             row.parent_thread_id === null ? null : ThreadId.make(row.parent_thread_id),
+          ...(row.parent_environment_id === null
+            ? {}
+            : { parentEnvironmentId: EnvironmentId.make(row.parent_environment_id) }),
           relationshipToParent:
             row.relationship_to_parent === "fork" || row.relationship_to_parent === "subagent"
               ? row.relationship_to_parent

@@ -421,12 +421,24 @@ describe("v2 thread shell lists", () => {
       ...running,
       id: ThreadId.make("remote-task"),
       delegatedFrom: { environmentId, threadId: root.id, title: root.title },
+      lineage: {
+        parentEnvironmentId: environmentId,
+        parentThreadId: root.id,
+        relationshipToParent: "subagent" as const,
+        rootThreadId: ThreadId.make("remote-task"),
+      },
     };
     const nestedTask = {
       ...v2ThreadShell,
       ...running,
       id: ThreadId.make("third-task"),
       delegatedFrom: { environmentId: remoteEnvironmentId, threadId: task.id, title: task.title },
+      lineage: {
+        parentEnvironmentId: remoteEnvironmentId,
+        parentThreadId: task.id,
+        relationshipToParent: "subagent" as const,
+        rootThreadId: ThreadId.make("third-task"),
+      },
     };
     // A task the middle one delegates back to the root's own environment.
     const returningTask = {

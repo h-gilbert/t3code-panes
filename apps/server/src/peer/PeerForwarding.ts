@@ -1,6 +1,7 @@
 import {
   type EnvironmentId,
   OrchestratorMcpFailure,
+  type OrchestrationV2ThreadShell,
   type OrchestratorMcpEnvironmentLinksResult,
   OrchestratorMcpThreadInterruptInput,
   OrchestratorMcpThreadInterruptResult,
@@ -94,6 +95,14 @@ export const linkedEnvironmentsOff = new OrchestratorMcpFailure({
     "Linked environments is off on this machine, so no tool can act on another machine. Leave out environmentId to work here; the user can turn it on in Settings → Labs.",
 });
 
+/** The thread in a linked environment that delegated `shell`, if one did. */
+const remoteParentOf = (
+  shell: Pick<OrchestrationV2ThreadShell, "lineage" | "delegatedFrom"> | undefined,
+) =>
+  shell?.lineage.parentEnvironmentId !== undefined && shell.lineage.parentThreadId !== null
+    ? { environmentId: shell.lineage.parentEnvironmentId, threadId: shell.lineage.parentThreadId }
+    : shell?.delegatedFrom;
+
 /** The linked environment a call names, or nothing when it names this one. */
 export const remoteTarget = (scope: Scope, environmentId: EnvironmentId | undefined) =>
   environmentId === scope.environmentId ? undefined : environmentId;
@@ -110,10 +119,27 @@ const make = Effect.gen(function* () {
    * link started never uses this environment's links, since the peer would see this
    * environment's session instead of that link, and its fence could not hold.
    */
-  const callerLimits = (scope: Scope) =>
+  const callerLimits = (
+    scope: Scope,
+    target?: { readonly environmentId: EnvironmentId; readonly threadId: unknown },
+  ) =>
     readCaller().pipe(
-      Effect.tap((caller) => assertNotLinked(caller, "use this environment's links")),
-      Effect.map((caller) => caller.limits),
+      Effect.flatMap((caller) => {
+        // A remote child reaches its own parent as a local subagent would, through the link back.
+        const parent = remoteParentOf(caller.caller);
+        const toParent =
+          parent !== undefined &&
+          parent.environmentId === target?.environmentId &&
+          parent.threadId === target.threadId;
+        return (
+          toParent ? Effect.void : assertNotLinked(caller, "use this environment's links")
+        ).pipe(
+          Effect.as({
+            limits: caller.limits,
+            callerThreadId: toParent ? caller.caller?.id : undefined,
+          }),
+        );
+      }),
       Effect.provideService(McpInvocationContext.McpInvocationContext, scope),
       Effect.provideService(ThreadManagement.ThreadManagementService, threads),
     );
@@ -138,10 +164,13 @@ const make = Effect.gen(function* () {
     environmentId: EnvironmentId,
     params: unknown,
   ) {
-    const limits = yield* callerLimits(scope);
     const encoded = (yield* Schema.encodeUnknownEffect(parameters as Schema.Encoder<unknown>)(
       params,
     ).pipe(Effect.mapError(unavailable))) as Record<string, unknown>;
+    const { limits, callerThreadId } = yield* callerLimits(scope, {
+      environmentId,
+      threadId: encoded.threadId,
+    });
     const { environmentId: _target, ...args } = encoded;
     // A pending upload lives here, so it cannot go with the call.
     if (Array.isArray(args.attachments) && args.attachments.length > 0) {
@@ -158,6 +187,7 @@ const make = Effect.gen(function* () {
       tool: toolName,
       arguments: args,
       limits,
+      callerThreadId,
       success: success as Schema.Decoder<A>,
     });
   });
@@ -206,13 +236,19 @@ const make = Effect.gen(function* () {
           threadId: input.threadId,
           ...(runId === undefined ? {} : { runId }),
           timeoutMs: chunk,
+          ...(input.afterSequence === undefined ? {} : { afterSequence: input.afterSequence }),
           ...(input.untilDelegatedWorkSettled === undefined
             ? {}
             : { untilDelegatedWorkSettled: input.untilDelegatedWorkSettled }),
         },
       );
       remaining -= chunk;
-      if (!result.timedOut || remaining <= 0) return result;
+      if (
+        !result.timedOut ||
+        remaining <= 0 ||
+        (input.afterSequence !== undefined && result.eventSequence !== undefined)
+      )
+        return result;
       // Later pieces wait for the run the first one picked, not a newer one.
       runId = result.runId ?? undefined;
     }

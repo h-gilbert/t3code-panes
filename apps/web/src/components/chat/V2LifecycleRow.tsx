@@ -379,7 +379,8 @@ export function SubagentNotificationLink(props: {
       progress={agent.progress}
       startedAt={agent.startedAt}
       completedAt={agent.completedAt}
-      threadId={props.childThreadId}
+      threadId={agent.remoteChild === undefined ? props.childThreadId : null}
+      remote={agent.remoteChild}
       onOpenThread={props.onOpenThread}
       {...(resumed
         ? {}

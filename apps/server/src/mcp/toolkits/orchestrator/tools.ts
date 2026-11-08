@@ -311,8 +311,7 @@ const ThreadSendTool = Tool.make("t3_thread_send", {
   .annotate(Tool.OpenWorld, true);
 
 const ThreadWaitTool = Tool.make("t3_thread_wait", {
-  description:
-    "Wait for a thread's run to finish. No `runId`: latest. Idle: at once. On timeout, with `next` end your turn; without, call again.",
+  description: "Wait for runId or latest. Idle returns. Timeout: next means end turn; else retry.",
   parameters: OrchestratorMcpThreadWaitInput,
   success: OrchestratorMcpThreadWaitResult,
   failure: OrchestratorMcpFailure,

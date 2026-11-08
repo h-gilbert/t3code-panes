@@ -266,6 +266,7 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
     const taskId =
       source.delegatedTaskId ?? (forkedFrom?.type === "node" ? forkedFrom.nodeId : undefined);
     if (
+      lineage.parentEnvironmentId === undefined &&
       lineage.relationshipToParent === "subagent" &&
       lineage.parentThreadId !== null &&
       taskId !== undefined

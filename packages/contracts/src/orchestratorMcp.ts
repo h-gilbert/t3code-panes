@@ -37,6 +37,7 @@ import { hasOnlyPairedSurrogates } from "./threadMetadataMcp.ts";
 import { ThreadTitleRegeneration } from "./threadTitle.ts";
 import {
   OrchestrationV2Actor,
+  OrchestrationV2RuntimeRequest,
   OrchestrationV2CreationSource,
   OrchestrationV2RunStatus,
   OrchestrationV2TurnItemStatus,
@@ -373,6 +374,7 @@ export const OrchestratorMcpThreadListItem = Schema.Struct({
   snoozed: Schema.Boolean,
   snoozedUntil: Schema.NullOr(IsoDateTime),
   parentThreadId: Schema.NullOr(ThreadId),
+  parentEnvironmentId: Schema.optional(EnvironmentId),
   relationshipToParent: Schema.NullOr(Schema.Literals(["fork", "subagent"])),
   itemCount: NonNegativeInt,
   createdAt: IsoDateTime,
@@ -443,6 +445,7 @@ export const OrchestratorMcpThreadDetail = Schema.Struct({
   branch: Schema.NullOr(Schema.String),
   worktreePath: Schema.NullOr(Schema.String),
   parentThreadId: Schema.NullOr(ThreadId),
+  parentEnvironmentId: Schema.optional(EnvironmentId),
   relationshipToParent: Schema.NullOr(Schema.Literals(["fork", "subagent"])),
   runCount: NonNegativeInt,
   itemCount: NonNegativeInt,
@@ -530,6 +533,7 @@ export const OrchestratorMcpThreadWaitInput = Schema.Struct({
   threadId: ThreadId,
   runId: Schema.optional(RunId),
   timeoutMs: Schema.optional(Schema.Finite),
+  afterSequence: Schema.optional(NonNegativeInt),
   untilDelegatedWorkSettled: Schema.optional(
     Schema.Boolean.annotate({
       description:
@@ -544,6 +548,8 @@ export const OrchestratorMcpThreadWaitResult = Schema.Struct({
   runId: Schema.NullOr(RunId),
   status: OrchestratorMcpThreadStatus,
   timedOut: Schema.Boolean,
+  eventSequence: Schema.optional(NonNegativeInt),
+  runtimeRequests: Schema.optional(Schema.Array(Schema.toCodecJson(OrchestrationV2RuntimeRequest))),
   next: Schema.optional(OrchestratorMcpRunningTaskNext),
   /** With untilDelegatedWorkSettled, once settled: the run whose reply is the thread's result. */
   resultRun: Schema.optional(Schema.Struct({ runId: RunId, status: OrchestrationV2RunStatus })),

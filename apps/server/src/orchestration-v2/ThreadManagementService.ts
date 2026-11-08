@@ -117,6 +117,7 @@ function existingThreadIdsForCommand(
     case "delegated_task.wake-policy":
     case "delegated_task.completion-delivery.acknowledge":
     case "delegated_task.completion-delivery.dispose":
+    case "delegated_task.remote.progress":
     case "delegated_task.remote.request":
     case "delegated_task.remote.complete":
     case "delegated_task.remote.stop":
@@ -175,12 +176,14 @@ export interface ThreadManagementWaitInput {
    * completion delivery will wake it again, as a delegated task's result does.
    */
   readonly untilDelegatedWorkSettled?: boolean;
+  readonly afterSequence?: number;
 }
 
 export interface ThreadManagementWaitResult {
   readonly threadId: ThreadId;
   readonly run: OrchestrationV2Run | null;
   readonly timedOut: boolean;
+  readonly eventSequence?: number;
   /** With `untilDelegatedWorkSettled`, once settled: the run with the thread's final answer. */
   readonly resultRun?: OrchestrationV2Run;
 }
@@ -916,6 +919,29 @@ const make = Effect.gen(function* () {
     const afterSequence = yield* orchestrator
       .getThreadEventSequence(input.threadId)
       .pipe(Effect.mapError(loadError));
+    if (input.afterSequence !== undefined && input.afterSequence > 0) {
+      yield* orchestrator
+        .streamStoredEventsFrom({ threadId: input.threadId, afterSequence: input.afterSequence })
+        .pipe(
+          Stream.filter((stored) =>
+            [
+              "run.updated",
+              "runtime-request.updated",
+              "subagent.updated",
+              "provider-thread.updated",
+            ].includes(stored.event.type),
+          ),
+          Stream.runHead,
+          Effect.timeoutOption(Duration.millis(Math.max(1, input.timeoutMs))),
+          Effect.mapError(loadError),
+        );
+    }
+    const eventSequence =
+      input.afterSequence === undefined
+        ? undefined
+        : yield* orchestrator
+            .getThreadEventSequence(input.threadId)
+            .pipe(Effect.mapError(loadError));
     const target = yield* getProjectThreadRecords(input, ["runs"]);
     const selectedRun =
       input.runId === undefined
@@ -928,7 +954,12 @@ const make = Effect.gen(function* () {
       });
     }
     if (selectedRun === undefined) {
-      return { threadId: input.threadId, run: null, timedOut: false };
+      return {
+        threadId: input.threadId,
+        run: null,
+        timedOut: false,
+        ...(eventSequence === undefined ? {} : { eventSequence }),
+      };
     }
     // A restart cuts a run and continues it as a new run. Follow that chain,
     // so a cut run is not the answer while its continuation is pending.
@@ -981,10 +1012,11 @@ const make = Effect.gen(function* () {
       threadId: input.threadId,
       run: current.run,
       timedOut: !current.settled,
+      ...(eventSequence === undefined ? {} : { eventSequence }),
       ...(current.resultRun === undefined ? {} : { resultRun: current.resultRun }),
     });
     const initial = yield* evaluate(target.runs);
-    if (initial.settled) return settledResult(initial);
+    if (initial.settled || input.afterSequence !== undefined) return settledResult(initial);
 
     // A declined continuation records no event, so its effect settling wakes
     // the wait too.

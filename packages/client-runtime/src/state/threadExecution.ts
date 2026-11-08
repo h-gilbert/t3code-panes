@@ -10,6 +10,7 @@ import {
   isProviderNativeSubagentThread,
   latestProviderTurnForAttempt,
   type ModelSelection,
+  type EnvironmentId,
   type OrchestrationV2NotificationSource,
   type OrchestrationV2PendingBackgroundTask,
   type OrchestrationV2ProviderGoal,
@@ -532,6 +533,7 @@ export interface PendingBackgroundWorkItem {
   readonly kind: BackgroundWorkKind;
   readonly label: string;
   readonly childThreadId: ThreadId | undefined;
+  readonly childEnvironmentId?: EnvironmentId | undefined;
 }
 
 export interface PendingBackgroundWorkPresentation {
@@ -589,6 +591,9 @@ export function presentPendingBackgroundWork(
             ? BACKGROUND_WORK_KINDS[task.kind].singular
             : label,
         childThreadId: task.kind === "subagent" ? task.childThreadId : undefined,
+        ...(task.kind === "subagent" && task.childEnvironmentId !== undefined
+          ? { childEnvironmentId: task.childEnvironmentId }
+          : {}),
       };
     })
     // `map` returned a new array; Hermes has no `toSorted`.

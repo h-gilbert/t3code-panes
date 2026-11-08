@@ -69,6 +69,9 @@ const nothingSeen: Seen = {
 
 /** The box user's own thread, which no link started. */
 const usersThread = ThreadId.make("thread:box-users-own");
+/** A full-access box thread that delegated `laptopChild` to the laptop. */
+const boxParent = ThreadId.make("thread:box-parent");
+const laptopChild = ThreadId.make("thread:laptop-child");
 
 /**
  * B's threads: one `auto` thread in `boxProject` that the laptop's link
@@ -83,11 +86,25 @@ const boxThreads = (seen: Ref.Ref<Seen>, linkSession: Ref.Ref<string>) => {
   const users = { ...liveThreadShell(usersThread, { runtimeMode: "auto" }), projectId: boxProject };
   const run = (status: OrchestrationV2Run["status"]) =>
     ({ id: boxRun, status }) as unknown as OrchestrationV2Run;
+  const parent = { ...liveThreadShell(boxParent), projectId: boxProject };
   const shellOf = (threadId: ThreadId): Effect.Effect<OrchestrationV2ThreadShell | null> =>
-    threadId === boxThread ? linked : Effect.succeed(threadId === usersThread ? users : null);
+    threadId === boxThread
+      ? linked
+      : Effect.succeed(threadId === usersThread ? users : threadId === boxParent ? parent : null);
   const projectionOf = (threadId: ThreadId) =>
     shellOf(threadId).pipe(
-      Effect.map((thread) => ({ thread, runs: [run("running")], runtimeRequests: [] }) as never),
+      Effect.map(
+        (thread) =>
+          ({
+            thread,
+            runs: [run("running")],
+            runtimeRequests: [],
+            subagents:
+              threadId === boxParent
+                ? [{ remoteChild: { environmentId: laptop.environmentId, threadId: laptopChild } }]
+                : [],
+          }) as never,
+      ),
     );
   return Layer.mock(ThreadManagement.ThreadManagementService)({
     getThreadShell: shellOf,
@@ -293,18 +310,30 @@ const makeLaptop = Effect.gen(function* () {
       Layer.mock(ThreadManagement.ThreadManagementService)({
         getThreadShell: (threadId) =>
           Effect.succeed(
-            threadId === ThreadId.make("thread:laptop-from-desk")
+            threadId === laptopChild
               ? {
-                  ...liveThreadShell(threadId, { runtimeMode: "full-access" }),
-                  // Work another environment's link started on this laptop.
-                  linkOrigin: { sessionId: "session:desk", label: "T3 Code · Desk" },
+                  ...liveThreadShell(threadId),
+                  // The box's `auto` link started it as that parent's subagent.
+                  lineage: {
+                    rootThreadId: boxParent,
+                    parentThreadId: boxParent,
+                    parentEnvironmentId: box.environmentId,
+                    relationshipToParent: "subagent",
+                  },
+                  linkOrigin: { sessionId: "session:box", label: "T3 Code · Box", access: "auto" },
                 }
-              : liveThreadShell(
-                  threadId,
-                  threadId === ThreadId.make("thread:laptop-plan")
-                    ? { runtimeMode: "full-access", interactionMode: "plan" }
-                    : { runtimeMode: "full-access" },
-                ),
+              : threadId === ThreadId.make("thread:laptop-from-desk")
+                ? {
+                    ...liveThreadShell(threadId, { runtimeMode: "full-access" }),
+                    // Work another environment's link started on this laptop.
+                    linkOrigin: { sessionId: "session:desk", label: "T3 Code · Desk" },
+                  }
+                : liveThreadShell(
+                    threadId,
+                    threadId === ThreadId.make("thread:laptop-plan")
+                      ? { runtimeMode: "full-access", interactionMode: "plan" }
+                      : { runtimeMode: "full-access" },
+                  ),
           ),
         getProjectThreadRecords: ({ threadId }) =>
           Effect.succeed({
@@ -432,6 +461,39 @@ it.effect("an agent here works on a linked environment's threads within its own 
         `thread.stop ${boxThread}`,
         `delegated-tasks.stop ${boxThread}`,
       ]);
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("a child here reaches its full-access parent there over an `auto` link", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const seen = yield* Ref.make<Seen>(nothingSeen);
+      const linkSession = yield* Ref.make("");
+      const b = yield* serveBox(seen, linkSession);
+      const a = yield* makeLaptop;
+      yield* linkTo(a.links, b, "auto");
+      const ask = (caller: string) =>
+        a.call(caller, "t3_thread_send", {
+          environmentId: box.environmentId,
+          threadId: boxParent,
+          message: "Which suite should I run?",
+        });
+
+      const asked = yield* ask(laptopChild);
+      expect(asked.isError, JSON.stringify(asked.content)).toBe(false);
+      expect((yield* Ref.get(seen)).sends.map((send) => send.threadId)).toEqual([boxParent]);
+      // Another agent here is still held to the link's access there.
+      expect(failureOf(yield* ask("thread:laptop-full"))).toMatchObject({
+        code: "runtime_mode_escalation_denied",
+      });
+      // And the child's fence still holds for every other thread there.
+      const elsewhere = yield* a.call(laptopChild, "t3_thread_send", {
+        environmentId: box.environmentId,
+        threadId: usersThread,
+        message: "Not my parent.",
+      });
+      expect(failureOf(elsewhere)).toMatchObject({ code: "capability_denied" });
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );

@@ -247,8 +247,26 @@ describe("subagents in workspace lists", () => {
       ...thread("agent", projectA),
       environmentId: EnvironmentId.make("remote"),
       delegatedFrom: { environmentId, threadId: ThreadId.make("parent"), title: "Parent" },
+      lineage: {
+        parentEnvironmentId: environmentId,
+        parentThreadId: ThreadId.make("parent"),
+        relationshipToParent: "subagent" as const,
+        rootThreadId: ThreadId.make("agent"),
+      },
       runtime: { status: "running" } as EnvironmentThreadShell["runtime"],
     };
+    expect(
+      buildWorkspaceThreadPickerItems({
+        threads: [remote],
+        projects: [
+          {
+            ...projects[0]!,
+            memberProjectRefs: [{ environmentId: remote.environmentId, projectId: projectA }],
+          },
+        ],
+        paneTargets: [],
+      }),
+    ).toEqual([]);
     const nested = {
       ...child("nested", "agent"),
       environmentId: remote.environmentId,

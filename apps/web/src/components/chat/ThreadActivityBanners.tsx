@@ -175,6 +175,7 @@ export function backgroundWorkNowItem(input: {
   readonly stopping: boolean;
   readonly onStop: () => Promise<void>;
   readonly onOpenThread: (threadId: ThreadId) => void;
+  readonly onOpenRemoteThread?: (threadId: ThreadId, environmentId: EnvironmentId) => void;
 }): ThreadNowItem | null {
   const { onOpenThread } = input;
   const presentation = presentPendingBackgroundWork(input.tasks);
@@ -200,7 +201,9 @@ export function backgroundWorkNowItem(input: {
       activity: subagent?.progress?.replace(/\s+/gu, " ").trim() || null,
       startedAtMs: item?.startedAt ? DateTime.toEpochMillis(item.startedAt) : null,
       updatedAtMs: subagent ? DateTime.toEpochMillis(subagent.updatedAt) : 0,
-      childThreadId: task.childThreadId ?? subagent?.childThreadId ?? undefined,
+      childThreadId:
+        task.childThreadId ?? subagent?.childThreadId ?? subagent?.remoteChild?.threadId,
+      environmentId: task.childEnvironmentId ?? subagent?.remoteChild?.environmentId,
     };
   });
   const [only] = rows.length === 1 ? rows : [];
@@ -247,7 +250,14 @@ export function backgroundWorkNowItem(input: {
           />
         )}
         {onlyThreadId === undefined ? null : (
-          <InlineButton tone="muted" onClick={() => onOpenThread(onlyThreadId)}>
+          <InlineButton
+            tone="muted"
+            onClick={() =>
+              only?.environmentId !== undefined
+                ? input.onOpenRemoteThread?.(onlyThreadId, only.environmentId)
+                : onOpenThread(onlyThreadId)
+            }
+          >
             Open
           </InlineButton>
         )}

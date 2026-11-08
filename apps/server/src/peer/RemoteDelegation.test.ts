@@ -11,10 +11,13 @@ import {
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
+  ProviderSessionId,
   ProviderThreadId,
   type Project,
   type RepositoryIdentity,
   RunId,
+  RuntimeRequestId,
+  type OrchestrationV2RuntimeRequest,
   ThreadId,
   TurnItemId,
 } from "@t3tools/contracts";
@@ -55,6 +58,7 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
+import * as ThreadSearch from "../orchestration-v2/ThreadSearch.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as CommandReceiptStore from "../orchestration-v2/CommandReceiptStore.ts";
@@ -111,6 +115,8 @@ interface BoxThread {
   readonly nestedSettled: Deferred.Deferred<void>;
   /** Waiting there fails with this, as a thread deleted there does. */
   readonly gone: Ref.Ref<boolean>;
+  readonly settled: Ref.Ref<number>;
+  readonly question: Ref.Ref<OrchestrationV2RuntimeRequest | null>;
   readonly interrupted: Ref.Ref<number>;
   /** What each interrupt or stop there did, once per command id. */
   readonly stops: Ref.Ref<ReadonlyArray<"interrupt" | "thread.stop" | "delegated-tasks">>;
@@ -152,6 +158,8 @@ const makeBoxThread = Effect.gen(function* () {
     nestedWaiting: yield* Deferred.make<void>(),
     nestedSettled: yield* Deferred.make<void>(),
     gone: yield* Ref.make(false),
+    settled: yield* Ref.make(0),
+    question: yield* Ref.make<OrchestrationV2RuntimeRequest | null>(null),
     interrupted: yield* Ref.make(0),
     stops: yield* Ref.make<ReadonlyArray<"interrupt" | "thread.stop" | "delegated-tasks">>([]),
     runless: yield* Ref.make(false),
@@ -237,9 +245,14 @@ const boxToolkitLayer = (thread: BoxThread) => {
       const shell = yield* shellOf(threadId);
       const status = yield* Ref.get(thread.status);
       const runless = yield* Ref.get(thread.runless);
+      const question = yield* Ref.get(thread.question);
       return shell === null
         ? (null as never)
-        : { ...idleThreadProjection(shell), runs: runless ? [] : [runOf(status)] };
+        : {
+            ...idleThreadProjection(shell),
+            runs: runless ? [] : [runOf(status)],
+            runtimeRequests: question === null ? [] : [question],
+          };
     });
   // One record per command id, as its receipt replays a repeat.
   const recordStop = (commandId: string, kind: "interrupt" | "thread.stop" | "delegated-tasks") =>
@@ -257,6 +270,9 @@ const boxToolkitLayer = (thread: BoxThread) => {
       }
     });
   const layerBoxThreads = Layer.mock(ThreadManagement.ThreadManagementService)({
+    settleThread: () =>
+      Ref.update(thread.settled, (count) => count + 1).pipe(Effect.as({ sequence: 0 })),
+    getThreadEventSequence: () => Effect.succeed(1),
     getThreadShell: shellOf,
     getProjectThreadRecords: (input) => projectionOf(input.threadId),
     getThreadRecords: (threadId) => projectionOf(threadId),
@@ -269,6 +285,14 @@ const boxToolkitLayer = (thread: BoxThread) => {
             threadId: input.threadId,
             run: { ...runOf(yield* Ref.get(thread.status)), id: boxLaterRunId },
             timedOut: false,
+          };
+        }
+        if (input.afterSequence === 0 && (yield* Ref.get(thread.question)) !== null) {
+          return {
+            threadId: input.threadId,
+            run: runOf("running"),
+            timedOut: true,
+            eventSequence: 1,
           };
         }
         // A thread with no run has nothing to wait for.
@@ -476,13 +500,14 @@ const boxToolkitLayer = (thread: BoxThread) => {
         ),
       ),
   });
-  return Layer.merge(
+  return Layer.mergeAll(
     McpHttpServer.layerOrchestratorToolkit,
     McpHttpServer.layerProjectRegistration,
+    McpHttpServer.layerThreadToolkit,
   ).pipe(
     Layer.provide(DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer))),
     Layer.provide(NodeCrypto.layer),
-    Layer.provide(layerBoxThreads),
+    Layer.provide(Layer.merge(layerBoxThreads, Layer.mock(ThreadSearch.ThreadSearch)({}))),
     Layer.provide(layerBoxLaunches),
     Layer.provide(Layer.mock(RemoteDelegation.RemoteDelegation)({})),
     Layer.provide(Layer.mock(PeerForwarding.PeerForwarding)({})),
@@ -786,7 +811,11 @@ const delegateToBox = (laptopEnv: Effect.Success<ReturnType<typeof makeLaptop>>)
     );
 
 /** Waits until the task here has the result its thread there ended with. */
-const taskResult = (laptopEnv: Effect.Success<ReturnType<typeof makeLaptop>>, taskId: NodeId) =>
+const taskResult = (
+  laptopEnv: Effect.Success<ReturnType<typeof makeLaptop>>,
+  taskId: NodeId,
+  settled = false,
+) =>
   laptopEnv.orchestrator
     .streamStoredEventsFrom({
       threadId: parentThreadId,
@@ -798,7 +827,8 @@ const taskResult = (laptopEnv: Effect.Success<ReturnType<typeof makeLaptop>>, ta
         (stored) =>
           stored.event.type === "subagent.updated" &&
           stored.event.payload.id === taskId &&
-          stored.event.payload.result !== null,
+          stored.event.payload.result !== null &&
+          (!settled || stored.event.payload.remoteChild?.settledThere === true),
       ),
       Stream.runHead,
       Effect.map((stored) =>
@@ -821,7 +851,39 @@ it.effect("a task delegated to the box wakes the laptop's parent when it ends th
       yield* linkTo(a.links, b, "full-access");
       yield* seedParent(a);
 
+      yield* Ref.set(thread.question, {
+        id: RuntimeRequestId.make("question:box"),
+        nodeId: NodeId.make("node:box"),
+        providerTurnId: null,
+        nativeRequestRef: null,
+        kind: "user_input",
+        status: "pending",
+        responseCapability: {
+          type: "live",
+          providerSessionId: ProviderSessionId.make("session:box"),
+        },
+        createdAt: DateTime.makeUnsafe(0),
+        resolvedAt: null,
+      });
       const delegated = yield* delegateToBox(a);
+      const question = yield* a.orchestrator
+        .streamStoredEventsFrom({
+          threadId: parentThreadId,
+          afterSequence: 0,
+          eventType: "message.updated",
+        })
+        .pipe(
+          Stream.filter(
+            (stored) =>
+              stored.event.type === "message.updated" &&
+              stored.event.payload.notification?.outcome === "updated",
+          ),
+          Stream.runHead,
+        );
+      expect(Option.isSome(question)).toBe(true);
+      if (Option.isSome(question) && question.value.event.type === "message.updated")
+        expect(question.value.event.payload.text).toContain(`environmentId ${box.environmentId}`);
+      yield* Ref.set(thread.question, null);
       expect(delegated).toMatchObject({
         status: "running",
         childThreadId: null,
@@ -883,8 +945,9 @@ it.effect("a task delegated to the box wakes the laptop's parent when it ends th
       yield* Ref.set(thread.reply, "All 412 tests pass on the box.");
       yield* Ref.set(thread.status, "completed");
       yield* Deferred.succeed(thread.finished, undefined);
-      const task = yield* taskResult(a, delegated.taskId);
+      const task = yield* taskResult(a, delegated.taskId, true);
       expect(task).toMatchObject({ status: "completed", result: "All 412 tests pass on the box." });
+      expect(yield* Ref.get(thread.settled)).toBe(1);
       // The parent's live run claims the result, as for a child here.
       const parentRun = (yield* a.orchestrator.getThreadProjection(parentThreadId)).runs.find(
         (run) => run.id === parentRunId,
@@ -1600,7 +1663,8 @@ it.effect("a stop the box refuses because the parent was lowered ends instead of
             (stored) =>
               stored.event.type === "subagent.updated" &&
               stored.event.payload.id === delegated.taskId &&
-              stored.event.payload.remoteChild?.stoppedThere === true,
+              stored.event.payload.remoteChild?.stoppedThere === true &&
+              stored.event.payload.remoteChild?.settledThere === true,
           ),
           Stream.runHead,
         );
@@ -1671,6 +1735,7 @@ const stoppedThere = (
           stored.event.type === "subagent.updated" &&
           stored.event.payload.id === taskId &&
           stored.event.payload.remoteChild?.stoppedThere === true &&
+          stored.event.payload.remoteChild.settledThere === true &&
           (stopCount === "any" ||
             stored.event.payload.remoteChild.stopCount === (stopCount ?? undefined)),
       ),

@@ -45,6 +45,8 @@ export interface McpClientCaller {
    * another environment passing on the limits of the agent it calls for.
    */
   readonly narrowedTo?: ClientModes | undefined;
+  /** A linked caller's own thread there (`T3-Caller-Thread`), which may be a remote child here. */
+  readonly callerThreadId?: ThreadId | undefined;
   /** An outside client's thread links go through this hosted app, as Copy thread's do. */
   readonly hostedAppUrl?: string | undefined;
 }
@@ -56,6 +58,9 @@ export interface McpClientCaller {
  * `clientModeCeiling`), so a client gains nothing by sending a broad one.
  */
 export const MODE_LIMIT_HEADER = "t3-mode-limit";
+
+/** A linked environment's calling thread. It grants nothing unless that thread is a remote child here. */
+export const CALLER_THREAD_HEADER = "t3-caller-thread";
 
 export interface ClientModes {
   readonly runtimeMode: RuntimeMode;
