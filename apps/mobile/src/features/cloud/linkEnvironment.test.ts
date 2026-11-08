@@ -840,7 +840,6 @@ describe("mobile cloud link environment client", () => {
         expect(connection.authenticationMethod).toBe("dpop");
         expect(connection.dpopAccessToken).toBe("environment-dpop-token");
         expect(connection.relayManaged).toBe(true);
-        // @effect-diagnostics-next-line preferSchemaOverJson:off
         expect(JSON.parse(connectRequestBody)).toMatchObject({
           deviceId: "device-1",
           clientKeyThumbprint: "client-proof-key-thumbprint",
