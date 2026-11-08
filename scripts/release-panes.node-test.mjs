@@ -1,4 +1,5 @@
 import * as NodeAssert from "node:assert/strict";
+import * as NodeChildProcess from "node:child_process";
 import * as NodeTest from "node:test";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -10,6 +11,7 @@ import {
   latestForkReleaseTag,
   latestMacYaml,
   parseSigningIdentities,
+  preseedScript,
   selectSigningIdentity,
   signingRequirement,
 } from "./release-panes.mjs";
@@ -164,3 +166,51 @@ NodeTest.test(
     NodeAssert.throws(() => signingRequirement("com.t3tools.t3code", 'TEAM" or true'), /Invalid/);
   },
 );
+
+NodeTest.test("preseeding installs a server version the update will find, once", (t) => {
+  const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-release-preseed-test-"));
+  t.after(() => NodeFS.rmSync(root, { recursive: true, force: true }));
+  const bin = NodePath.join(root, "bin");
+  NodeFS.mkdirSync(bin);
+  NodeFS.writeFileSync(NodePath.join(bin, "uname"), "#!/bin/sh\necho Linux x86_64\n", {
+    mode: 0o755,
+  });
+  const archive = (name, files) => {
+    const source = NodePath.join(root, name, "t3-1.0.0-panes.1-linux-x64");
+    NodeFS.mkdirSync(source, { recursive: true });
+    for (const [file, mode] of files)
+      NodeFS.writeFileSync(NodePath.join(source, file), "x", { mode });
+    const file = NodePath.join(root, `${name}.tar.gz`);
+    NodeChildProcess.execFileSync("tar", [
+      "-czf",
+      file,
+      "-C",
+      NodePath.dirname(source),
+      NodePath.basename(source),
+    ]);
+    return NodeFS.readFileSync(file);
+  };
+  const preseed = (input) =>
+    NodeChildProcess.spawnSync("sh", ["-c", preseedScript("1.0.0-panes.1")], {
+      input,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        HOME: NodePath.join(root, "home"),
+        PATH: `${bin}:${process.env.PATH}`,
+      },
+    });
+  const versions = NodePath.join(root, "home/.t3/runtime/versions");
+
+  NodeAssert.equal(preseed(archive("broken", [["README", 0o644]])).status, 4);
+  NodeAssert.deepEqual(NodeFS.readdirSync(versions), []);
+
+  const installed = preseed(archive("good", [["t3", 0o755]]));
+  NodeAssert.equal(installed.stdout.trim(), "installed");
+  NodeAssert.deepEqual(NodeFS.readdirSync(versions), ["1.0.0-panes.1"]);
+  NodeAssert.equal(
+    NodeFS.readFileSync(NodePath.join(versions, "1.0.0-panes.1/.install-complete"), "utf8"),
+    "1.0.0-panes.1\n",
+  );
+  NodeAssert.equal(preseed(archive("again", [["t3", 0o755]])).stdout.trim(), "already present");
+});

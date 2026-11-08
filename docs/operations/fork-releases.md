@@ -23,6 +23,13 @@ from the installed app's team, and attaches it with its
 `SHA256SUMS`, and publishes the release. Updaters only read published releases, so no machine sees
 half a release. The command waits for the workflow unless given `--no-wait`.
 
+Servers that download GitHub release assets slowly can be sent the Linux server from this Mac
+instead: `vp run release:panes --preseed fred` (repeat `--preseed` per SSH host). After the release
+publishes, the Mac downloads the archive, checks it against `SHA256SUMS`, and unpacks it over SSH
+into the host's `~/.t3/runtime/versions`. The server's own update then finds that version installed
+and skips the download. A failed copy only prints a warning; that server downloads from GitHub as
+before.
+
 If `~/.t3-promotions` is on an external drive, set `T3CODE_RELEASE_SOURCE_ROOT`
 to a temporary directory on the Mac's internal drive. The source checkout and
 dependency links can then reuse the internal package cache, while release

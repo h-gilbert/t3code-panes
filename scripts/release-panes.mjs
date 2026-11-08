@@ -1,16 +1,8 @@
 /* oxlint-disable t3code/no-global-process-runtime -- This standalone release command is the host boundary, outside the Effect application. */
 /**
- * Publishes a fork release that installed apps and servers update to on their own.
- *
- *   vp run release:panes            build, publish, and wait for the Linux server build
- *   vp run release:panes --no-wait  return once the GitHub workflow has started
- *   vp run release:panes --no-publish  build and sign only (also prepares local promotion)
- *
- * The macOS app is built here to use the maintainer's Apple signing key.
- * Signing and updater compatibility are checked before building. The Linux
- * server is built by .github/workflows/release-panes.yml, which publishes the
- * draft release once both halves are attached, so no updater ever sees half a
- * release. See docs/operations/fork-releases.md.
+ * Publishes a fork release: `vp run release:panes [--no-wait] [--no-publish] [--preseed <ssh host>]`.
+ * The macOS app is built and signed here; .github/workflows/release-panes.yml builds the Linux server
+ * and publishes once both are attached. See docs/operations/fork-releases.md.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
@@ -228,12 +220,90 @@ function releaseNotes(sha) {
   ].join("\n");
 }
 
+/**
+ * Unpacks a server archive from stdin into `~/.t3/runtime/versions/<version>` the way the server's
+ * pinned runtime install does: a staging directory, the sentinel, then a rename. The server's
+ * update then finds the version installed and skips its own download.
+ */
+export function preseedScript(version) {
+  return `set -eu
+[ "$(uname -sm)" = "Linux x86_64" ] || { echo "not a Linux x64 host" >&2; exit 3; }
+versions="$HOME/.t3/runtime/versions"
+target="$versions/${version}"
+if [ -e "$target" ]; then cat >/dev/null; echo "already present"; exit 0; fi
+mkdir -p "$versions"
+staging=$(mktemp -d "$versions/.staging-XXXXXX")
+trap 'rm -rf "$staging"' EXIT
+tar -xzf - -C "$staging" --strip-components=1
+[ -x "$staging/t3" ] || { echo "archive has no t3 executable" >&2; exit 4; }
+echo "${version}" > "$staging/.install-complete"
+mv "$staging" "$target"
+trap - EXIT
+echo "installed"`;
+}
+
+const shellQuote = (value) => `'${value.replaceAll("'", `'\\''`)}'`;
+
+/** Some servers download GitHub release assets slowly; this Mac sends them the archive instead. */
+export function preseedServers(tag, version, hosts, directory) {
+  const fileName = `t3-${version}-linux-x64.tar.gz`;
+  const downloads = NodePath.join(directory, "linux");
+  NodeFS.mkdirSync(downloads, { recursive: true });
+  run("gh", [
+    "release",
+    "download",
+    tag,
+    "--repo",
+    FORK_RELEASE_REPOSITORY,
+    "--pattern",
+    fileName,
+    "--pattern",
+    "SHA256SUMS",
+    "--dir",
+    downloads,
+    "--clobber",
+  ]);
+  const archive = NodePath.join(downloads, fileName);
+  const expected = NodeFS.readFileSync(NodePath.join(downloads, "SHA256SUMS"), "utf8")
+    .split("\n")
+    .map((line) => line.trim().split(/\s+/))
+    .find(([, name]) => name?.replace(/^\*/, "") === fileName)?.[0];
+  const actual = NodeCrypto.createHash("sha256").update(NodeFS.readFileSync(archive)).digest("hex");
+  if (expected !== actual) throw new Error(`${fileName} does not match the release checksum.`);
+  for (const host of hosts) {
+    const input = NodeFS.openSync(archive, "r");
+    try {
+      const result = NodeChildProcess.spawnSync(
+        "ssh",
+        [
+          "-o",
+          "BatchMode=yes",
+          "-o",
+          "ConnectTimeout=15",
+          host,
+          `sh -c ${shellQuote(preseedScript(version))}`,
+        ],
+        { stdio: [input, "pipe", "pipe"], encoding: "utf8" },
+      );
+      if (result.status === 0) console.log(`${host}: ${result.stdout.trim()}`);
+      else
+        console.warn(
+          `${host}: copy failed (${result.status ?? result.error?.message}); it will download from GitHub. ${result.stderr.trim()}`,
+        );
+    } finally {
+      NodeFS.closeSync(input);
+    }
+  }
+  NodeFS.rmSync(downloads, { recursive: true, force: true });
+}
+
 function main() {
   const { values } = NodeUtil.parseArgs({
     options: {
       wait: { type: "boolean", default: true },
       publish: { type: "boolean", default: true },
       "allow-signing-change": { type: "boolean", default: false },
+      preseed: { type: "string", multiple: true, default: [] },
     },
     allowNegative: true,
   });
@@ -442,7 +512,10 @@ function main() {
     `ref=${sha}`,
   ]);
   console.log(`Draft ${tag} created. GitHub is building the Linux server and will publish it.`);
-  if (!values.wait) return;
+  if (!values.wait) {
+    if (values.preseed.length > 0) console.warn("--preseed needs the published release; skipped.");
+    return;
+  }
 
   let runId;
   for (let attempt = 0; attempt < 30 && !runId; attempt += 1) {
@@ -467,6 +540,7 @@ function main() {
   run("gh", ["run", "watch", String(runId), "--repo", FORK_RELEASE_REPOSITORY, "--exit-status"], {
     stdio: "inherit",
   });
+  if (values.preseed.length > 0) preseedServers(tag, version, values.preseed, directory);
   console.log(
     signing.requiresLocalInstall
       ? `Published ${tag}. After safely quitting this Mac app, install once with: vp run promote:desktop install. Servers can update from the release feed.`
