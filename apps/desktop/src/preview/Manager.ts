@@ -3388,14 +3388,11 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           if (decoded.value.sessionId !== voice.sessionId) return;
           runFork(
             Effect.gen(function* () {
-              const window = yield* Ref.get(mainWindowRef);
-              if (Option.isNone(window) || window.value.isDestroyed()) return;
+              // The window that hosts this guest, not a single main window.
+              const host = wc.hostWebContents;
+              if (!host || host.isDestroyed()) return;
               yield* attempt({ operation: "annotationVoice.forward", tabId }, () =>
-                window.value.webContents.send(
-                  PREVIEW_ANNOTATION_VOICE_EVENT_CHANNEL,
-                  tabId,
-                  decoded.value,
-                ),
+                host.send(PREVIEW_ANNOTATION_VOICE_EVENT_CHANNEL, tabId, decoded.value),
               ).pipe(Effect.ignore);
             }),
           );

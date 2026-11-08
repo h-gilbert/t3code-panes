@@ -93,8 +93,14 @@ export const make = ElectronShell.of({
     if (!path.isAbsolute(filePath) || filePath.includes("\0")) return false;
     const fs = yield* FileSystem.FileSystem;
     return yield* fs.access(filePath).pipe(
-      Effect.andThen(() => Effect.try(() => Electron.shell.showItemInFolder(filePath))),
-      Effect.as(true),
+      Effect.map(() => {
+        try {
+          Electron.shell.showItemInFolder(filePath);
+          return true;
+        } catch {
+          return false;
+        }
+      }),
       Effect.orElseSucceed(() => false),
     );
   }),
