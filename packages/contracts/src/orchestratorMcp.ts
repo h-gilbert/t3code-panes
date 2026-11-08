@@ -643,7 +643,6 @@ export type OrchestratorMcpEnvironmentLinksResult =
 
 export const OrchestratorMcpCapabilitiesResult = Schema.Struct({
   parentThreadId: Schema.NullOr(ThreadId),
-  parentEnvironmentId: Schema.optional(EnvironmentId),
   inheritedProviderInstanceId: Schema.NullOr(ProviderInstanceId),
   inheritedModel: Schema.NullOr(Schema.String),
   inheritedOptions: Schema.optional(Schema.Array(ProviderOptionSelection)),
