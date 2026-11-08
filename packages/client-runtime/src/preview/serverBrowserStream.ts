@@ -85,7 +85,8 @@ export type PreviewStreamInput =
       readonly text?: string;
       readonly modifiers: number;
     }
-  | { readonly type: "text"; readonly text: string }
+  /** `paste` asks the server to deliver a paste event first; older servers just type the text. */
+  | { readonly type: "text"; readonly text: string; readonly paste?: boolean }
   | { readonly type: "resize"; readonly width: number; readonly height: number }
   | { readonly type: "navigate"; readonly url: string }
   | { readonly type: "history"; readonly delta: -1 | 1 }

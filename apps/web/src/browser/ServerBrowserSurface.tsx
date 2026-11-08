@@ -837,7 +837,7 @@ export function ServerBrowserSurface(props: {
           onPaste={(event) => {
             event.preventDefault();
             const text = event.clipboardData.getData("text/plain");
-            if (text) send({ type: "text", text });
+            if (text) send({ type: "text", text, paste: true });
           }}
         />
         {fileChooser && control?.controller === "you" ? (
