@@ -6607,11 +6607,7 @@ effectIt.effect("applies Chrome identity to frame and worker targets before rele
       const guest = Object.assign(makeTestPreviewWebContents(vi.fn()), {
         isDevToolsOpened: () => false,
       });
-      const resumed = Promise.withResolvers<void>();
-      vi.mocked(guest.debugger.sendCommand).mockImplementation(async (method) => {
-        if (method === "Runtime.runIfWaitingForDebugger") resumed.resolve();
-        return undefined;
-      });
+      vi.mocked(guest.debugger.sendCommand).mockResolvedValue(undefined);
       fromId.mockReturnValue(guest);
       yield* manager.createTab("worker-identity");
       yield* manager.registerWebview("worker-identity", 42);
@@ -6631,21 +6627,43 @@ effectIt.effect("applies Chrome identity to frame and worker targets before rele
         .mocked(guest.debugger.on)
         .mock.calls.find(([event]) => event === "message")?.[1];
       expect(onMessage).toBeDefined();
-      onMessage!({} as Electron.Event, "Target.attachedToTarget", { sessionId: "worker-1" }, "");
-      yield* Effect.promise(() => resumed.promise);
-      expect(guest.debugger.sendCommand).toHaveBeenCalledWith(
-        "Network.setUserAgentOverride",
-        expect.objectContaining({
-          userAgentMetadata: expect.objectContaining({
-            brands: expect.arrayContaining([{ brand: "Google Chrome", version: "152" }]),
-          }),
-        }),
-        "worker-1",
-      );
-      const commands = vi.mocked(guest.debugger.sendCommand).mock.calls.map(([method]) => method);
-      expect(commands.indexOf("Network.setUserAgentOverride")).toBeLessThan(
-        commands.indexOf("Runtime.runIfWaitingForDebugger"),
-      );
+      const pageIdentity = vi
+        .mocked(guest.debugger.sendCommand)
+        .mock.calls.find(([method]) => method === "Emulation.setUserAgentOverride")?.[1];
+      for (const type of ["iframe", "worker", "shared_worker", "service_worker"]) {
+        const sessionId = `${type}-1`;
+        const finished = Promise.withResolvers<void>();
+        vi.mocked(guest.debugger.sendCommand).mockImplementation(async (method, _params, child) => {
+          // Worker renderers expose Emulation directly, not the page's Network alias.
+          if (method === "Network.setUserAgentOverride") throw new Error("Method not found");
+          if (method === "Runtime.runIfWaitingForDebugger" && child === sessionId)
+            finished.resolve();
+          return undefined;
+        });
+        onMessage!(
+          {} as Electron.Event,
+          "Target.attachedToTarget",
+          { sessionId, targetInfo: { type }, waitingForDebugger: true },
+          type === "worker" ? "iframe-1" : "",
+        );
+        yield* Effect.promise(() => finished.promise);
+        const commands = vi
+          .mocked(guest.debugger.sendCommand)
+          .mock.calls.filter(([, , child]) => child === sessionId);
+        expect(commands).toEqual([
+          ["Emulation.setUserAgentOverride", pageIdentity, sessionId],
+          [
+            "Target.setAutoAttach",
+            expect.objectContaining({
+              autoAttach: true,
+              waitForDebuggerOnStart: true,
+              flatten: true,
+            }),
+            sessionId,
+          ],
+          ["Runtime.runIfWaitingForDebugger", {}, sessionId],
+        ]);
+      }
     }),
   ),
 );
