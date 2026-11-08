@@ -114,8 +114,8 @@ const DESKTOP_VIEWPORT_READ_TIMEOUT = "1 second";
 
 const sleepUntil = (deadline: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, Math.max(0, deadline - Date.now())));
-/** A viewer's first still is optional; screencast frames replace it. */
-const VIEWER_STILL_TIMEOUT_MS = 3_000;
+/** How long a viewer's attach waits on the page; its first still is optional. */
+const VIEWER_ATTACH_WAIT_MS = 3_000;
 
 /** Rejects when `work` has not settled in time; the work itself keeps running. */
 const withDeadline = <A>(work: Promise<A>, timeoutMs: number): Promise<A> => {
@@ -2939,7 +2939,7 @@ const make = Effect.gen(function* () {
       const data = await withCaptureLock(tab, () =>
         withDeadline(
           ServerBrowserPage.captureViewport(session, { format: "jpeg", quality }),
-          VIEWER_STILL_TIMEOUT_MS,
+          VIEWER_ATTACH_WAIT_MS,
         ),
       ).catch(() => null);
       if (data) viewer.push({ _tag: "frame", data: Buffer.from(data, "base64"), ack: Effect.void });
@@ -2996,10 +2996,10 @@ const make = Effect.gen(function* () {
       });
     });
     void broadcastViewport(tab).catch(constVoid);
-    // Neither may hold up the attach for long: until it returns, the stream has not
-    // upgraded and the viewer shows "Connecting…" with no control state.
+    // Until the attach returns, the stream has not upgraded and the viewer shows
+    // "Connecting…" with no control state, so neither may hold it up for long.
     const bounded = (work: Promise<unknown>) =>
-      Effect.promise(() => withDeadline(work, VIEWER_STILL_TIMEOUT_MS).catch(constVoid));
+      Effect.promise(() => withDeadline(work, VIEWER_ATTACH_WAIT_MS).catch(constVoid));
     yield* bounded(startScreencast(1));
     // An idle page does not repaint for a new screencast, so the viewer
     // starts from a still unless a live frame beat it.
