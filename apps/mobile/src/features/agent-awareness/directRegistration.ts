@@ -16,23 +16,23 @@ function authorizationHeaders(connection: SavedRemoteConnection) {
   return connection.bearerToken ? { authorization: `Bearer ${connection.bearerToken}` } : {};
 }
 
-export function readDirectNotificationStatus(connection: SavedRemoteConnection) {
-  return Effect.gen(function* () {
-    const client = yield* makeEnvironmentHttpApiClient(connection.httpBaseUrl);
-    const urls = makeEnvironmentHttpApiUrlBuilder(connection.httpBaseUrl);
-    return yield* executeEnvironmentHttpRequest(
-      urls.notifications.status(),
-      REQUEST_TIMEOUT_MS,
-      client.notifications.status({ headers: authorizationHeaders(connection) }),
-    );
-  }).pipe(Effect.provide(directHttpClientLayer));
-}
+export const readDirectNotificationStatus = Effect.fn("readDirectNotificationStatus")(function* (
+  connection: SavedRemoteConnection,
+) {
+  const client = yield* makeEnvironmentHttpApiClient(connection.httpBaseUrl);
+  const urls = makeEnvironmentHttpApiUrlBuilder(connection.httpBaseUrl);
+  return yield* executeEnvironmentHttpRequest(
+    urls.notifications.status(),
+    REQUEST_TIMEOUT_MS,
+    client.notifications.status({ headers: authorizationHeaders(connection) }),
+  );
+}, Effect.provide(directHttpClientLayer));
 
-export function registerDirectNotificationDevice(input: {
-  readonly connection: SavedRemoteConnection;
-  readonly payload: RelayDeviceRegistrationRequest;
-}) {
-  return Effect.gen(function* () {
+export const registerDirectNotificationDevice = Effect.fn("registerDirectNotificationDevice")(
+  function* (input: {
+    readonly connection: SavedRemoteConnection;
+    readonly payload: RelayDeviceRegistrationRequest;
+  }) {
     const client = yield* makeEnvironmentHttpApiClient(input.connection.httpBaseUrl);
     const urls = makeEnvironmentHttpApiUrlBuilder(input.connection.httpBaseUrl);
     return yield* executeEnvironmentHttpRequest(
@@ -43,5 +43,6 @@ export function registerDirectNotificationDevice(input: {
         payload: input.payload,
       }),
     );
-  }).pipe(Effect.provide(directHttpClientLayer));
-}
+  },
+  Effect.provide(directHttpClientLayer),
+);

@@ -235,6 +235,20 @@ describe("initial user input drafts", () => {
       customAnswer: "  Proposed commit\n\n",
     });
   });
+
+  it("seeds a question with the id __proto__ as its own draft", () => {
+    const seeded = seedUserInputDraftAnswers(
+      [
+        { id: "__proto__", initialAnswer: "Proposed" },
+        { id: "name", initialAnswer: "Control" },
+      ],
+      {},
+    );
+
+    expect(JSON.stringify(seeded)).toBe(
+      '{"__proto__":{"customAnswer":"Proposed"},"name":{"customAnswer":"Control"}}',
+    );
+  });
 });
 const projection: OrchestrationV2ThreadProjection = {
   ...v2Projection,
@@ -361,6 +375,44 @@ it("restores old text answers without mutating history or replacing unchanged ro
   expect(row.item).not.toHaveProperty("questionAnswer");
   expect(project(answered)).toBe(result);
   expect(project({ ...answered, visibleTurnItems: [...rows] })[0]).toBe(result[0]);
+});
+
+it("keeps app-owned settings approvals actionable with only one-time choices", () => {
+  const item = projection.turnItems[0]!;
+  if (item.type !== "user_input_request") throw new Error("Expected a request fixture");
+  const options = [
+    { decision: "accept", label: "Approve change" },
+    { decision: "decline", label: "Decline" },
+  ] as const;
+  const result = derivePendingThreadRequests({
+    runtimeRequests: [
+      {
+        ...projection.runtimeRequests[0]!,
+        kind: "permission",
+        responseCapability: { type: "settings" },
+      },
+    ],
+    turnItems: [
+      {
+        ...item,
+        type: "approval_request",
+        requestId,
+        requestKind: "permission",
+        prompt: "Enable device access on Fred",
+        options,
+      },
+    ],
+  });
+  expect(result.approvals).toEqual([
+    {
+      requestId,
+      requestKind: "permission",
+      createdAt: expect.any(String),
+      detail: "Enable device access on Fred",
+      options,
+      responseCapability: "live",
+    },
+  ]);
 });
 
 type QuestionItem = Extract<

@@ -383,7 +383,9 @@ export function createPreviewStreamClient(
     send: (input) => {
       if (socket?.readyState !== WebSocket.OPEN) return false;
       if (!control?.canOperate) return false;
-      if (input.type !== "takeControl" && control.controller !== "you") return false;
+      // The viewport follows the surface being viewed, whoever holds the page.
+      if (input.type !== "takeControl" && input.type !== "resize" && control.controller !== "you")
+        return false;
       socket.send(JSON.stringify(input));
       return true;
     },

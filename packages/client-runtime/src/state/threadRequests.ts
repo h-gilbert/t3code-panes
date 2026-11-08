@@ -99,18 +99,15 @@ export function seedUserInputDraftAnswers<Draft extends { readonly customAnswer?
   >,
   drafts: Record<string, Draft>,
 ): Record<string, Draft | { customAnswer: string }> {
-  let seeded: Record<string, Draft | { customAnswer: string }> = drafts;
-  for (const question of questions) {
-    if (
-      question.initialAnswer === undefined ||
-      question.allowCustomAnswer === false ||
-      seeded[question.id] !== undefined
-    )
-      continue;
-    if (seeded === drafts) seeded = { ...drafts };
-    seeded[question.id] = { customAnswer: question.initialAnswer };
-  }
-  return seeded;
+  // Entries, not assignment, so an id such as `__proto__` becomes an own draft.
+  const seeds = questions.flatMap((question) =>
+    question.initialAnswer === undefined ||
+    question.allowCustomAnswer === false ||
+    Object.hasOwn(drafts, question.id)
+      ? []
+      : [[question.id, { customAnswer: question.initialAnswer }] as const],
+  );
+  return seeds.length === 0 ? drafts : { ...drafts, ...Object.fromEntries(seeds) };
 }
 
 /** Keys a user-input draft by thread so a thread's resolved requests can be pruned together. */
@@ -274,7 +271,10 @@ export function derivePendingThreadRequests(
       ...(item?.type === "approval_request" && item.options !== undefined
         ? { options: item.options }
         : {}),
-      responseCapability: responseCapability === "live" ? "live" : "not_resumable",
+      responseCapability:
+        responseCapability === "live" || responseCapability === "settings"
+          ? "live"
+          : "not_resumable",
       ...(request.responseCapability.type === "live" && request.responseCapability.supportsFeedback
         ? { supportsFeedback: true }
         : {}),

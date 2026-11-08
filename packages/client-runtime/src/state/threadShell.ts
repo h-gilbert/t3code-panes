@@ -123,13 +123,15 @@ function pendingSubagentRequestsByThread(
       if (requests.get(parentId) !== "approval") requests.set(parentId, request);
       const parent = byId.get(parentId);
       parentId =
-        parent?.lineage.relationshipToParent === "subagent" || parent?.lineage.sideChat === true
+        parent?.lineage.parentEnvironmentId === undefined &&
+        (parent?.lineage.relationshipToParent === "subagent" || parent?.lineage.sideChat === true)
           ? parent.lineage.parentThreadId
           : null;
     }
   };
   for (const child of threads) {
-    const parentId = child.lineage.parentThreadId;
+    const parentId =
+      child.lineage.parentEnvironmentId === undefined ? child.lineage.parentThreadId : null;
     if (child.lineage.sideChat === true) {
       const request = sideChatRequest(child);
       if (parentId !== null && request !== null && requests.get(parentId) !== "approval") {
@@ -452,14 +454,22 @@ export function createEnvironmentThreadShellAtoms(input: {
           parent !== null &&
           (thread.lineage.relationshipToParent === "subagent" || thread.lineage.sideChat === true)
         ) {
-          addChild({ environmentId, threadId: parent }, environmentId, thread);
+          addChild(
+            {
+              environmentId: thread.lineage.parentEnvironmentId ?? environmentId,
+              threadId: parent,
+            },
+            environmentId,
+            thread,
+          );
         }
         if (
           thread.delegatedFrom !== undefined &&
           ((thread.lineage.relationshipToParent !== "subagent" &&
             thread.lineage.sideChat !== true) ||
             parent !== thread.delegatedFrom.threadId ||
-            environmentId !== thread.delegatedFrom.environmentId)
+            (thread.lineage.parentEnvironmentId ?? environmentId) !==
+              thread.delegatedFrom.environmentId)
         ) {
           addChild(thread.delegatedFrom, environmentId, thread);
         }

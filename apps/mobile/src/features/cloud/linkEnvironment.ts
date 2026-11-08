@@ -1,4 +1,3 @@
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { HttpClient } from "effect/http";
@@ -46,11 +45,14 @@ function readRelayUrl(): string | null {
   return resolveCloudPublicConfig().relay.url;
 }
 
-export class CloudEnvironmentLinkError extends Data.TaggedError("CloudEnvironmentLinkError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-  readonly traceId?: string;
-}> {}
+export class CloudEnvironmentLinkError extends Schema.TaggedError<CloudEnvironmentLinkError>()(
+  "CloudEnvironmentLinkError",
+  {
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+    traceId: Schema.optional(Schema.String),
+  },
+) {}
 
 export interface CloudEnvironmentRecordWithStatus {
   readonly environment: RelayClientEnvironmentRecord;
@@ -326,14 +328,14 @@ export const linkEnvironmentToCloud = Effect.fn("linkEnvironment.linkEnvironment
   },
 );
 
-export function listCloudEnvironments(input: {
-  readonly clerkToken: string;
-}): Effect.Effect<
-  ReadonlyArray<RelayClientEnvironmentRecord>,
-  CloudEnvironmentLinkError,
-  ManagedRelay.ManagedRelayClient
-> {
-  return Effect.gen(function* () {
+export const listCloudEnvironments = Effect.fn("mobile.cloud.listCloudEnvironments")(
+  function* (input: {
+    readonly clerkToken: string;
+  }): Effect.fn.Return<
+    ReadonlyArray<RelayClientEnvironmentRecord>,
+    CloudEnvironmentLinkError,
+    ManagedRelay.ManagedRelayClient
+  > {
     const relayUrl = yield* requireRelayUrl();
     const relayClient = yield* ManagedRelay.ManagedRelayClient;
 
@@ -342,19 +344,19 @@ export function listCloudEnvironments(input: {
         clerkToken: input.clerkToken,
       })
       .pipe(Effect.mapError(decodedRelayClientError(`${relayUrl}/v1/environments failed`)));
-  });
-}
+  },
+);
 
-export function getCloudEnvironmentStatus(input: {
-  readonly clerkToken: string;
-  readonly environment: RelayClientEnvironmentRecord;
-  readonly relayScopes?: ReadonlyArray<RelayDpopAccessTokenScope>;
-}): Effect.Effect<
-  RelayEnvironmentStatusResponseType,
-  CloudEnvironmentLinkError,
-  ManagedRelay.ManagedRelayClient
-> {
-  return Effect.gen(function* () {
+export const getCloudEnvironmentStatus = Effect.fn("mobile.cloud.getCloudEnvironmentStatus")(
+  function* (input: {
+    readonly clerkToken: string;
+    readonly environment: RelayClientEnvironmentRecord;
+    readonly relayScopes?: ReadonlyArray<RelayDpopAccessTokenScope>;
+  }): Effect.fn.Return<
+    RelayEnvironmentStatusResponseType,
+    CloudEnvironmentLinkError,
+    ManagedRelay.ManagedRelayClient
+  > {
     const relayUrl = yield* requireRelayUrl();
     const relayClient = yield* ManagedRelay.ManagedRelayClient;
     const status = yield* relayClient
@@ -372,8 +374,8 @@ export function getCloudEnvironmentStatus(input: {
       );
     yield* ensureStatusMatchesEnvironment({ environment: input.environment, status });
     return status;
-  });
-}
+  },
+);
 
 export function loadCloudEnvironmentStatuses(input: {
   readonly clerkToken: string;
@@ -408,21 +410,21 @@ export function loadCloudEnvironmentStatuses(input: {
   );
 }
 
-export function listCloudEnvironmentsWithStatus(input: {
+export const listCloudEnvironmentsWithStatus = Effect.fn(
+  "mobile.cloud.listCloudEnvironmentsWithStatus",
+)(function* (input: {
   readonly clerkToken: string;
-}): Effect.Effect<
+}): Effect.fn.Return<
   ReadonlyArray<CloudEnvironmentRecordWithStatus>,
   CloudEnvironmentLinkError,
   ManagedRelay.ManagedRelayClient
 > {
-  return Effect.gen(function* () {
-    const environments = yield* listCloudEnvironments(input);
-    return yield* loadCloudEnvironmentStatuses({
-      clerkToken: input.clerkToken,
-      environments,
-    });
+  const environments = yield* listCloudEnvironments(input);
+  return yield* loadCloudEnvironmentStatuses({
+    clerkToken: input.clerkToken,
+    environments,
   });
-}
+});
 
 const loadAgentAwarenessDeviceId = Effect.fn("mobile.cloud.loadAgentAwarenessDeviceId")(
   function* () {

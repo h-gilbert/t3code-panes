@@ -2,6 +2,7 @@ import {
   ConnectionDiagnosticObserver,
   type ConnectionDiagnosticEvent,
 } from "@t3tools/client-runtime/connection";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Network from "expo-network";
@@ -40,7 +41,7 @@ export const layer = Layer.effect(
         if (key === previous) return;
         previous = key;
         record({
-          timestamp: new Date().toISOString(),
+          timestamp: DateTime.formatIso(DateTime.nowUnsafe()),
           kind: "network",
           environmentId: null,
           fields,
@@ -52,7 +53,7 @@ export const layer = Layer.effect(
           .catch(() => {
             if (active)
               record({
-                timestamp: new Date().toISOString(),
+                timestamp: DateTime.formatIso(DateTime.nowUnsafe()),
                 kind: "network-unavailable",
                 environmentId: null,
                 fields: {},
@@ -66,7 +67,7 @@ export const layer = Layer.effect(
         checks.clear();
       };
       record({
-        timestamp: new Date().toISOString(),
+        timestamp: DateTime.formatIso(DateTime.nowUnsafe()),
         kind: "app-start",
         environmentId: null,
         fields: {
@@ -79,7 +80,7 @@ export const layer = Layer.effect(
       const networkSubscription = Network.addNetworkStateListener(network);
       const appSubscription = AppState.addEventListener("change", (state) => {
         record({
-          timestamp: new Date().toISOString(),
+          timestamp: DateTime.formatIso(DateTime.nowUnsafe()),
           kind: "app-state",
           environmentId: null,
           fields: { appState: state },
@@ -91,8 +92,8 @@ export const layer = Layer.effect(
         observe: (event: ConnectionDiagnosticEvent) =>
           Effect.sync(() => {
             if (!active) return;
-            const now = Date.now();
-            record(connectionLogRecord(event, new Date(now).toISOString()));
+            const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
+            record(connectionLogRecord(event, DateTime.formatIso(DateTime.makeUnsafe(now))));
             if (
               event.kind !== "failure" ||
               AppState.currentState !== "active" ||
@@ -105,6 +106,8 @@ export const layer = Layer.effect(
               const key = `${event.environmentId}:${baseUrl}`;
               const controller = new AbortController();
               let timedOut = false;
+              // Native reachability requests outlive the observer Effect and are cancelled on app background.
+              // @effect-diagnostics-next-line globalTimersInEffect:off
               const timer = setTimeout(() => {
                 timedOut = true;
                 controller.abort();
@@ -114,13 +117,13 @@ export const layer = Layer.effect(
                 .then((result) => {
                   if (active)
                     record({
-                      timestamp: new Date().toISOString(),
+                      timestamp: DateTime.formatIso(DateTime.nowUnsafe()),
                       kind: "reachability",
                       environmentId: event.environmentId,
                       fields: {
                         ...result,
                         label: event.label,
-                        durationMs: Date.now() - now,
+                        durationMs: DateTime.toEpochMillis(DateTime.nowUnsafe()) - now,
                         result: timedOut ? "timeout" : (result.result ?? "unknown"),
                       },
                     });
@@ -128,7 +131,7 @@ export const layer = Layer.effect(
                 .catch(() => {
                   if (active)
                     record({
-                      timestamp: new Date().toISOString(),
+                      timestamp: DateTime.formatIso(DateTime.nowUnsafe()),
                       kind: "reachability",
                       environmentId: event.environmentId,
                       fields: { result: "invalid-route" },

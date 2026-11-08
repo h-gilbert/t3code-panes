@@ -29,7 +29,10 @@ export function visibilityParentKey(
 ): string | null {
   const parentId = thread.lineage.parentThreadId;
   if (!isListedThreadLineage(thread.lineage) && parentId !== null) {
-    return threadKey({ environmentId, threadId: parentId });
+    return threadKey({
+      environmentId: thread.lineage.parentEnvironmentId ?? environmentId,
+      threadId: parentId,
+    });
   }
   return thread.delegatedFrom === undefined ? null : threadKey(thread.delegatedFrom);
 }

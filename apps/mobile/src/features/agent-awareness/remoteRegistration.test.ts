@@ -6,7 +6,6 @@ import { beforeEach, vi } from "vite-plus/test";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
-import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import { FetchHttpClient } from "effect/http";
 import { ManagedRelay } from "@t3tools/client-runtime/relay";
@@ -28,12 +27,14 @@ import { makeRelayDeviceRegistrationRequest, resolveApsEnvironment } from "./reg
 import { registerDirectNotificationDevice } from "./directRegistration";
 import {
   __resetAgentAwarenessRemoteRegistrationForTest,
+  __agentAwarenessBackgroundOperationForTest,
   getAgentAwarenessRegistrationStatus,
   refreshAgentAwarenessRegistration,
   registerAgentAwarenessConnection,
   releaseAgentAwarenessRelayTokenProvider,
   setAgentAwarenessRelayTokenProvider,
   unregisterAgentAwarenessConnection,
+  type AgentAwarenessRegistrationError,
 } from "./remoteRegistration";
 
 vi.mock("expo-constants", () => import("../../testing/expoConstantsMock"));
@@ -52,6 +53,7 @@ vi.mock("./directRegistration", async () => {
 const backgroundRuntime = vi.hoisted(() => ({
   pending: [] as Array<{
     readonly operation: unknown;
+    readonly completion: Promise<void>;
     readonly resolve: (exit: Exit.Exit<unknown, unknown>) => void;
   }>,
 }));
@@ -99,10 +101,15 @@ vi.mock("react-native", () => ({
 
 vi.mock("../../lib/runtime", () => ({
   runtime: {
-    runPromiseExit: (operation: unknown) =>
-      new Promise((resolve) => {
-        backgroundRuntime.pending.push({ operation, resolve });
-      }),
+    runPromiseExit: (operation: unknown) => {
+      let resolve!: (exit: Exit.Exit<unknown, unknown>) => void;
+      const result = new Promise<Exit.Exit<unknown, unknown>>((done) => {
+        resolve = done;
+      });
+      const completion = result.then(() => {});
+      backgroundRuntime.pending.push({ operation, resolve, completion });
+      return result;
+    },
   },
 }));
 
@@ -151,24 +158,23 @@ const layerRelayTest = ManagedRelayLayer.layer("https://relay.example.test").pip
 
 const runBackgroundOperations = Effect.fn("TestRemoteRegistration.runBackgroundOperations")(
   function* () {
-    let idlePasses = 0;
     for (;;) {
-      yield* Effect.promise(() => Promise.resolve());
       const pending = backgroundRuntime.pending.shift();
       if (!pending) {
-        idlePasses++;
-        if (idlePasses >= 3) {
-          return;
-        }
-        continue;
+        return;
       }
-      idlePasses = 0;
       const exit = yield* Effect.exit(
-        pending.operation as Effect.Effect<unknown, unknown, ManagedRelay.ManagedRelayClient>,
+        pending.operation as Effect.Effect<
+          unknown,
+          AgentAwarenessRegistrationError,
+          ManagedRelay.ManagedRelayClient
+        >,
       );
+      const completion = __agentAwarenessBackgroundOperationForTest(pending.operation as object);
       yield* Effect.sync(() => {
         pending.resolve(exit);
       });
+      yield* Effect.promise(() => completion);
     }
   },
 );
