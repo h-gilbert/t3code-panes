@@ -19,6 +19,7 @@ import {
   isWindowsShellHostedForeground,
   loadWindowsForegroundApi,
 } from "./WindowsForeground.ts";
+import { keepAppUserAgent } from "../preview/appUserAgent.ts";
 import { startWindowsForegroundFocusThread } from "./WindowsForegroundFocusThread.ts";
 
 function windowsForegroundFocusTarget(window: Electron.BrowserWindow) {
@@ -243,6 +244,7 @@ export const make = Effect.gen(function* () {
       return Effect.try({
         try: () => {
           const window = new Electron.BrowserWindow(options);
+          keepAppUserAgent(window.webContents);
           if (behavior?.auxiliary === true) auxiliaryWindows.add(window);
           return window;
         },
