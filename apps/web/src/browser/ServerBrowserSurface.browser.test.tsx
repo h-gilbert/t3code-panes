@@ -220,3 +220,45 @@ describe("ServerBrowserSurface history", () => {
     expect(mouseInputs()).not.toEqual([]);
   });
 });
+
+describe("ServerBrowserSurface viewer size", () => {
+  const resizes = () => mocks.sent.filter((input) => input.type === "resize");
+  const rounded = (element: Element) => {
+    const { width, height } = element.getBoundingClientRect();
+    return { width: Math.round(width), height: Math.round(height) };
+  };
+
+  it("publishes a newly shown surface's size while the agent holds the page", async () => {
+    setup();
+    const container = document.createElement("div");
+    container.style.cssText = "width: 320px; height: 180px; display: flex;";
+    await using _screen = await render(
+      <ServerBrowserSurface
+        environmentId={EnvironmentId.make("environment-size")}
+        threadId="thread-size"
+        tabId="tab-size"
+        visible
+        className="flex-1"
+      />,
+      { container },
+    );
+    await vi.waitFor(() => expect(mocks.createClient).toHaveBeenCalled());
+    const handlers = mocks.createClient.mock.calls.at(-1)![1];
+    const surface = container.querySelector("canvas")!.parentElement!;
+    expect(resizes()).toEqual([]);
+
+    await act(() =>
+      handlers.onControl?.({ canOperate: true, controller: "agent", generation: 1, dialog: null }),
+    );
+    expect(resizes()).toEqual([{ type: "resize", ...rounded(surface) }]);
+
+    // Expanding the view resizes the same surface; no click or takeover is needed.
+    mocks.sent.length = 0;
+    const inset = rounded(surface);
+    container.style.width = "460px";
+    container.style.height = "300px";
+    await vi.waitFor(() => expect(rounded(surface)).not.toEqual(inset));
+    await vi.waitFor(() => expect(resizes()).toEqual([{ type: "resize", ...rounded(surface) }]));
+    expect(rounded(surface).width).toBe(460);
+  });
+});

@@ -114,6 +114,19 @@ const DESKTOP_VIEWPORT_READ_TIMEOUT = "1 second";
 
 const sleepUntil = (deadline: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, Math.max(0, deadline - Date.now())));
+/** A viewer's first still is optional; screencast frames replace it. */
+const VIEWER_STILL_TIMEOUT_MS = 3_000;
+
+/** Rejects when `work` has not settled in time; the work itself keeps running. */
+const withDeadline = <A>(work: Promise<A>, timeoutMs: number): Promise<A> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    work,
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`Timed out after ${timeoutMs}ms.`)), timeoutMs);
+    }),
+  ]).finally(() => clearTimeout(timer));
+};
 
 const EDITABLE_AT_POINT_SCRIPT = `(x, y) => {
   let element = document.elementFromPoint(x, y);
@@ -2921,8 +2934,13 @@ const make = Effect.gen(function* () {
     broadcastControl(tab);
     pushFileChooser(tab);
     const pushStill = async () => {
+      // Chromium can leave a screenshot unanswered, such as one that straddles a cross-site
+      // redirect. Bounded, so it never holds this tab's capture lock against later viewers.
       const data = await withCaptureLock(tab, () =>
-        ServerBrowserPage.captureViewport(session, { format: "jpeg", quality }),
+        withDeadline(
+          ServerBrowserPage.captureViewport(session, { format: "jpeg", quality }),
+          VIEWER_STILL_TIMEOUT_MS,
+        ),
       ).catch(() => null);
       if (data) viewer.push({ _tag: "frame", data: Buffer.from(data, "base64"), ack: Effect.void });
     };
@@ -2978,10 +2996,14 @@ const make = Effect.gen(function* () {
       });
     });
     void broadcastViewport(tab).catch(constVoid);
-    yield* Effect.promise(() => startScreencast(1));
+    // Neither may hold up the attach for long: until it returns, the stream has not
+    // upgraded and the viewer shows "Connecting…" with no control state.
+    const bounded = (work: Promise<unknown>) =>
+      Effect.promise(() => withDeadline(work, VIEWER_STILL_TIMEOUT_MS).catch(constVoid));
+    yield* bounded(startScreencast(1));
     // An idle page does not repaint for a new screencast, so the viewer
     // starts from a still unless a live frame beat it.
-    if (!screencastStarted) yield* Effect.promise(pushStill);
+    if (!screencastStarted) yield* bounded(pushStill());
     return {
       output,
       input: (raw: unknown) =>
