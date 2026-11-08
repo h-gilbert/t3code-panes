@@ -10,6 +10,9 @@
  *   Node access).
  * - `focusOnNavigation=false`: navigation inside an agent-controlled guest
  *   must not move macOS first-responder focus away from the user's composer.
+ * - `transparent=false`: guests are transparent by default, so a page with no
+ *   background of its own streamed as black and showed the app through it.
+ *   Opaque guests paint Chrome's canvas colour like a normal browser.
  *
  * Format notes (locked down by `WebviewPreferences.test.ts`):
  * - Whitespace-free. Electron's webpreferences parser splits on `,` and
@@ -28,4 +31,4 @@
  * security-critical flags can't regress on preview tabs.
  */
 export const PREVIEW_WEBVIEW_PREFERENCES =
-  "contextIsolation=false,sandbox=true,nodeIntegration=false,focusOnNavigation=false";
+  "contextIsolation=false,sandbox=true,nodeIntegration=false,focusOnNavigation=false,transparent=false";
