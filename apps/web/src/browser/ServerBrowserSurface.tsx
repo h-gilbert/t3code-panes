@@ -340,8 +340,13 @@ export function ServerBrowserSurface(props: {
       const size = sizeRef.current;
       if (!size) return;
       const ratio = window.devicePixelRatio || 1;
-      const width = Math.round(size.width * ratio);
-      const height = Math.round(size.height * ratio);
+      // Growing the cap reconnects the stream, so an expandable view starts at screen size.
+      const width = Math.round(
+        (followSize ? Math.max(size.width, screen.width) : size.width) * ratio,
+      );
+      const height = Math.round(
+        (followSize ? Math.max(size.height, screen.height) : size.height) * ratio,
+      );
       setCap((current) =>
         current !== null && current.width >= width && current.height >= height
           ? current

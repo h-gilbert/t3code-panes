@@ -98,6 +98,8 @@ const SERVER_HOST_CLIENT_ID = SERVER_BROWSER_AUTOMATION_CLIENT_ID;
 const RENDER_SCALE = 2;
 // Chromium allows three unacked frames, so 100 ms pacing caps viewers near 30 fps.
 const SCREENCAST_ACK_PACE_MS = 100;
+// A person driving the page needs typing and scrolling to keep up, so pace near 60 fps then.
+const SCREENCAST_CONTROLLED_ACK_PACE_MS = 50;
 const SCREENCAST_SETTLE_MS = 200;
 const SCREENCAST_MOTION_FRAMES = 4;
 const SCREENCAST_MOTION_WINDOW_MS = 300;
@@ -3012,7 +3014,12 @@ const make = Effect.gen(function* () {
         _tag: "frame",
         data: Buffer.from(frame.data, "base64"),
         ack: Effect.promise(() =>
-          sleepUntil(arrivedAt + SCREENCAST_ACK_PACE_MS).then(() => {
+          sleepUntil(
+            arrivedAt +
+              (tab.control.controller === null
+                ? SCREENCAST_ACK_PACE_MS
+                : SCREENCAST_CONTROLLED_ACK_PACE_MS),
+          ).then(() => {
             framesInFlight -= 1;
             return session
               .send("Page.screencastFrameAck", { sessionId: frame.sessionId })
