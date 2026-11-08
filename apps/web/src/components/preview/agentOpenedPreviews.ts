@@ -80,15 +80,28 @@ export function followPreviewSessions(threadRef: ScopedThreadRef, state: ThreadP
 
 /**
  * Server tabs that are new, or carry a new reveal request, since `previous`.
- * Nothing is fresh until the first list has loaded: that list is the baseline,
- * so a reload never reopens previews the user dismissed. A tab this client was
- * closing comes back without a reveal if the close fails.
+ * The first list is a baseline, except its newest forced reveal: an agent may
+ * open a tab before anyone opens its thread, and closing a preview ends its tab.
+ * A tab this client was closing comes back without a reveal if the close fails.
  */
 function freshlyRevealedServerTabs(
   previous: ThreadPreviewState,
   next: ThreadPreviewState,
 ): ReadonlyArray<PreviewSessionSnapshot> {
-  if (!previous.listLoaded || previous.sessions === next.sessions) return [];
+  if (!previous.listLoaded) {
+    if (!next.listLoaded) return [];
+    const forced = Object.values(next.sessions)
+      .filter(
+        (session) =>
+          session.runtime === "server" &&
+          session.reveal === true &&
+          session.revealRequest?.force === true &&
+          !next.suppressedTabIds.has(session.tabId),
+      )
+      .toSorted((a, b) => a.updatedAt.localeCompare(b.updatedAt));
+    return forced.slice(-1);
+  }
+  if (previous.sessions === next.sessions) return [];
   return Object.values(next.sessions).filter((session) => {
     if (session.runtime !== "server" || session.reveal !== true) return false;
     if (previous.suppressedTabIds.has(session.tabId)) return false;

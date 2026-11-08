@@ -23,13 +23,14 @@ import {
   browserViewportSettingKey,
   resolveBrowserViewportLayout,
   resolveFittedBrowserViewport,
+  fitWithin,
 } from "./browserViewportLayout";
 import { BrowserDeviceToolbar } from "./BrowserDeviceToolbar";
 import { BrowserViewportResizeHandles } from "./BrowserViewportResizeHandles";
 import { acquireDesktopTab, type AcquiredDesktopTab, withDesktopTab } from "./desktopTabLifetime";
 import { resolveHostedBrowserWebviewWrapperStyle } from "./hostedBrowserWebviewStyle";
 import { usePreviewWebviewConfig } from "./previewWebviewConfigState";
-import { useBrowserLayoutZoomFactor } from "./useBrowserLayoutZoomFactor";
+import { useBrowserLayoutZoomFactor, useWindowSize } from "./useBrowserLayoutZoomFactor";
 import { useBrowserViewportResize } from "./useBrowserViewportResize";
 import {
   INITIAL_WEBVIEW_CRASH_RECOVERY_STATE,
@@ -348,7 +349,17 @@ export function HostedBrowserWebview(props: {
     setAspectRatioLocked(aspectRatio !== null);
   };
   const content = presentation.content;
-  const viewerViewport = useThreadPreviewState(threadRef).desktopByTabId[tabId]?.viewerViewport;
+  const requestedViewerViewport =
+    useThreadPreviewState(threadRef).desktopByTabId[tabId]?.viewerViewport;
+  const hostWindow = useWindowSize();
+  // A hidden guest is captured only about as large as this window, so a bigger viewer gets the
+  // same shape at a size that fits; the viewer scales it up instead of showing a cropped page.
+  const viewerViewport = requestedViewerViewport
+    ? fitWithin(requestedViewerViewport, {
+        width: hostWindow.width / layoutZoomFactor,
+        height: hostWindow.height / layoutZoomFactor,
+      })
+    : requestedViewerViewport;
   const hiddenWidth =
     viewport._tag !== "fill"
       ? viewport.width * layoutZoomFactor

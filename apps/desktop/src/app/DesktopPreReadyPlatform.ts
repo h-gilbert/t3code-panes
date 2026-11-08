@@ -15,6 +15,7 @@ import * as DesktopEarlyElectronStartup from "./DesktopEarlyElectronStartup.ts";
 import { trimmedString } from "./DesktopConfig.ts";
 import { resolveDesktopAppBranding } from "./DesktopEnvironment.ts";
 import { renderUrlHandlerDesktopEntry } from "./DesktopLinuxUrlHandler.ts";
+import { presentWorkersAsChrome } from "../preview/appUserAgent.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 
 export interface DesktopPreReadyCommandLineReader {
@@ -64,6 +65,7 @@ export const make = Effect.gen(function* () {
   const homeDirectory = yield* HostProcess.HomeDirectory;
   const linuxDesktopEntryConfig = yield* LinuxDesktopEntryConfig;
   return yield* Effect.sync((): DesktopPreReadyElectronOptions["Service"] => {
+    presentWorkersAsChrome();
     // Chromium keeps only the last --disable-features value, so pass the merged
     // list. The Linux switches below read and extend this value.
     const heartbeatDisableFeatures =

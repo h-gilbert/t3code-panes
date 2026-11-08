@@ -1147,7 +1147,11 @@ function BrowserHostSettings() {
           }}
         >
           <SelectTrigger>
-            <SelectValue />
+            <SelectValue>
+              {settings.browserHostEnvironmentId === null
+                ? "This environment"
+                : `${hosts.find((host) => host.environmentId === settings.browserHostEnvironmentId)?.label ?? "Selected"} desktop`}
+            </SelectValue>
           </SelectTrigger>
           <SelectPopup>
             <SelectItem value="local">This environment</SelectItem>

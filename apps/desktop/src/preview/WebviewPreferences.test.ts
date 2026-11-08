@@ -21,7 +21,13 @@ describe("PREVIEW_WEBVIEW_PREFERENCES", () => {
 
   it("contains exactly the required preview keys", () => {
     expect(Object.keys(parsed).toSorted()).toEqual(
-      ["contextIsolation", "focusOnNavigation", "nodeIntegration", "sandbox"].toSorted(),
+      [
+        "contextIsolation",
+        "focusOnNavigation",
+        "nodeIntegration",
+        "sandbox",
+        "transparent",
+      ].toSorted(),
     );
   });
 

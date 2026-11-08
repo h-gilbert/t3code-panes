@@ -98,6 +98,8 @@ const SERVER_HOST_CLIENT_ID = SERVER_BROWSER_AUTOMATION_CLIENT_ID;
 const RENDER_SCALE = 2;
 // Chromium allows three unacked frames, so 100 ms pacing caps viewers near 30 fps.
 const SCREENCAST_ACK_PACE_MS = 100;
+// A person driving the page needs typing and scrolling to keep up, so pace near 60 fps then.
+const SCREENCAST_CONTROLLED_ACK_PACE_MS = 50;
 const SCREENCAST_SETTLE_MS = 200;
 const SCREENCAST_MOTION_FRAMES = 4;
 const SCREENCAST_MOTION_WINDOW_MS = 300;
@@ -145,6 +147,18 @@ const EDITABLE_AT_POINT_SCRIPT = `(x, y) => {
   return !nonText.includes(element.type) && !element.disabled && !element.readOnly;
 }`;
 const UNATTACHED_FILL_VIEWPORT = { width: 1280, height: 800 } as const;
+// Runs in the page: dispatches a paste event at the focused element and reports whether the
+// page cancelled it, meaning it inserted the text itself. A focused cross-origin frame is
+// unreachable from here, so it falls back to typing.
+const PASTE_EVENT_SCRIPT = `(text) => {
+  let target = document.activeElement;
+  while (target?.shadowRoot?.activeElement) target = target.shadowRoot.activeElement;
+  if (!target || target.tagName === "IFRAME" || target === document.body) return false;
+  const data = new DataTransfer();
+  data.setData("text/plain", text);
+  const event = new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true, composed: true });
+  return !target.dispatchEvent(event);
+}`;
 const NAVIGATION_TIMEOUT_MS = 15_000;
 const VIEWER_NAVIGATION_OPTIONS = { waitUntil: "commit", timeout: NAVIGATION_TIMEOUT_MS } as const;
 const ACTION_TIMELINE_LIMIT = 50;
@@ -2689,6 +2703,17 @@ const make = Effect.gen(function* () {
     viewer.requestedSize = null;
   };
 
+  /** Fires a paste event at the focused element; true when the page handled it. */
+  const deliverPaste = async (session: CDPSession, text: string): Promise<boolean> => {
+    const result = await session
+      .send("Runtime.evaluate", {
+        expression: `(${PASTE_EVENT_SCRIPT})(${JSON.stringify(text)})`,
+        returnByValue: true,
+      })
+      .catch(() => null);
+    return result?.result?.value === true;
+  };
+
   const dispatchViewerInput = async (
     tab: ServerTab,
     session: CDPSession,
@@ -2768,7 +2793,10 @@ const make = Effect.gen(function* () {
       }
       case "text":
         if (typeof message.text === "string" && message.text.length > 0) {
-          await session.send("Input.insertText", { text: message.text.slice(0, 10_000) });
+          const text = message.text.slice(0, 10_000);
+          // Pages such as split 2FA fields handle paste themselves; only type what they leave alone.
+          if (message.paste === true && (await deliverPaste(session, text))) return;
+          await session.send("Input.insertText", { text });
         }
         return;
       case "resize": {
@@ -2986,7 +3014,12 @@ const make = Effect.gen(function* () {
         _tag: "frame",
         data: Buffer.from(frame.data, "base64"),
         ack: Effect.promise(() =>
-          sleepUntil(arrivedAt + SCREENCAST_ACK_PACE_MS).then(() => {
+          sleepUntil(
+            arrivedAt +
+              (tab.control.controller === null
+                ? SCREENCAST_ACK_PACE_MS
+                : SCREENCAST_CONTROLLED_ACK_PACE_MS),
+          ).then(() => {
             framesInFlight -= 1;
             return session
               .send("Page.screencastFrameAck", { sessionId: frame.sessionId })

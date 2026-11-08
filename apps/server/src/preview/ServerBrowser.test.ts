@@ -1235,6 +1235,33 @@ it.live("streams to a read-only viewer without allowing takeover, input, or view
   ).pipe(Effect.provide(layer)),
 );
 
+it.live.each([
+  { handled: true, typed: false },
+  { handled: false, typed: true },
+])(
+  "a viewer paste types only text the page leaves alone (handled: $handled)",
+  ({ handled, typed }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { browser, tabId } = yield* ready;
+        const viewer = yield* browser.attachViewer(viewerInput(tabId, true));
+        yield* viewer.input({ type: "takeControl" });
+        const session = contexts[0]!.sessions.at(-1)!;
+        const send = session.send.getMockImplementation()!;
+        session.send.mockImplementation(async (operation, input) =>
+          operation === "Runtime.evaluate"
+            ? { result: { value: handled } }
+            : send(operation, input),
+        );
+        yield* viewer.input({ type: "text", text: "654321", paste: true });
+        expect(session.send).toHaveBeenCalledWith("Runtime.evaluate", expect.anything());
+        expect(session.send.mock.calls.some(([method]) => method === "Input.insertText")).toBe(
+          typed,
+        );
+      }),
+    ).pipe(Effect.provide(layer)),
+);
+
 it.live(
   "takeover waits for the running agent and revokes snapshot refs before returning control",
   () =>

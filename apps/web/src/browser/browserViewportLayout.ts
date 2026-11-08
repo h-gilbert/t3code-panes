@@ -315,3 +315,13 @@ export function resolveResponsiveBrowserViewportSize(
     { x: 0, y: 0 },
   );
 }
+
+/** Scales `size` down, keeping its shape, until it fits within `bounds`. */
+export function fitWithin(
+  size: { readonly width: number; readonly height: number },
+  bounds: { readonly width: number; readonly height: number },
+) {
+  const scale = Math.min(1, bounds.width / size.width, bounds.height / size.height);
+  if (!(scale < 1) || !(scale > 0)) return size;
+  return { width: Math.floor(size.width * scale), height: Math.floor(size.height * scale) };
+}

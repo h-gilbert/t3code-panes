@@ -16,7 +16,7 @@ import {
  */
 import * as NodeCrypto from "node:crypto";
 import * as NodeZlib from "node:zlib";
-import { sendPageCommand } from "./GuestInput.ts";
+import { sendPageCommand, trackFrameTarget } from "./GuestInput.ts";
 import {
   DesktopPreviewAnnotationVoiceEventSchema,
   DesktopPreviewRecordingInputSchema,
@@ -1508,6 +1508,17 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           const scope = yield* Scope.fork(parentScope, "sequential");
           const wcDebugger = wc.debugger;
           let identity = chromeIdentity(wc.getUserAgent(), hostArchitecture);
+          const identityAutoAttach = {
+            autoAttach: true,
+            waitForDebuggerOnStart: true,
+            flatten: true,
+            filter: [
+              { type: "iframe" },
+              { type: "service_worker" },
+              { type: "shared_worker" },
+              { type: "worker" },
+            ],
+          };
           const consoleReleases = yield* Queue.sliding<void>(1);
           // Console eviction leaves strong debugger handles; release the group because we keep only text.
           yield* Effect.forkIn(
@@ -1550,10 +1561,16 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
             }
           });
           const onMessage: BrowserControlSession["onMessage"] = (_event, method, params) => {
+            trackFrameTarget(wcDebugger, method, params);
             if (method === "Target.attachedToTarget" && typeof params["sessionId"] === "string") {
               const child = params["sessionId"];
+              // Workers lack the browser-side Emulation handler that redirects the Network alias.
               void wcDebugger
-                .sendCommand("Network.setUserAgentOverride", identity, child)
+                .sendCommand("Emulation.setUserAgentOverride", identity, child)
+                // Auto-attach covers direct children only; arm descendants before their creator runs.
+                .then(() =>
+                  wcDebugger.sendCommand("Target.setAutoAttach", identityAutoAttach, child),
+                )
                 .finally(() => wcDebugger.sendCommand("Runtime.runIfWaitingForDebugger", {}, child))
                 .catch((cause: unknown) =>
                   runFork(Effect.logWarning("Browser worker identity failed", { cause })),
@@ -1623,17 +1640,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
                   metadata?.result?.value,
                 );
                 await wcDebugger.sendCommand("Emulation.setUserAgentOverride", identity);
-                await wcDebugger.sendCommand("Target.setAutoAttach", {
-                  autoAttach: true,
-                  waitForDebuggerOnStart: true,
-                  flatten: true,
-                  filter: [
-                    { type: "iframe" },
-                    { type: "service_worker" },
-                    { type: "shared_worker" },
-                    { type: "worker" },
-                  ],
-                });
+                await wcDebugger.sendCommand("Target.setAutoAttach", identityAutoAttach);
               },
             );
             // Set an opaque base before first paint or background-less dark pages retain white-on-white text.

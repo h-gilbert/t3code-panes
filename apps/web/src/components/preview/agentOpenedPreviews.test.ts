@@ -435,6 +435,23 @@ describe("startAgentOpenedPreviews", () => {
     expect(floatingTabId()).toBe("tab_agent");
   });
 
+  it("shows the newest forced reveal already present when the thread's first list loads", () => {
+    using _following = following();
+    reconcilePreviewServerSessions(ref, {
+      sessions: [
+        serverTab({ tabId: "tab_old", revealRequest: { id: "r1", force: true } }),
+        serverTab({
+          tabId: "tab_new",
+          revealRequest: { id: "r2", force: true },
+          updatedAt: "2026-01-01T00:00:01.000Z",
+        }),
+      ],
+      serverEpoch,
+      revision: 1,
+    });
+    expect(floatingTabId()).toBe("tab_new");
+  });
+
   it("reveals an existing tab only for a new reveal request", () => {
     using _following = following();
     const tab = serverTab({ revealRequest: { id: "r1", force: false } });

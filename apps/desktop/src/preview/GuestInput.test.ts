@@ -2,7 +2,7 @@ import * as NodeVM from "node:vm";
 
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { sendPageCommand, toKeyboardInputEvents } from "./GuestInput.ts";
+import { sendPageCommand, toKeyboardInputEvents, trackFrameTarget } from "./GuestInput.ts";
 
 const makeGuest = ({
   focused,
@@ -37,6 +37,61 @@ const makeGuest = ({
 };
 
 describe("preview guest input", () => {
+  describe("cross-site frames", () => {
+    const makeFramedGuest = () => {
+      const sendCommand = vi.fn(
+        async (method: string, params?: Record<string, unknown>, sessionId?: string) => {
+          if (method === "DOM.getNodeForLocation") return { backendNodeId: sessionId ? 9 : 7 };
+          if (method === "DOM.describeNode")
+            return {
+              node: sessionId || params?.["backendNodeId"] === 9 ? {} : { frameId: "frame-1" },
+            };
+          if (method === "DOM.getBoxModel")
+            return { model: { content: [100, 200, 400, 200, 400, 300, 100, 300] } };
+          if (method === "Runtime.evaluate" && typeof params?.["expression"] === "string")
+            return params["expression"].endsWith("!== null")
+              ? { result: { value: false } }
+              : { result: { objectId: sessionId ? "inner" : "iframe-element" } };
+          return {};
+        },
+      );
+      const debuggee = { sendCommand } as unknown as Electron.Debugger;
+      trackFrameTarget(debuggee, "Target.attachedToTarget", {
+        sessionId: "frame-session",
+        targetInfo: { type: "iframe", targetId: "frame-1" },
+      });
+      const webContents = {
+        focusedFrame: null,
+        hostWebContents: null,
+      } as unknown as Electron.WebContents;
+      return {
+        sendCommand,
+        send: (method: string, params: Record<string, unknown>) =>
+          sendPageCommand(webContents, debuggee, method, params),
+      };
+    };
+
+    it("sends a click over a cross-site frame to that frame at frame coordinates", async () => {
+      const guest = makeFramedGuest();
+      await guest.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 150, y: 230 });
+      expect(guest.sendCommand).toHaveBeenCalledWith(
+        "Input.dispatchMouseEvent",
+        expect.objectContaining({ x: 50, y: 30 }),
+        "frame-session",
+      );
+    });
+
+    it("types into the cross-site frame that holds focus instead of refusing", async () => {
+      const guest = makeFramedGuest();
+      await guest.send("Input.insertText", { text: "123456" });
+      expect(guest.sendCommand).toHaveBeenCalledWith(
+        "Input.insertText",
+        { text: "123456" },
+        "frame-session",
+      );
+    });
+  });
+
   it("types into an unfocused guest's own page, not the app's focused field", async () => {
     const guest = makeGuest({ focused: false });
     await guest.send("Input.insertText", { text: "pairing-code" });

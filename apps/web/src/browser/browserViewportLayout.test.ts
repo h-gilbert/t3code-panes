@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  fitWithin,
   resizeBrowserViewportFromRail,
   resolveFittedBrowserViewport,
 } from "./browserViewportLayout";
@@ -42,4 +43,24 @@ describe("resolveBrowserViewportLayout", () => {
       ),
     ).toEqual({ width: 460, height: 409 });
   });
+});
+
+describe("fitWithin", () => {
+  it.each([
+    {
+      size: { width: 2560, height: 1360 },
+      bounds: { width: 1920, height: 969 },
+      fit: { width: 1824, height: 969 },
+    },
+    {
+      size: { width: 1100, height: 675 },
+      bounds: { width: 1920, height: 969 },
+      fit: { width: 1100, height: 675 },
+    },
+  ])(
+    "keeps the shape of $size.width x $size.height within the host window",
+    ({ size, bounds, fit }) => {
+      expect(fitWithin(size, bounds)).toEqual(fit);
+    },
+  );
 });
