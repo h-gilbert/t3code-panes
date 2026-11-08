@@ -18,6 +18,7 @@ import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
@@ -28,6 +29,7 @@ import * as Stream from "effect/Stream";
 
 import * as DesktopBackendManager from "../backend/DesktopBackendManager.ts";
 import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
+import * as DesktopHomeHold from "../backend/DesktopHomeHold.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
@@ -673,6 +675,14 @@ export const make = Effect.gen(function* () {
     .remove(updateRestartMarkerPath, { force: true })
     .pipe(Effect.ignore);
 
+  const withHomeHoldServices = <A>(
+    effect: Effect.Effect<A, never, FileSystem.FileSystem | Path.Path>,
+  ) =>
+    effect.pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, environment.path),
+    );
+
   const installRecordPath = environment.path.join(
     updateRestartMarkerDir,
     DESKTOP_UPDATE_INSTALL_RECORD_FILE,
@@ -724,6 +734,7 @@ export const make = Effect.gen(function* () {
       Ref.set(installRunningBackendsRef, []),
       removeUpdateRestartMarker,
       removeInstallRecord,
+      withHomeHoldServices(DesktopHomeHold.hold(environment.baseDir)),
     ],
     { discard: true },
   );
@@ -815,6 +826,7 @@ export const make = Effect.gen(function* () {
 
         return yield* Effect.gen(function* () {
           yield* writeUpdateRestartMarker;
+          yield* withHomeHoldServices(DesktopHomeHold.holdThroughRestart(environment.baseDir));
           const { downloadedVersion } = yield* Ref.get(updateStateRef);
           if (downloadedVersion !== null) yield* writeInstallRecord(downloadedVersion);
           // Stop pooled backends before quitAndInstall can outrun their scope finalizers.

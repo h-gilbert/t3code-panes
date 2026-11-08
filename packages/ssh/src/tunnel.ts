@@ -1,6 +1,7 @@
-import type {
-  DesktopSshEnvironmentBootstrap,
-  DesktopSshEnvironmentTarget,
+import {
+  DESKTOP_HOME_HOLD_FILE,
+  type DesktopSshEnvironmentBootstrap,
+  type DesktopSshEnvironmentTarget,
 } from "@t3tools/contracts";
 import { waitForHttpReady as waitForHttpReadyShared } from "@t3tools/shared/httpReadiness";
 import { cliReleaseDownloadBaseUrl } from "@t3tools/shared/cliRelease";
@@ -727,6 +728,20 @@ else
   REMOTE_MANAGED=""
 fi
 if [ -z "$REMOTE_PORT" ]; then
+  # T3 Code on this machine is open, or relaunching after an update. A server
+  # started now would take its home, so wait for it and adopt its server.
+  DESKTOP_HOLD_FILE="$DEFAULT_SERVER_HOME/runtime/@@T3_DESKTOP_HOME_HOLD_FILE@@"
+  if [ -f "$DESKTOP_HOLD_FILE" ]; then
+    HOLD_PID=""
+    HOLD_UNTIL=""
+    read -r HOLD_PID HOLD_UNTIL <"$DESKTOP_HOLD_FILE" || true
+    case "$HOLD_PID" in *[!0-9]*) HOLD_PID="" ;; esac
+    case "$HOLD_UNTIL" in ''|*[!0-9]*) HOLD_UNTIL=0 ;; esac
+    if server_running "$HOLD_PID" || [ "$(date +%s)" -lt "$HOLD_UNTIL" ]; then
+      printf 'T3 Code is open or restarting on this computer and owns this home. Reconnecting once its server is ready. Refusing to start a competing server.\\n' >&2
+      exit 1
+    fi
+  fi
   # A disconnected service may be between update candidates. Starting a
   # standalone server here would steal its home lock and force a rollback.
   # Keep ownership with the installed service even when it has failed.
@@ -905,6 +920,7 @@ export function buildRemoteLaunchScript(input?: RemoteT3RunnerOptions): string {
     T3_READY_TIMEOUT_MS: String(REMOTE_READY_TIMEOUT_MS),
     T3_REUSE_READY_TIMEOUT_MS: String(REMOTE_REUSE_READY_TIMEOUT_MS),
     T3_READY_PROBE_TIMEOUT_MS: String(SSH_READY_PROBE_TIMEOUT_MS),
+    T3_DESKTOP_HOME_HOLD_FILE: DESKTOP_HOME_HOLD_FILE,
   });
 }
 

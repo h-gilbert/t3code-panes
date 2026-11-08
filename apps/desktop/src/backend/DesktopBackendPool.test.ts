@@ -26,11 +26,15 @@ function layerPool(labelRef: Ref.Ref<string>): Layer.Layer<DesktopBackendPool.De
   return DesktopBackendPool.layer.pipe(
     Layer.provideMerge(
       Layer.mergeAll(
-        FileSystem.layerNoop({}),
-        Layer.succeed(
-          DesktopEnvironment.DesktopEnvironment,
-          {} as DesktopEnvironment.DesktopEnvironment["Service"],
-        ),
+        FileSystem.layerNoop({
+          makeDirectory: () => Effect.void,
+          writeFileString: () => Effect.void,
+          readFileString: () => Effect.succeed(""),
+        }),
+        Layer.succeed(DesktopEnvironment.DesktopEnvironment, {
+          baseDir: "/t3-home",
+          path: { join: (...parts: string[]) => parts.join("/") },
+        } as unknown as DesktopEnvironment.DesktopEnvironment["Service"]),
         Layer.succeed(
           ChildProcessSpawner.ChildProcessSpawner,
           ChildProcessSpawner.make(() => Effect.die("unexpected child process spawn")),
