@@ -1134,10 +1134,13 @@ function BrowserHostSettings() {
   );
   const { scope } = useSettingsScope();
   const canChoose = isElectron && primary !== null && scope.kind === "environment";
+  const selectedHost = hosts.find(
+    (host) => host.environmentId === settings.browserHostEnvironmentId,
+  );
   return (
     <SettingsRow
       title="Browser host"
-      description="Choose the desktop that runs browser tabs and shares its saved logins. Keep that desktop connected. Close existing tabs before changing hosts."
+      description="Choose the desktop that runs browser tabs. Keep that desktop connected. Close existing tabs before changing hosts."
       control={
         <Select
           value={settings.browserHostEnvironmentId ?? "local"}
@@ -1147,7 +1150,13 @@ function BrowserHostSettings() {
           }}
         >
           <SelectTrigger>
-            <SelectValue />
+            <SelectValue>
+              {settings.browserHostEnvironmentId === null
+                ? "This environment"
+                : selectedHost
+                  ? `${selectedHost.label} desktop`
+                  : "Selected desktop (unavailable here)"}
+            </SelectValue>
           </SelectTrigger>
           <SelectPopup>
             <SelectItem value="local">This environment</SelectItem>
@@ -1162,6 +1171,51 @@ function BrowserHostSettings() {
                   Selected desktop (unavailable here)
                 </SelectItem>
               )}
+          </SelectPopup>
+        </Select>
+      }
+    />
+  );
+}
+
+function SavedLoginsSettings() {
+  const settings = useScopedSettings();
+  const update = useUpdateScopedSettings();
+  const { environments } = useEnvironments();
+  const { scope } = useSettingsScope();
+  if (scope.kind !== "environment") return null;
+  const own = scope.environmentId;
+  const others = environments.filter((environment) => environment.environmentId !== own);
+  const selected = settings.credentialVaultEnvironmentId;
+  const label =
+    selected === null
+      ? "Browser host"
+      : selected === own
+        ? "This environment"
+        : (others.find((environment) => environment.environmentId === selected)?.label ??
+          "Selected environment (unavailable here)");
+  return (
+    <SettingsRow
+      title="Saved logins"
+      description="Choose whose vault agents fill logins from. Another machine's vault needs a link to it."
+      control={
+        <Select
+          value={selected ?? "host"}
+          onValueChange={(value) => {
+            if (value) update({ credentialVaultEnvironmentId: value === "host" ? null : value });
+          }}
+        >
+          <SelectTrigger>
+            <SelectValue>{label}</SelectValue>
+          </SelectTrigger>
+          <SelectPopup>
+            <SelectItem value="host">Browser host</SelectItem>
+            <SelectItem value={own}>This environment</SelectItem>
+            {others.map((environment) => (
+              <SelectItem key={environment.environmentId} value={environment.environmentId}>
+                {environment.label}
+              </SelectItem>
+            ))}
           </SelectPopup>
         </Select>
       }
@@ -1699,6 +1753,7 @@ export function BrowserSettingsPanel() {
       </SettingsSection>
       <SettingsSection id="browser" title="Browsing">
         <BrowserHostSettings />
+        <SavedLoginsSettings />
         <BrowserProxySetting />
         <SettingsUnavailableGroup message={desktopOnlyMessage}>
           <BrowserProfilesSetting disabled={desktopOnly} />
