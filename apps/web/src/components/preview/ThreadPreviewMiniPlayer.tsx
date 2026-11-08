@@ -490,6 +490,8 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
                   : null
               }
               visible
+              // The inset scales the page down; resizing it would reflow the page to phone width.
+              followSize={false}
               controlPosition="bottom"
               onPopup={(popupTabId) => showPreviewPopup(threadRef, popupTabId, "floating")}
               className="size-full"
