@@ -270,6 +270,8 @@ interface ActiveBackendRun {
 
 interface BackendManagerState {
   readonly desiredRunning: boolean;
+  /** Stopped because another server owns the home; the owner decision may start it again. */
+  readonly awaitingHomeOwner: boolean;
   readonly ready: boolean;
   readonly config: Option.Option<DesktopBackendStartConfig>;
   readonly active: Option.Option<ActiveBackendRun>;
@@ -281,6 +283,7 @@ interface BackendManagerState {
 
 const initialState: BackendManagerState = {
   desiredRunning: false,
+  awaitingHomeOwner: false,
   ready: false,
   config: Option.none(),
   active: Option.none(),
@@ -719,6 +722,11 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
         if (Option.isNone(config)) {
           if (current.desiredRunning) {
             yield* scheduleRestart("failed to generate desktop backend configuration");
+          } else if (current.awaitingHomeOwner) {
+            yield* SubscriptionRef.update(state, (latest) => ({
+              ...latest,
+              awaitingHomeOwner: false,
+            }));
           }
           return;
         }
@@ -732,6 +740,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
         yield* SubscriptionRef.update(state, (latest) => ({
           ...latest,
           desiredRunning: true,
+          awaitingHomeOwner: false,
           ready: false,
           config: Option.some(config.value),
           preflightFailureAttempt: resetFatalPreflightCounter ? 0 : latest.preflightFailureAttempt,
@@ -892,6 +901,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
                   yield* SubscriptionRef.update(state, (latest) => ({
                     ...latest,
                     desiredRunning: false,
+                    awaitingHomeOwner: spec.onStateDirOwned !== undefined,
                   }));
                   yield* (spec.onStateDirOwned?.() ?? Effect.void).pipe(Effect.ignore);
                   return;
@@ -1078,6 +1088,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
             {
               ...latest,
               desiredRunning: false,
+              awaitingHomeOwner: false,
               ready: false,
               active,
               restartFiber: Option.none<Fiber.Fiber<void, never>>(),
@@ -1155,7 +1166,9 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
   const waitForReady = Effect.fn("DesktopBackendManager.waitForReady")(
     (timeout: Duration.Duration) =>
       SubscriptionRef.changes(state).pipe(
-        Stream.filter((current) => current.ready || !current.desiredRunning),
+        Stream.filter(
+          (current) => current.ready || (!current.desiredRunning && !current.awaitingHomeOwner),
+        ),
         Stream.map((current) => current.ready),
         Stream.runHead,
         Effect.timeoutOption(timeout),

@@ -618,8 +618,13 @@ describe("DesktopBackendManager", () => {
         const snapshot = yield* instance.snapshot;
         assert.isFalse(snapshot.desiredRunning);
         assert.isFalse(snapshot.restartScheduled);
+        // The owner decision can still restart this backend, so readiness waiters keep waiting.
+        const waiter = yield* instance.waitForReady(Duration.infinity).pipe(Effect.forkChild);
         yield* TestClock.adjust(Duration.minutes(1));
         assert.equal(startCount, 1);
+        assert.isUndefined(waiter.pollUnsafe());
+        yield* instance.stop();
+        assert.isFalse(yield* Fiber.join(waiter));
       }).pipe(Effect.provide(TestClock.layer())),
     ),
   );
