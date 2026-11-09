@@ -1459,6 +1459,26 @@ it.live("the owner can close a tab while an agent action waits on its dialog", (
   ).pipe(Effect.provide(layer)),
 );
 
+it.live("a popup opened while a viewer controls an agent's tab opens for that viewer", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const { browser, tabId } = yield* ready;
+      const viewer = yield* browser.attachViewer(viewerInput(tabId, true));
+      yield* viewer.input({ type: "takeControl" });
+      const popup = makeContext();
+      const manager = yield* Manager.PreviewManager;
+      contexts[0]!.page.emit("popup", popup.page);
+      let shown = yield* Queue.take(viewer.output);
+      while (shown._tag !== "popup") shown = yield* Queue.take(viewer.output);
+      const { sessions } = yield* manager.list({ threadId: scope.thread.threadId });
+      const popupTab = sessions.find((session) => session.tabId !== tabId)!;
+      expect(shown).toEqual({ _tag: "popup", tabId: popupTab.tabId });
+      expect(popupTab.automationOwner).toBeUndefined();
+      expect(popupTab.reveal).not.toBe(false);
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
 it.live("a popup becomes the agent's own tab and keeps its opener page", () =>
   Effect.scoped(
     Effect.gen(function* () {

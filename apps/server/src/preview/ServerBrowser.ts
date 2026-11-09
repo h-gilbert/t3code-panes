@@ -1602,15 +1602,15 @@ const make = Effect.gen(function* () {
     const controller = [...opener.viewers].find(
       (viewer) => viewer.id === opener.control.controller,
     );
+    // A viewer in control opened it, even in an agent's tab, so it is theirs to see.
+    const agentPopup = opener.control.agentId !== null && controller === undefined;
     await runPromise(
       openTab({
         threadId: opener.threadId,
         ...(/^https?:/i.test(url) ? { url } : {}),
         runtime: "server",
         ...(opener.profileId === undefined ? {} : { profileId: opener.profileId }),
-        ...(opener.control.agentId === null
-          ? {}
-          : { automationOwner: opener.control.agentId, reveal: false }),
+        ...(agentPopup ? { automationOwner: opener.control.agentId, reveal: false } : {}),
         beforePublish: (snapshot) =>
           adoptedPages.set(tabKey(snapshot.threadId, snapshot.tabId), {
             page: popup,
@@ -1619,7 +1619,7 @@ const make = Effect.gen(function* () {
       }),
     ).then(
       (tab) => {
-        if (opener.control.agentId === null) controller?.push({ _tag: "popup", tabId: tab.tabId });
+        if (!agentPopup) controller?.push({ _tag: "popup", tabId: tab.tabId });
       },
       async () => {
         await popup.close().catch(constVoid);
