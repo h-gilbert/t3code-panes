@@ -445,6 +445,36 @@ describe("resolveAutoSettlementAt", () => {
       }),
     ).toEqual(at(-45 * 60 * 1_000));
   });
+
+  it("does not let closing a superseded pull request override a merge", () => {
+    const merged = { ...persistedLink(null, at(-3 * 60 * 60 * 1_000)), number: 1 };
+    merged.snapshot = {
+      ...persistedLink("open", at(-3 * 60 * 60 * 1_000)).snapshot!,
+      state: "merged",
+      mergedAt: DateTime.formatIso(at(-50 * 60 * 1_000)),
+    };
+    const closed = { ...persistedLink(null, at(-3 * 60 * 60 * 1_000)), number: 2 };
+    closed.snapshot = {
+      ...persistedLink("open", at(-3 * 60 * 60 * 1_000)).snapshot!,
+      state: "closed",
+      closedAt: DateTime.formatIso(at(-40 * 60 * 1_000)),
+    };
+    const input = {
+      thread: shell({
+        latestUserMessageAt: at(-2 * 60 * 60 * 1_000),
+        latestRunCompletedAt: at(-30 * 60 * 1_000),
+        pullRequests: [merged, closed],
+      }),
+      pullRequest: null,
+      nowMs: NOW_MS,
+      autoSettleAfterDays: null,
+      autoSettleOnMerge: false,
+    };
+    expect(ThreadSettlementService.resolveAutoSettlementAt(input)).toBeNull();
+    expect(
+      ThreadSettlementService.resolveAutoSettlementAt({ ...input, autoSettleOnMerge: true }),
+    ).toEqual(at(-30 * 60 * 1_000));
+  });
 });
 
 const NOW = "2026-08-28T12:00:00.000Z";

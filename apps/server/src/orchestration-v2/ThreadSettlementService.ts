@@ -211,7 +211,9 @@ export function resolveAutoSettlementAt(input: {
   if (hasOpenLink) {
     pullRequest = null;
   } else if (links.length > 0) {
-    const latest = links.reduce((current, candidate) =>
+    // A merge is the thread's outcome; closing a superseded PR afterwards must not override it.
+    const merged = links.filter((link) => link.snapshot?.state === "merged");
+    const latest = (merged.length > 0 ? merged : links).reduce((current, candidate) =>
       linkTerminalAtMs(candidate) > linkTerminalAtMs(current) ? candidate : current,
     );
     pullRequest =
