@@ -633,7 +633,7 @@ describe("DesktopWindow", () => {
         assert.isFalse(createdWindowOptions[0]?.webPreferences?.backgroundThrottling);
         assert.deepEqual(fakeWindow.setAutoHideCursor.mock.calls, [[false]]);
         assert.deepEqual(fakeWindow.loadURL.mock.calls[0], [
-          "t3code-dev://app/#/workspace?workspace=main",
+          "t3code-dev://app/?browserCapture=delegated#/workspace?workspace=main",
         ]);
         assert.equal(fakeWindow.openDevTools.mock.calls.length, 1);
       }).pipe(Effect.provide(layer));
@@ -698,8 +698,8 @@ describe("DesktopWindow", () => {
           ],
         );
         assert.deepEqual(fakeWindow.loadURL.mock.calls, [
-          ["t3code-dev://app/#/workspace?workspace=main"],
-          ["t3code-dev://app/#/workspace?workspace=research-window"],
+          ["t3code-dev://app/?browserCapture=delegated#/workspace?workspace=main"],
+          ["t3code-dev://app/?browserCapture=delegated#/workspace?workspace=research-window"],
         ]);
 
         const readyToShow = fakeWindow.windowListeners.get("ready-to-show");
@@ -1246,7 +1246,7 @@ describe("DesktopWindow", () => {
         // window instead of opening a fresh workspace.
         assert.match(
           String(fakeWindow.loadURL.mock.calls[1]?.[0]),
-          /^t3code-dev:\/\/app\/#\/workspace\?workspace=[0-9a-f-]+$/,
+          /^t3code-dev:\/\/app\/\?browserCapture=delegated#\/workspace\?workspace=[0-9a-f-]+$/,
         );
         // Every workspace window can host previews, and both track bounds
         // for session restoration.
@@ -1695,8 +1695,8 @@ describe("DesktopWindow", () => {
 
         yield* TestClock.adjust(100);
         assert.deepEqual(fakeWindow.loadURL.mock.calls, [
-          ["t3code-dev://app/#/workspace?workspace=main"],
-          ["t3code-dev://app/#/workspace?workspace=main"],
+          ["t3code-dev://app/?browserCapture=delegated#/workspace?workspace=main"],
+          ["t3code-dev://app/?browserCapture=delegated#/workspace?workspace=main"],
         ]);
         assert.equal(fakeWindow.reload.mock.calls.length, 0);
 

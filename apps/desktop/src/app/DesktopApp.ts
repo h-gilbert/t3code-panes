@@ -16,6 +16,7 @@ import * as DesktopAppActivation from "./DesktopAppActivation.ts";
 import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
 import * as DesktopClerk from "./DesktopClerk.ts";
 import * as DesktopApplicationMenu from "../window/DesktopApplicationMenu.ts";
+import * as DesktopBrowserCaptureHost from "../window/DesktopBrowserCaptureHost.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 import * as DesktopWindowSession from "../window/DesktopWindowSession.ts";
 import * as PreviewPasskeys from "../preview/Passkeys.ts";
@@ -202,6 +203,9 @@ const bootstrap = Effect.gen(function* () {
     }
     return;
   }
+
+  // Draws the tabs this desktop hosts for remote viewers; app windows stream them instead.
+  yield* (yield* DesktopBrowserCaptureHost.DesktopBrowserCaptureHost).ensure;
 
   const pool = yield* DesktopBackendPool.DesktopBackendPool;
   const primaryBackend = yield* pool.primary;

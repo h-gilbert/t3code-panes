@@ -58,6 +58,7 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import { matchesKeybindingShortcut } from "@t3tools/shared/keybindings";
 import { safeFileNameSegment } from "@t3tools/shared/fileNameSegment";
 import { normalizePreviewUrl } from "@t3tools/shared/preview";
+import { browserCaptureHostBounds } from "./browserCaptureHost.ts";
 import {
   BrowserWindow,
   Menu,
@@ -67,6 +68,7 @@ import {
   clipboard,
   dialog,
   nativeImage,
+  screen,
   shell,
   webContents,
 } from "electron";
@@ -2522,6 +2524,50 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     });
   });
 
+  let browserCaptureHost: BrowserWindow | null = null;
+  /** Keeps the hidden capture host at least as large as every page a viewer streams. */
+  const fitBrowserCaptureHost = Effect.gen(function* () {
+    const host = browserCaptureHost;
+    if (host === null || host.isDestroyed()) return;
+    const pages = [...(yield* SynchronizedRef.get(tabsRef)).values()].flatMap((tab) =>
+      tab.serverTab && tab.viewerViewport
+        ? [
+            {
+              width: tab.viewerViewport.width * tab.zoomFactor,
+              height: tab.viewerViewport.height * tab.zoomFactor,
+            },
+          ]
+        : [],
+    );
+    yield* Effect.sync(() => {
+      if (host.isDestroyed()) return;
+      const next = browserCaptureHostBounds(
+        pages,
+        screen.getAllDisplays().map((d) => d.bounds),
+      );
+      const current = host.getBounds();
+      if (
+        current.x !== next.x ||
+        current.y !== next.y ||
+        current.width !== next.width ||
+        current.height !== next.height
+      ) {
+        host.setBounds(next);
+      }
+    });
+  });
+
+  const setBrowserCaptureHost = Effect.fn("PreviewManager.setBrowserCaptureHost")(function* (
+    window: BrowserWindow,
+  ) {
+    browserCaptureHost = window;
+    window.once("closed", () => {
+      if (browserCaptureHost === window) browserCaptureHost = null;
+    });
+    yield* addHostWindow(window);
+    yield* fitBrowserCaptureHost;
+  });
+
   /** Registers an app window whose renderer may host preview guests. */
   const addHostWindow = Effect.fn("PreviewManager.addHostWindow")(function* (
     window: BrowserWindow,
@@ -3487,7 +3533,9 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           operation: (request) =>
             runPromise(
               request.operation === "viewerViewport"
-                ? update(tabId, { viewerViewport: request.size })
+                ? update(tabId, { viewerViewport: request.size }).pipe(
+                    Effect.andThen(fitBrowserCaptureHost),
+                  )
                 : request.operation === "evaluate"
                   ? automationEvaluate(tabId, request.input)
                   : autofill(tabId, request.input),
@@ -5927,6 +5975,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     setShown,
     setColorScheme,
     addHostWindow,
+    setBrowserCaptureHost,
     setForwardedShortcuts: (shortcuts: ReadonlyArray<PreviewForwardedShortcut>) =>
       Effect.sync(() => {
         forwardedShortcuts = shortcuts;
@@ -6276,6 +6325,10 @@ export class PreviewManager extends Context.Service<
   PreviewManager,
   {
     readonly addHostWindow: (window: BrowserWindow) => Effect.Effect<void, PreviewManagerError>;
+    /** The hidden window that hosts streamed tabs; it is resized to fit their viewers. */
+    readonly setBrowserCaptureHost: (
+      window: BrowserWindow,
+    ) => Effect.Effect<void, PreviewManagerError>;
     readonly setForwardedShortcuts: (
       shortcuts: ReadonlyArray<PreviewForwardedShortcut>,
     ) => Effect.Effect<void>;
@@ -6561,6 +6614,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
 
   return PreviewManager.of({
     addHostWindow: operations.addHostWindow,
+    setBrowserCaptureHost: operations.setBrowserCaptureHost,
     setForwardedShortcuts: operations.setForwardedShortcuts,
     getBrowserSession: Effect.fn("PreviewManager.getBrowserSession")(
       function* (scope, persistent, namespace) {

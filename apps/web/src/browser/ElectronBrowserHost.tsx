@@ -19,7 +19,7 @@ import { type ComponentProps, useState, useEffect, useEffectEvent } from "react"
 
 import { primaryEnvironmentIdAtom } from "~/state/primaryEnvironment";
 
-import { isElectron } from "~/env";
+import { isBrowserCaptureHost, isElectron } from "~/env";
 import { useClientSettingsHydrated } from "~/hooks/useSettings";
 import { useDesktopHostedPreviewSessions } from "~/components/preview/usePreviewSession";
 import {
@@ -51,7 +51,7 @@ function hostedBrowserSessions(
       ? Object.values(previewState.sessions)
           .filter(
             (snapshot) =>
-              snapshot.runtime !== "server" ||
+              (snapshot.runtime !== "server" && !isBrowserCaptureHost) ||
               rendersServerTabNatively(
                 threadRef.environmentId,
                 primaryEnvironmentId,

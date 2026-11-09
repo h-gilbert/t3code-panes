@@ -114,6 +114,13 @@ remains available, with pane markers for settled threads still visible in a pane
   the page there; a recording tab stays put. Agent requests for a tab another window
   owns are relayed to that window. Do not reintroduce a single "main window" that
   rejects guests from other windows; that left previews stuck reconnecting.
+- On macOS, server tabs (the ones viewers stream) belong to a hidden capture host instead:
+  a transparent, unfocusable window parked left of every display and resized to the largest
+  viewer (`apps/desktop/src/window/DesktopBrowserCaptureHost.ts`). Chromium rasterizes a
+  guest shrunk to fit a smaller window at the shrunk scale, so streaming from the app window
+  blurred full-screen viewers. App windows get `?browserCapture=delegated` and stream those
+  tabs like a remote client (`rendersServerTabNatively`); the host gets
+  `?browserCapture=host` and renders only them.
 
 Simulator and emulator previews open inset inside their owning thread, including embedded panes.
 Physical devices stay hidden; their automation sessions and screenshots remain available.

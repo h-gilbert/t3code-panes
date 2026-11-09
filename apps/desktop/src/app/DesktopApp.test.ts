@@ -1,3 +1,4 @@
+import * as DesktopBrowserCaptureHost from "../window/DesktopBrowserCaptureHost.ts";
 import * as DesktopWindowSession from "../window/DesktopWindowSession.ts";
 import * as DesktopBrowserHost from "../preview/DesktopBrowserHost.ts";
 import { assert, it } from "@effect/vitest";
@@ -167,6 +168,9 @@ it.effect.each([false, true])(
           Effect.provideService(DesktopState.DesktopState, {
             quitting,
           } as DesktopState.DesktopState["Service"]),
+          Effect.provideService(DesktopBrowserCaptureHost.DesktopBrowserCaptureHost, {
+            ensure: Effect.void,
+          }),
           Effect.provideService(DesktopWindow.DesktopWindow, {
             ensureMain: record("window").pipe(
               Effect.andThen(Deferred.succeed(windowStarted, undefined)),

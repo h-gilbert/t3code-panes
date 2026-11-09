@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 const state = vi.hoisted(() => ({
   desktop: false,
+  delegates: false,
   host: null as string | null,
   primary: null as string | null,
   serverBrowser: new Set<string>(),
@@ -11,6 +12,9 @@ const state = vi.hoisted(() => ({
 vi.mock("~/env", () => ({
   get isElectron() {
     return state.desktop;
+  },
+  get delegatesStreamedTabs() {
+    return state.delegates;
   },
 }));
 vi.mock("~/state/server", () => ({ serverEnvironment: { settingsValueAtom: () => "settings" } }));
@@ -38,6 +42,7 @@ const remote = "remote" as EnvironmentId;
 
 afterEach(() => {
   state.desktop = false;
+  state.delegates = false;
   state.host = null;
   state.primary = null;
   state.serverBrowser = new Set();
@@ -84,6 +89,9 @@ it("hosts selected remote tabs on the primary desktop and keeps them on that hos
   expect(rendersServerTabNatively(remote, local, { runtime: "server" }, local)).toBe(true);
   expect(rendersServerTabNatively(remote, local, { runtime: "server" }, "other")).toBe(false);
   expect(alternatePreviewRuntime(remote, local, true, { runtime: "server" })).toBeNull();
+  // A window whose desktop has a hidden capture host streams the tab instead.
+  state.delegates = true;
+  expect(rendersServerTabNatively(remote, local, { runtime: "server" }, local)).toBe(false);
 });
 
 it("streams the primary environment when it selects a different desktop host", () => {

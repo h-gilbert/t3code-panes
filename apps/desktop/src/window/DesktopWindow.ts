@@ -32,7 +32,6 @@ import {
   TRACKPAD_SCROLL_END_CHANNEL,
   WINDOW_FULLSCREEN_STATE_CHANNEL,
 } from "../ipc/channels.ts";
-import { PASSKEY_BRIDGE_ARGUMENT } from "../preview/GuestProtocol.ts";
 import * as PreviewManager from "../preview/Manager.ts";
 import * as PreviewPasskeys from "../preview/Passkeys.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
@@ -48,6 +47,7 @@ import {
 } from "./FocusDiagnostics.ts";
 import { FOCUS_DIAGNOSTICS_CHANNEL } from "../ipc/channels.ts";
 import { copyContextMenuImage } from "./ContextMenuImage.ts";
+import { delegatesStreamedTabs, hardenWebviewGuests } from "./webviewGuests.ts";
 
 const TITLEBAR_HEIGHT = 40;
 const DEFAULT_MAIN_WORKSPACE_ID = "main";
@@ -411,7 +411,7 @@ export const make = Effect.gen(function* () {
     yield* previewManager.getBrowserSession();
     const applicationUrl = getDesktopUrl(environment.isDevelopment);
     const initialUrl = new URL(
-      `/#/workspace?workspace=${encodeURIComponent(input.workspaceId)}`,
+      `/${delegatesStreamedTabs(environment.platform) ? "?browserCapture=delegated" : ""}#/workspace?workspace=${encodeURIComponent(input.workspaceId)}`,
       applicationUrl,
     ).href;
     const iconPaths = yield* assets.iconPaths;
@@ -632,27 +632,7 @@ export const make = Effect.gen(function* () {
       yield* electronWindow.destroyAll;
       return Option.none();
     }
-    window.webContents.on("will-attach-webview", (event, webPreferences, params) => {
-      if (
-        typeof params.partition !== "string" ||
-        !previewManager.isBrowserPartition(params.partition)
-      ) {
-        event.preventDefault();
-        return;
-      }
-      webPreferences.sandbox = true;
-      webPreferences.nodeIntegration = false;
-      webPreferences.nodeIntegrationInSubFrames = false;
-      webPreferences.contextIsolation = false;
-      webPreferences.focusOnNavigation = false;
-      webPreferences.disableHtmlFullscreenWindowResize = true;
-      if (previewPasskeys.bridgeEnabled) {
-        webPreferences.additionalArguments = [
-          ...(webPreferences.additionalArguments ?? []),
-          PASSKEY_BRIDGE_ARGUMENT,
-        ];
-      }
-    });
+    hardenWebviewGuests(window, previewManager, previewPasskeys.bridgeEnabled);
 
     const contextMenuContents = new WeakSet<Electron.WebContents>();
     const installContextMenu = (
