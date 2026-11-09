@@ -91,7 +91,7 @@ export function useUpdateEverything(localUpdateVersion: string | null) {
   });
 
   return {
-    hasUpdates: servers.length > 0 || providers.machines.length > 0,
+    hasUpdates: localUpdateVersion !== null || servers.length > 0 || providers.machines.length > 0,
     summary,
     lines,
     restarts,
