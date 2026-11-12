@@ -1,3 +1,9 @@
+// @effect-diagnostics nodeBuiltinImport:off -- the CDP upload test drives a real browser and file.
+import * as NodeFS from "node:fs";
+import * as NodeNet from "node:net";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+
 import {
   chromium,
   type Browser,
@@ -16,6 +22,7 @@ import {
   vi,
 } from "vite-plus/test";
 
+import { ServerBrowserContexts } from "./ServerBrowserContexts.ts";
 import * as ServerBrowserPage from "./ServerBrowserPage.ts";
 
 describe("server browser element refs", () => {
@@ -564,4 +571,40 @@ describe("server browser net errors", () => {
   ])("reads the whole error name from %j", (errorText, description, code) => {
     expect(ServerBrowserPage.parseNetError(errorText)).toEqual({ description, code });
   });
+});
+
+it("sets a file over 50 MB on a desktop page reached over CDP", async () => {
+  const port = await new Promise<number>((resolve) => {
+    const server = NodeNet.createServer().listen(0, "127.0.0.1", () => {
+      const { port } = server.address() as NodeNet.AddressInfo;
+      server.close(() => resolve(port));
+    });
+  });
+  const browser = await chromium.launch({
+    headless: true,
+    args: [`--remote-debugging-port=${port}`],
+  });
+  const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-cdp-upload-"));
+  const file = NodePath.join(directory, "bundle.aab");
+  NodeFS.writeFileSync(file, "");
+  NodeFS.truncateSync(file, 60 * 1024 * 1024);
+  try {
+    await (await browser.newContext()).newPage();
+    const desktop = await new ServerBrowserContexts({
+      profilesDir: directory,
+      executable: async () => chromium.executablePath(),
+      env: {},
+    }).connectDesktopPage(`http://127.0.0.1:${port}`);
+    await desktop.page.setContent('<input type="file">');
+    await desktop.page.locator("input").setInputFiles([file]);
+    const size = await desktop.page
+      .locator("input")
+      .evaluate(
+        (input) => (input as unknown as { files: ArrayLike<{ size: number }> }).files[0]?.size,
+      );
+    expect(size).toBe(60 * 1024 * 1024);
+  } finally {
+    await browser.close();
+    NodeFS.rmSync(directory, { recursive: true, force: true });
+  }
 });

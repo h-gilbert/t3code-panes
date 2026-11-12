@@ -234,7 +234,9 @@ export class ServerBrowserContexts {
 
   async connectDesktopPage(endpoint: string) {
     const { chromium } = loadPlaywright();
-    const browser = await chromium.connectOverCDP(endpoint, { timeout: 15_000 });
+    // Without isLocal, Playwright buffers upload paths and rejects files over 50 MB. Paths stay
+    // valid: a remote desktop host rewrites DOM.setFileInputFiles to its staged copies.
+    const browser = await chromium.connectOverCDP(endpoint, { timeout: 15_000, isLocal: true });
     const page = browser.contexts().flatMap((context) => context.pages())[0];
     if (!page) {
       await browser.close().catch(constVoid);
