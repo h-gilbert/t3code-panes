@@ -6,6 +6,14 @@ import { resolveNodeExecutable } from "@t3tools/shared/nodeRuntime";
 import type { DeviceHostReady } from "./DeviceHost.ts";
 import * as ProcessRunner from "../processRunner.ts";
 
+const isSessionNotFound = (stdout: string) => {
+  try {
+    return JSON.parse(stdout)?.error?.code === "SESSION_NOT_FOUND";
+  } catch {
+    return false;
+  }
+};
+
 export const capturePhysicalScreenshot = Effect.fn("PhysicalDeviceScreenshot.capture")(
   function* (device: DeviceSummary, entryPath: string, targetArgs: ReadonlyArray<string>) {
     const fs = yield* FileSystem.FileSystem;
@@ -14,22 +22,29 @@ export const capturePhysicalScreenshot = Effect.fn("PhysicalDeviceScreenshot.cap
     const node = yield* resolveNodeExecutable("Device automation");
     const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-device-capture-" });
     const file = path.join(directory, "screen.png");
-    const result = yield* runner.run({
-      command: node,
-      args: [
-        entryPath,
-        "screenshot",
-        file,
-        "--platform",
-        device.platform,
-        device.platform === "ios" ? "--udid" : "--serial",
-        device.id,
-        ...targetArgs,
-        "--json",
-      ],
-      env: { ELECTRON_RUN_AS_NODE: "1" },
-      timeout: "60 seconds",
-    });
+    const agentDevice = (args: ReadonlyArray<string>) =>
+      runner.run({
+        command: node,
+        args: [
+          entryPath,
+          ...args,
+          "--platform",
+          device.platform,
+          device.platform === "ios" ? "--udid" : "--serial",
+          device.id,
+          ...targetArgs,
+          "--json",
+        ],
+        env: { ELECTRON_RUN_AS_NODE: "1" },
+        timeout: "60 seconds",
+      });
+    let result = yield* agentDevice(["screenshot", file]);
+    // A device opened in T3 has no agent-device session until something runs `open`.
+    // An app-less open starts one without launching or foregrounding anything.
+    if (result.code !== 0 && !result.timedOut && isSessionNotFound(result.stdout)) {
+      const opened = yield* agentDevice(["open"]);
+      if (opened.code === 0 && !opened.timedOut) result = yield* agentDevice(["screenshot", file]);
+    }
     if (result.code !== 0 || result.timedOut)
       return yield* new DeviceOperationError({
         operation: "physical device screenshot",
