@@ -624,3 +624,109 @@ it.effect(
       expect(yield* fs.exists(`${baseDir}/tools`)).toBe(false);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
+
+// Self-signed stand-ins with the subject layout of Apple's signing certificates.
+const TEAM_A_DEVELOPMENT = `-----BEGIN CERTIFICATE-----
+MIIB9TCCAZygAwIBAgIUHmYe+4B+0Fvp/ClDm/KTVGtxVLUwCgYIKoZIzj0EAwIw
+YDEtMCsGA1UEAwwkQXBwbGUgRGV2ZWxvcG1lbnQ6IFRlc3QgKEFBQUFBMTExMTEp
+MRMwEQYDVQQLDApBQUFBQTExMTExMQ0wCwYDVQQKDARUZXN0MQswCQYDVQQGEwJV
+UzAgFw0yNjExMTUwMjMyNDRaGA8yMTI2MTAyMjAyMzI0NFowYDEtMCsGA1UEAwwk
+QXBwbGUgRGV2ZWxvcG1lbnQ6IFRlc3QgKEFBQUFBMTExMTEpMRMwEQYDVQQLDApB
+QUFBQTExMTExMQ0wCwYDVQQKDARUZXN0MQswCQYDVQQGEwJVUzBZMBMGByqGSM49
+AgEGCCqGSM49AwEHA0IABEmBzkglKG765iGFppZ0Kh4VM0yc2hiKS906wnIBCFbZ
+GnopTLEW7c6U8HvSfWCZo2ovDKJz+Ek9o+99JF1CigyjMjAwMB0GA1UdDgQWBBTl
+9DP/OwDAPRVE7lycTIp3cPKGpTAPBgNVHRMBAf8EBTADAQH/MAoGCCqGSM49BAMC
+A0cAMEQCICS7JC9Z0+8Cgre5zi8sUpbuvDOjUVN11iarsX1OodAYAiAOXYLM6jNq
+zk4KihbuYMlOLr68y12PR4x/xkUhBPbs0g==
+-----END CERTIFICATE-----`;
+const TEAM_B_DISTRIBUTION = `-----BEGIN CERTIFICATE-----
+MIIB+TCCAZ6gAwIBAgIUXoRRbVrAE/dxG+OYWSBDTESEHN0wCgYIKoZIzj0EAwIw
+YTEuMCwGA1UEAwwlQXBwbGUgRGlzdHJpYnV0aW9uOiBUZXN0IChCQkJCQjIyMjIy
+KTETMBEGA1UECwwKQkJCQkIyMjIyMjENMAsGA1UECgwEVGVzdDELMAkGA1UEBhMC
+VVMwIBcNMjYxMTE1MDIzMjQ0WhgPMjEyNjEwMjIwMjMyNDRaMGExLjAsBgNVBAMM
+JUFwcGxlIERpc3RyaWJ1dGlvbjogVGVzdCAoQkJCQkIyMjIyMikxEzARBgNVBAsM
+CkJCQkJCMjIyMjIxDTALBgNVBAoMBFRlc3QxCzAJBgNVBAYTAlVTMFkwEwYHKoZI
+zj0CAQYIKoZIzj0DAQcDQgAE0lth/ts3191ZHW5AUZAGHGg4aaClVxL5yaeQL3Zc
+LrkcKv3MTeXieE38FEntg6AtunCjuvBuE6bprL3moOrnhaMyMDAwHQYDVR0OBBYE
+FDnpsD+sFmmt1Fn+VT2sqz0Gcs63MA8GA1UdEwEB/wQFMAMBAf8wCgYIKoZIzj0E
+AwIDSQAwRgIhANrBX2i466duN9fisuCrg9wcglNNSwjiRtzgqCB1iuo9AiEAtvd/
+CHDf3XVmYY8Bmv7o4kp3+PZfH6oRcjddaCJQrOQ=
+-----END CERTIFICATE-----`;
+const TEAM_C_DEVELOPMENT = `-----BEGIN CERTIFICATE-----
+MIIB+DCCAZ6gAwIBAgIUAOy3My99cYD7A4oBRsth0PVnxXowCgYIKoZIzj0EAwIw
+YTEuMCwGA1UEAwwlQXBwbGUgRGV2ZWxvcG1lbnQ6IE90aGVyIChDQ0NDQzMzMzMz
+KTETMBEGA1UECwwKQ0NDQ0MzMzMzMzENMAsGA1UECgwEVGVzdDELMAkGA1UEBhMC
+VVMwIBcNMjYxMTE1MDIzMzAxWhgPMjEyNjEwMjIwMjMzMDFaMGExLjAsBgNVBAMM
+JUFwcGxlIERldmVsb3BtZW50OiBPdGhlciAoQ0NDQ0MzMzMzMykxEzARBgNVBAsM
+CkNDQ0NDMzMzMzMxDTALBgNVBAoMBFRlc3QxCzAJBgNVBAYTAlVTMFkwEwYHKoZI
+zj0CAQYIKoZIzj0DAQcDQgAE6h09wHsnceMnfZ4bgvOXZpKvyoLxhzj0+TIjFqhl
+RjT0kXYjKx7PeNRyb6DMcIUgLwKB4zVhHux3RFrDH0R/66MyMDAwHQYDVR0OBBYE
+FF9kIvAVl8GMuOD75L8yC4rSSqUfMA8GA1UdEwEB/wQFMAMBAf8wCgYIKoZIzj0E
+AwIDSAAwRQIhANAfXncN+znNM/l7QZ9rDH8hLOiFJCBmB2oWTgUM9hvDAiBhNHVQ
+4HRQ/dfy84bfyvl0klT7i+tAu2x/UxsmGMrl2A==
+-----END CERTIFICATE-----`;
+
+describe("iOS runner signing", () => {
+  const { appleDevelopmentTeamIds, agentDeviceSigningEnvironment } = LocalDeviceHost.__testing;
+  const now = Date.UTC(2026, 0, 1);
+
+  it.each([
+    [
+      "development certificates only",
+      [TEAM_A_DEVELOPMENT, TEAM_B_DISTRIBUTION],
+      now,
+      ["AAAAA11111"],
+    ],
+    [
+      "every development team",
+      [TEAM_A_DEVELOPMENT, TEAM_C_DEVELOPMENT],
+      now,
+      ["AAAAA11111", "CCCCC33333"],
+    ],
+    ["no expired certificates", [TEAM_A_DEVELOPMENT], Date.UTC(2200, 0, 1), []],
+    [
+      "nothing from malformed output",
+      ["-----BEGIN CERTIFICATE-----\nnope\n-----END CERTIFICATE-----"],
+      now,
+      [],
+    ],
+  ])("reads %s", (_name, pems, nowMs, expected) => {
+    expect(appleDevelopmentTeamIds(pems.join("\n"), nowMs)).toEqual(expected);
+  });
+
+  it.each([
+    [
+      "uses the only team",
+      {},
+      ["AAAAA11111"],
+      {
+        AGENT_DEVICE_IOS_TEAM_ID: "AAAAA11111",
+        AGENT_DEVICE_IOS_BUNDLE_ID: "dev.t3code.agentdevice.aaaaa11111",
+      },
+    ],
+    ["leaves several teams to the user", {}, ["AAAAA11111", "CCCCC33333"], {}],
+    [
+      "prefers a configured team",
+      { AGENT_DEVICE_IOS_TEAM_ID: "XXXXX99999" },
+      ["AAAAA11111", "CCCCC33333"],
+      {
+        AGENT_DEVICE_IOS_TEAM_ID: "XXXXX99999",
+        AGENT_DEVICE_IOS_BUNDLE_ID: "dev.t3code.agentdevice.xxxxx99999",
+      },
+    ],
+    [
+      "keeps a configured bundle",
+      { AGENT_DEVICE_IOS_BUNDLE_ID: "com.me.runner" },
+      ["AAAAA11111"],
+      { AGENT_DEVICE_IOS_TEAM_ID: "AAAAA11111", AGENT_DEVICE_IOS_BUNDLE_ID: "com.me.runner" },
+    ],
+    [
+      "leaves the bundle to a manual profile",
+      { AGENT_DEVICE_IOS_PROVISIONING_PROFILE: "Runner" },
+      ["AAAAA11111"],
+      { AGENT_DEVICE_IOS_TEAM_ID: "AAAAA11111" },
+    ],
+  ])("%s", (_name, environment, teams, expected) => {
+    expect(agentDeviceSigningEnvironment(environment, teams)).toEqual(expected);
+  });
+});

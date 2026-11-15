@@ -1,3 +1,6 @@
+// @effect-diagnostics nodeBuiltinImport:off -- Effect has no X.509 parser for reading signing certificates.
+import * as NodeCrypto from "node:crypto";
+
 import { pruneLocalDeviceTools } from "./deviceToolMaintenance.ts";
 import { deviceToolInstallMessage } from "@t3tools/contracts";
 // The hub runs at origin root; T3 strips its prefix and the Device panel derives stream URLs from it.
@@ -189,6 +192,47 @@ const deviceHostEnvironment = (
         ].join(hostPlatform === "win32" ? ";" : ":"),
       }
     : environment;
+};
+
+/** Team IDs (certificate OU) of the unexpired Apple Development certificates in PEM output. */
+const appleDevelopmentTeamIds = (pem: string, nowMs: number): ReadonlyArray<string> => {
+  const teams = new Set<string>();
+  for (const block of pem.match(/-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/g) ??
+    []) {
+    try {
+      const certificate = new NodeCrypto.X509Certificate(block);
+      const team = /^OU=([A-Z0-9]{10})$/m.exec(certificate.subject)?.[1];
+      if (
+        team &&
+        /^CN=Apple Development:/m.test(certificate.subject) &&
+        certificate.validToDate.getTime() > nowMs
+      ) {
+        teams.add(team);
+      }
+    } catch {
+      continue;
+    }
+  }
+  return [...teams];
+};
+
+// agent-device otherwise signs its iOS runner as callstack's team, which fails on everyone else's Mac.
+const agentDeviceSigningEnvironment = (
+  environment: NodeJS.ProcessEnv,
+  teamIds: ReadonlyArray<string>,
+): NodeJS.ProcessEnv => {
+  const team =
+    environment.AGENT_DEVICE_IOS_TEAM_ID?.trim() || (teamIds.length === 1 ? teamIds[0] : undefined);
+  if (!team) return {};
+  const bundleId =
+    environment.AGENT_DEVICE_IOS_BUNDLE_ID?.trim() ||
+    (environment.AGENT_DEVICE_IOS_PROVISIONING_PROFILE?.trim()
+      ? undefined
+      : `dev.t3code.agentdevice.${team.toLowerCase()}`);
+  return {
+    AGENT_DEVICE_IOS_TEAM_ID: team,
+    ...(bundleId ? { AGENT_DEVICE_IOS_BUNDLE_ID: bundleId } : {}),
+  };
 };
 
 const hubEnvironment = Effect.fn("LocalDeviceHost.hubEnvironment")(function* (
@@ -527,8 +571,26 @@ export const make = Effect.fn("LocalDeviceHost.make")(function* () {
     const stateDir = agentDeviceStateDir(path, config.stateDir);
     yield* fs.makeDirectory(stateDir, { recursive: true }).pipe(Effect.ignore);
     const existing = yield* readDaemonFile().pipe(Effect.option);
+    const nowMs = yield* Clock.currentTimeMillis;
+    const signingTeams =
+      hostPlatform === "darwin"
+        ? yield* runner
+            .run({
+              command: "security",
+              args: ["find-certificate", "-a", "-c", "Apple Development", "-p"],
+              env: hostEnvironment,
+              timeout: Duration.seconds(5),
+            })
+            .pipe(
+              Effect.map((result) =>
+                result.code === 0 ? appleDevelopmentTeamIds(result.stdout, nowMs) : [],
+              ),
+              Effect.orElseSucceed(() => []),
+            )
+        : [];
     const daemonEnvironment: NodeJS.ProcessEnv = {
       ...hostEnvironment,
+      ...agentDeviceSigningEnvironment(hostEnvironment, signingTeams),
       AGENT_DEVICE_STATE_DIR: stateDir,
       AGENT_DEVICE_DAEMON_SERVER_MODE: "http",
       // Disable the five-minute idle timeout; the server owns shutdown.
@@ -877,4 +939,6 @@ export const __testing = {
   platformReason,
   deviceHostEnvironment,
   hubEnvironment,
+  appleDevelopmentTeamIds,
+  agentDeviceSigningEnvironment,
 };
