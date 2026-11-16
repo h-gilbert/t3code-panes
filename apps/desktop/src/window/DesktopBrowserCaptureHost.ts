@@ -74,6 +74,8 @@ const make = Effect.gen(function* () {
       window.excludedFromShownWindowsMenu = true;
       window.setIgnoreMouseEvents(true);
       window.setOpacity(0);
+      // Mission Control lists every shown window, offscreen or not.
+      window.setHiddenInMissionControl(true);
       hardenWebviewGuests(window, previewManager, previewPasskeys.bridgeEnabled);
       window.webContents.on("did-attach-webview", (_event, contents) => {
         void runPromise(previewManager.prepareWebview(contents));
