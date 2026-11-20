@@ -328,6 +328,24 @@ it.effect.each(deliveries)(
             );
             const ran = yield* service.runNow({ id: task.id });
             assert.equal(ran.task.lastRunStatus, "succeeded");
+            const projection = yield* orchestrator.getThreadProjection(threadId);
+            const scheduled = projection.messages.find(
+              (message) => message.scheduledTaskId === task.id,
+            );
+            assert.ok(scheduled);
+            const queued = projection.runs.find((run) => run.id === scheduled.runId);
+            assert.ok(queued);
+            assert.equal(queued.status, "queued");
+            assert.notEqual(queued.queueAtToolBoundary, true);
+            const promotion = yield* orchestrator.dispatch({
+              type: "queued-message.promote-to-steer",
+              commandId: CommandId.make("scheduled-tool-boundary"),
+              threadId,
+              queuedRunId: queued.id,
+              targetRunId: parent.id,
+              onlyIfReady: true,
+            });
+            assert.lengthOf(promotion.storedEvents, 0);
           }).pipe(
             Effect.provide(
               ScheduledTaskService.layer.pipe(

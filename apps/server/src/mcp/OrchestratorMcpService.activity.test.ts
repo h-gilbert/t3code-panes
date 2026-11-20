@@ -939,9 +939,11 @@ it("readThread and sendToThread reach threads in other projects", async () => {
       })
       .pipe(Effect.flip);
     expect(denied.code).toBe("runtime_mode_escalation_denied");
-    expect(denied.message).toBe(
-      "Runtime mode full-access exceeds this caller's authorized ceiling approval-required. Have the user raise the calling thread's access or approve a new MCP client grant before retrying.",
+    expect(denied.message).toContain(
+      `Thread "${foreignThreadId}" runs in full-access/default, above this caller's approval-required/default limit.`,
     );
+    expect(denied.message).toContain("This call does not create an approval request.");
+    expect(denied.message).toContain("act directly in the target thread");
     expect(sentMessages).toBe(1);
     const authorized = yield* service.sendToThread(
       {

@@ -5096,6 +5096,7 @@ it.effect.each([
         },
         providers: [
           fakePullRequestProvider(SourceControlProviderKind.make("github"), {
+            mergeMessageRewrite: (message) => message,
             capabilities: {
               ...fakePullRequestProvider(SourceControlProviderKind.make("github")).capabilities,
               actions: ["merge", "enable-auto-merge"],

@@ -74,6 +74,7 @@ describe("Codex orchestration context", () => {
       .join("\n");
 
     NodeAssert.ok(orchestration.includes("explicitly T3-owned work"));
+    NodeAssert.ok(orchestration.includes("no requested or inherited model options"));
     NodeAssert.ok(orchestration.includes("inheritedOptions"));
     NodeAssert.ok(orchestration.includes("target.options"));
     NodeAssert.ok(orchestration.includes("Never silently downgrade"));

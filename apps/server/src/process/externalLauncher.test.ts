@@ -57,6 +57,13 @@ function makeMockDetachedHandle(input: MockSpawnResult & { readonly onUnref?: ()
   });
 }
 
+const macEditorFileSystem = (fs: FileSystem.FileSystem, home: string): FileSystem.FileSystem => ({
+  ...fs,
+  readDirectory: (directory) =>
+    directory === "/Applications" ? Effect.succeed([]) : fs.readDirectory(directory),
+  stat: (file) => fs.stat(file.startsWith("/Applications/") ? `${home}/missing` : file),
+});
+
 const layerTest = (input: {
   readonly platform: NodeJS.Platform;
   readonly env?: Record<string, string>;
@@ -84,12 +91,20 @@ const layerTest = (input: {
       }),
     ),
   );
+  const home = input.env?.HOME;
+  const layerServices =
+    input.platform === "darwin" && home !== undefined
+      ? Layer.effect(
+          FileSystem.FileSystem,
+          Effect.map(FileSystem.FileSystem, (fs) => macEditorFileSystem(fs, home)),
+        ).pipe(Layer.provideMerge(NodeServices.layer))
+      : NodeServices.layer;
 
   return Layer.mergeAll(
     ExternalLauncher.layer.pipe(
       Layer.provide(
         Layer.mergeAll(
-          NodeServices.layer,
+          layerServices,
           layerSpawner,
           input.path ? Layer.succeed(Path.Path, input.path) : Layer.empty,
         ),
@@ -945,6 +960,7 @@ it.effect.skipIf(windowsHost)("does not offer the OpenZFS zed daemon as Zed on L
       resolveEditorCommand(editor, { HOME: home, PATH: `${binDir}:${laterBin}` }).pipe(
         Effect.provideService(HostProcess.Platform, platform),
         Effect.provideService(Path.Path, withSystemBin(path, systemBin)),
+        Effect.provideService(FileSystem.FileSystem, macEditorFileSystem(fs, home)),
       );
     assert.deepEqual(yield* resolveOn("linux"), Option.none());
     assert.deepEqual(yield* resolveOn("darwin"), Option.none());

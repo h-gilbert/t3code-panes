@@ -97,12 +97,12 @@ describe("compileClaudeModelSelection", () => {
     }
   });
 
-  it("uses the model default SDK effort alongside prompt-injected effort", () => {
+  it("uses the fork default SDK effort alongside prompt-injected effort", () => {
     expect(
       compileClaudeModelSelection(
         selection("claude-sonnet-4-6", [{ id: "effort", value: "ultrathink" }]),
       ),
-    ).toMatchObject({ effort: "high", promptEffort: "ultrathink" });
+    ).toMatchObject({ effort: "medium", promptEffort: "ultrathink" });
   });
 
   it("ignores thinking for catalog models without a thinking option", () => {

@@ -8135,7 +8135,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         status: "queued",
         ...(command.createdBy === "user" &&
         command.creationSource === "web" &&
-        command.notification === undefined
+        command.notification === undefined &&
+        command.scheduledTaskId === undefined
           ? { queueAtToolBoundary: true }
           : {}),
         ...(steerWhenReadyRunId === undefined ? {} : { steerWhenReadyRunId }),
@@ -12013,6 +12014,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const queuedMessage = projection.messages.find(
       (candidate) => candidate.id === queuedRun.userMessageId,
     );
+    if (command.onlyIfReady === true && queuedMessage?.scheduledTaskId !== undefined) return;
     if (
       queuedRootNode === undefined ||
       queuedAttempt === undefined ||

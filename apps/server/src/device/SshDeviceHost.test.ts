@@ -293,7 +293,7 @@ it.effect("lists Android devices without probing the host again once it reports 
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const home = yield* fs.makeTempDirectoryScoped();
-    const modes: string[] = [];
+    const commands: string[] = [];
     let androidInstalled = false;
     const spawner = ChildProcessSpawner.make((command) =>
       Effect.gen(function* () {
@@ -312,20 +312,31 @@ it.effect("lists Android devices without probing the host again once it reports 
                   ),
                 )
               : "";
-          const mode = /const mode = "([^"]+)"/.exec(script)?.[1] ?? "";
-          modes.push(mode);
-          output =
-            mode === ""
-              ? "Pixel_8\n"
-              : JSON.stringify({
-                  nodePath: "/node",
-                  platforms: [
-                    { platform: "ios", available: true },
-                    { platform: "android", available: androidInstalled },
-                  ],
-                  hubPort: 1234,
-                  helpers: { serveSimAxSettings: null, serveSimCli: null },
-                });
+          const mode = /const mode = "([^"]+)"/.exec(script)?.[1];
+          const remoteCommand = command.args.at(-1);
+          if (mode) {
+            commands.push(mode);
+            output = JSON.stringify({
+              nodePath: "/node",
+              platforms: [
+                { platform: "ios", available: true },
+                { platform: "android", available: androidInstalled },
+              ],
+              hubPort: 1234,
+              helpers: { serveSimAxSettings: null, serveSimCli: null },
+            });
+          } else if (remoteCommand?.includes("-list-avds")) {
+            commands.push("emulator");
+            output = "Pixel_8\n";
+          } else if (remoteCommand?.includes("xcdevice")) {
+            commands.push("xcdevice");
+            output = "[]";
+          } else if (remoteCommand?.includes("adb") && remoteCommand.includes("devices")) {
+            commands.push("adb");
+            output = "List of devices attached\n";
+          } else {
+            return yield* Effect.die("Unexpected remote command");
+          }
         }
         return ChildProcessSpawner.makeHandle({
           pid: ChildProcessSpawner.ProcessId(123),
@@ -373,33 +384,33 @@ it.effect("lists Android devices without probing the host again once it reports 
       ),
     );
 
-    modes.splice(0);
+    commands.splice(0);
 
     expect(yield* androidNames).toEqual([]);
-    expect(modes.splice(0)).toEqual(["probe"]);
+    expect(commands.splice(0).sort()).toEqual(["adb", "probe", "xcdevice"]);
     expect(yield* androidNames).toEqual([]);
-    expect(modes.splice(0)).toEqual(["probe"]);
+    expect(commands.splice(0)).toEqual(["probe"]);
 
     // The SDK appears after connecting, so the next listing still probes the host.
     androidInstalled = true;
     expect(yield* androidNames).toEqual(["Pixel_8"]);
-    expect(modes.splice(0)).toEqual(["probe", ""]);
+    expect(commands.splice(0)).toEqual(["probe", "emulator"]);
 
     // Android is now known to be available, so listing only runs `emulator -list-avds`.
     expect(yield* androidNames).toEqual(["Pixel_8"]);
-    expect(modes.splice(0)).toEqual([""]);
+    expect(commands.splice(0)).toEqual(["emulator"]);
 
     androidInstalled = false;
     expect((yield* host.platformAvailability("android")).available).toBe(false);
-    expect(modes.splice(0)).toEqual(["probe"]);
+    expect(commands.splice(0)).toEqual(["probe"]);
     expect(yield* androidNames).toEqual([]);
-    expect(modes.splice(0)).toEqual(["probe"]);
+    expect(commands.splice(0)).toEqual(["probe"]);
 
     androidInstalled = true;
     yield* host.inspect;
-    expect(modes.splice(0)).toEqual(["probe"]);
+    expect(commands.splice(0)).toEqual(["probe"]);
     expect(yield* androidNames).toEqual(["Pixel_8"]);
-    expect(modes.splice(0)).toEqual([""]);
+    expect(commands.splice(0)).toEqual(["emulator"]);
     yield* host.stop;
   }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );

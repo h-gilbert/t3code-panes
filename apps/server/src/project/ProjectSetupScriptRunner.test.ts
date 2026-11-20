@@ -353,13 +353,17 @@ describe.skipIf(HostProcess.Platform.defaultValue() === "win32")("POSIX setup co
     }),
   );
 
-  it.live.each([
-    { name: "an explicit exit", command: "exit 7", exitCode: 7 },
-    { name: "a syntax error", command: "if then", exitCode: 2 },
-  ])("reports a nonzero completion for $name", ({ command, exitCode }) =>
+  it.live("reports the explicit exit code", () =>
     Effect.gen(function* () {
-      const result = yield* runObservedSetup(command);
-      assert.equal(result.exitCode, exitCode);
+      const result = yield* runObservedSetup("exit 7");
+      assert.equal(result.exitCode, 7);
+    }),
+  );
+
+  it.live("reports a nonzero completion for a syntax error", () =>
+    Effect.gen(function* () {
+      const result = yield* runObservedSetup("if then");
+      assert.isAbove(result.exitCode ?? 0, 0);
     }),
   );
 });

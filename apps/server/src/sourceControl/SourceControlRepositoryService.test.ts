@@ -996,7 +996,7 @@ it.effect("switches an auto-selected remote to HTTPS when the SSH push is refuse
     assert.strictEqual(pushAttempts, 2);
     assert.deepStrictEqual(gitArgs, [
       ["rev-parse", "--verify", "HEAD"],
-      ["remote", "set-url", "origin", CLONE_URLS.url],
+      ["remote", "set-url", "--", "origin", CLONE_URLS.url],
     ]);
   }).pipe(
     Effect.provide(
