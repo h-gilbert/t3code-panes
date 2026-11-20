@@ -3,6 +3,15 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { ComponentProps, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+vi.mock("gt-react", async (importOriginal) => {
+  const gt = await importOriginal<typeof import("gt-react")>();
+  return {
+    ...gt,
+    useGT: () => (text: string) => text,
+    useMessages: () => gt.decodeMsg,
+  };
+});
+
 const mocks = vi.hoisted(() => ({
   buttons: new Map<string, (() => void) | undefined>(),
   commit: vi.fn(async () => undefined),

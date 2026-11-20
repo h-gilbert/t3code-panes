@@ -1,4 +1,5 @@
-import Constants from "expo-constants";
+import { errorDisplayMessage } from "@t3tools/client-runtime/errors";
+import { useGT, useMessages } from "gt-react-native";
 import * as Dialog from "../../components/ui/Dialog";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
 import { useAuth } from "@clerk/expo";
@@ -6,9 +7,10 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import * as Notifications from "expo-notifications";
 import { useNavigation } from "@react-navigation/native";
 import * as Effect from "effect/Effect";
-import { useCallback, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 import { Linking, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { m as resolveMessage } from "../../i18n/messages";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import {
@@ -18,10 +20,13 @@ import {
   settlePromise,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { supportsAgentAwarenessPush } from "../agent-awareness/capabilities";
+import {
+  isSelfHostedMobileBuild,
+  supportsAgentAwarenessPush,
+} from "../agent-awareness/capabilities";
 import { requestAgentNotificationPermission } from "../agent-awareness/notificationPermissions";
 import {
-  getAgentAwarenessRegistrationStatus,
+  agentAwarenessNotificationsReady,
   refreshAgentAwarenessRegistration,
   subscribeAgentAwarenessRegistrationStatus,
 } from "../agent-awareness/remoteRegistration";
@@ -49,47 +54,62 @@ const notificationStatusAtom = makePermissionStatusAtom<NotificationStatus>({
   },
 });
 
-function useDeviceRegistered(): boolean {
-  const status = useSyncExternalStore(
+function useNotificationsReady(): boolean {
+  return useSyncExternalStore(
     subscribeAgentAwarenessRegistrationStatus,
-    getAgentAwarenessRegistrationStatus,
-    () => "unknown" as const,
+    agentAwarenessNotificationsReady,
+    () => false,
   );
-  return status === "registered";
 }
 
 export function SettingsNotificationsRouteScreen() {
-  if (!hasCloudPublicConfig() && Constants.expoConfig?.extra?.selfHostedBuild !== true) {
+  const gt = useGT();
+  if (isSelfHostedMobileBuild()) {
+    return <ConfiguredSettingsNotificationsRouteScreen selfHosted />;
+  }
+  if (!hasCloudPublicConfig()) {
     return (
-      <SettingsScreen title="Notifications">
+      <SettingsScreen title={gt("Notifications")}>
         <ScrollView
           contentInsetAdjustmentBehavior="automatic"
           contentContainerClassName="px-5 pt-4"
         >
           <Text className="text-base text-foreground-muted">
-            Notifications require T3 Connect in this app build.
+            {gt("Notifications require {product} in this app build.", { product: "T3 Connect" })}
           </Text>
         </ScrollView>
       </SettingsScreen>
     );
   }
 
-  return <ConfiguredSettingsNotificationsRouteScreen />;
+  return <CloudSettingsNotificationsRouteScreen />;
 }
 
-function ConfiguredSettingsNotificationsRouteScreen() {
+function CloudSettingsNotificationsRouteScreen() {
+  const auth = useAuth({ treatPendingAsSignedOut: false });
+  return <ConfiguredSettingsNotificationsRouteScreen isSignedIn={auth.isSignedIn} />;
+}
+
+function ConfiguredSettingsNotificationsRouteScreen({
+  isSignedIn,
+  selfHosted = false,
+}: {
+  readonly isSignedIn?: boolean | undefined;
+  readonly selfHosted?: boolean;
+}) {
+  const gt = useGT();
+  const m = useMessages();
   const agentAwarenessPushAvailable = supportsAgentAwarenessPush();
-  const agentAwarenessPlatform = resolveAgentAwarenessPlatformPresentation(Platform.OS);
+  const agentAwarenessPlatform = resolveAgentAwarenessPlatformPresentation(Platform.OS, m);
   const agentAwarenessSubtitle =
     Platform.OS === "android" && !agentAwarenessPushAvailable
-      ? "Install a newer app build to enable notifications"
+      ? gt("Install a newer app build to enable notifications")
       : agentAwarenessPlatform.subtitle;
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
-  const { isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
   const notificationStatus = useAtomValue(notificationStatusAtom);
   const setNotificationStatus = useAtomSet(notificationStatusAtom);
-  const deviceRegistered = useDeviceRegistered();
+  const notificationsReady = useNotificationsReady();
 
   const requestNotifications = async () => {
     const result = await settleAsyncResult(() =>
@@ -105,20 +125,27 @@ function ConfiguredSettingsNotificationsRouteScreen() {
       if (!isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);
         Dialog.alert(
-          "Notifications unavailable",
-          error instanceof Error ? error.message : "Could not request notification permission.",
+          gt("Notifications unavailable"),
+          error instanceof Error
+            ? (errorDisplayMessage(error, resolveMessage) ?? error.message)
+            : gt("Could not request notification permission."),
         );
       }
       return;
     }
     if (result.value.type === "granted") {
       setNotificationStatus("enabled");
-      if (getAgentAwarenessRegistrationStatus() === "registered") {
-        Dialog.alert("Notifications enabled", "Agent notifications are enabled for this device.");
-      } else {
+      if (!agentAwarenessNotificationsReady()) {
         Dialog.alert(
-          "Couldn't finish enabling notifications",
-          "Notification access was granted, but this device could not be registered with the notification server. Notifications will start once registration succeeds.",
+          gt("Couldn't finish enabling notifications"),
+          selfHosted
+            ? gt(
+                "Notification access was granted. Connect to a paired environment to register this device.",
+              )
+            : gt(
+                "Notification access was granted, but this device could not be registered with {product}. Notifications will start once registration succeeds.",
+                { product: "T3 Connect" },
+              ),
         );
       }
       return;
@@ -126,61 +153,62 @@ function ConfiguredSettingsNotificationsRouteScreen() {
     if (result.value.type === "unsupported") {
       setNotificationStatus("unsupported");
       Dialog.alert(
-        "Notifications unavailable",
-        "Agent notifications are unavailable on this platform.",
+        gt("Notifications unavailable"),
+        gt("Agent notifications are unavailable on this platform."),
       );
       return;
     }
     setNotificationStatus("disabled");
     if (result.value.canAskAgain) {
-      Dialog.alert("Notifications disabled", "Notifications were not enabled.");
+      Dialog.alert(gt("Notifications disabled"), gt("Notifications were not enabled."));
       return;
     }
     Dialog.alert(
-      "Notifications disabled",
-      "Notifications were denied for this app. Open Settings to enable them.",
+      gt("Notifications disabled"),
+      gt("Notifications were denied for this app. Open Settings to enable them."),
       [
-        { text: "Cancel", style: "cancel" },
-        { text: "Open Settings", onPress: () => void Linking.openSettings() },
+        { text: gt("Cancel"), style: "cancel" },
+        { text: gt("Open Settings"), onPress: () => void Linking.openSettings() },
       ],
     );
   };
 
-  const promptSignIn = useCallback(() => {
-    Dialog.alert("Sign in to T3 Connect", "Sign in to register this device for notifications.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Continue",
-        onPress: () => navigation.navigate("SettingsAuth"),
-      },
-    ]);
-  }, [navigation]);
+  const promptSignIn = () => {
+    Dialog.alert(
+      gt("Sign in to {product}", { product: "T3 Connect" }),
+      gt("Sign in to register this device for notifications."),
+      [
+        { text: gt("Cancel"), style: "cancel" },
+        {
+          text: gt("Continue"),
+          onPress: () => navigation.navigate("SettingsAuth"),
+        },
+      ],
+    );
+  };
 
-  const handleDeviceNotificationsChange = useCallback(
-    (enabled: boolean) => {
-      if (enabled) {
-        if (!isSignedIn && Constants.expoConfig?.extra?.selfHostedBuild !== true) {
-          promptSignIn();
-          return;
-        }
-        void requestNotifications();
+  const handleDeviceNotificationsChange = (enabled: boolean) => {
+    if (enabled) {
+      if (!selfHosted && !isSignedIn) {
+        promptSignIn();
         return;
       }
+      void requestNotifications();
+      return;
+    }
 
-      Dialog.alert(
-        "Disable notifications",
-        "Open system Settings to disable notifications for T3 Code.",
-        [
-          { text: "Cancel", style: "cancel" },
-          { text: "Open Settings", onPress: () => void Linking.openSettings() },
-        ],
-      );
-    },
-    [isSignedIn, promptSignIn, requestNotifications],
-  );
+    Dialog.alert(
+      gt("Disable notifications"),
+      gt("Open system Settings to disable notifications for {product}.", { product: "T3 Code" }),
+      [
+        { text: gt("Cancel"), style: "cancel" },
+        { text: gt("Open Settings"), onPress: () => void Linking.openSettings() },
+      ],
+    );
+  };
 
   return (
-    <SettingsScreen title="Notifications">
+    <SettingsScreen title={gt("Notifications")}>
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
@@ -190,10 +218,10 @@ function ConfiguredSettingsNotificationsRouteScreen() {
           paddingBottom: Math.max(insets.bottom, 18) + 18,
         }}
       >
-        <SettingsSection title="Agent activity">
+        <SettingsSection title={gt("Agent activity")}>
           <SettingsSwitchRow
             icon="bell.badge"
-            label="Device Notifications"
+            label={gt("Device Notifications")}
             disabled={
               !agentAwarenessPlatform.supported ||
               !agentAwarenessPushAvailable ||
@@ -202,7 +230,7 @@ function ConfiguredSettingsNotificationsRouteScreen() {
             }
             subtitle={agentAwarenessSubtitle}
             value={
-              agentAwarenessPushAvailable && notificationStatus === "enabled" && deviceRegistered
+              agentAwarenessPushAvailable && notificationStatus === "enabled" && notificationsReady
             }
             onValueChange={handleDeviceNotificationsChange}
           />

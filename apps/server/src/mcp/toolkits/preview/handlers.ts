@@ -34,6 +34,7 @@ import {
   type PreviewAutomationResizeResult,
   type PreviewAutomationSetColorSchemeResult,
   type PreviewAutomationSnapshot,
+  type PreviewAutomationSnapshotMetadata,
   type PreviewAutomationStatus,
   PreviewTabId,
 } from "@t3tools/contracts";
@@ -368,12 +369,18 @@ const handlers = {
     invokeTargeted<PreviewAutomationSetColorSchemeResult>("setColorScheme", input),
   ),
   preview_snapshot: McpToolAccess.readsAsCaller((input) => {
-    // Saving still needs a capture even when the tool omits its image output.
     const { includeImage, save, ...operationInput } = input ?? {};
-    return invokeTargeted<PreviewAutomationSnapshot>("snapshot", {
-      ...operationInput,
-      includeImage: includeImage !== false || save === true,
-    });
+    // The saved file is for people, so it keeps the resolution the agent's image is capped below.
+    return invokeTargeted<PreviewAutomationSnapshot | PreviewAutomationSnapshotMetadata>(
+      "snapshot",
+      {
+        ...operationInput,
+        ...(save === true ? { fullScreenshot: true } : {}),
+        ...(includeImage === false && save !== true
+          ? { includeImage: false, pixelsRequired: false }
+          : {}),
+      },
+    );
   }),
   preview_upload: McpToolAccess.actsAsCaller((input) => uploadFiles(input)),
   preview_act: McpToolAccess.actsAsCaller(({ action, ...input }) =>

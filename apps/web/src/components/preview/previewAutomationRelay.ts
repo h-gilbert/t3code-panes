@@ -76,5 +76,5 @@ export async function relayPreviewAutomation(input: {
     request: input.request,
   })) as RelayResponse;
   if (response.ok) return response.result;
-  throw new RelayedPreviewAutomationError(response.error);
+  throw new RelayedPreviewAutomationError({ serialized: response.error });
 }

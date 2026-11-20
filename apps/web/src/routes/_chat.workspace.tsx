@@ -1,10 +1,20 @@
+import { useSidebarPendingFileDropStore } from "../sidebarPendingFileDropStore";
+import { threadKey } from "@t3tools/client-runtime/state/entities";
+import * as Option from "effect/Option";
+import { appAtomRegistry } from "../rpc/atomRegistry";
 import { useStableCallback } from "../hooks/useStableCallback";
-import { environmentThreadDetails, useEnvironmentThread } from "../state/threads";
+import {
+  environmentThreadDetails,
+  environmentThreadShells,
+  threadFamilies,
+  useEnvironmentThread,
+} from "../state/threads";
 import { Atom } from "effect/reactivity";
 import { useEnvironmentIdentities, useEnvironmentProviders } from "../state/environments";
 import { shouldTypeToFocusComposer } from "../components/chat/composerFocusRedirect";
 // @effect-diagnostics cryptoRandomUUID:off -- Synchronous workspace drag-and-drop allocates local view identities.
 import { useAtomValue } from "@effect/atom-react";
+import { msg, T, useGT, useMessages, Var } from "gt-react";
 import {
   scopedThreadKey,
   scopeProjectRef,
@@ -14,7 +24,12 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { canSettle, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
 import { createFileRoute } from "@tanstack/react-router";
-import type { EnvironmentId, ScopedProjectRef, ScopedThreadRef } from "@t3tools/contracts";
+import {
+  isListedThreadLineage,
+  type EnvironmentId,
+  type ScopedProjectRef,
+  type ScopedThreadRef,
+} from "@t3tools/contracts";
 import type { OrchestrationV2Subagent } from "@t3tools/contracts";
 import {
   ArrowLeftIcon,
@@ -44,6 +59,8 @@ import {
 import { EmptyWorkspacePane } from "../components/EmptyWorkspacePane";
 import { ProjectFavicon } from "../components/ProjectFavicon";
 import { ChatViewContent } from "../components/ChatView";
+import { ChatHeader } from "../components/chat/ChatHeader";
+import { openThreadFind } from "../components/chat/threadFindStore";
 import {
   WorkspacePaneHeaderContext,
   WorkspacePaneNavigationContext,
@@ -76,6 +93,8 @@ import { resolveThreadRouteRenderState } from "../threadRoutes";
 import { resolveThreadSyncPhase } from "../threadSync";
 import {
   useEnvironmentBootstrapComplete,
+  useAnyEnvironmentHiding,
+  useQuietThreadShell,
   useThreadDetailExists,
   useProjects,
   useServerConfigs,
@@ -87,6 +106,7 @@ import {
   useThreadTitle,
 } from "../state/entities";
 import { usePrimaryEnvironmentId } from "../state/environments";
+import { environmentPresentations } from "../state/presentation";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { useClientSettings } from "../hooks/useSettings";
 import { useDesktopFullscreen } from "../hooks/useDesktopFullscreen";
@@ -96,15 +116,12 @@ import { useLogicalProjectEnvironments } from "../hooks/useLogicalProjectEnviron
 import { EnvironmentMachineIcon } from "../components/EnvironmentMachineIcon";
 import { useNowMinute } from "../hooks/useNowMinute";
 import { useThreadActions } from "../hooks/useThreadActions";
+import { m } from "../i18n/messages";
 import {
   pickableProjectGroups,
   selectProjectGroupingSettings,
 } from "@t3tools/client-runtime/state/project-grouping";
-import {
-  markPromotedDraftThreadByRef,
-  useComposerDraftStore,
-  type DraftId,
-} from "../composerDraftStore";
+import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import {
   buildSidebarProjectSnapshots,
   resolveSidebarProjectScopeKey,
@@ -135,6 +152,11 @@ import { cn } from "~/lib/utils";
 import { newDraftId, newThreadId } from "../lib/utils";
 
 const WORKSPACE_PANE_DRAG_TYPE = "application/x-t3code-workspace-pane";
+const WORKSPACE_LAYOUT_OPTIONS = [
+  ["grid", Grid2X2Icon, msg("Grid layout")],
+  ["columns", Columns3Icon, msg("Column layout")],
+  ["rows", Rows3Icon, msg("Row layout")],
+] as const;
 
 function hasWorkspacePaneDrag(dataTransfer: DataTransfer): boolean {
   return dataTransfer.types.includes(WORKSPACE_PANE_DRAG_TYPE);
@@ -147,19 +169,50 @@ function workspacePaneRenderKey(target: WorkspacePaneTarget | null, index: numbe
   return "draftId" in target ? `draft:${target.draftId}` : `thread:${scopedThreadKey(target)}`;
 }
 
-function WorkspacePaneThreadTitle({ threadRef }: { readonly threadRef: ScopedThreadRef }) {
+function findInPaneThread(threadRef: ScopedThreadRef) {
+  openThreadFind(scopedThreadKey(threadRef));
+}
+
+function WorkspacePaneThreadTitle({
+  threadRef,
+  showActions = true,
+}: {
+  readonly threadRef: ScopedThreadRef;
+  readonly showActions?: boolean;
+}) {
+  const gt = useGT();
   const title = useThreadTitle(threadRef);
-  const displayTitle = title ?? "Loading thread…";
+  const threadHidden = useAtomValue(environmentThreadShells.hiddenThreadKeysAtom, (keys) =>
+    keys.has(threadKey(threadRef)),
+  );
+  const canFind = useAtomValue(
+    environmentPresentations.serverConfigsAtom,
+    (configs) => configs.get(threadRef.environmentId)?.threadFind === true,
+  );
+
+  if (title === null || !showActions || threadHidden) {
+    const displayTitle = title ?? gt("Loading thread…");
+    return (
+      <Tooltip>
+        <TooltipTrigger
+          render={<span className="min-w-0 flex-1 truncate text-center text-foreground" />}
+        >
+          {displayTitle}
+        </TooltipTrigger>
+        <TooltipPopup side="bottom">{displayTitle}</TooltipPopup>
+      </Tooltip>
+    );
+  }
 
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={<span className="min-w-0 flex-1 truncate text-center text-foreground" />}
-      >
-        {displayTitle}
-      </TooltipTrigger>
-      <TooltipPopup side="bottom">{displayTitle}</TooltipPopup>
-    </Tooltip>
+    <ChatHeader
+      paneTitleOnly
+      activeThreadEnvironmentId={threadRef.environmentId}
+      activeThreadId={threadRef.threadId}
+      activeThreadTitle={title}
+      isServerThread
+      onFindInThread={canFind ? findInPaneThread : undefined}
+    />
   );
 }
 
@@ -169,9 +222,11 @@ function WorkspacePaneDraftTitle({ draftId }: { readonly draftId: DraftId }) {
   const serverThreadRef = resolveWorkspaceDraftThreadRef(draftSession, threadRefs);
 
   return serverThreadRef ? (
-    <WorkspacePaneThreadTitle threadRef={serverThreadRef} />
+    <WorkspacePaneThreadTitle threadRef={serverThreadRef} showActions={false} />
   ) : (
-    <span className="min-w-0 flex-1 truncate text-center text-muted-foreground">New thread</span>
+    <span className="min-w-0 flex-1 truncate text-center text-muted-foreground">
+      <T>New thread</T>
+    </span>
   );
 }
 
@@ -188,10 +243,40 @@ function WorkspaceThreadPane({
   const serverThreadShellExists = useThreadShellExists(threadRef);
   const serverThreadDetailExists = useThreadDetailExists(threadRef);
   const serverThreadStatus = useThreadStatus(threadRef);
+  const hiddenKeys = useAtomValue(environmentThreadShells.hiddenThreadKeysAtom);
+  const hidingAnywhere = useAnyEnvironmentHiding();
   const unlistedThreadDetail = useEnvironmentThread(
     serverThreadShellExists ? null : threadRef.environmentId,
     serverThreadShellExists ? null : threadRef.threadId,
   );
+  const unlistedThread = Option.getOrNull(unlistedThreadDetail.data)?.thread;
+  const lineage = unlistedThread?.lineage;
+  const unlistedParentRef =
+    lineage && !isListedThreadLineage(lineage) && lineage.parentThreadId !== null
+      ? scopeThreadRef(
+          lineage.parentEnvironmentId ?? threadRef.environmentId,
+          lineage.parentThreadId,
+        )
+      : (unlistedThread?.delegatedFrom ?? null);
+  const unlistedParentKey = unlistedParentRef === null ? null : threadKey(unlistedParentRef);
+  const unlistedParent = useQuietThreadShell(unlistedParentRef);
+  const threadHidden = hiddenKeys.has(threadKey(threadRef));
+  const offShellBlocked =
+    hidingAnywhere &&
+    !serverThreadShellExists &&
+    (unlistedParentKey === null || unlistedParent === null || hiddenKeys.has(unlistedParentKey));
+  const [retainFamily, setRetainFamily] = useState(false);
+  if (bootstrapComplete && !serverThreadShellExists && !offShellBlocked && !retainFamily) {
+    setRetainFamily(true);
+  }
+  const { environmentId, threadId } = threadRef;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- retains the opened off-shell thread while the pane is mounted
+  useEffect(() => {
+    if (retainFamily && !threadHidden) {
+      return threadFamilies.mount(appAtomRegistry, environmentId, threadId);
+    }
+  }, [environmentId, threadId, retainFamily, threadHidden]);
+
   const renderState = resolveThreadRouteRenderState({
     bootstrapComplete,
     serverThreadExists: serverThreadShellExists || serverThreadDetailExists,
@@ -205,18 +290,31 @@ function WorkspaceThreadPane({
     status: serverThreadStatus,
   });
 
-  if (renderState === "missing") {
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- drops queued file inserts after the environment confirms the thread is missing
+  useEffect(() => {
+    if (renderState === "missing") {
+      useSidebarPendingFileDropStore
+        .getState()
+        .clearPendingFileDropsForThread({ environmentId, threadId });
+    }
+  }, [environmentId, threadId, renderState]);
+
+  if (
+    threadHidden ||
+    (offShellBlocked && unlistedThread !== undefined) ||
+    renderState === "missing"
+  ) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-xs text-muted-foreground">
-        This thread is no longer available. Clear the pane and choose another thread.
+        <T>This thread is no longer available. Clear the pane and choose another thread.</T>
       </div>
     );
   }
 
-  if (renderState === "loading" && !serverThreadShellExists) {
+  if (offShellBlocked || (renderState === "loading" && !serverThreadShellExists)) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center text-xs text-muted-foreground">
-        Loading thread…
+        <T>Loading thread…</T>
       </div>
     );
   }
@@ -249,8 +347,7 @@ function WorkspaceDraftPane({
   readonly composerHandleRef: RefObject<ChatComposerHandle | null>;
 }) {
   const draftSession = useComposerDraftStore((state) => state.getDraftSession(draftId));
-  const threadRefs = useThreadRefs();
-  const inferredThreadRef = resolveWorkspaceDraftThreadRef(draftSession, threadRefs);
+  const draftRedirect = useComposerDraftStore((state) => state.getPromotedDraftRedirect(draftId));
   const retainDraftThread = useComposerDraftStore((state) => state.retainDraftThread);
   const releaseDraftThread = useComposerDraftStore((state) => state.releaseDraftThread);
   const assignThread = useWorkspacePaneStore((state) => state.assignThread);
@@ -265,26 +362,14 @@ function WorkspaceDraftPane({
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- clears a restored pane whose draft no longer exists after storage hydration
   useEffect(() => {
     if (draftSession || !useComposerDraftStore.persist.hasHydrated()) return;
-    clearPane(workspaceKey, index);
-  }, [clearPane, draftSession, index, workspaceKey]);
-
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reconciles a draft with its promoted server thread
-  useEffect(() => {
-    if (!inferredThreadRef || draftSession?.promotedTo) return;
-    markPromotedDraftThreadByRef(inferredThreadRef);
-  }, [draftSession?.promotedTo, inferredThreadRef]);
-
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- replaces the pane draft assignment once the server thread is available
-  useEffect(() => {
-    if (draftSession?.promotedTo) {
-      assignThread(workspaceKey, draftSession.promotedTo, index);
-    }
-  }, [assignThread, draftSession?.promotedTo, index, workspaceKey]);
+    if (draftRedirect) assignThread(workspaceKey, draftRedirect, index);
+    else clearPane(workspaceKey, index);
+  }, [assignThread, clearPane, draftRedirect, draftSession, index, workspaceKey]);
 
   if (!draftSession) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center text-xs text-muted-foreground">
-        Restoring composer…
+        <T>Restoring composer…</T>
       </div>
     );
   }
@@ -360,6 +445,12 @@ function WorkspacePane({
   readonly knownThreads: readonly EnvironmentThreadShell[];
   readonly settleThread: ReturnType<typeof useThreadActions>["settleThread"];
 }) {
+  const gt = useGT();
+  const paneNumber = index + 1;
+  const backLabel = gt("Back in pane");
+  const settleLabel = gt("Settle thread and clear pane");
+  const maximizeLabel = maximized ? gt("Restore pane") : gt("Maximize pane");
+  const removeLabel = gt("Remove from pane. Thread keeps running");
   const openRelatedThread = useWorkspacePaneStore((state) => state.openRelatedThread);
   const goBack = useWorkspacePaneStore((state) => state.goBack);
   const canGoBack = useWorkspacePaneStore(
@@ -499,8 +590,9 @@ function WorkspacePane({
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Could not finish thread",
-          description: error instanceof Error ? error.message : "The thread was not settled.",
+          title: m(msg("Could not finish thread")),
+          description:
+            error instanceof Error ? error.message : m(msg("The thread was not settled.")),
         }),
       );
       return;
@@ -515,7 +607,7 @@ function WorkspacePane({
         focused ? "z-10 border-primary ring-1 ring-primary/50" : "border-border",
       )}
       style={style}
-      aria-label={`Workspace pane ${index + 1}`}
+      aria-label={gt("Workspace pane {paneNumber}", { paneNumber })}
       data-workspace-pane={index}
       data-focused={focused ? "true" : "false"}
       onDragOverCapture={(event) => {
@@ -597,11 +689,17 @@ function WorkspacePane({
             <TooltipTrigger render={<span className="-ml-1 flex shrink-0 items-center" />}>
               <GripVerticalIcon className="size-3 text-muted-foreground/60" aria-hidden />
             </TooltipTrigger>
-            <TooltipPopup side="bottom">Drag onto another pane to swap</TooltipPopup>
+            <TooltipPopup side="bottom">
+              <T>Drag onto another pane to swap</T>
+            </TooltipPopup>
           </Tooltip>
         ) : null}
         {paneTarget === null ? (
-          <span className="px-1 text-muted-foreground">Pane {index + 1}</span>
+          <span className="px-1 text-muted-foreground">
+            <T>
+              Pane <Var>{paneNumber}</Var>
+            </T>
+          </span>
         ) : projects.length === 0 ? (
           <button
             type="button"
@@ -609,7 +707,9 @@ function WorkspacePane({
             onClick={openProjectPicker}
           >
             <FolderOpenIcon className="size-3 shrink-0 text-muted-foreground" aria-hidden />
-            <span className="truncate">Choose project</span>
+            <span className="truncate">
+              <T>Choose project</T>
+            </span>
           </button>
         ) : (
           <DropdownMenu>
@@ -620,23 +720,31 @@ function WorkspacePane({
                   className="flex h-5 min-w-0 max-w-[45%] items-center gap-1 rounded px-1.5 text-left text-2xs text-foreground outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                 />
               }
-              aria-label={`Change project for pane ${index + 1}`}
+              aria-label={gt("Change project for pane {paneNumber}", { paneNumber })}
             >
               {selectedProject ? (
                 <ProjectFavicon project={selectedProject} className="size-3 shrink-0" />
               ) : null}
-              <span className="truncate">{selectedProject?.displayName ?? "Choose project"}</span>
+              <span className="truncate">
+                {selectedProject?.displayName ?? <T>Choose project</T>}
+              </span>
               <ChevronDownIcon className="size-3 shrink-0 text-muted-foreground" aria-hidden />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-72">
               <DropdownMenuGroup>
-                <DropdownMenuLabel>Project for this pane</DropdownMenuLabel>
+                <DropdownMenuLabel>
+                  <T>Project for this pane</T>
+                </DropdownMenuLabel>
                 {!menuProjects.some((project) => project.isScratch) ? (
                   <DropdownMenuSub>
-                    <DropdownMenuSubTrigger>No project</DropdownMenuSubTrigger>
+                    <DropdownMenuSubTrigger>
+                      <T>No project</T>
+                    </DropdownMenuSubTrigger>
                     <DropdownMenuSubContent>
                       <DropdownMenuGroup>
-                        <DropdownMenuLabel>New thread on</DropdownMenuLabel>
+                        <DropdownMenuLabel>
+                          <T>New thread on</T>
+                        </DropdownMenuLabel>
                         {scratchEnvironments.map((environment) => (
                           <DropdownMenuItem
                             key={environment.environmentId}
@@ -673,10 +781,12 @@ function WorkspacePane({
                               selectProject(scopeProjectRef(project.environmentId, project.id))
                             }
                           >
-                            Browse threads
+                            <T>Browse threads</T>
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
-                          <DropdownMenuLabel>New thread on</DropdownMenuLabel>
+                          <DropdownMenuLabel>
+                            <T>New thread on</T>
+                          </DropdownMenuLabel>
                           {scratchEnvironments.map((environment) => (
                             <DropdownMenuItem
                               key={environment.environmentId}
@@ -731,7 +841,9 @@ function WorkspacePane({
                         type="button"
                         tabIndex={-1}
                         className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground group-data-highlighted:opacity-100 pointer-coarse:opacity-100"
-                        aria-label={`Hide ${project.displayName} from this list`}
+                        aria-label={gt("Hide {projectName} from this list", {
+                          projectName: project.displayName,
+                        })}
                         onClick={(event) => {
                           event.preventDefault();
                           event.stopPropagation();
@@ -748,7 +860,9 @@ function WorkspacePane({
               {hiddenMenuProjects.length > 0 ? (
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger>
-                    Hidden projects ({hiddenMenuProjects.length})
+                    <T>
+                      Hidden projects (<Var>{hiddenMenuProjects.length}</Var>)
+                    </T>
                   </DropdownMenuSubTrigger>
                   <DropdownMenuSubContent className="w-72">
                     {hiddenMenuProjects.map((project) => (
@@ -772,12 +886,12 @@ function WorkspacePane({
               ) : null}
               {projectKey !== null ? (
                 <DropdownMenuItem onClick={() => setPaneProject(workspaceKey, index, null)}>
-                  Clear project
+                  <T>Clear project</T>
                 </DropdownMenuItem>
               ) : null}
               <DropdownMenuItem onClick={openProjectPicker}>
                 <FolderOpenIcon />
-                Add project or directory…
+                <T>Add project or directory…</T>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -800,26 +914,36 @@ function WorkspacePane({
             <Button
               size="xs"
               variant="ghost"
-              aria-label={`Open running agent: ${runningSubagents[0]!.title}`}
+              aria-label={gt("Open running agent: {agentTitle}", {
+                agentTitle: runningSubagents[0]!.title,
+              })}
               onClick={() => {
                 const agent = runningSubagents[0]!;
                 openRelated(scopeThreadRef(agent.environmentId, agent.id));
               }}
             >
-              <RunningSubagentProviderIcon agent={runningSubagents[0]!} />1 running
+              <RunningSubagentProviderIcon agent={runningSubagents[0]!} />
+              <T>1 running</T>
             </Button>
           ) : runningSubagents.length > 1 ? (
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={<Button size="xs" variant="ghost" />}
-                aria-label={`${runningSubagents.length} running agents`}
+                aria-label={gt(
+                  "{count, plural, one {{count} running agent} other {{count} running agents}}",
+                  { count: runningSubagents.length },
+                )}
               >
-                {runningSubagents.length} running
+                <T>
+                  <Var>{runningSubagents.length}</Var> running
+                </T>
                 <ChevronDownIcon className="size-3" aria-hidden />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-72">
                 <DropdownMenuGroup>
-                  <DropdownMenuLabel>Running agents</DropdownMenuLabel>
+                  <DropdownMenuLabel>
+                    <T>Running agents</T>
+                  </DropdownMenuLabel>
                   {runningSubagents.map((agent) => (
                     <DropdownMenuItem
                       key={scopedThreadKey(scopeThreadRef(agent.environmentId, agent.id))}
@@ -837,8 +961,8 @@ function WorkspacePane({
             <Button
               size="icon-micro"
               variant="ghost"
-              aria-label="Back in pane"
-              title="Back in pane"
+              aria-label={backLabel}
+              title={backLabel}
               onClick={() => goBack(workspaceKey, index)}
             >
               <ArrowLeftIcon className="size-3" />
@@ -848,10 +972,8 @@ function WorkspacePane({
             <Button
               size="icon-micro"
               variant="ghost"
-              aria-label="Settle thread and clear pane"
-              title={
-                settleAvailable ? "Settle thread and clear pane" : "Thread still needs attention"
-              }
+              aria-label={settleLabel}
+              title={settleAvailable ? settleLabel : gt("Thread still needs attention")}
               disabled={settling || !settleAvailable}
               onClick={() => void finishThread()}
             >
@@ -861,8 +983,8 @@ function WorkspacePane({
           <Button
             size="icon-micro"
             variant="ghost"
-            aria-label={maximized ? "Restore pane" : "Maximize pane"}
-            title={maximized ? "Restore pane" : "Maximize pane"}
+            aria-label={maximizeLabel}
+            title={maximizeLabel}
             onClick={() => toggleMaximize(workspaceKey, index)}
           >
             {maximized ? (
@@ -875,8 +997,8 @@ function WorkspacePane({
             <Button
               size="icon-micro"
               variant="ghost"
-              aria-label="Remove from pane. Thread keeps running"
-              title="Remove from pane. Thread keeps running"
+              aria-label={removeLabel}
+              title={removeLabel}
               onClick={handleClearPane}
             >
               <XIcon className="size-3" />
@@ -933,6 +1055,10 @@ export function ProjectPaneWorkspace({
   readonly workspaceKey: string;
   readonly active?: boolean;
 }) {
+  const gt = useGT();
+  const resolveMessage = useMessages();
+  const resetLabel = gt("Reset workspace");
+  const newWindowLabel = gt("Open workspace in new window");
   const projects = useProjects();
   const environments = useEnvironmentIdentities();
   const threads = useThreadShells();
@@ -1107,14 +1233,14 @@ export function ProjectPaneWorkspace({
           <div className="min-w-0 flex-1" aria-hidden />
           <div
             className="flex items-center gap-1 [-webkit-app-region:no-drag]"
-            aria-label="Workspace layout controls"
+            aria-label={gt("Workspace layout controls")}
           >
             <div className="relative h-6 w-[4.75rem] shrink-0 text-2xs">
               <span className="pointer-events-none absolute inset-y-0 left-2 flex items-center text-muted-foreground">
-                Panes
+                <T>Panes</T>
               </span>
               <select
-                aria-label="Number of panes"
+                aria-label={gt("Number of panes")}
                 className="h-6 w-full appearance-none rounded-md border border-border bg-background pr-5 pl-10.5 text-2xs text-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                 value={String(paneCount)}
                 onChange={(event) =>
@@ -1135,29 +1261,26 @@ export function ProjectPaneWorkspace({
                 aria-hidden
               />
             </div>
-            {(
-              [
-                ["grid", Grid2X2Icon, "Grid layout"],
-                ["columns", Columns3Icon, "Column layout"],
-                ["rows", Rows3Icon, "Row layout"],
-              ] as const
-            ).map(([mode, Icon, label]) => (
-              <Button
-                key={mode}
-                size="icon-micro"
-                variant={layoutMode === mode ? "secondary" : "ghost"}
-                aria-label={label}
-                title={label}
-                onClick={() => setLayoutMode(workspaceKey, mode)}
-              >
-                <Icon className="size-3" />
-              </Button>
-            ))}
+            {WORKSPACE_LAYOUT_OPTIONS.map(([mode, Icon, message]) => {
+              const label = resolveMessage(message);
+              return (
+                <Button
+                  key={mode}
+                  size="icon-micro"
+                  variant={layoutMode === mode ? "secondary" : "ghost"}
+                  aria-label={label}
+                  title={label}
+                  onClick={() => setLayoutMode(workspaceKey, mode)}
+                >
+                  <Icon className="size-3" />
+                </Button>
+              );
+            })}
             <Button
               size="icon-micro"
               variant="ghost"
-              aria-label="Reset workspace"
-              title="Reset workspace"
+              aria-label={resetLabel}
+              title={resetLabel}
               onClick={() => resetWorkspace(workspaceKey)}
             >
               <RotateCcwIcon className="size-3" />
@@ -1165,8 +1288,8 @@ export function ProjectPaneWorkspace({
             <Button
               size="icon-micro"
               variant="ghost"
-              aria-label="Open workspace in new window"
-              title="Open workspace in new window"
+              aria-label={newWindowLabel}
+              title={newWindowLabel}
               onClick={openWorkspaceWindow}
             >
               <SquareArrowOutUpRightIcon className="size-3" />

@@ -2,6 +2,15 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+vi.mock("../../shortcutModifierState", () => ({
+  useShortcutModifierState: () => ({
+    shiftKey: false,
+    altKey: false,
+    ctrlKey: false,
+    metaKey: false,
+  }),
+}));
+
 const stageArtworkState = vi.hoisted(() => ({
   mode: "none" as "artwork" | "none",
   variant: null as "nightly" | "dev" | null,
@@ -17,6 +26,13 @@ vi.mock("../SidebarStageBackdrop", () => ({
 }));
 
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
+import { m } from "../../i18n/messages";
+
+vi.mock("gt-react", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("gt-react")>()),
+  useGT: () => m,
+  useMessages: () => m,
+}));
 
 function renderPendingActions(isRunning: boolean) {
   return renderToStaticMarkup(
@@ -32,8 +48,6 @@ function renderPendingActions(isRunning: boolean) {
       },
       isRunning,
       canInterrupt: isRunning,
-      showPlanFollowUpPrompt: false,
-      promptHasText: false,
       isSendBusy: false,
       sendDisabledReason: null,
       isEnvironmentUnavailable: false,
@@ -41,7 +55,6 @@ function renderPendingActions(isRunning: boolean) {
       hasSendableContent: false,
       onPreviousPendingQuestion: () => {},
       onInterrupt: () => {},
-      onImplementPlanInNewThread: () => {},
     }),
   );
 }
@@ -51,11 +64,10 @@ function renderRunningActions(hasSendableContent: boolean) {
     createElement(ComposerPrimaryActions, {
       compact: true,
       pendingAction: null,
+      followUpBehavior: "queue",
       isRunning: true,
       canOperateThread: true,
       canInterrupt: true,
-      showPlanFollowUpPrompt: false,
-      promptHasText: hasSendableContent,
       isSendBusy: false,
       sendDisabledReason: null,
       isEnvironmentUnavailable: false,
@@ -63,7 +75,6 @@ function renderRunningActions(hasSendableContent: boolean) {
       hasSendableContent,
       onPreviousPendingQuestion: () => {},
       onInterrupt: () => {},
-      onImplementPlanInNewThread: () => {},
     }),
   );
 }
@@ -79,8 +90,6 @@ function renderSendButton(
       pendingAction: null,
       isRunning: false,
       canInterrupt: false,
-      showPlanFollowUpPrompt: false,
-      promptHasText: true,
       isSendBusy: false,
       sendDisabledReason,
       isEnvironmentUnavailable: false,
@@ -89,7 +98,6 @@ function renderSendButton(
       backgroundAgentsWorking,
       onPreviousPendingQuestion: () => {},
       onInterrupt: () => {},
-      onImplementPlanInNewThread: () => {},
     }),
   );
 }
@@ -143,14 +151,14 @@ describe("ComposerPrimaryActions", () => {
 
     expect(markup).toContain("ring-warning/55");
     expect(markup).toContain("bg-warning");
-    expect(markup).toContain('aria-label="Send message — agents still working"');
+    expect(markup).toContain('aria-label="Send message. Agents are still working"');
   });
 
-  it("renders a queue action alongside stop while running with a sendable draft", () => {
+  it("renders a queue action while running with a sendable draft", () => {
     setup();
     const markup = renderRunningActions(true);
 
-    expect(markup).toContain('aria-label="Stop generation"');
+    expect(markup).not.toContain('aria-label="Stop generation"');
     expect(markup).toContain('aria-label="Queue message"');
     expect(markup).toContain('type="submit"');
   });

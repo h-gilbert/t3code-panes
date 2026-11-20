@@ -13,6 +13,11 @@ declare global {
 
 let activeClient: ReturnType<typeof createDeviceStreamClient> | null = null;
 
+// The WebView has no catalogs: status details leave marked, and React Native resolves them.
+const keepMarked = ((message: string) => message) as NonNullable<
+  Parameters<typeof createDeviceStreamClient>[3]
+>;
+
 export function stop() {
   activeClient?.stop();
   activeClient = null;
@@ -48,10 +53,7 @@ export function start(configuration: DeviceStreamConfiguration) {
   });
   const frame = document.createElement("div");
   frame.setAttribute("role", "application");
-  frame.setAttribute(
-    "aria-label",
-    platform === "ios" ? "iOS Simulator screen" : "Android Emulator screen",
-  );
+  frame.setAttribute("aria-label", configuration.labels.screen);
   frame.tabIndex = 0;
   Object.assign(frame.style, {
     position: "relative",
@@ -68,7 +70,7 @@ export function start(configuration: DeviceStreamConfiguration) {
   image.style.display = "none";
   const inputStatus = document.createElement("div");
   inputStatus.setAttribute("role", "status");
-  inputStatus.textContent = "Reconnecting device controls...";
+  inputStatus.textContent = configuration.labels.reconnectingControls;
   Object.assign(inputStatus.style, {
     position: "fixed",
     bottom: "12px",
@@ -86,11 +88,12 @@ export function start(configuration: DeviceStreamConfiguration) {
 
   let pointerId: number | null = null;
   let inputConnected = false;
+  let inputDetail: string | undefined;
   let streaming = false;
   const reportStatus = (status: "connecting" | "streaming" | "error", detail?: string) => {
     if (activeClient !== client) return;
     streaming = status === "streaming";
-    inputStatus.style.display = streaming && !inputConnected ? "block" : "none";
+    inputStatus.style.display = streaming && !inputConnected && !inputDetail ? "block" : "none";
     post({ type: "status", status, detail });
   };
   const layout = (screen: DeviceScreenSize | null) => {
@@ -130,30 +133,35 @@ export function start(configuration: DeviceStreamConfiguration) {
   const unauthorized = () => {
     if (activeClient === client) post({ type: "unauthorized" });
   };
-  const client = createDeviceStreamClient(configuration, canvas, {
-    onStatus: reportStatus,
-    onScreen: layout,
-    onMjpegFallback: () => {
-      canvas.style.display = "none";
-      image.style.display = "block";
+  const client = createDeviceStreamClient(
+    configuration,
+    canvas,
+    {
+      onStatus: reportStatus,
+      onScreen: layout,
+      onMjpegFallback: () => {
+        canvas.style.display = "none";
+        image.style.display = "block";
+      },
+      onCanvasVideo: () => {
+        image.style.display = "none";
+        canvas.style.display = "";
+      },
+      onUnauthorized: unauthorized,
+      onInputConnected: (connected, detail) => {
+        inputConnected = connected;
+        inputDetail = detail;
+        inputStatus.style.display = streaming && !inputConnected && !inputDetail ? "block" : "none";
+        post({ type: "input", connected, ...(detail ? { detail } : {}) });
+      },
     },
-    onCanvasVideo: () => {
-      image.style.display = "none";
-      canvas.style.display = "";
-    },
-    onUnauthorized: unauthorized,
-    onInputConnected: (connected, detail) => {
-      inputConnected = connected;
-      inputStatus.textContent = detail ?? "Reconnecting device controls...";
-      inputStatus.style.display = streaming && !connected ? "block" : "none";
-      post({ type: "input", connected, ...(detail ? { detail } : {}) });
-    },
-  });
+    keepMarked,
+  );
   activeClient = client;
   client.setMjpegImage(image);
   if (configuration.physical) {
     const refresh = document.createElement("button");
-    refresh.textContent = "Refresh screenshot";
+    refresh.textContent = configuration.labels.refreshScreenshot;
     Object.assign(refresh.style, {
       position: "fixed",
       bottom: "12px",

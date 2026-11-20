@@ -10,7 +10,7 @@ import {
   PreviewAutomationRecordingTooLargeError,
   PreviewAutomationRecordingDeadlineExpiredError,
   type PreviewAutomationRequest,
-  type PreviewAutomationResponse,
+  PreviewAutomationResponse,
   PreviewTabId,
   ThreadId,
   TrimmedNonEmptyString,
@@ -343,8 +343,11 @@ export function serializePreviewAutomationHostError(
  * A failure the window that owns the tab already serialized. Passed through
  * unchanged so the agent sees the owner's error, not a relay wrapper.
  */
-export class RelayedPreviewAutomationError extends Error {
-  constructor(readonly serialized: NonNullable<PreviewAutomationResponse["error"]>) {
-    super(serialized.message);
+export class RelayedPreviewAutomationError extends Schema.TaggedError<RelayedPreviewAutomationError>()(
+  "RelayedPreviewAutomationError",
+  { serialized: Schema.required(PreviewAutomationResponse.fields.error) },
+) {
+  override get message(): string {
+    return this.serialized.message;
   }
 }

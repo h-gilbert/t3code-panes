@@ -1,6 +1,9 @@
 import type * as Electron from "electron";
 
-import { PASSKEY_BRIDGE_ARGUMENT } from "../preview/GuestProtocol.ts";
+import {
+  PASSKEY_BRIDGE_ARGUMENT,
+  PRIMARY_PASTE_DISABLED_ARGUMENT,
+} from "../preview/GuestProtocol.ts";
 
 /**
  * macOS composites an oversized offscreen window at full resolution, so a hidden host draws the
@@ -14,6 +17,7 @@ export function hardenWebviewGuests(
   window: Electron.BrowserWindow,
   previewManager: { readonly isBrowserPartition: (partition: string) => boolean },
   passkeyBridgeEnabled: boolean,
+  primaryPasteEnabled: boolean,
 ): void {
   window.webContents.on("will-attach-webview", (event, webPreferences, params) => {
     if (
@@ -33,6 +37,12 @@ export function hardenWebviewGuests(
       webPreferences.additionalArguments = [
         ...(webPreferences.additionalArguments ?? []),
         PASSKEY_BRIDGE_ARGUMENT,
+      ];
+    }
+    if (!primaryPasteEnabled) {
+      webPreferences.additionalArguments = [
+        ...(webPreferences.additionalArguments ?? []),
+        PRIMARY_PASTE_DISABLED_ARGUMENT,
       ];
     }
   });

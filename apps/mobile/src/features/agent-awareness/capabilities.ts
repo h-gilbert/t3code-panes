@@ -7,3 +7,7 @@ export function supportsAgentAwarenessPush() {
     ? supportsAndroidAgentNotifications()
     : Platform.OS === "ios" && Constants.expoConfig?.extra?.iosPersonalTeamBuild !== true;
 }
+
+export function isSelfHostedMobileBuild(): boolean {
+  return Constants.expoConfig?.extra?.selfHostedBuild === true;
+}

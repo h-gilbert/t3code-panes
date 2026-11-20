@@ -4,6 +4,7 @@ import type {
   PreviewAutomationResponse,
   PreviewAutomationStreamEvent,
 } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 import { AsyncResult, Atom } from "effect/reactivity";
 
 import {
@@ -15,11 +16,13 @@ import {
 
 type AutomationStreamResult<E> = AsyncResult.AsyncResult<PreviewAutomationStreamEvent, E>;
 
+const isRelayedPreviewAutomationError = Schema.is(RelayedPreviewAutomationError);
+
 export function serializePreviewAutomationError(
   error: unknown,
   context: PreviewAutomationOperationContext,
 ): NonNullable<PreviewAutomationResponse["error"]> {
-  if (error instanceof RelayedPreviewAutomationError) return error.serialized;
+  if (isRelayedPreviewAutomationError(error)) return error.serialized;
   return serializePreviewAutomationHostError(
     PreviewAutomationOperationError.fromCause({ ...context, cause: error }),
   );

@@ -41,7 +41,7 @@ export function ThreadTimeline({
     visibleTurnItems,
   });
   const entries = draftEntries ?? serverEntries;
-  const displayedEntries = resolveThreadSwitchTimeline({
+  const { entries: displayedEntries } = resolveThreadSwitchTimeline({
     loading: entries.length === 0 && syncing,
     activeThreadKey,
     nextEntries: entries,
@@ -54,5 +54,7 @@ export function ThreadTimeline({
     }
     rememberReadyThreadTimeline({ threadKey: activeThreadKey, entries });
   }, [activeThreadKey, detailLoading, entries]);
-  return <MessagesTimeline {...timelineProps} timelineEntries={displayedEntries.entries} />;
+  return (
+    <MessagesTimeline {...timelineProps} syncing={syncing} timelineEntries={displayedEntries} />
+  );
 }

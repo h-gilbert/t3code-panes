@@ -13,3 +13,16 @@ export function workspaceWindowForSender(senderId: number): Electron.BrowserWind
   const window = workspaceWindows.get(senderId);
   return window && !window.isDestroyed() ? window : undefined;
 }
+
+const captureRenderers = new Map<number, Electron.BrowserWindow>();
+
+export function registerCaptureRenderer(window: Electron.BrowserWindow): void {
+  const senderId = window.webContents.id;
+  captureRenderers.set(senderId, window);
+  window.once("closed", () => captureRenderers.delete(senderId));
+}
+
+export function appRendererForSender(senderId: number): Electron.BrowserWindow | undefined {
+  const window = workspaceWindowForSender(senderId) ?? captureRenderers.get(senderId);
+  return window && !window.isDestroyed() ? window : undefined;
+}

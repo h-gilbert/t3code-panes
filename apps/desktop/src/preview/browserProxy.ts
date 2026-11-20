@@ -1,4 +1,4 @@
-import type { ProxyConfig } from "electron";
+import type { ProxyConfig, Session } from "electron";
 
 /** A single proxy, with no DIRECT fallback or implicit localhost bypass. */
 export function browserProxyConfig(value: string): ProxyConfig {
@@ -22,4 +22,38 @@ export function browserProxyConfig(value: string): ProxyConfig {
     proxyRules: `${url.protocol}//${url.host}`,
     proxyBypassRules: "<-loopback>",
   };
+}
+
+interface BrowserProxyRoutes {
+  configured: ProxyConfig | undefined;
+  loopback: ProxyConfig | undefined;
+  pending: Promise<void>;
+}
+
+const routesBySession = new WeakMap<Session, BrowserProxyRoutes>();
+const systemProxy: ProxyConfig = { mode: "system" };
+
+/** An explicit proxy covers all destinations. Removing it restores this session's loopback route. */
+export function setBrowserProxy(
+  session: Session,
+  route: "configured" | "loopback",
+  config: ProxyConfig | undefined,
+): Promise<void> {
+  let routes = routesBySession.get(session);
+  if (!routes) {
+    routes = { configured: undefined, loopback: undefined, pending: Promise.resolve() };
+    routesBySession.set(session, routes);
+  }
+  const state = routes;
+  const pending = state.pending
+    .catch(() => {})
+    .then(async () => {
+      const effective =
+        route === "configured" ? (config ?? state.loopback) : (state.configured ?? config);
+      await session.setProxy(effective ?? systemProxy);
+      await session.closeAllConnections();
+      state[route] = config;
+    });
+  state.pending = pending;
+  return pending;
 }

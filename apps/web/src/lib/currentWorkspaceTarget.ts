@@ -21,5 +21,5 @@ export function readCurrentWorkspaceTarget(router: AnyRouter): ThreadRouteTarget
         : { kind: "server", threadRef: target }
       : null;
   }
-  return resolveThreadRouteTarget(router.state.matches.at(-1)?.params ?? {});
+  return resolveThreadRouteTarget(router.state.matches.at(-1)?.params ?? {}, location?.pathname);
 }

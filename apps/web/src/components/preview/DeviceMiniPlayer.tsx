@@ -1,6 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import { deviceStreamScreenAtom } from "../device/deviceStreamSession";
 import { createPortal } from "react-dom";
+import { T, useGT } from "gt-react";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { observeResize } from "~/lib/observeResize";
 
@@ -10,6 +11,7 @@ import { Maximize2Icon, Minimize2Icon, PictureInPicture2, XIcon } from "lucide-r
 import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
+  useEffectEvent,
   useLayoutEffect,
   useRef,
   useState,
@@ -40,7 +42,10 @@ import {
   resolvePreviewMiniPlayerFrame,
 } from "./previewMiniPlayerLayout";
 
+import { settlePreviewMiniPlayerResize } from "./previewMiniPlayerGesture";
+
 interface PointerGesture {
+  readonly source: PreviewMiniPlayerSize;
   readonly pointerId: number;
   readonly pointerX: number;
   readonly pointerY: number;
@@ -77,6 +82,7 @@ export function DeviceMiniPlayer({
   miniPlayer,
   bottomInset,
 }: Props & { readonly source: Extract<PreviewMiniPlayerSource, { kind: "device" }> }) {
+  const gt = useGT();
   const { state: deviceState } = useDeviceState(threadRef.environmentId);
   const viewId = `device-mini-player:${scopedThreadKey(threadRef)}:${source.hostId}:${source.deviceId}`;
   const screen = useAtomValue(deviceStreamScreenAtom(viewId));
@@ -85,7 +91,7 @@ export function DeviceMiniPlayer({
     (entry) => entry.hostId === source.hostId && entry.id === source.deviceId,
   );
   const hostLabel =
-    deviceState.hosts.find((host) => host.id === source.hostId)?.label ?? "Device host";
+    deviceState.hosts.find((host) => host.id === source.hostId)?.label ?? gt("Device host");
   const cornerRadius = (player: PreviewMiniPlayerSize) =>
     resolveDeviceMiniPlayerCornerRadius(source.platform, player);
 
@@ -97,7 +103,7 @@ export function DeviceMiniPlayer({
       miniPlayer={miniPlayer}
       sourceSize={sourceSize}
       bottomInset={bottomInset}
-      label="Floating device preview"
+      label={gt("Floating device preview")}
       cornerRadius={cornerRadius}
     >
       {() => (
@@ -146,8 +152,11 @@ function MiniPlayerShell({
   readonly cornerRadius?: (frame: PreviewMiniPlayerSize) => number;
   readonly children: (frame: PreviewMiniPlayerFrame) => ReactNode;
 }) {
+  const gt = useGT();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const gestureRef = useRef<PointerGesture | null>(null);
+  const [heldSource, setHeldSource] = useState<PreviewMiniPlayerSize | null>(null);
+  const captureRef = useRef<HTMLElement | null>(null);
   const [container, setContainer] = useState<PreviewMiniPlayerSize | null>(null);
   const sourceKey = previewMiniPlayerSourceKey(miniPlayer.source);
   const { maximized, floating } = miniPlayer;
@@ -168,7 +177,7 @@ function MiniPlayerShell({
       : resolvePreviewMiniPlayerFrame({
           width: miniPlayer.width ?? (floating ? 360 : null),
           position: miniPlayer.position,
-          source: sourceSize,
+          source: heldSource ?? sourceSize,
           container,
           obstacles,
         })
@@ -214,8 +223,15 @@ function MiniPlayerShell({
       pointerY: event.clientY,
       frame,
       direction,
+      source: sourceSize,
     };
-    event.currentTarget.setPointerCapture(event.pointerId);
+    captureRef.current = event.currentTarget;
+    if (direction !== null) setHeldSource(sourceSize);
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // The pointer can leave before the native window acknowledges capture.
+    }
     event.preventDefault();
     event.stopPropagation();
   };
@@ -223,6 +239,10 @@ function MiniPlayerShell({
   const handlePointerMove = (event: ReactPointerEvent<HTMLElement>) => {
     const gesture = gestureRef.current;
     if (!gesture || gesture.pointerId !== event.pointerId || !container) return;
+    if ((event.buttons & 1) === 0) {
+      finishGesture();
+      return;
+    }
     const delta = { x: event.clientX - gesture.pointerX, y: event.clientY - gesture.pointerY };
     const store = usePreviewMiniPlayerStore.getState();
     if (gesture.direction === null) {
@@ -242,21 +262,47 @@ function MiniPlayerShell({
       start: gesture.frame,
       direction: gesture.direction,
       delta,
-      source: sourceSize,
+      source: gesture.source,
       container,
       obstacles,
     });
-    store.resize(threadRef, sourceKey, next.width);
-    store.move(threadRef, sourceKey, { x: next.x, y: next.y });
+    store.resize(threadRef, sourceKey, next.width, { x: next.x, y: next.y });
   };
 
-  const endGesture = (event: ReactPointerEvent<HTMLElement>) => {
-    if (gestureRef.current?.pointerId !== event.pointerId) return;
+  const finishGesture = () => {
+    const gesture = gestureRef.current;
+    if (!gesture) return;
     gestureRef.current = null;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
+    setHeldSource(null);
+    const capture = captureRef.current;
+    captureRef.current = null;
+    if (capture?.hasPointerCapture(gesture.pointerId)) {
+      capture.releasePointerCapture(gesture.pointerId);
+    }
+    if (gesture.direction === null || !frame || !container) return;
+    const settled = settlePreviewMiniPlayerResize({
+      frame,
+      direction: gesture.direction,
+      held: gesture.source,
+      source: sourceSize,
+      container,
+    });
+    if (settled) {
+      usePreviewMiniPlayerStore
+        .getState()
+        .resize(threadRef, sourceKey, settled.width, { x: settled.x, y: settled.y });
     }
   };
+  const endGesture = (event: ReactPointerEvent<HTMLElement>) => {
+    if (gestureRef.current?.pointerId === event.pointerId) finishGesture();
+  };
+  const handleWindowBlur = useEffectEvent(finishGesture);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- a native window can lose pointer capture when it blurs
+  useLayoutEffect(() => {
+    const onBlur = () => handleWindowBlur();
+    window.addEventListener("blur", onBlur);
+    return () => window.removeEventListener("blur", onBlur);
+  }, []);
 
   const player = frame ? (
     <section
@@ -294,6 +340,7 @@ function MiniPlayerShell({
           onPointerMove={handlePointerMove}
           onPointerUp={endGesture}
           onPointerCancel={endGesture}
+          onLostPointerCapture={endGesture}
         >
           <Tooltip>
             <TooltipTrigger
@@ -301,7 +348,9 @@ function MiniPlayerShell({
                 <Button
                   variant="ghost"
                   size="icon-xs"
-                  aria-label={maximized ? "Exit full screen" : "Expand preview to full screen"}
+                  aria-label={
+                    maximized ? gt("Exit full screen") : gt("Expand preview to full screen")
+                  }
                   onPointerDown={(event) => event.stopPropagation()}
                   onClick={() =>
                     usePreviewMiniPlayerStore
@@ -313,7 +362,9 @@ function MiniPlayerShell({
             >
               {maximized ? <Minimize2Icon /> : <Maximize2Icon />}
             </TooltipTrigger>
-            <TooltipPopup side="top">{maximized ? "Exit full screen" : "Full screen"}</TooltipPopup>
+            <TooltipPopup side="top">
+              {maximized ? gt("Exit full screen") : gt("Full screen")}
+            </TooltipPopup>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger
@@ -321,7 +372,9 @@ function MiniPlayerShell({
                 <Button
                   variant="ghost"
                   size="icon-xs"
-                  aria-label={floating ? "Return to small preview" : "Open floating device window"}
+                  aria-label={
+                    floating ? gt("Return to small preview") : gt("Open floating device window")
+                  }
                   onPointerDown={(event) => event.stopPropagation()}
                   onClick={() => {
                     const store = usePreviewMiniPlayerStore.getState();
@@ -333,7 +386,9 @@ function MiniPlayerShell({
             >
               <PictureInPicture2 />
             </TooltipTrigger>
-            <TooltipPopup side="top">{floating ? "Small preview" : "Floating window"}</TooltipPopup>
+            <TooltipPopup side="top">
+              {floating ? gt("Small preview") : gt("Floating window")}
+            </TooltipPopup>
           </Tooltip>
           {pillActions}
           <Tooltip>
@@ -342,7 +397,7 @@ function MiniPlayerShell({
                 <Button
                   variant="ghost"
                   size="icon-xs"
-                  aria-label="Close floating preview"
+                  aria-label={gt("Close floating preview")}
                   onPointerDown={(event) => event.stopPropagation()}
                   onClick={close}
                 />
@@ -350,7 +405,9 @@ function MiniPlayerShell({
             >
               <XIcon />
             </TooltipTrigger>
-            <TooltipPopup side="top">Close floating preview</TooltipPopup>
+            <TooltipPopup side="top">
+              <T>Close floating preview</T>
+            </TooltipPopup>
           </Tooltip>
         </div>
       </div>
@@ -369,6 +426,7 @@ function MiniPlayerShell({
             onPointerMove={handlePointerMove}
             onPointerUp={endGesture}
             onPointerCancel={endGesture}
+            onLostPointerCapture={endGesture}
           />
         ))}
     </section>

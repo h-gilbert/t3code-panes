@@ -9,7 +9,7 @@ import {
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
-import { Tool, Toolkit } from "effect/ai";
+import { McpSchema, Tool, Toolkit } from "effect/ai";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as AgentSettings from "../../../settings/AgentSettings.ts";
@@ -89,7 +89,9 @@ const SettingsUpdateTool = Tool.make("t3_settings_update", {
     "Propose changes to this environment's T3 Code settings. Explain the reason and pass a patch using the normal settings schema. T3 shows the exact changes and waits for the user to approve this specific request, including in full access. Rejection changes nothing. Requires a live T3 thread. Omitted fields are preserved. Device/browser access changes may require a new turn to refresh available tools. Never edit the live settings file directly.",
   parameters: Schema.Struct({ reason: Schema.String, patch: AgentSettingsPatch }),
   success: Schema.Struct({ applied: Schema.Boolean }),
-}).annotate(Tool.Destructive, true);
+})
+  .annotate(Tool.Destructive, true)
+  .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 export const EnvironmentToolkit = Toolkit.make(
   EnvironmentReadTool,
   EnvironmentPreferencesTool,

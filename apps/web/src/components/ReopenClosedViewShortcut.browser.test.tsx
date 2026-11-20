@@ -75,6 +75,11 @@ vi.mock(import("./ui/toast"), async (original) => {
 });
 
 import { useClosedViewStore } from "../closedViewStore";
+import {
+  selectThreadPreviewMiniPlayerTabId,
+  usePreviewMiniPlayerStore,
+} from "../previewMiniPlayerStore";
+import { resetPreviewStateForTests } from "../previewStateStore";
 import { selectThreadRightPanelState, useRightPanelStore } from "../rightPanelStore";
 import { useTerminalUiStateStore } from "../terminalUiStateStore";
 import { ReopenClosedViewShortcut } from "./ReopenClosedViewShortcut";
@@ -100,6 +105,8 @@ function setup() {
   state.navigate.mockResolvedValue(undefined);
   state.openPreview.mockReset();
   useClosedViewStore.setState({ entries: [] });
+  usePreviewMiniPlayerStore.setState({ byThreadKey: {}, frontThreadKey: null });
+  resetPreviewStateForTests();
   useRightPanelStore.setState({ byThreadKey: {}, userActionRevisionByThreadKey: {} });
   useTerminalUiStateStore.setState({
     terminalUiStateByThreadKey: {},
@@ -190,8 +197,8 @@ describe("root reopen shortcut", () => {
       press();
     });
     expect(
-      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, ref).activeSurfaceId,
-    ).toBe("browser:new-tab");
+      selectThreadPreviewMiniPlayerTabId(usePreviewMiniPlayerStore.getState().byThreadKey, ref),
+    ).toBe("new-tab");
     expect(state.toast).toHaveBeenCalledWith(
       expect.objectContaining({ title: "Could not reopen view" }),
     );
@@ -257,19 +264,32 @@ describe("root reopen shortcut", () => {
       await act(() => {
         press();
       });
-      expect(
-        selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, ref).activeSurfaceId,
-      ).toBe(
-        kind === "browser" ? "browser:new-tab" : kind === "file" ? "file:src/app.ts" : "files",
-      );
+      if (kind === "browser") {
+        expect(
+          selectThreadPreviewMiniPlayerTabId(usePreviewMiniPlayerStore.getState().byThreadKey, ref),
+        ).toBe("new-tab");
+      } else {
+        expect(
+          selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, ref)
+            .activeSurfaceId,
+        ).toBe(kind === "file" ? "file:src/app.ts" : "files");
+      }
       expect(useClosedViewStore.getState().entries).toEqual([]);
     },
   );
-  it("forwards address-bar focus from a focused desktop page", async () => {
+  it("forwards address-bar focus, zoom, and panel close from a focused desktop page", async () => {
     setup();
     await using _shortcut = await renderShortcut();
     expect(state.setShortcuts).toHaveBeenLastCalledWith(
-      expect.arrayContaining([expect.objectContaining({ command: "preview.focusUrl" })]),
+      expect.arrayContaining(
+        [
+          "preview.focusUrl",
+          "preview.zoomIn",
+          "preview.zoomOut",
+          "preview.resetZoom",
+          "rightPanel.close",
+        ].map((command) => expect.objectContaining({ command })),
+      ),
     );
   });
 });

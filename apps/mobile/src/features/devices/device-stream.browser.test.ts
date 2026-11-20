@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { msg } from "gt-react-native";
 import { command, start, stop } from "./device-stream.browser";
+
+const labels = {
+  screen: "iOS Simulator screen",
+  reconnectingControls: "Reconnecting device controls...",
+  refreshScreenshot: "Refresh screenshot",
+};
 
 class Element extends EventTarget {
   readonly style = {};
@@ -54,6 +61,7 @@ async function setup() {
   const configuration = {
     platform: "ios" as const,
     deviceId: "fixture-device",
+    labels,
     access: {
       httpBase: "https://device.test",
       wsBase: "wss://device.test",
@@ -104,7 +112,7 @@ it("bridges shared first-frame readiness, image failure, and a successful fresh 
   expect(messages()).toContainEqual({
     type: "status",
     status: "error",
-    detail: "Could not receive the device stream. Reconnect to try again.",
+    detail: msg("Could not receive the device stream. Reconnect to try again."),
   });
   expect(messages()).toContainEqual({ type: "input", connected: false });
   expect(messages()).not.toContainEqual({ type: "unauthorized" });
@@ -171,10 +179,10 @@ it("reports simulator input failures instead of hiding them behind a working vid
   expect(messages()).toContainEqual({
     type: "input",
     connected: false,
-    detail: "Simulator input is unavailable",
+    detail: msg("Simulator input is unavailable"),
   });
   expect(elements.findLast((element) => element.tag === "div")).toMatchObject({
-    textContent: "Simulator input is unavailable",
+    style: { display: "none" },
   });
 });
 
@@ -265,6 +273,7 @@ function viewerFixture(supported: boolean) {
       buttonForeground: "white",
       buttonBorder: "gray",
     },
+    labels,
   });
   return { configured, requested, videoBodies };
 }

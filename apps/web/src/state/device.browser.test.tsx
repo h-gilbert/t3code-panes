@@ -131,6 +131,7 @@ it("baselines the first device snapshot without reopening dismissed devices", as
     deviceId: "tablet",
     platform: "ios",
     name: "Tablet",
+    physical: false,
   });
 });
 

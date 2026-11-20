@@ -1,13 +1,14 @@
 import type * as AcpCompat from "./compat.ts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
 import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
-import type * as PlatformError from "effect/PlatformError";
+import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -115,6 +116,15 @@ export interface AcpPatchedProtocolOptions {
   };
 }
 
+/**
+ * Provided to a request call, settles once that request is queued for writing. Messages queued
+ * later are written after it; the call itself returns only with the reply.
+ */
+export const AcpOutgoingQueued = Context.Reference<Deferred.Deferred<void> | undefined>(
+  "effect-acp/protocol/AcpOutgoingQueued",
+  { defaultValue: () => undefined },
+);
+
 export interface AcpPatchedProtocol {
   readonly clientProtocol: RpcClient.Protocol["Service"];
   readonly serverProtocol: RpcServer.Protocol["Service"];
@@ -150,6 +160,18 @@ interface AcpOutgoingWriterState {
   readonly terminalError?: AcpError.AcpError;
 }
 
+const isClosedWritePipe = (cause: Cause.Cause<unknown>) => {
+  const failure = Cause.findErrorOption(cause);
+  if (Option.isNone(failure) || !PlatformError.isPlatformError(failure.value)) return false;
+  const error = failure.value.cause;
+  if (!(error instanceof Error) || !("code" in error)) return false;
+  return (
+    error.code === "EPIPE" ||
+    error.code === "ERR_STREAM_DESTROYED" ||
+    error.code === "ERR_STREAM_PREMATURE_CLOSE"
+  );
+};
+
 const decodeSessionUpdate = Schema.decodeUnknownEffect(
   Schema.Union([
     // Claude ACP v2 reports prompt failures on idle; alpha.3 omits that field.
@@ -164,6 +186,15 @@ const decodeSessionUpdate = Schema.decodeUnknownEffect(
         _meta: AcpSchema.UpdateSessionNotification.fields._meta,
       }),
     }),
+    // fx reports command cancellation outside ACP's standard tool fields.
+    Schema.Struct({
+      ...AcpSchemaV1.SessionNotification.fields,
+      update: Schema.Struct({
+        ...AcpSchemaV1.ToolCallUpdate.fields,
+        sessionUpdate: Schema.Literals(["tool_call", "tool_call_update"]),
+        command_result: Schema.Json,
+      }),
+    }),
     AcpSchema.UpdateSessionNotification,
     AcpSchemaV1.SessionNotification,
   ]),
@@ -173,7 +204,7 @@ const decodeElicitationComplete = Schema.decodeUnknownEffect(
 );
 const parserFactory = RpcSerialization.ndJsonRpc();
 // ndJsonRpc skips lines that are not JSON. A malformed agent line has to end the
-// session, so frames are split here and each one goes through the strict codec.
+// session, so frames are split here and each nonblank one goes through the strict codec.
 const makeStrictNdJsonRpcParser = () => {
   const codec = RpcSerialization.jsonRpc().makeUnsafe();
   const decoder = new TextDecoder();
@@ -197,7 +228,7 @@ const makeStrictNdJsonRpcParser = () => {
       }
       const lines = (buffer + chunk.slice(0, lastNewline)).split("\n");
       buffer = chunk.slice(lastNewline + 1);
-      return lines.flatMap(decodeLine);
+      return lines.flatMap((line) => (line.trim() === "" ? [] : decodeLine(line)));
     },
     // A truncated final line is left to the exit status, which explains a crash better.
     end: (): ReadonlyArray<AcpDecodedWireMessage> => {
@@ -211,10 +242,41 @@ const makeStrictNdJsonRpcParser = () => {
     },
     encode: (response: Parameters<typeof codec.encode>[0]) => {
       const encoded = codec.encode(response);
-      return encoded === undefined ? undefined : `${encoded}\n`;
+      if (encoded === undefined) return undefined;
+      const json = typeof encoded === "string" ? encoded : new TextDecoder().decode(encoded);
+      if (!json.includes('"_tag":"Cause"')) return `${json}\n`;
+      return `${JSON.stringify(normalizeOutgoingFrame(JSON.parse(json)))}\n`;
     },
   };
 };
+const isCauseResponse = Schema.is(
+  Schema.Struct({
+    error: Schema.TaggedStruct("Cause", { data: Schema.Array(Schema.Unknown) }),
+  }),
+);
+const isProtocolFailure = Schema.is(Schema.TaggedStruct("Fail", { error: AcpSchema.Error }));
+const isInterruptReason = Schema.is(Schema.TaggedStruct("Interrupt", {}));
+
+// Normalize only Effect's error envelope after the codec has completed batch tracking.
+function normalizeOutgoingFrame(frame: unknown): unknown {
+  if (Array.isArray(frame)) return frame.map(normalizeOutgoingFrame);
+  if (!isCauseResponse(frame)) return frame;
+  const reasons = frame.error.data.filter((reason) => !isInterruptReason(reason));
+  const [failure] = reasons;
+  const error =
+    reasons.length === 1 && isProtocolFailure(failure)
+      ? failure.error
+      : AcpError.AcpRequestError.internalError().toProtocolError();
+  return {
+    ...frame,
+    error: {
+      code: error.code,
+      message: error.message,
+      ...(error.data === undefined ? {} : { data: error.data }),
+    },
+  };
+}
+
 // Unread raw notifications are best-effort. The newest is always kept; older
 // ones are dropped once the backlog passes either limit. The length limit counts
 // JSON line characters (UTF-16 code units), not bytes or heap size.
@@ -282,9 +344,8 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
   const serverQueue = yield* Queue.unbounded<RpcMessage.FromClientEncoded>();
   const clientQueue = yield* Queue.unbounded<RpcMessage.FromServerEncoded>();
   const rawNotifications = yield* Queue.unbounded<AcpBufferedRawNotification, Cause.Done<void>>();
-  // JSON length of the notifications offered since the queue was last empty.
-  // `incoming` takes the whole backlog on every pull, so an empty queue holds
-  // nothing, and a read can only make this an overestimate.
+  // JSON length of the notifications still in the queue. `incoming` takes one
+  // at a time, so a slow reader holds at most one outside this budget.
   let rawNotificationsJsonLength = 0;
   // Raw readers finish with the connection: termination ends the queue, and so
   // does closing the scope, which interrupts the reader before it terminates.
@@ -304,6 +365,22 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
   const ensureActive = Ref.get(terminationHandled).pipe(
     Effect.flatMap((terminated) => (terminated ? Deferred.await(terminationFailure) : Effect.void)),
   );
+
+  const queueOutgoing = (write: AcpOutgoingWrite, kind: "message" | "notification") =>
+    Queue.offer(outgoing, write).pipe(
+      Effect.flatMap((accepted) =>
+        accepted
+          ? Effect.void
+          : ensureActive.pipe(
+              Effect.andThen(
+                new AcpError.AcpTransportError({
+                  detail: `The ACP output queue was closed before accepting a ${kind}`,
+                  cause: "Output queue closed",
+                }),
+              ),
+            ),
+      ),
+    );
 
   const logProtocol = (event: AcpProtocolLogEvent) => {
     if (event.direction === "incoming" && !options.logIncoming) {
@@ -379,25 +456,10 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
       if (options.testHooks?.onOutgoingWriteAdmitted !== undefined) {
         yield* options.testHooks.onOutgoingWriteAdmitted();
       }
-      yield* Queue.offer(outgoing, {
-        payload: encoded,
-        ...(acknowledgement === undefined ? {} : { acknowledgement }),
-      }).pipe(
-        Effect.mapError(
-          (cause) =>
-            new AcpError.AcpTransportError({
-              detail: "Failed to queue an outgoing ACP message",
-              cause,
-            }),
-        ),
-        Effect.filterOrFail(
-          (accepted) => accepted,
-          () =>
-            new AcpError.AcpTransportError({
-              detail: "The ACP output queue was closed before accepting a message",
-              cause: "Output queue closed",
-            }),
-        ),
+      yield* queueOutgoing(
+        { payload: encoded, ...(acknowledgement === undefined ? {} : { acknowledgement }) },
+        "message",
+      ).pipe(
         Effect.tapError((error) =>
           acknowledgement === undefined
             ? Effect.void
@@ -408,6 +470,10 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
               }).pipe(Effect.andThen(Deferred.fail(acknowledgement, error)), Effect.asVoid),
         ),
       );
+      const queued = yield* AcpOutgoingQueued;
+      if (queued !== undefined) {
+        yield* Deferred.succeed(queued, undefined);
+      }
       if (acknowledgement !== undefined) {
         yield* Deferred.await(acknowledgement);
       }
@@ -463,7 +529,6 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
   // so readers never see more than the limits allow.
   const bufferRawNotification = (notification: AcpIncomingNotification, lineLength: number) =>
     Effect.sync(() => {
-      if (Queue.sizeUnsafe(rawNotifications) === 0) rawNotificationsJsonLength = 0;
       if (!Queue.offerUnsafe(rawNotifications, { notification, lineLength })) return;
       rawNotificationsJsonLength += lineLength;
       while (
@@ -500,10 +565,25 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
       }),
     }).pipe(Effect.asVoid);
 
-  const handleTermination = (classify: () => Effect.Effect<AcpError.AcpError>) =>
+  const classifyProcessTermination = (fallback: AcpError.AcpError) =>
+    options.terminationError?.pipe(
+      // Either pipe can close while the child is still alive.
+      Effect.timeoutOption("250 millis"),
+      Effect.provideService(Clock.Clock, Clock.Clock.defaultValue()),
+      Effect.map(Option.getOrElse(() => fallback)),
+    ) ?? Effect.succeed(fallback);
+
+  const handleTermination = (
+    classify: () => Effect.Effect<AcpError.AcpError>,
+    onClassified?: (error: AcpError.AcpError) => Effect.Effect<void>,
+  ) =>
     Ref.modify(terminationHandled, (handled) => {
       if (handled) {
-        return [Effect.void, true] as const;
+        const finish =
+          onClassified === undefined
+            ? Effect.void
+            : Deferred.await(terminationFailure).pipe(Effect.flip, Effect.flatMap(onClassified));
+        return [finish, true] as const;
       }
       return [
         Effect.gen(function* () {
@@ -511,6 +591,7 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
           yield* Queue.end(rawNotifications);
           const error = yield* classify();
           yield* Deferred.fail(terminationFailure, error);
+          if (onClassified !== undefined) yield* onClassified(error);
           yield* failAllExtPending(error);
           yield* emitClientProtocolError(error);
           if (options.onTermination) {
@@ -824,16 +905,9 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
         return handleTermination(() => Effect.succeed(normalized));
       },
       onSuccess: () =>
-        handleTermination(() => {
-          const ended = new AcpError.AcpInputStreamEndedError({});
-          if (!options.terminationError) return Effect.succeed(ended);
-          // Stdout can close without process exit; use a live-clock diagnostic grace period.
-          return options.terminationError.pipe(
-            Effect.timeoutOption("250 millis"),
-            Effect.provideService(Clock.Clock, Clock.Clock.defaultValue()),
-            Effect.map(Option.getOrElse(() => ended)),
-          );
-        }),
+        handleTermination(() =>
+          classifyProcessTermination(new AcpError.AcpInputStreamEndedError({})),
+        ),
     }),
     Effect.forkScoped,
   );
@@ -898,18 +972,21 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
     Effect.onExit((exit) =>
       Exit.match(exit, {
         onFailure: (cause) => {
+          const interrupted = Cause.hasInterruptsOnly(cause);
           const error = new AcpError.AcpTransportError({
-            detail: Cause.hasInterruptsOnly(cause)
+            detail: interrupted
               ? "The ACP output writer was interrupted while closing"
               : "Failed to write an outgoing ACP message",
             cause,
           });
-          return failOutgoingWrites(error).pipe(
-            Effect.andThen(
-              Cause.hasInterruptsOnly(cause)
-                ? Effect.void
-                : handleTermination(() => Effect.succeed(error)),
-            ),
+          if (interrupted) return failOutgoingWrites(error);
+          return handleTermination(
+            () =>
+              isClosedWritePipe(cause) ? classifyProcessTermination(error) : Effect.succeed(error),
+            failOutgoingWrites,
+          ).pipe(
+            Effect.interruptible,
+            Effect.onError(() => failOutgoingWrites(error)),
           );
         },
         onSuccess: () =>
@@ -1025,23 +1102,7 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
     yield* ensureActive;
     // FIFO queue admission preserves wire ordering against later requests
     // (a session/prompt sent after session/cancel cannot overtake it).
-    yield* Queue.offer(outgoing, { payload: encoded }).pipe(
-      Effect.mapError(
-        (cause) =>
-          new AcpError.AcpTransportError({
-            detail: "Failed to queue an outgoing ACP notification",
-            cause,
-          }),
-      ),
-      Effect.filterOrFail(
-        (accepted) => accepted,
-        () =>
-          new AcpError.AcpTransportError({
-            detail: "The ACP output queue was closed before accepting a notification",
-            cause: "Output queue closed",
-          }),
-      ),
-    );
+    yield* queueOutgoing({ payload: encoded }, "notification");
   });
 
   const sendRequest = Effect.fn("sendRequest")(function* (method: string, payload: unknown) {
@@ -1054,15 +1115,15 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
     yield* Ref.update(extPending, (pending) =>
       new Map(pending).set(acpRequestIdentity(requestId), { deferred, method }),
     );
-    yield* offerOutgoing({
+    return yield* offerOutgoing({
       _tag: "Request",
       id: requestId,
       tag: method,
       payload,
       headers: [],
-    }).pipe(Effect.tapError(() => removeExtPending(requestId)));
-    return yield* Deferred.await(deferred).pipe(
-      Effect.onInterrupt(() => removeExtPending(requestId)),
+    }).pipe(
+      Effect.andThen(Deferred.await(deferred)),
+      Effect.onError(() => removeExtPending(requestId)),
     );
   });
 
@@ -1070,8 +1131,15 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
     clientProtocol,
     serverProtocol,
     get incoming() {
-      return Stream.fromQueue(rawNotifications).pipe(
-        Stream.map(({ notification }) => notification),
+      return Stream.fromPull(
+        Effect.succeed(
+          Queue.take(rawNotifications).pipe(
+            Effect.map(({ notification, lineLength }) => {
+              rawNotificationsJsonLength -= lineLength;
+              return [notification] as const;
+            }),
+          ),
+        ),
       );
     },
     request: sendRequest,

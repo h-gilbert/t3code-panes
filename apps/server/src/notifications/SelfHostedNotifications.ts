@@ -446,6 +446,7 @@ const make = Effect.gen(function* () {
         environmentId,
         thread: Option.some(thread),
         project: Option.some(project),
+        pendingSubagentRequest: null,
       }).state;
       if (projected !== null) states.set(thread.id, projected);
     }
@@ -574,6 +575,7 @@ const make = Effect.gen(function* () {
       environmentId,
       thread,
       project,
+      pendingSubagentRequest: null,
     });
     const inputRequest =
       Option.isSome(thread) && thread.value.pendingRuntimeRequest?.kind === "user_input"

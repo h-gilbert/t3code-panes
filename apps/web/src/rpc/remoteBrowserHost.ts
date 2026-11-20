@@ -8,7 +8,6 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
-import * as Data from "effect/Data";
 import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
 import * as Schema from "effect/Schema";
@@ -17,9 +16,10 @@ import { Atom } from "effect/reactivity";
 import { connectionAtomRuntime } from "~/connection/runtime";
 import { createRemoteBrowserEventQueue } from "./remoteBrowserEventQueue";
 
-class RemoteBrowserTransferError extends Data.TaggedError("RemoteBrowserTransferError")<{
-  readonly message: string;
-}> {}
+class RemoteBrowserTransferError extends Schema.TaggedError<RemoteBrowserTransferError>()(
+  "RemoteBrowserTransferError",
+  { message: Schema.String },
+) {}
 
 const decodeCommand = Schema.decodeUnknownSync(DesktopBrowserCommand);
 

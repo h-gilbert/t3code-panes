@@ -14,7 +14,7 @@ export function useDesktopUpdateServers(state: DesktopUpdateState | null) {
   const included = version ? targets : [];
   return {
     serverLabels: included.map((target) => target.serverLabel),
-    /** Resolves false when the user declined part of the update. */
+    /** Resolves true after every included server reconnects. */
     updateServersFirst: (): Promise<boolean> =>
       included.length > 0 ? updateServers(included) : Promise.resolve(true),
   };

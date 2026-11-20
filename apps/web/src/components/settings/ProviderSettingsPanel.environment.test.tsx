@@ -7,8 +7,11 @@ import {
   type ServerProvider,
   type UnifiedSettings,
 } from "@t3tools/contracts";
+import { T } from "gt-react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { withTestI18n } from "../../../test/unitI18n";
 import { visitElements } from "../../test/reactElementTree";
 import { reactHookHarness as hooks } from "../../test/reactHookHarness";
 
@@ -26,6 +29,7 @@ const commands = vi.hoisted(() => ({
   updateProvider: vi.fn(),
   uninstall: vi.fn(),
   acceptUrlAuth: vi.fn(),
+  confirm: vi.fn<() => Promise<boolean>>(),
   canManageProviders: true,
   canWriteSettings: true,
 }));
@@ -150,6 +154,11 @@ vi.mock("../../state/session", () => ({
         : scope === "orchestration:read"),
 }));
 
+vi.mock(import("../../localApi"), async (original) => ({
+  ...(await original()),
+  ensureLocalApi: (() => ({ dialogs: { confirm: commands.confirm } })) as never,
+}));
+
 vi.mock("../../state/entities", () => ({
   useProjects: () => [],
   useServerConfigs: () => new Map(),
@@ -191,17 +200,7 @@ function renderPanel(options?: {
   readonly readOnly?: boolean;
   readonly targetInstanceId?: ProviderInstanceId;
 }): ReactElement<Record<string, unknown>> {
-  hooks.beginRender();
-  const panel = EnvironmentProviderSettings({
-    environmentId,
-    environmentLabel: "Remote device",
-    ...(options?.readOnly === undefined ? {} : { readOnly: options.readOnly }),
-    ...(options?.targetInstanceId === undefined
-      ? {}
-      : { targetInstanceId: options.targetInstanceId }),
-  }) as ReactElement<Record<string, unknown>>;
-  // Upstream moved the card callbacks into a row component. Evaluate that
-  // boundary so these routing assertions still exercise the public card actions.
+  // Evaluate the row boundary so routing assertions reach the card actions.
   function expandRows(node: unknown): unknown {
     if (Array.isArray(node)) return node.map(expandRows);
     if (!isValidElement<Record<string, unknown>>(node)) return node;
@@ -215,7 +214,22 @@ function renderPanel(options?: {
       ),
     );
   }
-  return expandRows(panel) as ReactElement<Record<string, unknown>>;
+  let panel: ReactElement<Record<string, unknown>> | undefined;
+  function CapturePanel() {
+    hooks.beginRender();
+    panel = expandRows(
+      EnvironmentProviderSettings({
+        environmentId,
+        environmentLabel: "Remote device",
+        ...options,
+      }),
+    ) as ReactElement<Record<string, unknown>>;
+    return null;
+  }
+  // Run the hook shim inside GT's real React context.
+  renderToStaticMarkup(withTestI18n(<CapturePanel />));
+  if (!panel) throw new Error("Provider settings did not render");
+  return panel;
 }
 
 function isRefreshButton(element: ReactElement<Record<string, unknown>>): boolean {
@@ -224,11 +238,11 @@ function isRefreshButton(element: ReactElement<Record<string, unknown>>): boolea
     Array.isArray(children) &&
     children.some(
       (child) =>
-        typeof child === "object" &&
-        child !== null &&
-        (child as ReactElement<Record<string, unknown>>).props?.className === "sr-only" &&
-        (child as ReactElement<Record<string, unknown>>).props?.children ===
-          "Refresh provider status",
+        isValidElement<Record<string, unknown>>(child) &&
+        child.props.className === "sr-only" &&
+        isValidElement<{ children: unknown }>(child.props.children) &&
+        child.props.children.type === T &&
+        child.props.children.props.children === "Refresh provider status",
     )
   );
 }
@@ -257,6 +271,7 @@ describe("EnvironmentProviderSettings routing", () => {
     settingsState.mutateProviderInstance
       .mockReset()
       .mockResolvedValue({ _tag: "Success", value: {} });
+    commands.confirm.mockReset().mockResolvedValue(true);
     commands.canManageProviders = true;
     commands.canWriteSettings = true;
     commands.refresh.mockReset().mockResolvedValue({ _tag: "Success" });
@@ -328,7 +343,7 @@ describe("EnvironmentProviderSettings routing", () => {
 
   it("coalesces a nullable provider snapshot before rendering array-backed UI", () => {
     expect(() => renderPanel()).not.toThrow();
-    expect(settingsState.readEnvironmentIds).toEqual([environmentId]);
+    expect(new Set(settingsState.readEnvironmentIds)).toEqual(new Set([environmentId]));
     expect(settingsState.updateEnvironmentIds).toEqual([environmentId]);
     expect(settingsState.mutationEnvironmentIds).toEqual([environmentId]);
   });
@@ -343,7 +358,7 @@ describe("EnvironmentProviderSettings routing", () => {
 
     expect(commands.refresh).toHaveBeenCalledWith({
       environmentId,
-      input: { refreshModels: true },
+      input: { refreshModels: true, reloadSecrets: true },
     });
 
     const providerCard = visitElements(
@@ -525,8 +540,7 @@ describe("EnvironmentProviderSettings routing", () => {
       (element) => element.props.instanceId === customId && element.props.mode === "editor",
     );
     expect(customCard).not.toBeNull();
-    (customCard?.props.onDelete as (() => void) | undefined)?.();
-    await flushPromises();
+    await (customCard?.props.onDelete as (() => Promise<void>) | undefined)?.();
 
     expect(settingsState.mutateProviderInstance).toHaveBeenLastCalledWith({
       operation: "remove",
@@ -550,8 +564,7 @@ describe("EnvironmentProviderSettings routing", () => {
       (element) => typeof element.props.onClick === "function",
     );
     expect(resetButton).not.toBeNull();
-    (resetButton?.props.onClick as (() => void) | undefined)?.();
-    await flushPromises();
+    await (resetButton?.props.onClick as (() => Promise<void>) | undefined)?.();
 
     const [resetMutation, resetPatch] = settingsState.mutateProviderInstance.mock.lastCall ?? [];
     expect(resetMutation).toEqual({ operation: "remove", instanceId: codexId });
@@ -612,8 +625,7 @@ describe("EnvironmentProviderSettings routing", () => {
       panel,
       (element) => element.props.instanceId === firstId && element.props.mode === "editor",
     );
-    (card?.props.onDelete as (() => void) | undefined)?.();
-    await flushPromises();
+    await (card?.props.onDelete as (() => Promise<void>) | undefined)?.();
 
     expect(settingsState.mutateProviderInstance).toHaveBeenCalledWith({
       operation: "remove",

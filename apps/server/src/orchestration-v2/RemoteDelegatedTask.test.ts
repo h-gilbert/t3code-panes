@@ -10,6 +10,7 @@ import {
   ProviderInstanceId,
   ProviderThreadId,
   RunId,
+  RuntimeRequestId,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -19,6 +20,7 @@ import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
+import { delegatedTaskQuestionCommand } from "./delegatedTaskQuestion.ts";
 import * as EventSink from "./EventSink.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
@@ -217,6 +219,7 @@ it.layer(layerTest)("a delegated task in a linked environment", (it) => {
       const [task] = projection.subagents;
       assert.equal(task?.childThreadId, null);
       assert.deepEqual(task?.remoteChild, { ...remoteChild, settledThere: false });
+      assert.deepEqual(task?.modelSelection, modelSelection);
       assert.equal(task?.status, "running");
       yield* orchestrator.dispatch({
         type: "delegated_task.remote.progress",
@@ -235,6 +238,76 @@ it.layer(layerTest)("a delegated task in a linked environment", (it) => {
       });
       // No thread was created here for the child.
       assert.equal(yield* orchestrator.getThreadShell(remoteChild.threadId), null);
+      const other = yield* seedLiveParent("records-no-task");
+      const index = yield* (yield* ProjectionStore.ProjectionStoreV2).listActiveShellIndex();
+      assert.isTrue(index.find((entry) => entry.id === parent.threadId)?.hasRemoteTasks);
+      assert.isFalse(index.find((entry) => entry.id === other.threadId)?.hasRemoteTasks);
+      // Nothing here can cancel the task there, so it must not block archiving.
+      yield* orchestrator.dispatch({
+        type: "thread.archive",
+        commandId: CommandId.make("command:archive:records"),
+        threadId: parent.threadId,
+      });
+      assert.isNotNull((yield* orchestrator.getThreadShell(parent.threadId))?.archivedAt);
+    }),
+  );
+
+  it.effect("starts a queued question wake while its remote child is still live", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const parent = yield* seedLiveParent("remote-question");
+      yield* orchestrator.dispatch({
+        type: "delegated_task.remote.request",
+        commandId: CommandId.make("command:remote-delegate:question"),
+        parentThreadId: parent.threadId,
+        parentRunId: parent.runId,
+        parentNodeId: parent.rootNodeId,
+        task: "Run the suite there.",
+        driver: ProviderDriverKind.make("remote"),
+        modelSelection,
+        remoteChild,
+        completionWake: "always",
+      });
+      const { subagents, runs } = yield* projections.getThreadRecords(parent.threadId, [
+        "subagents",
+        "runs",
+      ]);
+      const now = yield* DateTime.now;
+      const question = delegatedTaskQuestionCommand(subagents[0]!, {
+        id: RuntimeRequestId.make("request:remote-question"),
+        nodeId: NodeId.make("node:remote-question"),
+        providerTurnId: null,
+        nativeRequestRef: null,
+        kind: "user_input",
+        status: "pending",
+        responseCapability: { type: "message" },
+        createdAt: now,
+        resolvedAt: null,
+      });
+      yield* orchestrator.dispatch(question);
+      const wakeRun = () =>
+        projections
+          .getThreadRecords(parent.threadId, ["runs"])
+          .pipe(
+            Effect.map(({ runs }) => runs.find((run) => run.userMessageId === question.messageId)),
+          );
+      assert.equal((yield* wakeRun())?.status, "queued");
+
+      const parentRun = runs.find((run) => run.id === parent.runId)!;
+      yield* projections.apply({
+        id: EventId.make("event:remote-question-parent-finished"),
+        type: "run.updated",
+        threadId: parent.threadId,
+        occurredAt: now,
+        payload: { ...parentRun, status: "completed", completedAt: now },
+      });
+      yield* orchestrator.dispatch({
+        type: "queue.resume",
+        commandId: CommandId.make("command:resume:remote-question"),
+        threadId: parent.threadId,
+      });
+      assert.equal((yield* wakeRun())?.status, "starting");
     }),
   );
 

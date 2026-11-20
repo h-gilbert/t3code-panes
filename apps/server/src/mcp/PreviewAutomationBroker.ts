@@ -25,6 +25,7 @@ import {
   PreviewAutomationTabNotFoundError,
   PreviewAutomationTargetNotEditableError,
   PreviewAutomationTimeoutError,
+  PreviewAutomationTimeoutDetail,
   PreviewAutomationUnsupportedClientError,
   PreviewTabId,
   type PreviewAutomationError,
@@ -320,6 +321,7 @@ const readRemoteReason = (detail: unknown): string | undefined =>
     : undefined;
 
 const MAX_REASON_CHARS = 500;
+const decodeTimeoutDetail = Schema.decodeUnknownOption(PreviewAutomationTimeoutDetail);
 
 const classifyResponseError = (
   context: PreviewAutomationRequestErrorContext,
@@ -407,18 +409,19 @@ const classifyResponseError = (
         ...remoteDiagnostics,
       });
     case "PreviewAutomationTimeoutError": {
-      const detail = error.detail;
+      const rawDetail = error.detail;
       const reportedStages =
-        typeof detail === "object" &&
-        detail !== null &&
-        "stages" in detail &&
-        Array.isArray(detail.stages)
-          ? detail.stages
+        typeof rawDetail === "object" &&
+        rawDetail !== null &&
+        "stages" in rawDetail &&
+        Array.isArray(rawDetail.stages)
+          ? rawDetail.stages
           : [];
       const stages = (["text", "accessibility", "screenshot"] as const).filter((stage) =>
         reportedStages.includes(stage),
       );
       const remoteTimeoutMs = readRemoteTimeoutMs(error.detail);
+      const detail = decodeTimeoutDetail(error.detail);
       const remoteReason = readRemoteReason(error.detail);
       return new PreviewAutomationTimeoutError({
         ...context,
@@ -430,6 +433,7 @@ const classifyResponseError = (
           ? {}
           : { timeoutMs: Math.min(context.timeoutMs, remoteTimeoutMs) }),
         ...(stages?.length ? { stages } : {}),
+        ...(Option.isSome(detail) ? { pendingStages: detail.value.pendingStages } : {}),
       });
     }
     case "PreviewAutomationControlInterruptedError": {
@@ -892,11 +896,15 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake() {
       // The host enforces timeoutMs itself and reports its own timeout. Evicting
       // at the same instant races that reply, so wait past it before deciding
       // the host is unreachable.
-      const evictsOnTimeout =
+      const isServerBrowser = connection.clientId === SERVER_BROWSER_AUTOMATION_CLIENT_ID;
+      const expectsHostReply =
         input.disconnectOnTimeout !== false && input.updateCurrentTab !== false;
+      const waitsForHostDeadline =
+        expectsHostReply && (!isServerBrowser || input.operation === "snapshot");
+      const evictsOnTimeout = expectsHostReply && !isServerBrowser;
       const result = yield* Deferred.await(deferred).pipe(
         Effect.timeoutOption(
-          evictsOnTimeout ? timeoutMs + PREVIEW_AUTOMATION_RESPONSE_GRACE_MS : timeoutMs,
+          waitsForHostDeadline ? timeoutMs + PREVIEW_AUTOMATION_RESPONSE_GRACE_MS : timeoutMs,
         ),
       );
       return yield* Option.match(result, {

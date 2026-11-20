@@ -1,14 +1,15 @@
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { observeResize } from "~/lib/observeResize";
 import { resolveTimelineMinimapPreview, type TimelineMinimapItem } from "./timelineMinimapItems";
-import { useLayoutEffect, useRef, useState, type MouseEvent } from "react";
+import { useRef, useState, type MouseEvent } from "react";
+import { useGT } from "gt-react";
 import { ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import {
   resolveTimelineMinimapHeightStyle,
+  resolveTimelineMinimapInteractiveWidth,
   resolveTimelineMinimapContentHeight,
   resolveTimelineMinimapIndexFromPointer,
-  resolveTimelineMinimapInteractiveWidth,
   resolveTimelineMinimapNavigationInteractive,
   resolveTimelineMinimapTopPercent,
   TIMELINE_MINIMAP_MIN_ITEMS,
@@ -42,6 +43,7 @@ export function TimelineMinimap({
   hasPersistentGutter,
   hitStripWidth,
   currentIndex,
+  atEnd,
   items,
   stripMap,
   onWheel,
@@ -51,23 +53,24 @@ export function TimelineMinimap({
   hasPersistentGutter: boolean;
   hitStripWidth: number;
   currentIndex: number | null;
+  atEnd: boolean;
   items: ReadonlyArray<TimelineMinimapItem>;
   stripMap: Map<string, HTMLSpanElement>;
   onWheel: (event: WheelEvent) => void;
   onSelect: (item: TimelineMinimapItem) => void;
 }) {
+  const gt = useGT();
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(Infinity);
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- observes the marker viewport height to bound its independent scroll region
-  useLayoutEffect(() => {
-    const viewport = scrollRef.current;
+  const measureViewport = useStableCallback((viewport: HTMLDivElement | null) => {
+    scrollRef.current = viewport;
     if (!viewport) return;
     const measure = () => setViewportHeight(viewport.clientHeight);
     measure();
     return observeResize(viewport, measure);
-  }, []);
+  });
   const contentHeight = resolveTimelineMinimapContentHeight(items.length);
   const wheelTargetRef = (node: HTMLDivElement | null) => {
     if (!node) return;
@@ -97,7 +100,8 @@ export function TimelineMinimap({
     currentIndex !== null && currentIndex >= 0 && currentIndex < items.length ? currentIndex : null;
   const previousItem =
     resolvedCurrentIndex === null ? null : (items[resolvedCurrentIndex - 1] ?? null);
-  const nextItem = resolvedCurrentIndex === null ? null : (items[resolvedCurrentIndex + 1] ?? null);
+  const nextItem =
+    resolvedCurrentIndex === null || atEnd ? null : (items[resolvedCurrentIndex + 1] ?? null);
 
   const resolveActiveIndexFromPointer = (event: MouseEvent<HTMLElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -171,7 +175,7 @@ export function TimelineMinimap({
           }}
           style={{
             height: resolveTimelineMinimapHeightStyle(items.length),
-            width: resolveTimelineMinimapInteractiveWidth(hitStripWidth, activeItem !== null),
+            width: resolveTimelineMinimapInteractiveWidth(hitStripWidth, false),
           }}
         >
           <TimelineMinimapNavigationButton
@@ -183,14 +187,16 @@ export function TimelineMinimap({
             }}
           />
           <div
-            ref={scrollRef}
+            ref={measureViewport}
             className="scrollbar-none relative h-full w-full overflow-y-auto overscroll-y-contain py-1"
             data-minimap-scroll
             onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
           >
             <button
               style={{ height: contentHeight }}
-              aria-label={`Jump to message: ${activeItem?.userText ?? "User message"}`}
+              aria-label={gt("Jump to message: {text}", {
+                text: activeItem?.userText ?? gt("User message"),
+              })}
               className="relative block w-full shrink-0 cursor-pointer bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
               onBlur={() => setActiveIndex(null)}
               onClick={(event) => {
@@ -240,7 +246,6 @@ export function TimelineMinimap({
               }}
               type="button"
             >
-              <div className="absolute top-0 left-3 h-full w-px bg-border/15" />
               {items.map((item, index) => {
                 const top = `${resolveTimelineMinimapTopPercent(index, items.length)}%`;
                 const activeDistance =
@@ -282,18 +287,19 @@ export function TimelineMinimap({
             <span
               className={cn(
                 "pointer-events-auto absolute cursor-text select-text",
-                compact ? "left-7 w-64" : "left-8 w-80",
+                compact ? "left-7" : "left-8",
               )}
               data-minimap-preview
               onMouseMove={(event) => event.stopPropagation()}
               style={{
                 top: activeTop,
+                width: `calc(${resolveTimelineMinimapInteractiveWidth(hitStripWidth, true, compact)} - ${compact ? "1.75rem" : "2rem"})`,
                 transform: `translateY(${activeTooltipTranslate})`,
               }}
             >
               <span className="dropdown-glass block rounded-xl p-3 text-left text-popover-foreground shadow-xl shadow-black/25">
                 <span className="block max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-sm font-medium leading-5">
-                  {activeItem.userText ?? "User message"}
+                  {activeItem.userText ?? gt("User message")}
                 </span>
                 {activeItem.assistantText ? (
                   <span
@@ -335,8 +341,9 @@ function TimelineMinimapNavigationButton({
   interactive: boolean;
   onClick: () => void;
 }) {
+  const gt = useGT();
   const previous = direction === "previous";
-  const label = previous ? "Previous turn" : "Next turn";
+  const label = previous ? gt("Previous turn") : gt("Next turn");
   const Icon = previous ? ChevronUpIcon : ChevronDownIcon;
 
   return (
@@ -347,7 +354,7 @@ function TimelineMinimapNavigationButton({
             className={cn(
               "absolute left-1 z-10 inline-flex -translate-x-1/2 opacity-0 transition-opacity duration-150 hover:opacity-100 focus-within:opacity-100",
               interactive ? "pointer-events-auto" : "pointer-events-none",
-              previous ? "bottom-[calc(100%+2px)]" : "top-[calc(100%+2px)]",
+              previous ? "bottom-[calc(100%+6px)]" : "top-[calc(100%+6px)]",
             )}
           />
         }

@@ -177,6 +177,9 @@ already contains text. Preserve this when integrating upstream composer changes.
   Navigation and settings overlay the mounted panes instead of replacing the workspace.
   Settings use upstream's section routes and modal sidebar, with the fork's custom controls.
   Opening or dismissing Settings must retain pane drafts and scroll positions.
+- In compact web and desktop composers, offer the planning shortcut when the selected provider
+  advertises `/plan` for the workspace. Insert it as a provider command so the user can edit the
+  request before sending and the provider controls its planning semantics.
 - Preserve retained terminal sessions and reconnect behavior described in
   `docs/internals/terminal-runtime.md`.
 - Preserve the separate private iOS branch and its normal push notifications for approval, input,

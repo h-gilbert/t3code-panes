@@ -3,22 +3,43 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   findExistingAddProject,
+  getCloneDestinationForPickedFolder,
   getCloneDestinationPath,
   getCloneDirectoryLeafName,
   getCloneDirectoryName,
   getCloneDirectoryPath,
+  getAddProjectInitialQuery,
   getDefaultCloneUrl,
   githubIncompleteOwnerRepositoryMessage,
   normalizePastedCloneUrl,
   buildProjectCreateCommand,
   getNewProjectPublishTarget,
   getNewProjectPublishTargets,
+  sortAddProjectProviderSources,
 } from "./projects.ts";
 import type { EnvironmentProject } from "../state/models.ts";
+import { isFilesystemBrowseQuery } from "../state/projects.ts";
 
 import * as Option from "effect/Option";
 
 describe("add project shared logic", () => {
+  it("starts the Add Project picker on a browsable path for a relative base directory", () => {
+    expect(isFilesystemBrowseQuery(getAddProjectInitialQuery("Desktop/dev"))).toBe(true);
+    expect(getAddProjectInitialQuery("Desktop/dev")).toBe("~/Desktop/dev/");
+    expect(getAddProjectInitialQuery("/srv/code")).toBe("/srv/code/");
+    expect(getAddProjectInitialQuery("~")).toBe("~/");
+    expect(getAddProjectInitialQuery("./work")).toBe("./work/");
+    expect(getAddProjectInitialQuery("C:\\dev")).toBe("C:\\dev\\");
+  });
+
+  it("offers only GitHub until other hosts are turned on", () => {
+    const ready = () => ({ ready: true, hint: null });
+    expect(sortAddProjectProviderSources(ready, {})).toEqual(["github"]);
+    expect(sortAddProjectProviderSources(ready, { gitlab: true, github: false })).toEqual([
+      "gitlab",
+    ]);
+  });
+
   it("asks for a repository name when GitHub input is only an owner path", () => {
     const github = SourceControlProviderKind.make("github");
     expect(githubIncompleteOwnerRepositoryMessage(github, "pingdotgg/")).toBe(
@@ -67,6 +88,33 @@ describe("add project shared logic", () => {
     );
     expect(normalizePastedCloneUrl("group/subgroup/project")).toBe("group/subgroup/project");
     expect(normalizePastedCloneUrl("/srv/git/repo.git")).toBe("/srv/git/repo.git");
+    for (const gitlabProject of [
+      "https://gitlab.com/acme/tools/src/branch/worker.git",
+      "https://scm.example.test/acme/tools/src/branch/worker.git",
+      "https://scm.example.test/acme/tools/src/branch/worker",
+      "https://scm.example.test/team/repo/src/branch/main/-/README.md",
+      "https://forgejo.example.test/a/b/src/branch/mount/team/repo.git",
+    ]) {
+      expect(normalizePastedCloneUrl(gitlabProject)).toBe(gitlabProject);
+    }
+  });
+
+  it("clones the repository when given a page URL copied from the browser", () => {
+    for (const [pageUrl, pageRoute, repository] of [
+      ["https://github.com/pingdotgg/t3code/tree/main", "/tree/", "t3code"],
+      ["https://gitlab.com/gitlab-org/gitlab-runner/-/tree/main", "/-/", "gitlab-runner"],
+      ["https://git.cafe/pingdotgg/t3code/tree/main", "/tree/", "t3code"],
+      ["https://gitlab.example.test/g/p/-/blob/main/src/branch/x", "/-/", "p"],
+      ["https://code.company.test/g/p/-/tree/main", "/-/", "p"],
+      ["https://github.com/pingdotgg/t3code/tree/release.git", "/tree/", "t3code"],
+    ] as const) {
+      const cloneUrl = normalizePastedCloneUrl(pageUrl);
+      expect(cloneUrl).not.toContain(pageRoute);
+      expect(getCloneDirectoryName(cloneUrl)).toBe(repository);
+    }
+    expect(
+      normalizePastedCloneUrl("https://alice:example@bitbucket.org/workspace/repo/src/master/"),
+    ).toBe("https://alice:example@bitbucket.org/workspace/repo");
   });
 
   it("uses HTTPS for repositories selected through a provider", () => {
@@ -139,6 +187,23 @@ describe("add project shared logic", () => {
     expect(getCloneDirectoryName("git@github.com:acme/123.git")).toBe("123");
   });
 
+  it("resolves a native-picker folder like an in-app clone selection", () => {
+    const pick = (pickedPath: string, caseSensitive = true) =>
+      getCloneDestinationForPickedFolder({
+        pickedPath,
+        cloneDirectoryName: "repo",
+        caseSensitive,
+      });
+
+    expect(pick("/Users/me/code")).toBe("/Users/me/code/repo");
+    expect(pick("/Users/me/code/")).toBe("/Users/me/code/repo");
+    expect(pick("/Users/me/repo")).toBe("/Users/me/repo/");
+    expect(pick("/Users/me/Repo")).toBe("/Users/me/Repo/repo");
+    expect(pick("C:\\Projects\\Repo", false)).toBe("C:\\Projects\\Repo\\");
+    expect(pick("C:\\Projects", false)).toBe("C:\\Projects\\repo");
+    expect(pick("/")).toBe("/repo");
+  });
+
   it("finds existing projects by normalized path in the target environment", () => {
     const env = EnvironmentId.make("env");
     const other = EnvironmentId.make("other");
@@ -172,7 +237,7 @@ describe("add project shared logic", () => {
     );
   });
 
-  it("builds the V2 project.create mutation", () => {
+  it("creates the project without overriding the shared model selection", () => {
     expect(
       buildProjectCreateCommand({
         commandId: CommandId.make("command"),
@@ -186,11 +251,7 @@ describe("add project shared logic", () => {
       title: "repo",
       workspaceRoot: "/work/repo",
       createWorkspaceRootIfMissing: true,
-      defaultModelSelection: {
-        instanceId: "claudeAgent",
-        model: "claude-opus-4-8",
-        options: [{ id: "effort", value: "medium" }],
-      },
+      defaultModelSelection: null,
     });
   });
 });
@@ -212,14 +273,17 @@ describe("new project publish targets", () => {
   });
 
   it("offers ready hosts that can place the repository, GitHub first, and keeps the pick", () => {
-    const targets = getNewProjectPublishTargets({
-      versionControlSystems: [],
-      sourceControlProviders: [
-        readyHost("gitlab", "group"),
-        readyHost("github", null),
-        readyHost("azure-devops", "me"),
-      ],
-    });
+    const targets = getNewProjectPublishTargets(
+      {
+        versionControlSystems: [],
+        sourceControlProviders: [
+          readyHost("gitlab", "group"),
+          readyHost("github", null),
+          readyHost("azure-devops", "me"),
+        ],
+      },
+      { gitlab: true, "azure-devops": true },
+    );
     expect(targets.map((target) => target.definition.kind)).toEqual(["github", "gitlab"]);
     expect(getNewProjectPublishTarget(targets, null)?.definition.kind).toBe("github");
     expect(

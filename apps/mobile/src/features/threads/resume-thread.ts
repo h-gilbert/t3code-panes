@@ -1,3 +1,4 @@
+import { resolveMobileCreationSource } from "../../lib/mobileClientOrigin";
 import type {
   ResumeThreadQueueInput,
   SetThreadInteractionModeInput,
@@ -7,6 +8,7 @@ import type {
 import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
 import type {
   EnvironmentId,
+  ExecutionEnvironmentCapabilities,
   MessageId,
   ModelSelection,
   ProviderInteractionMode,
@@ -28,19 +30,22 @@ export async function resumeThread<E>(input: {
     readonly runtimeMode: RuntimeMode;
     readonly interactionMode: ProviderInteractionMode;
   };
+  readonly destinationCapabilities?:
+    | Pick<ExecutionEnvironmentCapabilities, "iosTurnOrigin">
+    | undefined;
   readonly resumableRunId: RunId | null;
   readonly queueHeld: boolean;
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
   readonly modelSelection: ModelSelection | null;
   readonly messageId: MessageId;
-  readonly createdAt: string;
+  readonly createdAt?: string;
   readonly setRuntimeMode: Command<SetThreadRuntimeModeInput, E>;
   readonly setInteractionMode: Command<SetThreadInteractionModeInput, E>;
   readonly startTurn: Command<StartThreadTurnInput, E>;
   readonly resumeQueue: Command<ResumeThreadQueueInput, E>;
 }): Promise<AtomCommandResult<unknown, E>> {
-  const { thread, runtimeMode, interactionMode, createdAt } = input;
+  const { thread, runtimeMode, interactionMode, createdAt = new Date().toISOString() } = input;
   const environmentId = thread.environmentId;
   // The server holds the queue behind a stopped or usage-limited run until that run is continued.
   if (input.resumableRunId !== null) {
@@ -62,14 +67,14 @@ export async function resumeThread<E>(input: {
     const continued = await input.startTurn({
       environmentId,
       input: {
-        creationSource: "mobile",
+        creationSource: resolveMobileCreationSource(input.destinationCapabilities),
         threadId: thread.id,
         manualContinuationOfRunId: input.resumableRunId,
         ...(input.modelSelection ? { modelSelection: input.modelSelection } : {}),
         message: {
           messageId: input.messageId,
           role: "user",
-          text: "Continue where you left off.",
+          text: "",
           attachments: [],
         },
         runtimeMode,

@@ -117,32 +117,21 @@ describe("electron development launcher", () => {
   });
 });
 
-it.each([
-  "/tmp/t3-feature.one/apps/desktop",
-  "/tmp/t3-feature.one [two](three)+?^${four}|back\\slash*/apps/desktop",
-])("dev cleanup signals only its owned process tree: %s", async (desktopDir) => {
+// Supply inert imports so the real startup runs without launching Electron or signalling processes.
+async function runDevElectronStartup({
+  desktopDir = "/repo/apps/desktop",
+  spawnSync,
+  spawn,
+  ...context
+}) {
   const source = NodeFS.readFileSync(new URL("./dev-electron.mjs", import.meta.url), "utf8");
-  const signals = [];
-  const treeSignals = [];
-  const handlers = new Map();
-  const child = new NodeEvents.EventEmitter();
-  child.pid = 12345;
-  child.kill = (signal) => {
-    signals.push(signal);
-    child.emit("exit", 0, signal);
-  };
-  let exited;
-  const shutdown = new Promise((resolve) => {
-    exited = resolve;
-  });
-  // Other apps, including those whose root matches this one, stay untouched.
   await NodeVM.runInNewContext(
     `(async () => { ${source.replace(/^import\s[\s\S]*?;\n/gm, "")} })()`,
     {
       NodeChildProcess: {
         execFileSync: () => undefined,
-        spawnSync: (command, args) => treeSignals.push([command, ...args]),
-        spawn: () => child,
+        spawnSync: spawnSync ?? (() => undefined),
+        spawn: spawn ?? (() => new NodeEvents.EventEmitter()),
       },
       NodeFS: { watch: () => ({ close: () => undefined }) },
       NodeOS: { platform: () => "linux" },
@@ -152,23 +141,136 @@ it.each([
       resolveElectronLaunchCommand: (args) => ({ electronPath: "electron", args }),
       waitForResources: async () => undefined,
       URL,
-      setTimeout: (fn) => {
-        queueMicrotask(fn);
-        return { unref: () => undefined };
-      },
-      clearTimeout: () => undefined,
+      ...makeFakeClock(),
       process: {
         pid: 23456,
         env: { VITE_DEV_SERVER_URL: "http://localhost:1234" },
         execPath: "node",
-        once: (event, handler) => handlers.set(event, handler),
-        exit: exited,
+        ppid: 1,
+        once: () => undefined,
       },
+      ...context,
     },
   );
+}
+
+function makeFakeClock() {
+  let now = 0;
+  let timers = [];
+  const schedule = (callback, delay, repeat) => {
+    const timer = { callback, due: now + (delay ?? 0), repeat: repeat ? (delay ?? 0) : null };
+    timer.handle = { unref: () => timer.handle, ref: () => timer.handle };
+    timers.push(timer);
+    return timer.handle;
+  };
+  const clear = (handle) => {
+    timers = timers.filter((timer) => timer.handle !== handle);
+  };
+  const flushMicrotasks = async () => {
+    for (let index = 0; index < 50; index += 1) await Promise.resolve();
+  };
+  return {
+    setTimeout: (callback, delay) => schedule(callback, delay, false),
+    setInterval: (callback, delay) => schedule(callback, delay, true),
+    clearTimeout: clear,
+    clearInterval: clear,
+    async advance(ms) {
+      const end = now + ms;
+      for (;;) {
+        await flushMicrotasks();
+        const next = timers
+          .filter((timer) => timer.due <= end)
+          .toSorted((a, b) => a.due - b.due)[0];
+        if (!next) break;
+        now = next.due;
+        if (next.repeat === null) clear(next.handle);
+        else next.due = now + Math.max(next.repeat, 1);
+        next.callback();
+      }
+      now = end;
+      await flushMicrotasks();
+    },
+  };
+}
+
+it("dev supervisor stops Electron and exits once its parent process goes away", async () => {
+  const clock = makeFakeClock();
+  let ppid = 4242;
+  const exitCodes = [];
+  const appSignals = [];
+  await runDevElectronStartup({
+    ...clock,
+    spawn: () => {
+      const app = new NodeEvents.EventEmitter();
+      app.pid = 5151;
+      app.kill = (signal) => {
+        appSignals.push(signal);
+        app.emit("exit", null, signal);
+      };
+      return app;
+    },
+    process: {
+      env: { VITE_DEV_SERVER_URL: "http://localhost:1234" },
+      execPath: "node",
+      pid: 4343,
+      get ppid() {
+        return ppid;
+      },
+      once: () => undefined,
+      exit: (code) => {
+        exitCodes.push(code);
+      },
+    },
+  });
+
+  await clock.advance(5_000);
+  assert.deepEqual(appSignals, [], "supervisor stopped Electron while its parent was alive");
+
+  // The launching process died without signalling us; the OS reparented the supervisor.
+  ppid = 1;
+  await clock.advance(5_000);
+
+  assert.include(
+    appSignals,
+    "SIGTERM",
+    "supervisor kept Electron running after its parent process went away",
+  );
+  assert.lengthOf(exitCodes, 1, "supervisor did not exit after its parent process went away");
+});
+
+it.each([
+  "/tmp/t3-feature.one/apps/desktop",
+  "/tmp/t3-feature.one [two](three)+?^${four}|back\\slash*/apps/desktop",
+])("dev cleanup signals only its owned process tree: %s", async (desktopDir) => {
+  const clock = makeFakeClock();
+  const treeSignals = [];
+  const signals = [];
+  const handlers = new Map();
+  const exitCodes = [];
+  const child = new NodeEvents.EventEmitter();
+  child.pid = 12345;
+  child.kill = (signal) => {
+    signals.push(signal);
+    child.emit("exit", 0, signal);
+  };
+  await runDevElectronStartup({
+    ...clock,
+    desktopDir,
+    spawnSync: (command, args) => treeSignals.push([command, ...args]),
+    spawn: () => child,
+    process: {
+      pid: 23456,
+      ppid: 1,
+      env: { VITE_DEV_SERVER_URL: "http://localhost:1234" },
+      execPath: "node",
+      once: (event, handler) => handlers.set(event, handler),
+      exit: (code) => exitCodes.push(code),
+    },
+  });
   assert.deepEqual(treeSignals, []);
   handlers.get("SIGTERM")();
-  assert.equal(await shutdown, 143);
+  await clock.advance(5_000);
+  assert.deepEqual(exitCodes, [143]);
   assert.deepEqual(signals, ["SIGTERM"]);
   assert.deepEqual(treeSignals, [
     ["pkill", "-TERM", "-P", "12345"],

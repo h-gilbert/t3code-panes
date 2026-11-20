@@ -353,8 +353,19 @@ export const discoverFxSkills = Effect.fn("discoverFxSkills")(function* (input: 
   const realPath = (target: string) =>
     fileSystem.realPath(target).pipe(Effect.orElseSucceed(() => target));
   const home = yield* realPath(configuredHome);
-  const cwd = yield* realPath(input.cwd);
   const path = yield* Path.Path;
+  let cwd = path.resolve(input.cwd);
+  // A deleted workspace can still sit under a symlink to HOME.
+  while (true) {
+    const resolved = yield* fileSystem.realPath(cwd).pipe(Effect.option);
+    if (Option.isSome(resolved)) {
+      cwd = resolved.value;
+      break;
+    }
+    const parent = path.dirname(cwd);
+    if (parent === cwd) break;
+    cwd = parent;
+  }
   const seenFolders = new Set<string>();
   // `$review` and `$Review` each load the skill whose name matches the typed
   // case, so only an exact repeat of a name is dropped.

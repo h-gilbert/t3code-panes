@@ -5,6 +5,7 @@ import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { createFileRoute, Link, redirect, useRouter } from "@tanstack/react-router";
 import { PanelsTopLeftIcon, PlusIcon } from "lucide-react";
 import { useEffect, useRef, useState, useEffectEvent } from "react";
+import { T, useGT } from "gt-react";
 
 import { openCommandPalette } from "../commandPaletteBus";
 import { isElectron } from "../env";
@@ -94,7 +95,8 @@ function IndexDraftLanding() {
 }
 
 function DraftStartError({ onRetry }: { readonly onRetry: () => void }) {
-  const contentArea = workspaceAreaProps("home", 1, "Home");
+  const gt = useGT();
+  const contentArea = workspaceAreaProps("home", 1, gt("Home", { $context: "the home screen" }));
   return (
     <SidebarInset
       {...contentArea}
@@ -104,14 +106,16 @@ function DraftStartError({ onRetry }: { readonly onRetry: () => void }) {
       {isElectron ? <WorkspacePageHeader electron /> : null}
       <Empty size="hero" className="flex-1">
         <EmptyHeader className="max-w-md">
-          <EmptyTitle>Couldn’t start a new thread</EmptyTitle>
+          <EmptyTitle>
+            <T>Couldn’t start a new thread</T>
+          </EmptyTitle>
           <EmptyDescription>
-            The project is still available. Try opening the draft again.
+            <T>The project is still available. Try opening the draft again.</T>
           </EmptyDescription>
           <div className="mt-5 flex justify-center">
             <Button size="sm" onClick={onRetry}>
               <RefreshIcon size="md" />
-              Try again
+              <T>Try again</T>
             </Button>
           </div>
         </EmptyHeader>
@@ -129,9 +133,11 @@ function NoProjectsHero() {
         <Empty size="hero" className="flex-1">
           <div className="w-full max-w-lg px-8 py-12">
             <EmptyHeader className="max-w-none">
-              <EmptyTitle>What should we work on?</EmptyTitle>
+              <EmptyTitle>
+                <T>What should we work on?</T>
+              </EmptyTitle>
               <EmptyDescription className="mt-2">
-                Add a project to start your first thread.
+                <T>Add a project to start your first thread.</T>
               </EmptyDescription>
               <div className="mt-6 flex justify-center">
                 <Button
@@ -139,11 +145,11 @@ function NoProjectsHero() {
                   size="sm"
                 >
                   <PanelsTopLeftIcon className="size-4" />
-                  Workspace
+                  <T>Workspace</T>
                 </Button>
                 <Button className="ml-2" size="sm" variant="outline" onClick={openAddProject}>
                   <PlusIcon className="size-4" />
-                  Add project
+                  <T>Add project</T>
                 </Button>
               </div>
             </EmptyHeader>

@@ -1,5 +1,6 @@
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { renderToStaticMarkup } from "react-dom/server";
+import type { ReactNode } from "react";
+import { renderToStaticMarkup as renderMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const testState = vi.hoisted(() => ({
@@ -29,6 +30,7 @@ vi.mock("../assets/assetUrls", () => ({
     };
   },
 }));
+vi.mock("../useNativeFileDrag", () => ({ useNativeFileDrag: () => ({}) }));
 vi.mock("../hooks/useTheme", () => ({
   useTheme: () => ({ resolvedTheme: "dark" }),
   useRenderedAppearance: () => "dark",
@@ -41,6 +43,7 @@ vi.mock("../state/session", async (importOriginal) => ({
 }));
 vi.mock("../state/entities", () => ({
   readThreadShell: () => null,
+  readEnvironmentSupportsServerBrowser: () => false,
   useProjects: () => [],
   useServerConfigs: () => new Map(),
 }));
@@ -58,6 +61,7 @@ vi.mock("~/lib/openPullRequestLink", () => ({
   useOpenChangeRequestLink: () => vi.fn(),
 }));
 
+import { withTestI18n } from "../../test/unitI18n";
 import ChatMarkdown from "./ChatMarkdown";
 import { ChatMarkdownAssetImage } from "./chat/ChatMarkdownMedia";
 import { FileMarkdownPreview } from "./files/FileMarkdownPreview";
@@ -67,10 +71,12 @@ const threadRef = {
   threadId: ThreadId.make("thread-windows"),
 };
 
-function render(markdown: string): string {
-  return renderToStaticMarkup(
-    <ChatMarkdown cwd={"C:\\Users\\shawn\\project"} threadRef={threadRef} text={markdown} />,
-  );
+function renderToStaticMarkup(node: ReactNode): string {
+  return renderMarkup(withTestI18n(node));
+}
+
+function render(markdown: string, cwd = "C:\\Users\\shawn\\project"): string {
+  return renderToStaticMarkup(<ChatMarkdown cwd={cwd} threadRef={threadRef} text={markdown} />);
 }
 
 function renderWithoutThread(markdown: string): string {
@@ -129,18 +135,18 @@ describe("ChatMarkdown workspace images", () => {
         _tag: "media-file",
         threadId: threadRef.threadId,
         path: expectedPath,
+        hostOnly: true,
       },
     ]);
   });
 
-  it("loads every Windows workspace path form through a signed asset URL", () => {
+  it("loads relative and drive-absolute Windows paths through signed asset URLs", () => {
     const imagePath = "C:/Users/shawn/project/.t3/workspace-image.svg";
     const html = render(
       [
         "![relative](.t3/workspace-image.svg)",
         `![absolute](${imagePath})`,
         `![file URL](file:///${imagePath})`,
-        "![UNC file URL](file://server/share/workspace-image.svg)",
       ].join("\n\n"),
     );
 
@@ -149,20 +155,37 @@ describe("ChatMarkdown workspace images", () => {
         _tag: "media-file",
         threadId: threadRef.threadId,
         path: "C:\\Users\\shawn\\project\\.t3\\workspace-image.svg",
+        hostOnly: true,
       },
       { _tag: "media-file", threadId: threadRef.threadId, path: imagePath },
       { _tag: "media-file", threadId: threadRef.threadId, path: imagePath },
+    ]);
+    expect(html.match(/<img[^>]*src="https:\/\/signed\.test\/workspace-image\.svg"/g)).toHaveLength(
+      3,
+    );
+    expect(html.match(/max-w-\[min\(100%,30rem\)\]/g)).toHaveLength(3);
+    expect(html).not.toContain("Image unavailable");
+  });
+
+  it("loads images from the workspace's own Windows share", () => {
+    const markdown = "![diagram](file://server/share/workspace-image.svg)";
+    const html = render(markdown, "\\\\server\\share");
+
+    expect(testState.resources).toEqual([
       {
         _tag: "media-file",
         threadId: threadRef.threadId,
         path: "\\\\server\\share\\workspace-image.svg",
       },
     ]);
-    expect(html.match(/<img[^>]*src="https:\/\/signed\.test\/workspace-image\.svg"/g)).toHaveLength(
-      4,
-    );
-    expect(html.match(/max-w-\[min\(100%,30rem\)\]/g)).toHaveLength(4);
+    expect(html).toContain('src="https://signed.test/workspace-image.svg"');
+    expect(html).toContain("max-w-[min(100%,30rem)]");
     expect(html).not.toContain("Image unavailable");
+
+    testState.resources = [];
+    const blocked = render(markdown);
+    expect(testState.resources).toEqual([]);
+    expect(blocked).toContain("Image unavailable");
   });
 
   it("loads a POSIX absolute path and file URI through a signed asset URL", () => {
@@ -206,6 +229,7 @@ describe("ChatMarkdown workspace images", () => {
         String.raw`[settings](C:\Users\shawn\.claude\settings.json)`,
         String.raw`![unc](\\wsl.localhost\Ubuntu\.t3\workspace-image.svg)`,
       ].join("\n\n"),
+      String.raw`\\wsl.localhost\Ubuntu`,
     );
 
     expect(testState.resources).toEqual([

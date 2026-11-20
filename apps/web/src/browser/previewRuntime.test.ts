@@ -5,6 +5,7 @@ const state = vi.hoisted(() => ({
   desktop: false,
   delegates: false,
   host: null as string | null,
+  loadsLoopback: true,
   primary: null as string | null,
   serverBrowser: new Set<string>(),
 }));
@@ -17,15 +18,24 @@ vi.mock("~/env", () => ({
     return state.delegates;
   },
 }));
-vi.mock("~/state/server", () => ({ serverEnvironment: { settingsValueAtom: () => "settings" } }));
+vi.mock("~/state/server", () => ({
+  serverEnvironment: { settingsValueAtom: () => "settings" },
+  environmentServerConfigsAtom: {},
+}));
+vi.mock("~/connection/catalog", () => ({ environmentCatalog: { catalogValueAtom: {} } }));
+vi.mock("./browserTargetResolver", () => ({ tunnelsEnvironmentLoopback: () => true }));
 vi.mock("~/previewStateStore", () => ({ isPreviewSupportedInRuntime: () => state.desktop }));
 vi.mock("~/rpc/atomRegistry", () => ({
   appAtomRegistry: {
     get: (atom: unknown) =>
-      atom === "settings" ? { browserHostEnvironmentId: state.host } : state.primary,
+      atom === "settings"
+        ? { browserHostEnvironmentId: state.host }
+        : atom === "primary"
+          ? state.primary
+          : state.loadsLoopback,
   },
 }));
-vi.mock("~/state/primaryEnvironment", () => ({ primaryEnvironmentIdAtom: {} }));
+vi.mock("~/state/primaryEnvironment", () => ({ primaryEnvironmentIdAtom: "primary" }));
 vi.mock("~/state/entities", () => ({
   readEnvironmentSupportsServerBrowser: (id: string) => state.serverBrowser.has(id),
   useEnvironmentSupportsServerBrowser: () => false,
@@ -44,6 +54,7 @@ afterEach(() => {
   state.desktop = false;
   state.delegates = false;
   state.host = null;
+  state.loadsLoopback = true;
   state.primary = null;
   state.serverBrowser = new Set();
 });
@@ -56,6 +67,8 @@ describe("previewRuntimeFor", () => {
 
     expect(previewRuntimeFor(remote)).toBeUndefined();
     expect(previewRuntimeFor(local)).toBe("server");
+    state.loadsLoopback = false;
+    expect(previewRuntimeFor(remote)).toBe("server");
   });
 
   it("uses the environment's browser where the client has none of its own", () => {
@@ -69,14 +82,17 @@ describe("alternatePreviewRuntime", () => {
   it("moves a remote environment's tab between this computer and the environment", () => {
     state.desktop = true;
 
-    expect(alternatePreviewRuntime(remote, local, true, {})).toBe("server");
-    expect(alternatePreviewRuntime(remote, local, true, { runtime: "server" })).toBe("desktop");
-    expect(alternatePreviewRuntime(local, local, true, {})).toBeNull();
-    expect(alternatePreviewRuntime(remote, local, false, {})).toBeNull();
+    expect(alternatePreviewRuntime(remote, local, true, true, {})).toBe("server");
+    expect(alternatePreviewRuntime(remote, local, true, true, { runtime: "server" })).toBe(
+      "desktop",
+    );
+    expect(alternatePreviewRuntime(remote, local, true, false, { runtime: "server" })).toBeNull();
+    expect(alternatePreviewRuntime(local, local, true, true, {})).toBeNull();
+    expect(alternatePreviewRuntime(remote, local, false, true, {})).toBeNull();
   });
 
   it("offers no move outside the desktop app", () => {
-    expect(alternatePreviewRuntime(remote, null, true, { runtime: "server" })).toBeNull();
+    expect(alternatePreviewRuntime(remote, null, true, true, { runtime: "server" })).toBeNull();
   });
 });
 
@@ -88,7 +104,7 @@ it("hosts selected remote tabs on the primary desktop and keeps them on that hos
   expect(previewRuntimeFor(remote)).toBe("server");
   expect(rendersServerTabNatively(remote, local, { runtime: "server" }, local)).toBe(true);
   expect(rendersServerTabNatively(remote, local, { runtime: "server" }, "other")).toBe(false);
-  expect(alternatePreviewRuntime(remote, local, true, { runtime: "server" })).toBeNull();
+  expect(alternatePreviewRuntime(remote, local, true, true, { runtime: "server" })).toBeNull();
   // A window whose desktop has a hidden capture host streams the tab instead.
   state.delegates = true;
   expect(rendersServerTabNatively(remote, local, { runtime: "server" }, local)).toBe(false);
@@ -103,5 +119,5 @@ it("streams the primary environment when it selects a different desktop host", (
   expect(rendersServerTabNatively(local, local, { runtime: "server" }, remote)).toBe(false);
   expect(rendersServerTabNatively(local, remote, { runtime: "server" }, remote)).toBe(true);
   expect(rendersServerTabNatively(local, local, { runtime: "server" }, null)).toBe(true);
-  expect(alternatePreviewRuntime(local, local, true, { runtime: "server" })).toBeNull();
+  expect(alternatePreviewRuntime(local, local, true, true, { runtime: "server" })).toBeNull();
 });

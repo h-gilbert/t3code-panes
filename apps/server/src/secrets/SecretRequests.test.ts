@@ -155,6 +155,7 @@ const buildService = (options: ServiceOptions = {}) =>
                 type: "secret_request",
                 label: "GitHub token",
                 reason: "Used as GH_TOKEN.",
+                url: "https://github.com/settings/tokens",
                 ...(options.delivery === undefined ? {} : { delivery: options.delivery }),
                 secretStatus,
                 ...(options.credential === undefined ? {} : { credential: options.credential }),
@@ -235,6 +236,7 @@ it.effect("a saved answer becomes a one-use ref, and the thread only learns it w
       assert.include(dispatched[0] as object, {
         type: "secret_request.record",
         secretStatus: "saved",
+        url: "https://github.com/settings/tokens",
       });
       assert.notInclude(Object.values(dispatched[0] as object).map(String), "ghp_secret");
 
@@ -608,6 +610,23 @@ it.effect("a secret the card promised to keep from the agent is never written to
       assert.equal(refused.reason, "not_a_file_request");
       assert.isTrue(valuesOf(stored).some((value) => value.includes("ghp_secret")));
     }),
+  ),
+);
+
+it.effect("secret provider references cannot populate the credential vault", () =>
+  withService(
+    ({ service, dispatched }) =>
+      Effect.gen(function* () {
+        const answer = {
+          type: "reference" as const,
+          reference: { provider: vault, reference: "fake://github/token" },
+        };
+        const error = yield* service.answer({ threadId, turnItemId, answer }).pipe(Effect.flip);
+        assert.equal(error.reason, "store_failed");
+        assert.deepEqual(dispatched, []);
+        assert.deepEqual(yield* service.listCredentials(), []);
+      }),
+    { credential: { name: "GitHub token", kind: "secret" } },
   ),
 );
 
@@ -1020,6 +1039,12 @@ it.effect("a pasted secret keeps its exact bytes from the tool input to the file
       value: "",
     });
     assert.isTrue(Exit.isFailure(empty));
+    for (const url of ["https://?state=x", "javascript:alert(1)"]) {
+      assert.isTrue(
+        Exit.isFailure(decodeSecretInputExit({ label: "Code", reason: "Sign in.", url })),
+        url,
+      );
+    }
     const file = yield* withService(
       ({ service }) =>
         service.savePasted({

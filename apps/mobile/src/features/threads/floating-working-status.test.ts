@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { backgroundFloatingStatus, connectionFloatingStatus } from "./floating-working-status";
+import {
+  backgroundFloatingStatus,
+  connectionFloatingStatus,
+  connectionRetryLabel,
+} from "./floating-working-status";
 
 const status = (
   connectionState: Parameters<typeof connectionFloatingStatus>[0]["connectionState"],
@@ -19,24 +23,18 @@ describe("connectionFloatingStatus", () => {
     expect(status("connected")).toBeNull();
   });
 
-  it("names the environment it is retrying, and says so only after a failure", () => {
-    expect(status("connecting")).toMatchObject({
-      tone: "reconnecting",
-      label: "Reconnecting to Mac mini...",
-    });
-    expect(status("reconnecting", { connectionError: "ECONNREFUSED" })).toMatchObject({
-      tone: "reconnecting",
-      label: "Failed to connect. Retrying Mac mini...",
-    });
+  it("leaves automatic retries to the thread header", () => {
+    expect(status("connecting")).toBeNull();
+    expect(status("reconnecting", { connectionError: "ECONNREFUSED" })).toBeNull();
   });
 
   it("reports why the environment is unreachable", () => {
     expect(status("offline")).toMatchObject({
-      tone: "unavailable",
+      kind: "connection",
       label: "You are offline",
     });
     expect(status("available")).toMatchObject({
-      tone: "unavailable",
+      kind: "connection",
       label: "Mac mini is not connected",
     });
     expect(status("error", { connectionError: "handshake timed out" })).toMatchObject({
@@ -62,6 +60,27 @@ describe("connectionFloatingStatus", () => {
     if (pill?.kind !== "connection") throw new Error("expected a connection pill");
     pill.onPress();
     expect(onReconnect).toHaveBeenCalledOnce();
+  });
+});
+
+describe("connectionRetryLabel", () => {
+  it("distinguishes reconnecting, retrying after an error, and waiting for approval", () => {
+    expect(connectionRetryLabel({ connectionState: "connecting", connectionError: null })).toBe(
+      "Reconnecting…",
+    );
+    expect(
+      connectionRetryLabel({ connectionState: "reconnecting", connectionError: "ECONNREFUSED" }),
+    ).toBe("Retrying connection…");
+    expect(
+      connectionRetryLabel({
+        connectionState: "reconnecting",
+        connectionError: "approval required",
+        connectionAwaitingApproval: true,
+      }),
+    ).toBe("Awaiting device approval");
+    expect(
+      connectionRetryLabel({ connectionState: "connected", connectionError: null }),
+    ).toBeNull();
   });
 });
 

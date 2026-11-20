@@ -13,9 +13,13 @@ const environmentId = EnvironmentId.make("environment-1");
 describe("loadPreviewWebviewConfig", () => {
   it.effect("reports a structurally distinct missing-bridge failure", () =>
     Effect.gen(function* () {
-      const error = yield* loadPreviewWebviewConfig(environmentId, undefined, undefined, null).pipe(
-        Effect.flip,
-      );
+      const error = yield* loadPreviewWebviewConfig(
+        environmentId,
+        undefined,
+        undefined,
+        false,
+        null,
+      ).pipe(Effect.flip);
 
       expect(error).toBeInstanceOf(PreviewWebviewBridgeUnavailableError);
       expect(error.environmentId).toBe(environmentId);
@@ -27,7 +31,7 @@ describe("loadPreviewWebviewConfig", () => {
   it.effect("preserves the bridge rejection as the load failure cause", () =>
     Effect.gen(function* () {
       const cause = new Error("ipc unavailable");
-      const error = yield* loadPreviewWebviewConfig(environmentId, undefined, undefined, {
+      const error = yield* loadPreviewWebviewConfig(environmentId, undefined, undefined, false, {
         getPreviewConfig: () => Promise.reject(cause),
       }).pipe(Effect.flip);
 
@@ -38,22 +42,22 @@ describe("loadPreviewWebviewConfig", () => {
     }),
   );
 
-  it.effect("forwards the environment id and profile to the bridge", () =>
+  it.effect("forwards the environment, managed profile, legacy scope and tunnel flag", () =>
     Effect.gen(function* () {
-      let requested: { environmentId: EnvironmentId; profileId: string | undefined } | null = null;
+      let requested: ReadonlyArray<unknown> = [];
       const config = {
         partition: "persist:test-preview",
         webPreferences: "sandbox=yes",
         preloadUrl: null,
       };
-      const result = yield* loadPreviewWebviewConfig(environmentId, "work", undefined, {
-        getPreviewConfig: (requestedEnvironmentId, profileId) => {
-          requested = { environmentId: requestedEnvironmentId, profileId };
+      const result = yield* loadPreviewWebviewConfig(environmentId, "work", "legacy-work", true, {
+        getPreviewConfig: (...args) => {
+          requested = args;
           return Promise.resolve(config);
         },
       });
 
-      expect(requested).toEqual({ environmentId, profileId: "work" });
+      expect(requested).toEqual([environmentId, "work", "legacy-work", true]);
       expect(result).toEqual(config);
     }),
   );

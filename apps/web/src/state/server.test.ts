@@ -53,9 +53,9 @@ function makeHarness(input: {
     primaryConfigAtom,
     environmentsAtom,
     keybindings: () => registry.get(keybindingsAtom),
-    cmdN: () =>
+    resolveShortcut: (key: string, shiftKey = false) =>
       resolveShortcutCommand(
-        { key: "n", metaKey: true, ctrlKey: false, shiftKey: false, altKey: false },
+        { key, metaKey: true, ctrlKey: false, shiftKey, altKey: false },
         registry.get(keybindingsAtom),
         { platform: "MacIntel" },
       ),
@@ -73,7 +73,8 @@ describe("createShortcutKeybindingsAtom", () => {
     const aConfig = config(STALE);
     const bConfig = config(SWAPPED);
     const edited = config([{ key: "mod+n", command: "sidebar.toggle" }]);
-    expect(harness.cmdN()).toBe("chat.new");
+    expect(harness.resolveShortcut("n")).toBeNull();
+    expect(harness.resolveShortcut("o", true)).toBe("chat.new");
 
     // One mounted consumer follows config loading, edits, disconnects and reconnects.
     for (const [a, b, command] of [
@@ -86,8 +87,8 @@ describe("createShortcutKeybindingsAtom", () => {
       ],
       [environment("connected", edited), environment("connected", bConfig), "sidebar.toggle"],
       [environment("offline", edited), environment("connected", bConfig), "chat.newLocal"],
-      [environment("offline", edited), environment("offline", bConfig), "chat.new"],
-      [environment("reconnecting", edited), environment("offline", bConfig), "chat.new"],
+      [environment("offline", edited), environment("offline", bConfig), null],
+      [environment("reconnecting", edited), environment("offline", bConfig), null],
       [
         environment("connected", aConfig),
         environment("offline", bConfig),
@@ -101,7 +102,8 @@ describe("createShortcutKeybindingsAtom", () => {
           [B, b],
         ]),
       );
-      expect(harness.cmdN()).toBe(command);
+      expect(harness.resolveShortcut("n")).toBe(command);
+      expect(harness.resolveShortcut("o", true)).toBe("chat.new");
     }
   });
 
@@ -109,18 +111,20 @@ describe("createShortcutKeybindingsAtom", () => {
     const harness = makeHarness({
       environments: [[B, environment("connected", config(SWAPPED))]],
     });
-    expect(harness.cmdN()).toBe("chat.newLocal");
+    expect(harness.resolveShortcut("n")).toBe("chat.newLocal");
 
     harness.registry.set(harness.primaryEnvironmentIdAtom, PRIMARY);
-    expect(harness.cmdN()).toBe("chat.new");
+    expect(harness.resolveShortcut("n")).toBeNull();
+    expect(harness.resolveShortcut("o", true)).toBe("chat.new");
 
     harness.registry.set(harness.primaryConfigAtom, config(STALE));
-    expect(harness.cmdN()).toBe("chat.newWithoutProject");
+    expect(harness.resolveShortcut("n")).toBe("chat.newWithoutProject");
 
     harness.registry.set(harness.primaryConfigAtom, null);
-    expect(harness.cmdN()).toBe("chat.new");
+    expect(harness.resolveShortcut("n")).toBeNull();
+    expect(harness.resolveShortcut("o", true)).toBe("chat.new");
 
     harness.registry.set(harness.primaryEnvironmentIdAtom, null);
-    expect(harness.cmdN()).toBe("chat.newLocal");
+    expect(harness.resolveShortcut("n")).toBe("chat.newLocal");
   });
 });

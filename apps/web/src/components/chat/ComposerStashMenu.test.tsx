@@ -1,8 +1,14 @@
-import { renderToStaticMarkup } from "react-dom/server";
+import type { ReactNode } from "react";
+import { renderToStaticMarkup as renderMarkup } from "react-dom/server";
 import { EnvironmentId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
+import { withTestI18n } from "../../../test/unitI18n";
 import { ComposerStashMenu } from "./ComposerStashMenu";
+
+function renderToStaticMarkup(node: ReactNode): string {
+  return renderMarkup(withTestI18n(node));
+}
 
 describe("ComposerStashMenu", () => {
   it("shows saved image thumbnails and incomplete image states", () => {

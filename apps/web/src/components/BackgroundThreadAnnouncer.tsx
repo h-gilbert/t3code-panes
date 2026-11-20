@@ -8,7 +8,9 @@ import { useComposerDraftStore } from "../composerDraftStore";
 import { createLiveRegion } from "../hooks/useLiveRegion";
 import { liveShellEnvironmentIdsAtom } from "../state/shell";
 import { environmentThreadShells } from "../state/threads";
-import { resolveActiveThreadRouteRef, resolveThreadRouteTarget } from "../threadRoutes";
+import { resolveActiveThreadRouteRef } from "../threadRoutes";
+import { readCurrentWorkspaceTarget } from "../lib/currentWorkspaceTarget";
+import { useWorkspacePaneStore } from "../workspacePaneStore";
 import {
   type BackgroundThreadMemory,
   type BackgroundThreadSnapshot,
@@ -19,12 +21,18 @@ import {
 const backgroundThreadLiveRegion = createLiveRegion();
 
 function readOpenThreadKey(router: AnyRouter): string | null {
-  const target = resolveThreadRouteTarget(router.state.matches.at(-1)?.params ?? {});
+  const target = readCurrentWorkspaceTarget(router);
   const draft =
     target?.kind === "draft"
       ? useComposerDraftStore.getState().getDraftSession(target.draftId)
       : null;
-  const ref = resolveActiveThreadRouteRef(target, draft);
+  const ref = resolveActiveThreadRouteRef(
+    target,
+    draft,
+    target?.kind === "draft"
+      ? useComposerDraftStore.getState().getPromotedDraftRedirect(target.draftId)
+      : null,
+  );
   return ref === null ? null : scopedThreadKey(ref);
 }
 
@@ -73,6 +81,7 @@ export function startBackgroundThreadAnnouncements(
     registry.subscribe(liveShellEnvironmentIdsAtom, update),
     router.subscribe("onResolved", updateOpenThread),
     useComposerDraftStore.subscribe(updateOpenThread),
+    useWorkspacePaneStore.subscribe(updateOpenThread),
   ];
   update();
   return () => {

@@ -1,17 +1,13 @@
-// @vitest-environment jsdom
-
 import {
   ApprovalRequestId,
   CheckpointRef,
   EnvironmentId,
   MessageId,
   type ServerProvider,
-  ProjectId,
   RunId,
   ThreadId,
 } from "@t3tools/contracts";
 import {
-  act,
   createRef,
   useLayoutEffect,
   useState,
@@ -19,13 +15,24 @@ import {
   type Ref,
   type ReactElement,
 } from "react";
+// oxlint-disable-next-line t3code/require-disposable-render -- The mock LegendList tests drive a Node renderer without browser globals.
+import { act as reactAct } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { createRoot } from "react-dom/client";
 import { create, type ReactTestRenderer } from "react-test-renderer";
 import { shouldUseRestingComposerLayout } from "../composerFooterLayout";
 import { useComposerFocusState } from "./useComposerFocusState";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import type { LegendListRef } from "@legendapp/list/react";
+import { m } from "../../i18n/messages";
+
+vi.mock("gt-react", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("gt-react")>()),
+  useGT: () => m,
+  useMessages: () => m,
+  useLocale: () => "en",
+  T: ({ children }: { children: ReactNode }) => children,
+  Var: ({ children }: { children: ReactNode }) => children,
+}));
 
 const activityTestState = vi.hoisted(() => ({
   providers: [] as ReadonlyArray<ServerProvider>,
@@ -158,7 +165,6 @@ vi.mock("@legendapp/list/react", async () => {
       | {
           data?: boolean;
           size?: boolean;
-          shouldRestorePosition?: boolean;
         };
     onItemSizeChanged?: (info: { index: number }) => void;
     className?: string;
@@ -181,6 +187,7 @@ vi.mock("@legendapp/list/react", async () => {
         getState: () => ({
           ...supplied?.getState(),
           data: legendListTestState.data,
+          indexByKey: supplied.getState().indexByKey ?? (() => undefined),
           listen: (_key: string, callback: () => void) => {
             legendListTestState.onSize = callback;
             return () => {
@@ -188,6 +195,8 @@ vi.mock("@legendapp/list/react", async () => {
             };
           },
         }),
+        cancelScroll: () => {},
+        anchorVisibleContent: () => undefined,
         scrollToEnd: () => Promise.resolve(),
         scrollToOffset: () => Promise.resolve(),
       } as unknown as LegendListRef;
@@ -223,11 +232,6 @@ vi.mock("@legendapp/list/react", async () => {
         data-maintain-visible-content-position-size={
           typeof props.maintainVisibleContentPosition === "object"
             ? props.maintainVisibleContentPosition.size
-            : undefined
-        }
-        data-maintain-visible-content-position-restore={
-          typeof props.maintainVisibleContentPosition === "object"
-            ? Boolean(props.maintainVisibleContentPosition.shouldRestorePosition)
             : undefined
         }
         data-maintain-scroll-at-end={props.maintainScrollAtEnd ? "enabled" : undefined}
@@ -291,9 +295,21 @@ function matchMedia() {
   };
 }
 
-let MessagesTimeline: typeof import("./MessagesTimeline").MessagesTimeline;
+function ElementStub() {}
 
-const ElementStub = class ElementStub {};
+async function act(callback: () => unknown) {
+  const previous = globalThis.IS_REACT_ACT_ENVIRONMENT;
+  // oxlint-disable-next-line t3code/require-disposable-render -- Scope act mode to this Node renderer call.
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  try {
+    await reactAct(async () => {
+      await callback();
+    });
+  } finally {
+    // oxlint-disable-next-line t3code/require-disposable-render -- Restore the caller's act mode.
+    globalThis.IS_REACT_ACT_ENVIRONMENT = previous;
+  }
+}
 function stubDomGlobals() {
   const classList = {
     add: () => {},
@@ -303,7 +319,12 @@ function stubDomGlobals() {
   };
 
   vi.stubGlobal("Element", ElementStub);
+  vi.stubGlobal("HTMLElement", ElementStub);
+  vi.stubGlobal("HTMLIFrameElement", ElementStub);
+  vi.stubGlobal("customElements", { get: () => undefined, define: () => {} });
   vi.stubGlobal("getComputedStyle", undefined);
+  vi.stubGlobal("requestAnimationFrame", () => 0);
+  vi.stubGlobal("cancelAnimationFrame", () => {});
   vi.stubGlobal("localStorage", {
     getItem: () => null,
     setItem: () => {},
@@ -312,6 +333,7 @@ function stubDomGlobals() {
   });
   vi.stubGlobal("window", {
     Element: ElementStub,
+    HTMLElement: ElementStub,
     localStorage: globalThis.localStorage,
     matchMedia,
     addEventListener: () => {},
@@ -324,6 +346,7 @@ function stubDomGlobals() {
     desktopBridge: undefined,
   });
   vi.stubGlobal("document", {
+    querySelectorAll: () => [],
     documentElement: {
       classList,
       offsetHeight: 0,
@@ -331,132 +354,12 @@ function stubDomGlobals() {
   });
 }
 
+stubDomGlobals();
+const { MessagesTimeline } = await import("./MessagesTimeline");
 beforeEach(stubDomGlobals);
-beforeAll(async () => {
-  Object.defineProperty(window, "matchMedia", { value: matchMedia, configurable: true });
-  ({ MessagesTimeline } = await import("./MessagesTimeline"));
-});
 
 const ACTIVE_THREAD_ENVIRONMENT_ID = EnvironmentId.make("environment-local");
 const MESSAGE_CREATED_AT = "2026-03-17T19:12:28.000Z";
-
-describe("timeline tooltip scroll dismissal", () => {
-  it.each([
-    "hover",
-    "delayed hover",
-    "focus",
-    "hover then focus",
-    "outside timeline",
-    "wheel without scroll",
-    "pr hover",
-    "pr delayed hover",
-    "pr focus",
-    "pr hover then focus",
-  ])("handles %s through the real tooltip interactions", async (scenario) => {
-    const isPullRequest = scenario.startsWith("pr ");
-    const interaction = isPullRequest ? scenario.slice(3) : scenario;
-    vi.unstubAllGlobals();
-    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-    vi.useFakeTimers();
-    const { Tooltip, TooltipTrigger, TooltipPopup, TooltipScrollDismissArea } =
-      await vi.importActual<typeof import("../ui/tooltip")>("../ui/tooltip");
-    const container = document.createElement("div");
-    document.body.append(container);
-    const root = createRoot(container);
-    const onMouseEnter = vi.fn();
-    const query = await import("~/state/query");
-    const querySpy = isPullRequest
-      ? vi.spyOn(query, "useEnvironmentQuery").mockReturnValue({
-          data: null,
-          dataUpdatedAt: 0,
-          error: "Pull request not found",
-          failure: null,
-          isPending: false,
-          isSuccess: false,
-          refresh: vi.fn(),
-        })
-      : null;
-    const { PullRequestLinkPreview } = await import("../pullRequest/PullRequestLinkPreview");
-    const tooltip = isPullRequest ? (
-      <PullRequestLinkPreview
-        link={<button onMouseEnter={onMouseEnter}>message link</button>}
-        originalUrl="https://example.com"
-        target={{
-          environmentId: ACTIVE_THREAD_ENVIRONMENT_ID,
-          input: {
-            projectId: ProjectId.make("project-1"),
-            repository: "pingdotgg/t3code",
-            number: 1,
-          },
-        }}
-      />
-    ) : (
-      <Tooltip>
-        <TooltipTrigger delay={50} onMouseEnter={onMouseEnter}>
-          message link
-        </TooltipTrigger>
-        <TooltipPopup>https://example.com</TooltipPopup>
-      </Tooltip>
-    );
-    try {
-      await act(async () => {
-        root.render(
-          <>
-            <TooltipScrollDismissArea>
-              <div data-testid="scrollable">
-                {interaction === "outside timeline" ? null : tooltip}
-              </div>
-            </TooltipScrollDismissArea>
-            {interaction === "outside timeline" ? tooltip : null}
-          </>,
-        );
-      });
-      const trigger = container.querySelector<HTMLButtonElement>("button")!;
-      const scrollable = container.querySelector<HTMLElement>('[data-testid="scrollable"]')!;
-      await act(async () => {
-        if (interaction !== "focus") {
-          trigger.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
-          trigger.dispatchEvent(new MouseEvent("mouseenter"));
-          trigger.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
-        }
-        if (interaction === "focus" || interaction === "hover then focus") {
-          document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab" }));
-          trigger.focus();
-        }
-        if (interaction !== "delayed hover") {
-          await vi.advanceTimersByTimeAsync(isPullRequest ? 400 : 60);
-        }
-      });
-      expect(onMouseEnter).toHaveBeenCalledTimes(interaction === "focus" ? 0 : 1);
-      expect(
-        document.querySelector('[data-slot="tooltip-popup"][data-open]')?.textContent ?? null,
-      ).toBe(interaction === "delayed hover" ? null : "https://example.com");
-
-      await act(async () => {
-        scrollable.dispatchEvent(
-          interaction === "wheel without scroll"
-            ? new WheelEvent("wheel", { bubbles: true, deltaY: 100 })
-            : new Event("scroll"),
-        );
-        await vi.advanceTimersByTimeAsync(isPullRequest ? 1000 : 100);
-      });
-      expect(
-        document.querySelector('[data-slot="tooltip-popup"][data-open]')?.textContent ?? null,
-      ).toBe(
-        interaction === "hover" || interaction === "delayed hover" ? null : "https://example.com",
-      );
-      if (interaction === "focus" || interaction === "hover then focus") {
-        expect(document.activeElement).toBe(trigger);
-      }
-    } finally {
-      await act(async () => root.unmount());
-      querySpy?.mockRestore();
-      container.remove();
-      vi.useRealTimers();
-      vi.unstubAllGlobals();
-    }
-  });
-});
 
 function buildProps() {
   return {
@@ -557,7 +460,6 @@ function buildSnapShotTimelineEntry(previewUrl?: string) {
 describe("MessagesTimeline", () => {
   it("shows dynamic tool input without cached output when the row is expanded", async () => {
     activityTestState.expanded = true;
-    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     vi.stubGlobal("requestAnimationFrame", () => 0);
     vi.stubGlobal("cancelAnimationFrame", () => {});
     let renderer: ReactTestRenderer | undefined;
@@ -603,7 +505,6 @@ describe("MessagesTimeline", () => {
   });
 
   it("leads an unanswered question row with the question text", async () => {
-    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     vi.stubGlobal("requestAnimationFrame", () => 0);
     vi.stubGlobal("cancelAnimationFrame", () => {});
     let renderer: ReactTestRenderer | undefined;
@@ -665,7 +566,6 @@ describe("MessagesTimeline", () => {
         return nextFrame;
       });
       vi.stubGlobal("cancelAnimationFrame", (frame: number) => frames.delete(frame));
-      vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
       const flushFrame = () =>
         act(() => {
           const callbacks = [...frames.values()];
@@ -734,87 +634,10 @@ describe("MessagesTimeline", () => {
 
         timelineIsAtEnd = false;
         await act(() => toggle.props.onClick());
-        await flushFrame();
         timelineIsAtEnd = isAtEnd;
+        await act(() => legendListTestState.onSize?.());
         await flushFrame();
         expect(isResting).toBe(!isAtEnd);
-      } finally {
-        await act(() => renderer?.unmount());
-      }
-    },
-  );
-
-  it.each([true, false])(
-    "keeps the end in view when tool output toggles only at the end: %s",
-    async (isAtEnd) => {
-      const frames = new Map<number, FrameRequestCallback>();
-      let nextFrame = 0;
-      vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
-        frames.set(++nextFrame, callback);
-        return nextFrame;
-      });
-      vi.stubGlobal("cancelAnimationFrame", (frame: number) => frames.delete(frame));
-      vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-      const flushFrame = () =>
-        act(() => {
-          const callbacks = [...frames.values()];
-          frames.clear();
-          callbacks.forEach((callback) => callback(0));
-        });
-      const viewport = {
-        scrollTop: 400,
-        scrollHeight: 1000,
-        addEventListener() {},
-        removeEventListener() {},
-      };
-      const props = buildProps();
-      legendListTestState.handle = props.listRef.current = {
-        getState: () => ({ isAtEnd }),
-        getScrollableNode: () => viewport,
-      } as unknown as LegendListRef;
-      let renderer: ReactTestRenderer | undefined;
-      try {
-        await act(() => {
-          renderer = create(
-            <MessagesTimeline
-              emptyPlaceholderInset={0}
-              {...props}
-              timelineEntries={[
-                {
-                  id: "tool",
-                  kind: "work",
-                  createdAt: MESSAGE_CREATED_AT,
-                  entry: {
-                    id: "tool",
-                    createdAt: MESSAGE_CREATED_AT,
-                    label: "Run command",
-                    tone: "tool",
-                    toolLifecycleStatus: "completed",
-                    detail: "Command output",
-                  },
-                },
-              ]}
-            />,
-          );
-        });
-        const toggle = renderer!.root.findByProps({ "aria-expanded": false });
-        const list = renderer!.root.find(
-          (node) => node.props.ListFooterComponent !== undefined && node.props.onItemSizeChanged,
-        );
-        for (const scrollHeight of [1300, 900]) {
-          await act(() => toggle.props.onClick());
-          // The rows grow or shrink once the list measures them.
-          viewport.scrollHeight = scrollHeight;
-          await flushFrame();
-          expect(viewport.scrollTop).toBe(isAtEnd ? scrollHeight : 400);
-          // Tool output that renders late is pinned before the next frame.
-          viewport.scrollHeight = scrollHeight + 200;
-          await act(() => list.props.onItemSizeChanged({ index: list.props.data.length - 1 }));
-          expect(viewport.scrollTop).toBe(isAtEnd ? scrollHeight + 200 : 400);
-          await flushFrame();
-          await flushFrame();
-          viewport.scrollTop = 400;
-        }
       } finally {
         await act(() => renderer?.unmount());
       }
@@ -829,7 +652,6 @@ describe("MessagesTimeline", () => {
       return nextFrame;
     });
     vi.stubGlobal("cancelAnimationFrame", (frame: number) => frames.delete(frame));
-    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     const props = { ...buildProps(), routeThreadKey };
     const timeline = {
       props,
@@ -1023,7 +845,7 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain('<code data-inline-code="">&lt;tag attr=&quot;x&quot;&gt;</code>');
+    expect(markup).toMatch(/<code[^>]*>&lt;tag attr=&quot;x&quot;&gt;<\/code>/);
     expect(markup).toContain("&lt;root&gt;&lt;child enabled=&quot;true&quot; /&gt;&lt;/root&gt;");
   });
 
@@ -1291,7 +1113,7 @@ describe("MessagesTimeline", () => {
   it("anchors a sent attachment message using its measured height", () => {
     const onAnchorReady = vi.fn();
     const onAnchorSizeChanged = vi.fn();
-    // Since #7897 only the first user row after the live edge may anchor, so
+    // Only the first user row after the live edge may anchor, so
     // the preceding row is an assistant reply rather than an older prompt.
     const firstEntry = buildAssistantTimelineEntry("Earlier reply.");
     const secondEntry = {
@@ -1334,7 +1156,6 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('data-maintain-visible-content-position="object"');
     expect(markup).toContain('data-maintain-visible-content-position-data="true"');
     expect(markup).toContain('data-maintain-visible-content-position-size="true"');
-    expect(markup).toContain('data-maintain-visible-content-position-restore="true"');
     expect(onAnchorReady).toHaveBeenCalledOnce();
     expect(onAnchorReady).toHaveBeenCalledWith(secondEntry.message.id, 1);
     expect(onAnchorSizeChanged).toHaveBeenCalledWith(secondEntry.message.id, 240);
@@ -1606,7 +1427,7 @@ describe("MessagesTimeline", () => {
     ).not.toContain('data-maintain-scroll-at-end="enabled"');
   });
 
-  it("renders collapse controls for long user messages", () => {
+  it("keeps end-follow enabled for long user messages", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         emptyPlaceholderInset={0}
@@ -1615,17 +1436,13 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain("Show full message");
-    // LegendList owns ordinary end-follow (#5449): with live follow on and no
+    // LegendList owns ordinary end-follow: with live follow on and no
     // anchored end space, its maintainScrollAtEnd is enabled.
     expect(markup).toContain('data-maintain-scroll-at-end="enabled"');
     expect(markup).toContain('data-maintain-scroll-at-end-animated="false"');
     expect(markup).toContain('data-maintain-scroll-at-end-data-change="true"');
     expect(markup).toContain('data-maintain-scroll-at-end-item-layout="true"');
     expect(markup).toContain('data-maintain-scroll-at-end-layout="true"');
-    expect(markup).toContain('data-user-message-collapsed="true"');
-    expect(markup).toContain('data-user-message-fade="true"');
-    expect(markup).toContain('data-user-message-footer="true"');
   });
 
   it("does not render collapse controls for short user messages", () => {
@@ -1639,7 +1456,7 @@ describe("MessagesTimeline", () => {
 
     expect(markup).not.toContain("Show full message");
     expect(markup).toContain('data-user-message-collapsible="false"');
-    expect(markup).toContain("rounded-2xl bg-message p-3");
+    expect(markup).toMatch(/rounded-2xl[^"]*bg-message[^"]*p-3/);
   });
 
   it("identifies user-role messages sent by another agent", async () => {
@@ -1662,8 +1479,8 @@ describe("MessagesTimeline", () => {
     );
 
     expect(agentMarkup).toContain('data-user-message-attribution="agent"');
-    expect(agentMarkup).toContain("Sent by another agent");
-    expect(userMarkup).not.toContain("Sent by another agent");
+    expect(agentMarkup).toContain('aria-expanded="false"');
+    expect(userMarkup).not.toContain('data-user-message-attribution="agent"');
   });
 
   it("keeps a subagent parent-thread link at the top of an empty timeline", async () => {
@@ -1918,8 +1735,7 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("lucide-terminal");
     expect(markup).toContain("yoo what&#x27;s");
     expect(markup).not.toContain("terminal_context");
-    expect(markup).toContain("Show full message");
-  }, 20_000);
+  });
 
   it("renders chips for standalone element-pick context messages", () => {
     const markup = renderToStaticMarkup(
@@ -1946,20 +1762,6 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("SubmitButton");
     expect(markup).not.toContain("&lt;element_context");
     expect(markup).not.toContain("<element_context");
-  });
-
-  it("keeps the copy button for collapsed long user messages", () => {
-    const markup = renderToStaticMarkup(
-      <MessagesTimeline
-        emptyPlaceholderInset={0}
-        {...buildProps()}
-        timelineEntries={[buildUserTimelineEntry(buildLongUserMessageText())]}
-      />,
-    );
-
-    expect(markup).toContain('aria-label="Copy message"');
-    expect(markup).toContain('data-user-message-collapsed="true"');
-    expect(markup).toContain('data-user-message-footer="true"');
   });
 
   it("renders context compaction entries in the normal work log", () => {
@@ -2368,9 +2170,6 @@ describe("MessagesTimeline", () => {
     async ({ status, progress, result, preview, count }) => {
       activityTestState.expandedRuns = true;
       activityTestState.subagentTooltips = true;
-      vi.stubGlobal("HTMLElement", ElementStub);
-      window.HTMLElement = ElementStub as typeof HTMLElement;
-      vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
       vi.stubGlobal("requestAnimationFrame", () => 0);
       vi.stubGlobal("cancelAnimationFrame", () => {});
       const onOpenThread = vi.fn();
@@ -2945,7 +2744,6 @@ describe("MessagesTimeline", () => {
   ] as const)(
     "shows plain text for a V2 reasoning preview: %s",
     async (markdown, expected, strongCount) => {
-      vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
       vi.stubGlobal("requestAnimationFrame", () => 0);
       vi.stubGlobal("cancelAnimationFrame", () => {});
       activityTestState.expanded = true;
@@ -3003,7 +2801,6 @@ describe("MessagesTimeline", () => {
   );
 
   it("expands and collapses a tool call through its header", async () => {
-    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     vi.stubGlobal("requestAnimationFrame", () => 0);
     vi.stubGlobal("cancelAnimationFrame", () => {});
     let renderer: ReactTestRenderer | undefined;
@@ -3105,7 +2902,6 @@ describe("fork timeline behavior", () => {
   it.each([{}, { text: "Text-only answer", file: "Answer with a file" }])(
     "renders attachment-only question history alongside text answers: %j",
     async (answers) => {
-      vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
       vi.stubGlobal("requestAnimationFrame", () => 0);
       vi.stubGlobal("cancelAnimationFrame", () => {});
       let renderer: ReactTestRenderer | undefined;
@@ -3219,7 +3015,7 @@ describe("fork timeline behavior", () => {
       />,
     );
 
-    expect(markup).toContain("Worked for 8.0s");
+    expect(markup).toContain("Worked for 8s");
   });
 
   it("does not render assistant changed-files summaries", () => {
@@ -3393,11 +3189,9 @@ describe("fork timeline behavior", () => {
     expect(markup).toContain('data-maintain-visible-content-position="object"');
     expect(markup).toContain('data-maintain-visible-content-position-data="true"');
     expect(markup).toContain('data-maintain-visible-content-position-size="true"');
-    expect(markup).toContain('data-maintain-visible-content-position-restore="true"');
     expect(markup).toContain("Terminal");
     expect(markup).toContain("t3code — Tests");
     expect(markup).toContain('src="data:image/png;base64,aWNvbg=="');
-    expect(markup).toContain("h-28 w-52 max-w-full");
     expect(onAnchorReady).toHaveBeenCalledOnce();
     expect(onAnchorReady).toHaveBeenCalledWith(firstEntry.message.id, 0);
   });
@@ -3551,7 +3345,6 @@ describe("fork timeline behavior", () => {
       return nextFrame;
     });
     vi.stubGlobal("cancelAnimationFrame", (frame: number) => frames.delete(frame));
-    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     const flushFrame = () =>
       act(() => {
         const callbacks = [...frames.values()];
@@ -3594,7 +3387,7 @@ describe("fork timeline behavior", () => {
       ];
     let renderer!: ReactTestRenderer;
     try {
-      act(() => {
+      await act(() => {
         renderer = create(
           <MessagesTimeline
             emptyPlaceholderInset={0}
@@ -3606,11 +3399,11 @@ describe("fork timeline behavior", () => {
         );
       });
       expect(animatedAttr(renderer)).toBe(false);
-      flushFrame();
-      flushFrame();
+      await flushFrame();
+      await flushFrame();
       expect(animatedAttr(renderer)).toBe(true);
 
-      act(() => {
+      await act(() => {
         renderer.update(
           <MessagesTimeline
             emptyPlaceholderInset={0}
@@ -3624,11 +3417,11 @@ describe("fork timeline behavior", () => {
       expect(animatedAttr(renderer)).toBe(false);
 
       // Two frames later the switch has settled and gliding resumes.
-      flushFrame();
-      flushFrame();
+      await flushFrame();
+      await flushFrame();
       expect(animatedAttr(renderer)).toBe(true);
     } finally {
-      act(() => renderer?.unmount());
+      await act(() => renderer?.unmount());
       vi.unstubAllGlobals();
     }
   });

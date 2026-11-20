@@ -1,9 +1,17 @@
-import { SourceControlProviderKind } from "@t3tools/contracts";
+import {
+  DEFAULT_CLIENT_SETTINGS,
+  SourceControlProviderKind,
+  type ClientSettings,
+} from "@t3tools/contracts";
 import { EnvironmentId, ProjectId, type PullRequestDetailView } from "@t3tools/contracts";
 import { expect, it, vi } from "vite-plus/test";
-import { userEvent } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 
-const state = vi.hoisted(() => ({ update: vi.fn(), canUpdate: true }));
+const state = vi.hoisted(() => ({
+  update: vi.fn(),
+  canUpdate: true,
+  timestampFormat: "locale" as "locale" | "12-hour" | "24-hour",
+}));
 
 vi.mock(import("~/state/use-atom-command"), async (original) => ({
   ...(await original()),
@@ -13,6 +21,13 @@ vi.mock(import("~/state/session"), async (original) => ({
   ...(await original()),
   readEnvironmentScope: () => true,
   useEnvironmentScope: () => true,
+}));
+vi.mock(import("~/hooks/useSettings"), async (original) => ({
+  ...(await original()),
+  useClientSettings: ((select?: (settings: ClientSettings) => unknown) => {
+    const settings = { ...DEFAULT_CLIENT_SETTINGS, timestampFormat: state.timestampFormat };
+    return select ? select(settings) : settings;
+  }) as never,
 }));
 vi.mock(import("~/state/pullRequests"), async (original) => {
   const actual = await original();
@@ -35,6 +50,7 @@ function setup() {
   state.update.mockReset();
   state.update.mockResolvedValue({ _tag: "Success", value: undefined });
   state.canUpdate = true;
+  state.timestampFormat = "locale";
 }
 
 import { act, render as renderUi } from "../../../test/render";
@@ -92,8 +108,6 @@ const detail: PullRequestDetailView = {
   },
 };
 
-// The comment filter persists to localStorage, so tests that touch it start and end empty.
-
 const tab = (value = detail) => (
   <PullRequestSummaryTab
     scrollerRef={() => {}}
@@ -136,6 +150,11 @@ it("keeps an unsaved description when collapsed and reopened, and after a failed
   const textarea = screen.container.querySelector("textarea")!;
   await userEvent.clear(textarea);
   await userEvent.type(textarea, "Unsaved description");
+  await screen.click("Comments (0)");
+  expect(screen.expanded("Comments (0)")).toBe("false");
+  await screen.click("Comments (0)");
+  expect(screen.container.querySelector("textarea")!.value).toBe("Unsaved description");
+
   await screen.click("Description");
   expect(screen.expanded("Description")).toBe("false");
   await screen.click("Description");
@@ -186,4 +205,176 @@ it("leaves description checkboxes read-only without the right to edit it", async
   expect(screen.container.querySelector<HTMLInputElement>('input[type="checkbox"]')!.disabled).toBe(
     true,
   );
+});
+
+it("fixes an overview thread as its opening remark, since it has no line to attach", async () => {
+  setup();
+  const author = { login: "reviewer", name: null, avatarUrl: null };
+  const note = { author, createdAt: "2026-09-01T00:00:00Z", url: null };
+  const remark = {
+    ...note,
+    id: "10",
+    kind: "review-comment" as const,
+    body: "Mention the flag in the README",
+    path: null,
+    reviewState: null,
+  };
+  const onFixFinding = vi.fn();
+  const value: PullRequestDetailView = {
+    ...detail,
+    comments: [remark],
+    overviewThreads: [
+      {
+        id: "overview",
+        path: null,
+        line: null,
+        side: "right",
+        isResolved: false,
+        isOutdated: false,
+        comments: [{ ...note, id: "10", body: remark.body }],
+      },
+    ],
+  };
+  await using screen = await renderUi(
+    <PullRequestSummaryTab
+      scrollerRef={() => {}}
+      environmentId={EnvironmentId.make("environment")}
+      threadRef={null}
+      reference={value}
+      detail={value}
+      activityPending={false}
+      activityError={null}
+      onRefresh={() => {}}
+      onFixFinding={onFixFinding}
+      actionPending={false}
+      onCommentAction={async () => ({ commentPosted: false })}
+    />,
+  );
+
+  await userEvent.click(screen.getByRole("button", { name: "Fix in a thread" }));
+  expect(onFixFinding).toHaveBeenCalledWith({ kind: "comment", comment: remark });
+});
+
+it("shows a comment's exact time in the chosen 24-hour clock", async () => {
+  setup();
+  state.timestampFormat = "24-hour";
+  const createdAt = "2026-09-01T17:30:00Z";
+  const comment = {
+    id: "10",
+    kind: "review-comment" as const,
+    body: "A remark",
+    author: { login: "reviewer", name: null, avatarUrl: null },
+    createdAt,
+    url: null,
+    path: null,
+    reviewState: null,
+  };
+  await using screen = await render({ ...detail, comments: [comment], commentCount: 1 });
+
+  await userEvent.hover(screen.container.querySelector(`time[datetime="${createdAt}"]`)!);
+  const expected = new Date(createdAt).toLocaleString(undefined, { hour12: false });
+  await vi.waitFor(() =>
+    expect(document.querySelector('[data-slot="tooltip-popup"]')?.textContent).toBe(expected),
+  );
+});
+
+it("toggles checks and resets the expanded list for another pull request", async () => {
+  setup();
+  await using screen = await render();
+  const showChecks = screen.getByRole("button", { name: "Show checks" });
+  const unitTests = screen.getByText("Unit tests", { exact: true });
+  await expect.element(unitTests).not.toBeInTheDocument();
+
+  await screen.click("Checks");
+  await userEvent.click(showChecks);
+  await expect.element(unitTests).toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: "Hide checks" }));
+  await expect.element(showChecks).toHaveAttribute("aria-expanded", "false");
+  await expect.element(unitTests).not.toBeInTheDocument();
+
+  await userEvent.click(showChecks);
+  await screen.rerender(tab({ ...detail, url: "https://github.com/owner/repo/pull/2", number: 2 }));
+  expect(screen.expanded("Checks")).toBe("false");
+  await screen.click("Checks");
+  await expect.element(showChecks).toHaveAttribute("aria-expanded", "false");
+});
+
+it("hides bot and resolved comments until the filter shows them, and remembers the choice", async () => {
+  setup();
+  const filterKey = "t3code:pull-request-comment-filter:v1";
+  const previousFilter = localStorage.getItem(filterKey);
+  localStorage.removeItem(filterKey);
+  using _storage = {
+    [Symbol.dispose]: () =>
+      previousFilter === null
+        ? localStorage.removeItem(filterKey)
+        : localStorage.setItem(filterKey, previousFilter),
+  };
+  const comment = (index: number, login: string, body: string, isBot = false) => ({
+    id: `comment-${index}`,
+    kind: "issue-comment" as const,
+    author: { login, name: null, avatarUrl: null, isBot },
+    body,
+    createdAt: `2026-09-01T00:00:${String(index).padStart(2, "0")}Z`,
+    url: null,
+    path: null,
+    reviewState: null,
+  });
+  const resolved = {
+    ...comment(13, "reviewer", "Resolved remark"),
+    kind: "review-comment" as const,
+  };
+  const value: PullRequestDetailView = {
+    ...detail,
+    commentCount: 14,
+    comments: [
+      ...Array.from({ length: 12 }, (_, index) =>
+        comment(index, "review-app", `Bot report ${index}`, true),
+      ),
+      comment(12, "human", "Human comment"),
+      resolved,
+    ],
+    reviewThreads: [
+      {
+        id: "thread",
+        path: "src/index.ts",
+        line: 1,
+        side: "right",
+        isResolved: true,
+        isOutdated: false,
+        comments: [resolved],
+      },
+    ],
+  };
+
+  {
+    await using screen = await render(value);
+    const filter = screen.getByRole("button", { name: "Filter comments" });
+    const human = screen.getByText("Human comment", { exact: true });
+    const botReports = screen.getByText(/^Bot report \d+$/);
+    const oldestBotReport = screen.getByText("Bot report 0", { exact: true });
+    const resolvedThread = screen.getByRole("button", { name: "Resolved", exact: true });
+    await expect.element(human).toBeVisible();
+    await expect.element(botReports).not.toBeInTheDocument();
+    await expect.element(resolvedThread).not.toBeInTheDocument();
+    await expect.element(filter).toHaveTextContent("13 hidden");
+
+    await userEvent.click(filter);
+    await userEvent.click(page.getByRole("menuitemcheckbox", { name: "Bot comments" }));
+    await vi.waitFor(() => expect(botReports.all()).toHaveLength(9));
+    await expect.element(human).toBeVisible();
+    await expect.element(oldestBotReport).not.toBeInTheDocument();
+
+    await userEvent.click(page.getByRole("menuitemcheckbox", { name: "Resolved or dismissed" }));
+    await expect.element(resolvedThread).toBeVisible();
+    await userEvent.keyboard("{Escape}");
+  }
+
+  await using screen = await render({ ...value, url: `${value.url}0`, number: 10 });
+  await expect.element(screen.getByText("Bot report 11", { exact: true })).toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: "Filter comments" }));
+  await expect
+    .element(page.getByRole("menuitemcheckbox", { name: "Bot comments" }))
+    .toHaveAttribute("aria-checked", "true");
+  await userEvent.keyboard("{Escape}");
 });

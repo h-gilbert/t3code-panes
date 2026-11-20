@@ -4,7 +4,7 @@ import {
 } from "@t3tools/shared/markdownPipeline";
 import { renderToStaticMarkup } from "react-dom/server";
 import ReactMarkdown from "react-markdown";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { createIncrementalMarkdownPlugin } from "../../markdown-incremental";
 import { createMarkdownRenderer } from "./markdownRenderer";
@@ -45,9 +45,10 @@ describe("createMarkdownRenderer", () => {
         {source}
       </ReactMarkdown>,
     );
-    const element = render(source, true);
+    const { element, remember } = render(source);
     expect(renderToStaticMarkup(element)).toBe(expected);
-    expect(render(source, true)).toBe(element);
+    remember();
+    expect(renderToStaticMarkup(render(source).element)).toBe(expected);
   });
 
   it("renders what react-markdown renders while a reply streams through the incremental parser", () => {
@@ -62,8 +63,8 @@ describe("createMarkdownRenderer", () => {
         rehypePlugins: CHAT_MARKDOWN_REHYPE_PLUGINS,
         components: {},
         urlTransform,
-      })(source, false);
-      expect(renderToStaticMarkup(streamed)).toBe(
+      })(source);
+      expect(renderToStaticMarkup(streamed.element)).toBe(
         renderToStaticMarkup(
           <ReactMarkdown
             remarkPlugins={CHAT_MARKDOWN_REMARK_PLUGINS}
@@ -78,8 +79,19 @@ describe("createMarkdownRenderer", () => {
   });
 
   it("keeps cached messages when one far larger than the cache is rendered", () => {
-    const element = render("Kept *message*", true);
-    render("x".repeat(600_000), true);
-    expect(render("Kept *message*", true)).toBe(element);
+    const prepareTree = vi.fn();
+    const renderCached = createMarkdownRenderer({
+      remarkPlugins: CHAT_MARKDOWN_REMARK_PLUGINS,
+      rehypePlugins: [...CHAT_MARKDOWN_REHYPE_PLUGINS, () => prepareTree],
+      components: {},
+      urlTransform,
+    });
+    const first = renderCached("Kept *message*");
+    first.remember();
+    renderCached("x".repeat(600_000)).remember();
+    const cached = renderCached("Kept *message*");
+    expect(prepareTree).toHaveBeenCalledTimes(2);
+    expect(cached.element).not.toBe(first.element);
+    expect(renderToStaticMarkup(cached.element)).toBe(renderToStaticMarkup(first.element));
   });
 });

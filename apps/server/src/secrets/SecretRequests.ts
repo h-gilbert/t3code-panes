@@ -188,6 +188,12 @@ const make = Effect.gen(function* () {
     if (run === undefined || ThreadManagementService.isTerminalRunStatus(run.status)) {
       return yield* new SecretRequestError({ reason: "agent_stopped" });
     }
+    if (item.credential !== undefined && input.answer.type === "reference") {
+      return yield* new SecretRequestError({
+        reason: "store_failed",
+        detail: "Enter the value to save it as a reusable credential.",
+      });
+    }
     const secret =
       input.answer.type === "save"
         ? input.answer.secret
@@ -242,6 +248,7 @@ const make = Effect.gen(function* () {
         turnItemId: item.id,
         label: item.label,
         reason: item.reason,
+        ...(item.url === undefined ? {} : { url: item.url }),
         ...(item.placeholder === undefined ? {} : { placeholder: item.placeholder }),
         ...(item.delivery === undefined ? {} : { delivery: item.delivery }),
         ...(item.credential === undefined ? {} : { credential: item.credential }),

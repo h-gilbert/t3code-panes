@@ -8,7 +8,7 @@ export const AGENT_NOTIFICATION_POLICY = {
   notifyOnApproval: true,
   notifyOnInput: true,
   notifyOnCompletion: false,
-  notifyOnIosCompletion: true,
+  notifyOnIosCompletion: false,
   notifyOnFailure: true,
 } as const satisfies Pick<
   RelayDeviceRegistrationRequest["preferences"],
@@ -35,7 +35,10 @@ export function makeRelayDeviceRegistrationRequest(
     readonly notificationsEnabled: boolean;
   } & (
     | { readonly platform?: "ios"; readonly iosMajorVersion: number }
-    | { readonly platform: "android"; readonly androidApiLevel: number }
+    | {
+        readonly platform: "android";
+        readonly androidApiLevel: number;
+      }
   ),
 ): RelayDeviceRegistrationRequest {
   const pushAvailable = supportsAgentAwarenessPush();

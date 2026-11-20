@@ -16,7 +16,11 @@ import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environ
 import { type DesktopBridge, EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { DraftId, useComposerDraftStore } from "../../composerDraftStore";
+import {
+  DraftId,
+  hydrateImagesFromPersisted,
+  useComposerDraftStore,
+} from "../../composerDraftStore";
 import * as imageCompression from "../../lib/imageCompression";
 import {
   questionAttachmentDraftId,
@@ -171,6 +175,7 @@ describe("pending snapshot processing", () => {
     );
     const route = {
       preferredProjectRef: null,
+      defaultProjectFallbackReady: true,
       activeDraftThread: null,
       activeThread: null,
       defaultProjectRef: routeThreadRef ? projectRef : null,
@@ -600,6 +605,9 @@ describe("open question delivery", () => {
       expect(store.getComposerDraft(first)?.images.map(({ id }) => id)).toEqual([capture.id]);
       expect(store.getComposerDraft(threadRef)?.images ?? []).toHaveLength(0);
       expect(acknowledgeSnapShot).toHaveBeenCalledExactlyOnceWith(capture.id);
+      const repeat = hydrateImagesFromPersisted([{ ...capture, id: "repeat" }]);
+      expect(store.addImages(first, repeat)).toEqual([]);
+      expect(store.getComposerDraft(first)?.images.map(({ id }) => id)).toEqual([capture.id]);
     } finally {
       untrack();
     }

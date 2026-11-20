@@ -4,6 +4,7 @@ import {
   secretRequestAnswerInput,
   secretRequestDisplay,
   secretRequestFailureMessage,
+  secretRequestLink,
   secretRequestPrivacyNote,
   secretRequestReference,
   secretRequestSources,
@@ -22,7 +23,8 @@ import {
   type SecretProviderId,
 } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
-import { CheckIcon, LockIcon, MinusIcon, ShieldCheckIcon } from "lucide-react";
+import { T, useGT, useMessages, Var } from "gt-react";
+import { CheckIcon, ExternalLinkIcon, LockIcon, MinusIcon, ShieldCheckIcon } from "lucide-react";
 import { useId, useRef, useState, type FormEvent } from "react";
 
 import { isSecretsFeatureEnabled } from "../../env";
@@ -40,7 +42,8 @@ export function SecretRequestCard(props: {
   readonly visibility: OrchestrationV2ProjectedTurnItem["visibility"];
 }) {
   const { item } = props;
-  const display = secretRequestDisplay(item, props.visibility);
+  const messages = useMessages();
+  const display = secretRequestDisplay(item, props.visibility, messages);
   if (display.kind === "answered" || display.kind === "pending-elsewhere") {
     const Icon =
       display.kind === "pending-elsewhere"
@@ -67,8 +70,9 @@ const NO_SOURCES: ReadonlyArray<SecretRequestSource> = [];
 
 function useSecretRequestSources(environmentId: EnvironmentId) {
   const config = useAtomValue(serverEnvironment.configValueAtom(environmentId));
+  const messages = useMessages();
   return isSecretsFeatureEnabled
-    ? secretRequestSources(config, config?.settings.secretProviders ?? {})
+    ? secretRequestSources(config, config?.settings.secretProviders ?? {}, messages)
     : NO_SOURCES;
 }
 
@@ -77,7 +81,9 @@ function PendingSecretRequestForm(props: {
   readonly item: SecretRequestItem;
 }) {
   const { item } = props;
+  const gt = useGT();
   const canGrantEnvironment = useEnvironmentScope(props.environmentId, AuthAccessWriteScope);
+  const messages = useMessages();
   const inputId = useId();
   const errorId = useId();
   const privacyId = useId();
@@ -118,7 +124,11 @@ function PendingSecretRequestForm(props: {
       return;
     }
     if (!isAtomCommandInterrupted(result)) {
-      pipe(squashAtomCommandFailure(result), secretRequestFailureMessage, setError);
+      pipe(
+        squashAtomCommandFailure(result),
+        (failure) => secretRequestFailureMessage(failure, messages),
+        setError,
+      );
     }
   };
 
@@ -139,6 +149,7 @@ function PendingSecretRequestForm(props: {
     }
   };
   const draft = source === null ? secret : reference;
+  const link = secretRequestLink(item);
   const describedBy = error !== null ? `${privacyId} ${errorId}` : privacyId;
 
   return (
@@ -165,6 +176,24 @@ function PendingSecretRequestForm(props: {
           <p className="text-sm wrap-anywhere text-muted-foreground">{item.reason}</p>
         ) : null}
       </div>
+      {link !== null ? (
+        <div className="flex min-w-0 flex-col items-start gap-1.5">
+          <Button
+            variant="outline"
+            size="sm"
+            render={<a href={link.href} target="_blank" rel="noopener noreferrer" />}
+          >
+            <T>
+              Open <Var>{link.host}</Var>
+            </T>
+            <ExternalLinkIcon aria-hidden />
+          </Button>
+          {/* A link found in the reason is already shown there. */}
+          {item.url !== undefined ? (
+            <p className="font-mono text-xs wrap-anywhere text-muted-foreground">{item.url}</p>
+          ) : null}
+        </div>
+      ) : null}
       {item.credential !== undefined ? (
         <div className="flex flex-col gap-2">
           <p className="text-xs text-muted-foreground">
@@ -173,7 +202,7 @@ function PendingSecretRequestForm(props: {
           </p>
           {item.credential.kind === "login" ? (
             <label className="flex flex-col gap-1 text-sm">
-              Username or email
+              <T>Username or email</T>
               <Input
                 autoComplete="username"
                 value={username}
@@ -192,14 +221,19 @@ function PendingSecretRequestForm(props: {
                   setScope(event.currentTarget.checked ? "environment" : "project")
                 }
               />
-              Allow reuse by all projects
+              <T>Allow reuse by all projects</T>
             </label>
           ) : null}
           <p className="text-xs text-muted-foreground">
-            {scope === "project"
-              ? "Only agents in this project can reuse it."
-              : "Agents in any project can reuse it, including on machines that share this browser host."}{" "}
-            Replace or revoke it in Settings → Sharing & access → Credentials.
+            {scope === "project" ? (
+              <T>Only agents in this project can reuse it.</T>
+            ) : (
+              <T>
+                Agents in any project can reuse it, including on machines that share this browser
+                host.
+              </T>
+            )}{" "}
+            <T>Replace or revoke it in Settings → Sharing &amp; access → Credentials.</T>
           </p>
         </div>
       ) : null}
@@ -232,8 +266,8 @@ function PendingSecretRequestForm(props: {
               placeholder={
                 item.placeholder ??
                 (item.credential?.kind === "login"
-                  ? "Password"
-                  : SECRET_REQUEST_DEFAULT_PLACEHOLDER)
+                  ? gt("Password")
+                  : messages(SECRET_REQUEST_DEFAULT_PLACEHOLDER))
               }
               value={secret}
               disabled={submitting}
@@ -270,7 +304,7 @@ function PendingSecretRequestForm(props: {
             (source === null && item.credential?.kind === "login" && username.trim().length === 0)
           }
         >
-          Save securely
+          <T>Save securely</T>
         </Button>
       </div>
       {error !== null ? (
@@ -284,7 +318,7 @@ function PendingSecretRequestForm(props: {
           className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
         >
           <ShieldCheckIcon className="size-3.5 shrink-0" aria-hidden />
-          {secretRequestPrivacyNote(item)}
+          {secretRequestPrivacyNote(item, messages)}
         </p>
         <Button
           type="button"
@@ -293,7 +327,7 @@ function PendingSecretRequestForm(props: {
           disabled={submitting}
           onClick={() => void send({ type: "decline" })}
         >
-          Decline
+          <T>Decline</T>
         </Button>
       </div>
     </form>

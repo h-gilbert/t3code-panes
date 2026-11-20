@@ -52,7 +52,7 @@ describe("discoverFxSkills", () => {
           "home-claude",
         ],
       );
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+    }).pipe(Effect.provide(NodeServices.layer)),
   );
 
   // For `$review` with two skills of exactly that name, fx's model loads the
@@ -147,19 +147,20 @@ describe("discoverFxSkills", () => {
 
       const skills = yield* discoverFxSkills({ cwd: workspace, environment: { HOME: home } });
 
+      const realHome = yield* fileSystem.realPath(home);
       assert.deepEqual(
         skills.map((skill) => [skill.name, skill.path]),
         [
-          ["été", path.join(home, ".fx/skills/accent-lower/SKILL.md")],
-          ["Été", path.join(home, ".fx/skills/accent-upper/SKILL.md")],
-          ["bom-folder", path.join(home, ".fx/skills/bom-folder/SKILL.md")],
-          ["plain", path.join(home, ".fx/skills/plain/SKILL.md")],
-          ["replacement", path.join(home, ".fx/skills/replacement/SKILL.md")],
-          ["review", path.join(workspace, ".fx/skills/review/SKILL.md")],
-          ["Review", path.join(home, ".claude/skills/review/SKILL.md")],
+          ["été", path.join(realHome, ".fx/skills/accent-lower/SKILL.md")],
+          ["Été", path.join(realHome, ".fx/skills/accent-upper/SKILL.md")],
+          ["bom-folder", path.join(realHome, ".fx/skills/bom-folder/SKILL.md")],
+          ["plain", path.join(realHome, ".fx/skills/plain/SKILL.md")],
+          ["replacement", path.join(realHome, ".fx/skills/replacement/SKILL.md")],
+          ["review", path.join(realHome, "app/.fx/skills/review/SKILL.md")],
+          ["Review", path.join(realHome, ".claude/skills/review/SKILL.md")],
         ],
       );
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+    }).pipe(Effect.provide(NodeServices.layer)),
   );
 
   // Nix home-manager and dotfile setups link ~/.fx/skills; fx then loads
@@ -185,8 +186,14 @@ describe("discoverFxSkills", () => {
         path.join(home, ".fx/skills"),
       );
 
+      const aliasRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-fx-skills-alias-",
+      });
+      const alias = path.join(aliasRoot, "home");
+      yield* fileSystem.symlink(home, alias);
+
       const skills = yield* discoverFxSkills({
-        cwd: path.join(home, "app"),
+        cwd: path.join(alias, "missing-app"),
         environment: { HOME: home },
       });
 
@@ -194,6 +201,6 @@ describe("discoverFxSkills", () => {
         skills.map((skill) => skill.name),
         ["compat"],
       );
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+    }).pipe(Effect.provide(NodeServices.layer)),
   );
 });

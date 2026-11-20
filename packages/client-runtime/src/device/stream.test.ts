@@ -439,14 +439,13 @@ describe("shared device stream readiness and recovery", () => {
     expect(sockets.map((socket) => socket.url)).toEqual([
       "wss://test/api/device-hub/vendor/serve-sim/helper/ws?device=test-device",
     ]);
-    // Simlock adds meta (5), keep-alive (6), and lease-end (7) frames to serve-sim's envelopes.
+    // Simlock adds metadata (5) and keep-alive (6) frames to serve-sim's envelopes.
     videoBodies[0]!.enqueue(
       new Uint8Array([
         ...envelope(5, [0x7b, 0x7d]),
         ...envelope(1, [1, 0x64, 0, 0x1f]),
         ...envelope(6, []),
         ...envelope(2, [2]),
-        ...envelope(7, [0x7b, 0x7d]),
       ]),
     );
     await vi.advanceTimersByTimeAsync(0);
@@ -473,6 +472,32 @@ describe("shared device stream readiness and recovery", () => {
     ]);
     client.stop();
   });
+
+  it.each(["video", "input"] as const)(
+    "stops retrying when Simlock reports the lease ended over %s",
+    async (transport) => {
+      const { client, events, fetch, sockets, videoBodies } = recoveryFixture(
+        "ios",
+        false,
+        false,
+        true,
+      );
+      client.start();
+      await vi.advanceTimersByTimeAsync(0);
+      if (transport === "video") {
+        const reason = [...new TextEncoder().encode('{"reason":"expired"}')];
+        videoBodies[0]!.enqueue(new Uint8Array(envelope(7, reason)));
+      } else {
+        sockets[0]!.onclose?.({ code: 4001, reason: "expired" });
+      }
+      await vi.advanceTimersByTimeAsync(0);
+      expect(events.onStatus).toHaveBeenLastCalledWith("error", expect.stringContaining("expired"));
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(fetch.mock.calls.filter(([url]) => url.includes("stream.avcc"))).toHaveLength(1);
+      expect(sockets).toHaveLength(1);
+      client.stop();
+    },
+  );
 
   it("does not repaint a delayed JPEG seed over newer decoded video", async () => {
     const { client, videoBodies, drawImage, decodedFrame } = recoveryFixture("ios", false);

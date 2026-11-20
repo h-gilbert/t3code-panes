@@ -2,13 +2,14 @@ import { requestUrl } from "../requestUrl.ts";
 // Loopback-only hubs expose shell execution or unauthenticated actions.
 // Proxy with environment read scope for streams and operate scope for input and tuning.
 import {
-  DeviceId,
+  LOCAL_DEVICE_HOST_ID,
   AuthOrchestrationReadScope,
   AuthOrchestrationOperateScope,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Stream from "effect/Stream";
 import {
   HttpClient,
   HttpClientRequest,
@@ -18,9 +19,11 @@ import {
   HttpServerResponse,
 } from "effect/http";
 import * as Socket from "effect/socket/Socket";
+import * as NodeHttpServerRequest from "@effect/platform-node/NodeHttpServerRequest";
 import * as NodeSocket from "@effect/platform-node/NodeSocket";
 
-import { authenticateMediaRequest } from "../auth/http.ts";
+import { authenticateMediaRequest, failEnvironmentInternal } from "../auth/http.ts";
+import * as SessionStore from "../auth/SessionStore.ts";
 import * as DeviceService from "./DeviceService.ts";
 import { repeatStillFrame } from "./mjpegStillFrame.ts";
 
@@ -105,6 +108,7 @@ const proxyWebSocket = Effect.fn("DeviceHubProxy.proxyWebSocket")(function* (
   protocols: ReadonlyArray<string> = [],
   headers: Readonly<Record<string, string>> = {},
 ) {
+  const transport = NodeHttpServerRequest.toIncomingMessage(request).socket;
   const client = yield* request.upgrade;
   const upstream = yield* Socket.makeWebSocket(upstreamUrl, {
     openTimeout: "10 seconds",
@@ -120,7 +124,10 @@ const proxyWebSocket = Effect.fn("DeviceHubProxy.proxyWebSocket")(function* (
         pumpFrames(client, writeToUpstream),
       );
     }),
-  ).pipe(Effect.ignoreCause);
+  ).pipe(
+    Effect.onInterrupt(() => Effect.sync(() => transport.destroy())),
+    Effect.ignoreCause,
+  );
   return HttpServerResponse.empty();
 });
 
@@ -136,6 +143,7 @@ const pumpFrames =
 const proxyHttp = Effect.fn("DeviceHubProxy.proxyHttp")(function* (
   request: HttpServerRequest.HttpServerRequest,
   upstreamUrl: string,
+  invalidated: Effect.Effect<void>,
   extraHeaders: Readonly<Record<string, string>> = {},
 ) {
   const httpClient = HttpClient.withScope(yield* HttpClient.HttpClient);
@@ -159,7 +167,7 @@ const proxyHttp = Effect.fn("DeviceHubProxy.proxyHttp")(function* (
   const response = yield* httpClient.execute(upstreamRequest);
   const headers: Record<string, string> = {};
   for (const [name, value] of Object.entries(response.headers)) {
-    // A cookie from an upstream such as an EAS session's preview host would land on T3's origin.
+    // A cookie from an upstream such as an Expo Simulators session's preview host would land on T3's origin.
     if (
       name === "content-encoding" ||
       name === "transfer-encoding" ||
@@ -175,7 +183,7 @@ const proxyHttp = Effect.fn("DeviceHubProxy.proxyHttp")(function* (
   const body = headers["content-type"]?.startsWith("multipart/x-mixed-replace")
     ? repeatStillFrame(response.stream)
     : response.stream;
-  return HttpServerResponse.stream(body, {
+  return HttpServerResponse.stream(body.pipe(Stream.interruptWhen(invalidated)), {
     status: response.status,
     headers,
     ...(headers["content-type"] ? { contentType: headers["content-type"] } : {}),
@@ -204,29 +212,38 @@ const handler = Effect.gen(function* () {
   const controlsDevice =
     (upgrade && hubPath !== "/api/devices/ws") ||
     (!readOnly && /\/api\/(stream-(mode|settings)|fold)$/.test(hubPath));
-  yield* authenticateMediaRequest(
+  const session = yield* authenticateMediaRequest(
     controlsDevice ? AuthOrchestrationOperateScope : AuthOrchestrationReadScope,
   );
+  const sessions = yield* SessionStore.SessionStore;
+  const invalidated = sessions.awaitInvalidation(session.sessionId).pipe(
+    Effect.catchTags({
+      SessionCredentialVerificationError: (error) =>
+        failEnvironmentInternal("internal_error", error).pipe(Effect.ignore),
+    }),
+  );
   const devices = yield* DeviceService.DeviceService;
-  if (/^\/vendor\/(serve-sim|serve-emu)\/api\/screenshot$/.test(hubPath)) {
-    const deviceId = url.value.searchParams.get("device");
-    const hostId = url.value.searchParams.get("hostId") ?? undefined;
+  const hostId = url.value.searchParams.get("hostId") ?? undefined;
+  const screenshotDevice = /^\/vendor\/(serve-sim|serve-emu)\/api\/screenshot$/.test(hubPath)
+    ? url.value.searchParams.get("device")
+    : null;
+  if (screenshotDevice) {
     const state = yield* devices.state;
-    const target = state.devices.find(
-      (device) => device.id === deviceId && device.hostId === (hostId ?? "local"),
+    const physical = state.devices.find(
+      (device) =>
+        device.physical &&
+        device.id === screenshotDevice &&
+        device.hostId === (hostId ?? LOCAL_DEVICE_HOST_ID),
     );
-    if (target?.physical) {
-      const shot = yield* devices.screenshot({
-        hostId: target.hostId,
-        deviceId: DeviceId.make(target.id),
-      });
-      return HttpServerResponse.uint8Array(shot.png, {
+    if (physical) {
+      const { png } = yield* devices.screenshot({ hostId: physical.hostId, deviceId: physical.id });
+      return HttpServerResponse.uint8Array(png, {
         contentType: "image/png",
         headers: { "cache-control": "no-store" },
       });
     }
   }
-  const ready = yield* devices.currentReadiness(url.value.searchParams.get("hostId") ?? undefined);
+  const ready = yield* devices.currentReadiness(hostId);
   if (!ready) {
     return HttpServerResponse.text("Device hub is not running", { status: 503 });
   }
@@ -235,6 +252,13 @@ const handler = Effect.gen(function* () {
   upstreamSearch.delete("wsTicket");
   upstreamSearch.delete("hostId");
   const search = upstreamSearch.size > 0 ? `?${upstreamSearch.toString()}` : "";
+  if (screenshotDevice) {
+    const { png } = yield* devices.screenshot({ hostId: ready.hostId, deviceId: screenshotDevice });
+    return HttpServerResponse.uint8Array(png, {
+      contentType: "image/png",
+      headers: { "cache-control": "no-store, no-transform" },
+    });
+  }
   // Hosts with several upstreams (one per cloud session) route and authenticate requests themselves.
   const routed = ready.upstream ? yield* ready.upstream(hubPath, upstreamSearch) : undefined;
   if (routed === null) {
@@ -242,14 +266,17 @@ const handler = Effect.gen(function* () {
   }
   const upstreamUrl = routed?.url ?? `${ready.hub.origin}${hubPath}${search}`;
   if (upgrade) {
-    return yield* proxyWebSocket(
-      request,
-      upstreamUrl.replace(/^http/, "ws"),
-      routed?.protocols,
-      routed?.headers,
+    return yield* Effect.raceFirst(
+      proxyWebSocket(
+        request,
+        upstreamUrl.replace(/^http/, "ws"),
+        routed?.protocols,
+        routed?.headers,
+      ),
+      invalidated.pipe(Effect.as(HttpServerResponse.empty())),
     );
   }
-  return yield* proxyHttp(request, upstreamUrl, routed?.headers);
+  return yield* proxyHttp(request, upstreamUrl, invalidated, routed?.headers);
 });
 
 export const layer = HttpRouter.add("*", `${DeviceService.DEVICE_HUB_ROUTE_PREFIX}/*`, handler);

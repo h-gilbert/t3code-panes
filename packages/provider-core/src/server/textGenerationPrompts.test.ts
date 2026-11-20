@@ -236,6 +236,23 @@ describe("buildReviewGuidePrompt", () => {
 });
 
 describe("buildThreadTitlePrompt", () => {
+  it("names the project to leave out and puts the user's instructions above the limits", () => {
+    for (const previousTitle of [undefined, "Hyperdrive Config Crash"]) {
+      const { prompt } = buildThreadTitlePrompt({
+        message: "hyperdrive init crashes without a config",
+        previousTitle,
+        projectTitle: "Hyperdrive",
+        instructions: "Prefix every title with the team name.",
+      });
+      expect(prompt).toContain('Never include the project name ("Hyperdrive")');
+      expect(prompt).not.toContain("fewer than 40 characters");
+      expect(prompt).toContain("Title instructions from the user:\nPrefix every title");
+    }
+    expect(buildThreadTitlePrompt({ message: "Fix login", instructions: " " }).prompt).toContain(
+      "3-8 words, fewer than 40 characters.",
+    );
+  });
+
   it("requires each generated field in the strict response schema", () => {
     const { outputSchema } = buildThreadTitlePrompt({ message: "Fix this" });
     expect(toJsonSchemaObject(outputSchema)).toMatchObject({
@@ -389,5 +406,41 @@ describe("normalizeCliError", () => {
 
     expect(result.detail).toBe("Failed to generate a commit message");
     expect(result.message).not.toContain("secret-token");
+  });
+});
+
+describe("buildThreadTitlePrompt", () => {
+  it("names the project to leave out and puts the user's instructions above the limits", () => {
+    for (const previousTitle of [undefined, "Hyperdrive Config Crash"]) {
+      const { prompt } = buildThreadTitlePrompt({
+        message: "hyperdrive init crashes without a config",
+        previousTitle,
+        projectTitle: "Hyperdrive",
+        instructions: "Prefix every title with the team name.",
+      });
+      expect(prompt).toContain('Never include the project name ("Hyperdrive")');
+      expect(prompt).not.toContain("fewer than 40 characters");
+      expect(prompt).toContain("Title instructions from the user:\nPrefix every title");
+    }
+    expect(buildThreadTitlePrompt({ message: "Fix login", instructions: " " }).prompt).toContain(
+      "3-8 words, fewer than 40 characters.",
+    );
+  });
+
+  it("names the project to leave out and puts the user's instructions above the limits", () => {
+    for (const previousTitle of [undefined, "Hyperdrive Config Crash"]) {
+      const { prompt } = buildThreadTitlePrompt({
+        message: "hyperdrive init crashes without a config",
+        previousTitle,
+        projectTitle: "Hyperdrive",
+        instructions: "Prefix every title with the team name.",
+      });
+      expect(prompt).toContain('Never include the project name ("Hyperdrive")');
+      expect(prompt).not.toContain("fewer than 40 characters");
+      expect(prompt).toContain("Title instructions from the user:\nPrefix every title");
+    }
+    expect(buildThreadTitlePrompt({ message: "Fix login", instructions: " " }).prompt).toContain(
+      "3-8 words, fewer than 40 characters.",
+    );
   });
 });

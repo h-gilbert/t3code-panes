@@ -1,3 +1,4 @@
+import { msg, useGT, useMessages } from "gt-react";
 import { PreviewView } from "./PreviewView";
 import { showBrowserInset } from "./showBrowserInset";
 import { previewPdfAssetUrl } from "@t3tools/shared/preview";
@@ -71,15 +72,48 @@ interface ResizeState {
 const RESIZE_HANDLES: ReadonlyArray<{
   direction: BrowserViewportResizeDirection;
   className: string;
+  label: string;
 }> = [
-  { direction: "north", className: "inset-x-0 -top-1 h-2 cursor-ns-resize" },
-  { direction: "south", className: "inset-x-0 -bottom-1 h-2 cursor-ns-resize" },
-  { direction: "west", className: "inset-y-0 -left-1 w-2 cursor-ew-resize" },
-  { direction: "east", className: "inset-y-0 -right-1 w-2 cursor-ew-resize" },
-  { direction: "northwest", className: "-left-2 -top-2 size-4 cursor-nwse-resize" },
-  { direction: "northeast", className: "-right-2 -top-2 size-4 cursor-nesw-resize" },
-  { direction: "southwest", className: "-bottom-2 -left-2 size-4 cursor-nesw-resize" },
-  { direction: "southeast", className: "-bottom-2 -right-2 size-4 cursor-nwse-resize" },
+  {
+    direction: "north",
+    className: "inset-x-0 -top-1 h-2 cursor-ns-resize",
+    label: msg("Resize floating preview north"),
+  },
+  {
+    direction: "south",
+    className: "inset-x-0 -bottom-1 h-2 cursor-ns-resize",
+    label: msg("Resize floating preview south"),
+  },
+  {
+    direction: "west",
+    className: "inset-y-0 -left-1 w-2 cursor-ew-resize",
+    label: msg("Resize floating preview west"),
+  },
+  {
+    direction: "east",
+    className: "inset-y-0 -right-1 w-2 cursor-ew-resize",
+    label: msg("Resize floating preview east"),
+  },
+  {
+    direction: "northwest",
+    className: "-left-2 -top-2 size-4 cursor-nwse-resize",
+    label: msg("Resize floating preview northwest"),
+  },
+  {
+    direction: "northeast",
+    className: "-right-2 -top-2 size-4 cursor-nesw-resize",
+    label: msg("Resize floating preview northeast"),
+  },
+  {
+    direction: "southwest",
+    className: "-bottom-2 -left-2 size-4 cursor-nesw-resize",
+    label: msg("Resize floating preview southwest"),
+  },
+  {
+    direction: "southeast",
+    className: "-bottom-2 -right-2 size-4 cursor-nwse-resize",
+    label: msg("Resize floating preview southeast"),
+  },
 ];
 
 interface BrowserProps {
@@ -88,6 +122,8 @@ interface BrowserProps {
 }
 
 function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
+  const gt = useGT();
+  const resolve = useMessages();
   const httpBaseUrl = useEnvironmentHttpBaseUrl(threadRef.environmentId);
   const [anchorLayout, setAnchorLayout] = useState(0);
   const rootRef = useRef<HTMLElement | null>(null);
@@ -146,8 +182,8 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
       if (result._tag === "Failure") {
         toastManager.add({
           type: "error",
-          title: "Unable to close the browser",
-          description: "The preview session could not be closed. It may already be gone.",
+          title: gt("Unable to close the browser"),
+          description: gt("The preview session could not be closed. It may already be gone."),
         });
       }
     });
@@ -243,6 +279,10 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
   const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
+    if ((event.buttons & 1) === 0) {
+      endDrag(event);
+      return;
+    }
     const next = clampPreviewMiniPlayerPosition(
       {
         x: drag.playerX + event.clientX - drag.pointerX,
@@ -303,6 +343,10 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
     if (!resize || resize.pointerId !== event.pointerId || !root) {
       return;
     }
+    if ((event.buttons & 1) === 0) {
+      endResize(event);
+      return;
+    }
     const next = resizeFloatingPreviewFrame({
       start: { x: resize.playerX, y: resize.playerY, width: resize.width, height: resize.height },
       direction: resize.direction,
@@ -328,7 +372,7 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
   const player = (
     <section
       ref={rootRef}
-      aria-label={compact ? "Browser preview" : "Floating browser preview"}
+      aria-label={compact ? gt("Browser preview") : gt("Floating browser preview")}
       data-preview-mini-player={tabId}
       data-preview-presentation={maximized ? "fullscreen" : floating ? "window" : "mini"}
       onPointerDownCapture={() => {
@@ -381,10 +425,11 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
         onPointerMove={handlePointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
+        onLostPointerCapture={endDrag}
       >
         {Object.keys(previewState.sessions).length > 1 ? (
           <select
-            aria-label="Browser tab"
+            aria-label={gt("Browser tab")}
             value={tabId}
             className="min-w-0 flex-1 truncate bg-transparent pl-1 text-2xs text-muted-foreground outline-none"
             onPointerDown={(event) => event.stopPropagation()}
@@ -393,22 +438,22 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
             {Object.values(previewState.sessions).map((session) => (
               <option key={session.tabId} value={session.tabId}>
                 {session.navStatus._tag === "Idle"
-                  ? "Browser"
-                  : session.navStatus.title.trim() || session.navStatus.url.trim() || "Browser"}
+                  ? gt("Browser")
+                  : session.navStatus.title.trim() || session.navStatus.url.trim() || gt("Browser")}
               </option>
             ))}
           </select>
         ) : (
           <span className="min-w-0 flex-1 truncate pl-1 text-2xs text-muted-foreground">
             {snapshot.navStatus._tag === "Idle"
-              ? "Browser"
-              : snapshot.navStatus.title.trim() || snapshot.navStatus.url.trim() || "Browser"}
+              ? gt("Browser")
+              : snapshot.navStatus.title.trim() || snapshot.navStatus.url.trim() || gt("Browser")}
           </span>
         )}
         {recording ? (
           <span
             role="status"
-            aria-label="Recording browser preview"
+            aria-label={gt("Recording browser preview")}
             className="shrink-0 rounded-full bg-error size-2"
           />
         ) : null}
@@ -418,7 +463,9 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
               <Button
                 variant="ghost"
                 size="icon-xs"
-                aria-label={floating ? "Return to small preview" : "Open floating browser window"}
+                aria-label={
+                  floating ? gt("Return to small preview") : gt("Open floating browser window")
+                }
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={toggleFloating}
               />
@@ -427,7 +474,7 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
             <PictureInPicture2 />
           </TooltipTrigger>
           <TooltipPopup side="bottom">
-            {floating ? "Return to small preview" : "Open floating browser window"}
+            {floating ? gt("Return to small preview") : gt("Open floating browser window")}
           </TooltipPopup>
         </Tooltip>
         <Tooltip>
@@ -436,7 +483,9 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
               <Button
                 variant="ghost"
                 size="icon-xs"
-                aria-label={maximized ? "Exit full screen" : "Expand preview to full screen"}
+                aria-label={
+                  maximized ? gt("Exit full screen") : gt("Expand preview to full screen")
+                }
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={toggleMaximized}
               />
@@ -445,7 +494,7 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
             {maximized ? <Minimize2Icon /> : <Maximize2Icon />}
           </TooltipTrigger>
           <TooltipPopup side="bottom">
-            {maximized ? "Exit full screen" : "Full screen"}
+            {maximized ? gt("Exit full screen") : gt("Full screen")}
           </TooltipPopup>
         </Tooltip>
         <Tooltip>
@@ -454,7 +503,7 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
               <Button
                 variant="ghost"
                 size="icon-xs"
-                aria-label="Close browser"
+                aria-label={gt("Close browser")}
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={closeBrowser}
               />
@@ -462,7 +511,7 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
           >
             <XIcon />
           </TooltipTrigger>
-          <TooltipPopup side="bottom">Close browser</TooltipPopup>
+          <TooltipPopup side="bottom">{gt("Close browser")}</TooltipPopup>
         </Tooltip>
       </div>
 
@@ -522,22 +571,23 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
         {compact && !serverTab && !desktopOverlay?.hasWebContents ? (
           <div className="pointer-events-none absolute inset-0 z-[32] flex items-center justify-center bg-muted text-xs text-muted-foreground">
             {desktopOverlay?.hostedElsewhere
-              ? "Showing in another window…"
-              : "Reconnecting preview…"}
+              ? gt("Showing in another window…")
+              : gt("Reconnecting preview…")}
           </div>
         ) : null}
       </div>
       {floating && !maximized
-        ? RESIZE_HANDLES.map(({ direction, className }) => (
+        ? RESIZE_HANDLES.map(({ direction, className, label }) => (
             <button
               key={direction}
               type="button"
-              aria-label={`Resize floating preview ${direction}`}
+              aria-label={resolve(label)}
               className={`pointer-events-auto absolute z-[130] touch-none ${className}`}
               onPointerDown={(event) => handleResizePointerDown(event, direction)}
               onPointerMove={handleResizePointerMove}
               onPointerUp={endResize}
               onPointerCancel={endResize}
+              onLostPointerCapture={endResize}
             />
           ))
         : null}
@@ -555,11 +605,11 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
 export function ThreadPreviewMiniPlayer({
   threadRef,
   miniPlayer,
-  bottomInset,
+  bottomInset = 0,
 }: {
   readonly threadRef: ScopedThreadRef;
   readonly miniPlayer: PreviewMiniPlayerState;
-  readonly bottomInset: number;
+  readonly bottomInset?: number;
 }) {
   const { source } = miniPlayer;
   return source.kind === "browser" ? (

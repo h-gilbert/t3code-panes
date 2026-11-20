@@ -67,6 +67,7 @@ const layer = PreviewManager.layer.pipe(
         isPartition: (partition) => partition.startsWith("persist:t3code-preview-"),
         getSession: () => Effect.die("unexpected getSession"),
         clearCookies: () => Effect.void,
+        cookiesCleared: () => Effect.die("unexpected cookiesCleared"),
         clearCache: () => Effect.void,
       }),
     ),

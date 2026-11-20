@@ -36,7 +36,7 @@ async function renderCard(
       driverOption={undefined}
       liveProvider={liveProvider}
       mode={mode}
-      onUpdate={() => undefined}
+      onUpdate={async () => true}
       hiddenModels={[]}
       favoriteModels={[]}
       modelOrder={[]}

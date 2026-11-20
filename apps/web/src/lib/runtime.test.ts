@@ -2,11 +2,19 @@ import { afterEach, describe, expect, it, vi } from "@effect/vitest";
 import { withRelayClientTracing } from "@t3tools/shared/relayTracing";
 import * as Effect from "effect/Effect";
 import * as Tracer from "effect/Tracer";
+// Load the runtime's module graph once at collection, outside the per-test timeout;
+// each case re-evaluates it from that cache after vi.resetModules().
+import "./runtime";
 
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
+
+const answers = (...values: Array<boolean | null>) => {
+  let call = 0;
+  return () => values[Math.min(call++, values.length - 1)] ?? null;
+};
 
 describe("web runtime relay telemetry policy", () => {
   it.each([
@@ -21,6 +29,17 @@ describe("web runtime relay telemetry policy", () => {
       exports: true,
     },
     {
+      // The desktop host reads the login shell after the renderer has started.
+      surface: "desktop enabled once the login shell is read",
+      desktopBridge: { getRelayTelemetryEnabled: answers(null, true) },
+      exports: true,
+    },
+    {
+      surface: "desktop opt-out found in the login shell",
+      desktopBridge: { getRelayTelemetryEnabled: answers(null, false, true) },
+      exports: false,
+    },
+    {
       surface: "ordinary browser ignores host opt-out",
       desktopBridge: undefined,
       exports: true,
@@ -33,7 +52,7 @@ describe("web runtime relay telemetry policy", () => {
     vi.stubEnv("VITE_RELAY_OTLP_TRACES_URL", "https://telemetry.example.test/v1/traces");
     vi.stubEnv("VITE_RELAY_OTLP_TRACES_DATASET", "relay-test");
     vi.stubEnv("VITE_RELAY_OTLP_TRACES_TOKEN", "test-token");
-    vi.stubGlobal("window", { desktopBridge });
+    vi.stubGlobal("window", { desktopBridge, location: new URL("http://localhost") });
     const fetchFn = vi.fn<typeof fetch>(async () => new Response(null, { status: 202 }));
     vi.stubGlobal("fetch", fetchFn);
     // Re-import after setting runtime policy: static initialization creates the exporter layer.

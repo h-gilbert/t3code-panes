@@ -1,7 +1,6 @@
 import type { Element, Nodes, Root } from "hast";
 import { toJsxRuntime, type Components } from "hast-util-to-jsx-runtime";
 import { urlAttributes } from "html-url-attributes";
-import type { ReactElement } from "react";
 import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
@@ -19,26 +18,25 @@ interface MarkdownRendererOptions {
   readonly urlTransform: MarkdownUrlTransform;
 }
 
-// Elements are immutable, so a remount (a thread switch, a row scrolled back into view)
-// reuses one instead of parsing again. Parsing is most of the cost of rendering markdown.
-// An element and the hast it keeps hold about 20 bytes per source character, so ~10 MB.
+// A remount reuses the prepared tree. React elements in development can retain
+// their rendering component through owner and debug stack references.
 const MAX_CACHED_CHARS = 500_000;
-const rendered = new Map<string, ReactElement>();
+const preparedTrees = new Map<string, Root>();
 let cachedChars = 0;
 let nextRendererId = 0;
 
-// A short block still holds a whole element tree.
+// A short block still holds a whole tree.
 const ENTRY_OVERHEAD_CHARS = 200;
 const entrySize = (key: string) => key.length + ENTRY_OVERHEAD_CHARS;
 
-function remember(key: string, element: ReactElement) {
+function remember(key: string, tree: Root) {
   // One huge message would otherwise evict everything else.
   if (entrySize(key) > MAX_CACHED_CHARS / 4) return;
-  rendered.set(key, element);
+  preparedTrees.set(key, tree);
   cachedChars += entrySize(key);
-  for (const oldest of rendered.keys()) {
+  for (const oldest of preparedTrees.keys()) {
     if (cachedChars <= MAX_CACHED_CHARS) break;
-    rendered.delete(oldest);
+    preparedTrees.delete(oldest);
     cachedChars -= entrySize(oldest);
   }
 }
@@ -82,18 +80,18 @@ export function createMarkdownRenderer({
     }
   };
 
-  return (text: string, cache: boolean): ReactElement => {
+  return (text: string) => {
     const key = keyPrefix + text;
-    const cached = rendered.get(key);
-    if (cached !== undefined) {
+    let tree = preparedTrees.get(key);
+    if (tree === undefined) {
+      const file = new VFile(text);
+      tree = processor.runSync(processor.parse(file), file) as Root;
+      prepare(tree);
+    } else {
       // Refresh its place in the eviction order.
-      rendered.delete(key);
-      rendered.set(key, cached);
-      return cached;
+      preparedTrees.delete(key);
+      preparedTrees.set(key, tree);
     }
-    const file = new VFile(text);
-    const tree = processor.runSync(processor.parse(file), file) as Root;
-    prepare(tree);
     const element = toJsxRuntime(tree, {
       Fragment,
       components,
@@ -103,7 +101,11 @@ export function createMarkdownRenderer({
       passKeys: true,
       passNode: true,
     });
-    if (cache) remember(key, element);
-    return element;
+    return {
+      element,
+      remember: () => {
+        if (!preparedTrees.has(key)) remember(key, tree);
+      },
+    };
   };
 }

@@ -4,6 +4,8 @@ import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import type * as Electron from "electron";
 
+import * as DesktopPrimaryPaste from "../app/DesktopPrimaryPaste.ts";
+import { registerCaptureRenderer } from "./workspaceWindows.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import { makeComponentLogger } from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
@@ -30,6 +32,7 @@ const make = Effect.gen(function* () {
   const desktopState = yield* DesktopState.DesktopState;
   const electronWindow = yield* ElectronWindow.ElectronWindow;
   const previewManager = yield* PreviewManager.PreviewManager;
+  const primaryPaste = yield* DesktopPrimaryPaste.DesktopPrimaryPaste;
   const previewPasskeys = yield* PreviewPasskeys.PreviewPasskeys;
   const rendererHistory = yield* DesktopRendererHistory.DesktopRendererHistory;
   const context = yield* Effect.context<PreviewManager.PreviewManager>();
@@ -76,7 +79,13 @@ const make = Effect.gen(function* () {
       window.setOpacity(0);
       // Mission Control lists every shown window, offscreen or not.
       window.setHiddenInMissionControl(true);
-      hardenWebviewGuests(window, previewManager, previewPasskeys.bridgeEnabled);
+      registerCaptureRenderer(window);
+      hardenWebviewGuests(
+        window,
+        previewManager,
+        previewPasskeys.bridgeEnabled,
+        primaryPaste.enabled,
+      );
       window.webContents.on("did-attach-webview", (_event, contents) => {
         void runPromise(previewManager.prepareWebview(contents));
       });

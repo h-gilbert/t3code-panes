@@ -46,6 +46,7 @@ const mocks = vi.hoisted(() => ({
   })(),
 }));
 
+vi.mock("./browserTargetResolver", () => ({ tunnelsEnvironmentLoopback: () => false }));
 vi.mock("~/state/use-atom-command", () => ({ useAtomCommand: () => mocks.resize }));
 vi.mock("~/state/preview", () => ({ previewEnvironment: { resize: {} } }));
 vi.mock("~/previewStateStore", async () => {
@@ -137,7 +138,10 @@ beforeEach(() => {
   });
   // oxlint-disable-next-line t3code/require-disposable-render -- react-test-renderer requires act mode for mocked Electron guest attachment.
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const windowEvents = new EventTarget();
   vi.stubGlobal("window", globalThis);
+  vi.stubGlobal("addEventListener", windowEvents.addEventListener.bind(windowEvents));
+  vi.stubGlobal("removeEventListener", windowEvents.removeEventListener.bind(windowEvents));
   vi.stubGlobal("navigator", { platform: "Linux" });
   vi.stubGlobal(
     "requestAnimationFrame",
@@ -241,6 +245,7 @@ describe("HostedBrowserWebview settings hydration", () => {
       threadRef.environmentId,
       "work",
       undefined,
+      false,
     );
     expect(createGuest).toHaveBeenCalledOnce();
     expect(createGuest).toHaveBeenCalledWith(
@@ -372,8 +377,6 @@ describe("HostedBrowserWebview recovery", () => {
   it("leaves a tab to the window that owns it and takes it back with a fresh guest", async () => {
     mocks.ownership.set(true);
     vi.stubGlobal("document", { hasFocus: () => true });
-    vi.stubGlobal("addEventListener", vi.fn());
-    vi.stubGlobal("removeEventListener", vi.fn());
     const { guests, guestAttributes, runtimeTabId } = await mountTab();
     expect(guests).toHaveLength(0);
     expect(mocks.createTab).toHaveBeenCalledOnce();

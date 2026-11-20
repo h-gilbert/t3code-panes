@@ -1,9 +1,17 @@
 import { EnvironmentId, ThreadId, RuntimeRequestId } from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
+
+import { withTestI18n } from "../../../test/unitI18n";
 
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import type { PendingUserInput } from "../../session-logic";
+
+vi.mock(import("../../state/clientHostEnvironment"), async (original) => {
+  const { Atom } = await import("effect/reactivity");
+  const remote = Atom.make(false);
+  return { ...(await original()), clientHostEnvironmentAtom: () => remote };
+});
 
 const prompt: PendingUserInput = {
   requestId: RuntimeRequestId.make("request-1"),
@@ -26,17 +34,19 @@ const prompt: PendingUserInput = {
 
 function renderPanel(pendingUserInput: PendingUserInput = prompt) {
   return renderToStaticMarkup(
-    <ComposerPendingUserInputPanel
-      cwd={undefined}
-      threadRef={{ environmentId: EnvironmentId.make("test"), threadId: ThreadId.make("test") }}
-      pendingUserInputs={[pendingUserInput]}
-      respondingRequestIds={[]}
-      answers={{}}
-      questionIndex={0}
-      onToggleOption={() => {}}
-      onAdvance={() => {}}
-      onDismiss={() => {}}
-    />,
+    withTestI18n(
+      <ComposerPendingUserInputPanel
+        cwd={undefined}
+        threadRef={{ environmentId: EnvironmentId.make("test"), threadId: ThreadId.make("test") }}
+        pendingUserInputs={[pendingUserInput]}
+        respondingRequestIds={[]}
+        answers={{}}
+        questionIndex={0}
+        onToggleOption={() => {}}
+        onAdvance={() => {}}
+        onDismiss={() => {}}
+      />,
+    ),
   );
 }
 

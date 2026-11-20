@@ -195,13 +195,41 @@ describe("server ownership", () => {
             Effect.flip,
           );
           assert.equal(refused._tag, "ServerAlreadyRunningError");
-          assert.include(refused.message, "do not delete it while a server is running");
+          assert.include(refused.message, "Do not delete either while a server is running");
           assert.equal(yield* fs.readFileString(statePath), before);
         }),
       );
       assert.isFalse(yield* fs.exists(statePath));
       yield* Effect.scoped(ServerOwnership.acquireServerOwnership(statePath));
     }).pipe(Effect.provide(layerOwnership)),
+  );
+
+  it.effect.each(["server-owner.sqlite", "server-lock.sqlite"])(
+    "excludes a running older owner using %s before it publishes discovery",
+    (filename) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-owner-older-lock-" });
+        const statePath = path.join(root, "server-runtime.json");
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            yield* Effect.acquireRelease(
+              Effect.sync(() => {
+                const db = new NodeSqlite.DatabaseSync(path.join(root, filename));
+                db.exec("BEGIN EXCLUSIVE;");
+                return db;
+              }),
+              (db) => Effect.sync(() => db.close()),
+            );
+            const refused = yield* Effect.scoped(
+              ServerOwnership.acquireServerOwnership(statePath),
+            ).pipe(Effect.flip);
+            assert.equal(refused._tag, "ServerAlreadyRunningError");
+          }),
+        );
+        yield* Effect.scoped(ServerOwnership.acquireServerOwnership(statePath));
+      }).pipe(Effect.provide(layerOwnership)),
   );
 
   describe.skipIf(HostProcess.Platform.defaultValue() === "win32")("lock file checks", () => {
@@ -255,8 +283,11 @@ describe("server ownership", () => {
           yield* TestClock.adjust("15 seconds").pipe(
             Effect.ensuring(fs.chmod(root, 0o700).pipe(Effect.orDie)),
           );
-          assert.deepEqual(warnings, [
+          assert.sameDeepMembers(warnings, [
             [`Cannot check server ownership lock at ${lockPath} (EACCES).`],
+            [
+              `Cannot check server ownership lock at ${path.join(root, "server-lock.sqlite")} (EACCES).`,
+            ],
           ]);
           yield* TestClock.adjust("5 seconds");
           assert.deepEqual(messages, []);
@@ -274,11 +305,15 @@ describe("server ownership", () => {
         assert.deepEqual(messages, expected);
         if (operation !== "unchanged") {
           yield* fs.remove(`${lockPath}-journal`, { force: true });
-          yield* Effect.scoped(ServerOwnership.acquireServerOwnership(statePath));
+          // The other lock still excludes a second integrated server.
+          const refused = yield* Effect.scoped(
+            ServerOwnership.acquireServerOwnership(statePath),
+          ).pipe(Effect.flip);
+          assert.equal(refused._tag, "ServerAlreadyRunningError");
         }
         yield* TestClock.adjust("15 seconds");
         assert.deepEqual(messages, expected);
-        assert.lengthOf(warnings, operation === "stat error" ? 1 : 0);
+        assert.lengthOf(warnings, operation === "stat error" ? 2 : 0);
       }).pipe(
         Effect.provide(
           Layer.merge(layerOwnership, Logger.layer([logger], { mergeWithExisting: false })),
