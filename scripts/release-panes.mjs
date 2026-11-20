@@ -203,18 +203,18 @@ function releaseNotes(sha) {
   const previous = latestForkReleaseTag(tags);
   if (previous) run("git", ["fetch", "--quiet", "origin", "tag", previous]);
   const range = previous ? `${previous}..${sha}` : sha;
-  const log = run("git", [
-    "log",
-    "--no-merges",
-    "--format=- %s",
-    ...(previous ? [] : ["-20"]),
-    range,
-  ]);
+  const log = run("git", ["log", "-20", "--no-merges", "--format=- %s", range]);
   return [
-    previous ? `Changes since ${previous}:` : "Recent changes:",
+    "Recent changes:",
     "",
     log || "- No new commits.",
     "",
+    ...(previous
+      ? [
+          `[Full changelog](https://github.com/${FORK_RELEASE_REPOSITORY}/compare/${previous}...${sha})`,
+          "",
+        ]
+      : []),
     `Built from ${sha}.`,
     "",
   ].join("\n");
