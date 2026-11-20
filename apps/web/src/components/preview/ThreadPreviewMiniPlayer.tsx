@@ -486,7 +486,10 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
                 aria-label={
                   maximized ? gt("Exit full screen") : gt("Expand preview to full screen")
                 }
-                onPointerDown={(event) => event.stopPropagation()}
+                onPointerDown={(event) => {
+                  event.stopPropagation();
+                  event.preventDefault();
+                }}
                 onClick={toggleMaximized}
               />
             }

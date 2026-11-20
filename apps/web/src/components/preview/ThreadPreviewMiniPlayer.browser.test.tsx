@@ -6,6 +6,9 @@ import { type DeviceServiceState, type EnvironmentId, ThreadId } from "@t3tools/
 import { AsyncResult, Atom } from "effect/reactivity";
 import { expect, it, vi } from "vite-plus/test";
 
+import { page, userEvent } from "vite-plus/test/browser";
+import { applyPreviewServerSnapshot, resetPreviewStateForTests } from "../../previewStateStore";
+
 import { act, render } from "../../../test/render";
 import {
   type PreviewMiniPlayerSource,
@@ -109,4 +112,37 @@ it("holds its frame through a source change and stops when the gesture is interr
   await act(() => window.dispatchEvent(new Event("blur")));
   await point(handle("west"), "pointermove", landscape.left - 100, landscape.top + 10, 1);
   expect(rect()).toEqual(landscape);
+});
+
+it("keeps the draft focused through a floating browser fullscreen round trip", async () => {
+  const store = usePreviewMiniPlayerStore.getState();
+  using _store = {
+    [Symbol.dispose]() {
+      store.removeThread(threadRef);
+      resetPreviewStateForTests();
+    },
+  };
+  applyPreviewServerSnapshot(threadRef, {
+    threadId: threadRef.threadId,
+    tabId: "tab",
+    navStatus: { _tag: "Idle" },
+    canGoBack: false,
+    canGoForward: false,
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  });
+  store.open(threadRef, "tab");
+  store.setFloating(threadRef, "tab", true);
+  await using screen = await render(
+    <RegistryContext.Provider value={appAtomRegistry}>
+      <textarea aria-label="Draft" />
+      <Harness />
+    </RegistryContext.Provider>,
+  );
+  const draft = screen.getByRole("textbox", { name: "Draft" });
+  draft.element().focus();
+  await userEvent.keyboard("before");
+  await page.getByRole("button", { name: "Expand preview to full screen" }).click();
+  await page.getByRole("button", { name: "Exit full screen" }).click();
+  await userEvent.keyboard(" after");
+  await expect.element(draft).toHaveValue("before after");
 });
