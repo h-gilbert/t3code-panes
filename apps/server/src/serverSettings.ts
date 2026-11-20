@@ -1305,6 +1305,24 @@ const make = Effect.gen(function* () {
   const watchLinkTargetChanges = (linkTargetPath: string, ready: Deferred.Deferred<void>) =>
     Stream.unwrap(
       Effect.gen(function* () {
+        const readVersion = fs.stat(linkTargetPath).pipe(
+          Effect.map(
+            (info) =>
+              `${info.dev}:${Option.getOrUndefined(info.ino)}:${info.size}:${Option.getOrUndefined(info.mtime)?.getTime()}`,
+          ),
+          Effect.orElseSucceed(() => undefined),
+        );
+        // macOS can drop notifications while libuv restarts its shared FSEvents stream.
+        const initialVersion = yield* readVersion;
+        const missedChanges = Stream.tick("1 second").pipe(
+          Stream.drop(1),
+          Stream.mapEffect(() => readVersion),
+          Stream.prepend([initialVersion]),
+          Stream.changes,
+          Stream.drop(1),
+          Stream.as(undefined),
+        );
+
         const parentReady = yield* Deferred.make<void>();
         const replacements = yield* watchFileChanges(
           pathService.dirname(linkTargetPath),
@@ -1332,10 +1350,11 @@ const make = Effect.gen(function* () {
             );
           }),
         );
-        return Stream.make(targetChanges).pipe(
+        const nativeChanges = Stream.make(targetChanges).pipe(
           Stream.concat(Stream.fromQueue(replacements).pipe(Stream.as(targetChanges))),
           Stream.switchMap((changes) => changes),
         );
+        return Stream.merge(nativeChanges, missedChanges);
       }),
     );
 

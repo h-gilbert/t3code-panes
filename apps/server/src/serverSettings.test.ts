@@ -3646,7 +3646,7 @@ it.effect("starts with symlinked settings when the settings directory watch fail
   }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );
 
-it.effect("publishes edits made before the restored settings watch is registered", () =>
+it.effect("reloads symlinked edits during watch registration and after a missed event", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -3661,6 +3661,7 @@ it.effect("publishes edits made before the restored settings watch is registered
       path.join(restored, "settings.json"),
       `{ "responseStreamingMode": "turn" }`,
     );
+    let targetInfo = yield* fs.stat(target);
 
     const replaced = yield* Deferred.make<void>();
     const registering = yield* Deferred.make<void>();
@@ -3671,6 +3672,7 @@ it.effect("publishes edits made before the restored settings watch is registered
           FileSystem.FileSystem,
           FileSystem.FileSystem.of({
             ...fs,
+            stat: (file) => (file === target ? Effect.sync(() => targetInfo) : fs.stat(file)),
             watch: (directory, options) =>
               Stream.unwrap(
                 Effect.gen(function* () {
@@ -3681,8 +3683,7 @@ it.effect("publishes edits made before the restored settings watch is registered
                       Stream.concat(Stream.never),
                     );
                   }
-                  if (directory !== active) return fs.watch(directory, options);
-                  if (yield* Deferred.isDone(replaced)) {
+                  if (directory === active && (yield* Deferred.isDone(replaced))) {
                     yield* Deferred.succeed(registering, undefined);
                     yield* Deferred.await(allowRegistration);
                   }
@@ -3709,7 +3710,7 @@ it.effect("publishes edits made before the restored settings watch is registered
         Effect.delay(1),
         Effect.forkScoped({ startImmediately: true }),
       );
-      yield* TestClock.adjust("1 second");
+      yield* TestClock.adjust("250 millis");
       yield* Deferred.await(registering);
       yield* service.withSettingsSnapshot(() => Effect.void);
       yield* fs.writeFileString(target, `{ "responseStreamingMode": "paragraph" }`);
@@ -3717,10 +3718,20 @@ it.effect("publishes edits made before the restored settings watch is registered
         Effect.delay(1),
         Effect.forkScoped({ startImmediately: true }),
       );
-      yield* TestClock.adjust("1 second");
+      yield* TestClock.adjust("250 millis");
 
       const published = yield* changes.pipe(Stream.runHead);
       assert.equal(Option.getOrThrow(published).responseStreamingMode, "paragraph");
+
+      // The native target watcher is silent, as it can be during an FSEvents restart.
+      yield* fs.writeFileString(target, `{ "responseStreamingMode": "token" }`);
+      targetInfo = yield* fs.stat(target);
+      yield* TestClock.adjust("1 second");
+      const followUp = yield* changes.pipe(
+        Stream.filter((settings) => settings.responseStreamingMode === "token"),
+        Stream.runHead,
+      );
+      assert.isTrue(Option.isSome(followUp));
     }).pipe(Effect.provide(settingsLayer));
   }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );

@@ -314,6 +314,8 @@ it.effect("lists Android devices without probing the host again once it reports 
               : "";
           const mode = /const mode = "([^"]+)"/.exec(script)?.[1];
           const remoteCommand = command.args.at(-1);
+          if (typeof remoteCommand !== "string")
+            return yield* Effect.die("Expected SSH command text");
           if (mode) {
             commands.push(mode);
             output = JSON.stringify({
@@ -325,13 +327,13 @@ it.effect("lists Android devices without probing the host again once it reports 
               hubPort: 1234,
               helpers: { serveSimAxSettings: null, serveSimCli: null },
             });
-          } else if (remoteCommand?.includes("-list-avds")) {
+          } else if (remoteCommand.includes("-list-avds")) {
             commands.push("emulator");
             output = "Pixel_8\n";
-          } else if (remoteCommand?.includes("xcdevice")) {
+          } else if (remoteCommand.includes("xcdevice")) {
             commands.push("xcdevice");
             output = "[]";
-          } else if (remoteCommand?.includes("adb") && remoteCommand.includes("devices")) {
+          } else if (remoteCommand.includes("adb") && remoteCommand.includes("devices")) {
             commands.push("adb");
             output = "List of devices attached\n";
           } else {

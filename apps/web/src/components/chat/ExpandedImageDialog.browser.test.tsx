@@ -144,8 +144,20 @@ describe("ExpandedImageDialog", () => {
     const recordWheel = (event: WheelEvent) =>
       wheels.push({ ctrlKey: event.ctrlKey, canceled: event.defaultPrevented });
     document.addEventListener("wheel", recordWheel);
-    using _wheelListener = {
-      [Symbol.dispose]: () => document.removeEventListener("wheel", recordWheel),
+    let completedScrolls = 0;
+    const recordScrollEnd = () => completedScrolls++;
+    viewport.addEventListener("scrollend", recordScrollEnd);
+    using _listeners = {
+      [Symbol.dispose]: () => {
+        viewport.removeEventListener("scrollend", recordScrollEnd);
+        document.removeEventListener("wheel", recordWheel);
+      },
+    };
+    // Native wheel scrolling and zoom's scroll offset updates must settle before the next gesture.
+    const withScrollEnd = async (gesture: () => Promise<void>) => {
+      const before = completedScrolls;
+      await gesture();
+      await vi.waitFor(() => expect(completedScrolls).toBeGreaterThan(before));
     };
     // Wheels land on the viewport's center; this is the image fraction under it.
     const pointerFraction = () => {
@@ -158,13 +170,12 @@ describe("ExpandedImageDialog", () => {
     };
     const ctrlWheel = async (deltaY: number) => {
       await userEvent.keyboard("{Control>}");
-      await userEvent.wheel(viewportLocator, { delta: { y: deltaY } });
-      await userEvent.keyboard("{/Control}");
+      try {
+        await withScrollEnd(() => userEvent.wheel(viewportLocator, { delta: { y: deltaY } }));
+      } finally {
+        await userEvent.keyboard("{/Control}");
+      }
     };
-
-    await userEvent.wheel(viewportLocator, { delta: { y: 120 } });
-    expect(wheels.at(-1)).toEqual({ ctrlKey: false, canceled: false });
-    expect(image.getBoundingClientRect().width).toBe(fitWidth);
 
     await ctrlWheel(-100);
     expect(wheels.at(-1)).toEqual({ ctrlKey: true, canceled: true });
@@ -173,11 +184,9 @@ describe("ExpandedImageDialog", () => {
 
     const pan = async (delta: { x: number; y: number }) => {
       const { scrollLeft, scrollTop } = viewport;
-      await userEvent.wheel(viewportLocator, { delta });
-      await vi.waitFor(() => {
-        expect(Math.sign(viewport.scrollLeft - scrollLeft)).toBe(Math.sign(delta.x));
-        expect(Math.sign(viewport.scrollTop - scrollTop)).toBe(Math.sign(delta.y));
-      });
+      await withScrollEnd(() => userEvent.wheel(viewportLocator, { delta }));
+      expect(Math.sign(viewport.scrollLeft - scrollLeft)).toBe(Math.sign(delta.x));
+      expect(Math.sign(viewport.scrollTop - scrollTop)).toBe(Math.sign(delta.y));
     };
     await pan({ x: 60, y: 0 });
     await pan({ x: 0, y: 60 });
@@ -190,5 +199,12 @@ describe("ExpandedImageDialog", () => {
     expect(image.getBoundingClientRect().width).toBeGreaterThan(zoomedWidth);
     expect(pointerFraction().x).toBeCloseTo(anchor.x, 2);
     expect(pointerFraction().y).toBeCloseTo(anchor.y, 2);
+
+    // A wheel at fit can leave native scrolling pending as zoom creates overflow.
+    await ctrlWheel(200);
+    expect(image.getBoundingClientRect().width).toBe(fitWidth);
+    await userEvent.wheel(viewportLocator, { delta: { y: 120 } });
+    await vi.waitFor(() => expect(wheels.at(-1)).toEqual({ ctrlKey: false, canceled: false }));
+    expect(image.getBoundingClientRect().width).toBe(fitWidth);
   });
 });
