@@ -80,8 +80,10 @@ export interface PrimaryEnvironmentTarget {
 
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
 
-function getDesktopLocalEnvironmentBootstrap(): DesktopEnvironmentBootstrap | null {
-  const bootstraps = window.desktopBridge?.getLocalEnvironmentBootstraps() ?? [];
+function getDesktopLocalEnvironmentBootstrap(
+  bootstraps: ReadonlyArray<DesktopEnvironmentBootstrap> = window.desktopBridge?.getLocalEnvironmentBootstraps() ??
+    [],
+): DesktopEnvironmentBootstrap | null {
   return bootstraps.find((entry) => entry.id === PRIMARY_LOCAL_ENVIRONMENT_ID) ?? null;
 }
 
@@ -238,8 +240,10 @@ function resolveWindowOriginPrimaryTarget(): PrimaryEnvironmentTarget {
   };
 }
 
-function resolveDesktopPrimaryTarget(): PrimaryEnvironmentTarget | null {
-  const desktopBootstrap = getDesktopLocalEnvironmentBootstrap();
+function resolveDesktopPrimaryTarget(
+  bootstraps?: ReadonlyArray<DesktopEnvironmentBootstrap>,
+): PrimaryEnvironmentTarget | null {
+  const desktopBootstrap = getDesktopLocalEnvironmentBootstrap(bootstraps);
   if (!desktopBootstrap) {
     return null;
   }
@@ -291,13 +295,18 @@ export function resolvePrimaryEnvironmentHttpUrl(
   return url.toString();
 }
 
-/** Null only for desktop with its local environment disabled; other hosts fall back to page origin. */
-export function readPrimaryEnvironmentTarget(): PrimaryEnvironmentTarget | null {
+/**
+ * Null only for desktop with its local environment disabled; other hosts fall back to page origin.
+ * Pass `bootstraps` already read from the bridge to skip another synchronous IPC read.
+ */
+export function readPrimaryEnvironmentTarget(
+  bootstraps?: ReadonlyArray<DesktopEnvironmentBootstrap>,
+): PrimaryEnvironmentTarget | null {
   if (isLocalEnvironmentDisabled()) {
     return null;
   }
   return (
-    resolveDesktopPrimaryTarget() ??
+    resolveDesktopPrimaryTarget(bootstraps) ??
     resolveConfiguredPrimaryTarget() ??
     resolveWindowOriginPrimaryTarget()
   );

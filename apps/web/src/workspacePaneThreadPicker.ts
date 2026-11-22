@@ -4,9 +4,15 @@ import {
   scopeProjectRef,
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
+import { parseThreadKey, threadKey } from "@t3tools/client-runtime/state/entities";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
-import type { OrchestrationV2Subagent } from "@t3tools/contracts";
+import type { OrchestrationV2Subagent, ScopedThreadRef } from "@t3tools/contracts";
 import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
+import * as Equal from "effect/Equal";
+import { Atom } from "effect/reactivity";
+import { msg } from "gt-react";
+
+import { m } from "./i18n/messages";
 
 import {
   isSidebarHiddenThread,
@@ -42,19 +48,15 @@ export type WorkspaceRunningSubagent = Pick<
 export function mergeWorkspaceRunningSubagents(
   threads: readonly EnvironmentThreadShell[],
   tasks: readonly OrchestrationV2Subagent[],
-  knownThreads: readonly EnvironmentThreadShell[] = threads,
+  findKnownThread?: (key: string) => EnvironmentThreadShell | undefined,
 ): readonly WorkspaceRunningSubagent[] {
-  const known = new Map(
-    knownThreads.map((thread) => [
-      scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-      thread,
-    ]),
-  );
   const agents = new Map<string, WorkspaceRunningSubagent>(
     threads.map((thread) => [
       scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
       {
-        ...thread,
+        id: thread.id,
+        environmentId: thread.environmentId,
+        title: thread.title,
         providerInstanceId: thread.runtime?.providerInstanceId ?? thread.providerInstanceId,
       },
     ]),
@@ -65,17 +67,46 @@ export function mergeWorkspaceRunningSubagents(
     const ref = task.remoteChild;
     const key = scopedThreadKey(ref);
     if (agents.has(key)) continue;
-    const shell = known.get(key);
+    const shell = findKnownThread?.(key);
     if (shell !== undefined && (ref.runId === undefined || shell.latestRun?.runId === ref.runId))
       continue;
     agents.set(key, {
       environmentId: ref.environmentId,
       id: ref.threadId,
-      title: task.title ?? "Subagent",
+      title: task.title ?? m(msg("Subagent")),
       providerInstanceId: task.providerInstanceId,
     });
   }
   return [...agents.values()];
+}
+
+export function createWorkspaceRunningSubagentsAtomFamily(input: {
+  readonly threads: Atom.Atom<readonly EnvironmentThreadShell[]>;
+  readonly remoteSubagents: (ref: ScopedThreadRef) => Atom.Atom<readonly OrchestrationV2Subagent[]>;
+}) {
+  const threadIndex = Atom.map(input.threads, (threads) => ({
+    known: new Map(
+      threads.map((thread) => [
+        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+        thread,
+      ]),
+    ),
+    running: runningWorkspaceSubagentsByParent(threads),
+  }));
+  const byThread = Atom.family((key: string) => {
+    const ref = parseThreadKey(key);
+    const parentKey = scopedThreadKey(ref);
+    const remoteSubagents = input.remoteSubagents(ref);
+    return Atom.make((get) => {
+      const { known, running } = get(threadIndex);
+      return mergeWorkspaceRunningSubagents(
+        running.get(parentKey) ?? [],
+        get(remoteSubagents),
+        (childKey) => known.get(childKey),
+      );
+    }).pipe(Atom.setIdleTTL(0), Atom.withEquality(Equal.equals));
+  });
+  return (ref: ScopedThreadRef) => byThread(threadKey(ref));
 }
 
 export function buildWorkspaceThreadPickerItems(input: {

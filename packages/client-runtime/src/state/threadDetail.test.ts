@@ -203,6 +203,33 @@ describe("quietThreadAtom", () => {
     expect(next?.projection.turnItems[0]).toMatchObject({ status: "completed", streaming: false });
   });
 
+  it("reuses the item arrays across a metadata change and their rows across appends", () => {
+    const initial = withItem(assistant);
+    using thread = setup(initial);
+    const first = thread.read()!.projection;
+    const renamed = { ...initial, thread: { ...initial.thread, title: "Renamed" } };
+    thread.push(renamed);
+    const afterRename = thread.read()!.projection;
+    expect(afterRename.thread.title).toBe("Renamed");
+    expect(afterRename.turnItems).toBe(first.turnItems);
+    expect(afterRename.visibleTurnItems).toBe(first.visibleTurnItems);
+
+    const appended = { ...assistant, id: TurnItemId.make("second"), ordinal: 2 };
+    const next = applyOrchestrationV2ProjectionEvent(renamed, {
+      id: EventId.make("append"),
+      type: "turn-item.updated",
+      threadId: v2ThreadId,
+      occurredAt: later,
+      payload: appended,
+    })!;
+    thread.push(next);
+    const afterAppend = thread.read()!.projection;
+    expect(afterAppend.turnItems[0]).toBe(first.turnItems[0]);
+    expect(afterAppend.visibleTurnItems[0]).toBe(first.visibleTurnItems[0]);
+    expect(afterAppend.turnItems[1]).toMatchObject({ id: appended.id });
+    expect(afterAppend.visibleTurnItems[1]?.item).toBe(afterAppend.turnItems[1]);
+  });
+
   it("discards structure held before the thread resets", () => {
     const initial = withItem(assistant);
     using thread = setup(initial);

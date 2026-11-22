@@ -185,7 +185,7 @@ import { type LegendListRef } from "@legendapp/list/react";
 
 import { shouldInterruptThreadOnEscape } from "./chat/escapeToInterrupt";
 
-import { useWorkspaceMutationRefresh } from "../hooks/useWorkspaceMutationRefresh";
+import { useChatGitStatus } from "../hooks/useChatGitStatus";
 import { DEFAULT_INTERACTION_MODE, type ChatMessage } from "../types";
 import { buildThreadRouteParams } from "../threadRoutes";
 import { useTheme } from "../hooks/useTheme";
@@ -279,7 +279,6 @@ import { collectInlineContextIds } from "../lib/composerContextReferences";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
 
-import { useEnvironmentQueryRefresh } from "../state/query";
 import { useEnvironmentScope } from "~/state/session";
 import { primaryServerKeybindingsAtom, serverEnvironment } from "../state/server";
 import { hostEnvironmentIdAtom } from "../state/primaryEnvironment";
@@ -288,7 +287,6 @@ import {
   resolveProviderSkillsForCwd,
   resolveProvidersForCwd,
 } from "@t3tools/client-runtime/providerSkills";
-import { chatGitStatusAtom, NO_CHAT_GIT_STATUS_ATOM, vcsEnvironment } from "../state/vcs";
 import {
   type EnvironmentPresentation,
   useEnvironment,
@@ -1836,22 +1834,11 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
   );
 
   const gitStatusCwd = activeThread?.worktreePath ?? gitCwd;
-  const gitStatusAtom =
-    gitStatusCwd === null
-      ? null
-      : vcsEnvironment.status({
-          environmentId,
-          input: { cwd: gitStatusCwd },
-        });
-  const gitStatusQuery = {
-    data: useAtomValue(gitStatusAtom ? chatGitStatusAtom(gitStatusAtom) : NO_CHAT_GIT_STATUS_ATOM),
-    refresh: useEnvironmentQueryRefresh(gitStatusAtom).refresh,
-  };
-  useWorkspaceMutationRefresh({
-    enabled: gitStatusCwd !== null,
+  const gitStatus = useChatGitStatus({
+    environmentId,
+    cwd: gitStatusCwd,
+    threadKey: activeThreadKey,
     mutationId: workspaceMutationId,
-    refresh: gitStatusQuery.refresh,
-    resourceKey: `git-status:${activeThreadKey ?? ""}:${gitStatusCwd ?? ""}`,
   });
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const backgroundThread = use(BackgroundThreadContext);
@@ -1931,7 +1918,7 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
   const activeWorkspaceRoot = activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
   const activeTerminalLaunchContext =
     terminalUiLaunchContext?.threadId === activeThreadId ? terminalUiLaunchContext : null;
-  const liveIsGitRepo = gitStatusQuery.data?.isRepo;
+  const liveIsGitRepo = gitStatus?.isRepo;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- records live git repo status in the session cache read while the status query is unavailable
   useEffect(() => {
     if (gitStatusCwd !== null && liveIsGitRepo !== undefined) {
@@ -2301,7 +2288,7 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
     projectId: activeProject?.id ?? null,
     projectRepository: activeProjectRepository,
     threadBranch: activeThread?.branch ?? null,
-    gitStatus: gitStatusQuery.data ?? null,
+    gitStatus,
   });
   const proactivePullRequestsKey = pullRequestsSurfaceAvailable
     ? JSON.stringify(
@@ -2318,7 +2305,7 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
     latestRun: activeLatestRun,
     latestRunSettled,
     turnDiffSummaries,
-    isGitRepo: gitStatusQuery.data?.isRepo,
+    isGitRepo: gitStatus?.isRepo,
     linkedPullRequest: linkedThreadPullRequest,
     hasLinkedPullRequestDetail,
     pullRequestsKey: proactivePullRequestsKey,
@@ -2573,7 +2560,7 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
         effectiveEnvMode: envMode,
         activeWorktreePath,
         activeThreadBranch,
-        currentGitBranch: gitStatusQuery.data?.refName ?? null,
+        currentGitBranch: gitStatus?.refName ?? null,
       })
     : null;
   const openPanelPullRequestUrl = useOpenPanelPullRequestUrl(activeThreadRef);
@@ -2691,7 +2678,6 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
     activePendingApproval,
     activePendingUserInput,
     localCheckoutBranchMismatch,
-    gitStatusQuery,
     nowMinute,
     composerRef,
     composerDraftTarget,
@@ -2788,7 +2774,7 @@ export const ChatViewContent = memo(function ChatViewContent(props: ChatViewProp
   const armFreshSessionStable = useStableCallback(() => armFreshSession(routeThreadKey));
   const handleRestoreThreadBranch = () => {
     if (!canWriteSourceControl) return;
-    if (gitStatusQuery.data?.hasWorkingTreeChanges) {
+    if (gitStatus?.hasWorkingTreeChanges) {
       if (activeThreadKey !== null) openBranchRestoreConfirm(activeThreadKey);
       return;
     }

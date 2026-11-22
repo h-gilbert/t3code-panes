@@ -115,6 +115,26 @@ describe("migratePersistedWorkspacePaneState", () => {
     ).toEqual({ main: activeLayout });
   });
 
+  it("restores the active layout from repeated browser capture suffixes", () => {
+    const staleLayout = { ...DEFAULT_PROJECT_WORKSPACE_LAYOUT, paneCount: 2 as const };
+    const activeLayout = { ...DEFAULT_PROJECT_WORKSPACE_LAYOUT, paneCount: 7 as const };
+
+    expect(
+      migratePersistedWorkspacePaneState({
+        layoutsByProjectKey: {
+          main: staleLayout,
+          "main?browserCapture=delegated?browserCapture=delegated": activeLayout,
+          "main?browserCapture=delegated": staleLayout,
+          "window-a": staleLayout,
+        },
+        hiddenPickerProjectKeys: ["hidden-project"],
+      }),
+    ).toEqual({
+      layoutsByProjectKey: { main: activeLayout, "window-a": staleLayout },
+      hiddenPickerProjectKeys: ["hidden-project"],
+    });
+  });
+
   it("leaves unrelated named workspaces intact", () => {
     const layout = { ...DEFAULT_PROJECT_WORKSPACE_LAYOUT, paneCount: 3 as const };
 

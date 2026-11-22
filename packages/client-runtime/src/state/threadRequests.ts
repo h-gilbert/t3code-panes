@@ -13,7 +13,10 @@ import type {
 } from "@t3tools/contracts";
 import { Atom } from "effect/reactivity";
 import { parseThreadKey, threadKey } from "./entities.ts";
-import { getProjectionArrayReplacementIndex } from "./orchestrationV2Projection.ts";
+import {
+  getProjectionArrayChangeIndex,
+  setProjectionArrayChange,
+} from "./orchestrationV2Projection.ts";
 import type { EnvironmentThreadShell } from "./models.ts";
 import * as DateTime from "effect/DateTime";
 import type { AtomCommandResult } from "./runtime.ts";
@@ -359,16 +362,25 @@ export function createQuestionHistoryProjector<
     const sameRequests = requests === previousRequests;
     if (rows === previousRows && sameRequests && previousResult) return previousResult;
     if (!sameRequests) byId = new Map(requests.map((request) => [request.id, request]));
-    // Nothing was overlaid and requests are unchanged, so only an exactly replaced row can differ.
-    const replacedIndex =
-      sameRequests && previousRows !== undefined && previousResult === previousRows
-        ? getProjectionArrayReplacementIndex(previousRows, rows)
+    const index =
+      sameRequests && previousRows !== undefined
+        ? getProjectionArrayChangeIndex(previousRows, rows)
         : undefined;
-    const unchanged =
-      replacedIndex !== undefined && projectRow(rows[replacedIndex]!) === rows[replacedIndex];
+    if (index !== undefined && previousResult !== undefined) {
+      const row = projectRow(rows[index]!);
+      if (previousResult === previousRows && row === rows[index]) {
+        previousResult = rows;
+      } else {
+        const result = previousResult.slice();
+        result[index] = row;
+        setProjectionArrayChange(previousResult, result, index);
+        previousResult = result;
+      }
+    } else {
+      previousResult = projectRows(rows);
+    }
     previousRows = rows;
     previousRequests = requests;
-    previousResult = unchanged ? rows : projectRows(rows);
     return previousResult;
   };
 }

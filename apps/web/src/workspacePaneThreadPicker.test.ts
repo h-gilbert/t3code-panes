@@ -7,11 +7,13 @@ import {
   type OrchestrationV2Subagent,
   ProviderInstanceId,
 } from "@t3tools/contracts";
-import { describe, expect, it } from "vite-plus/test";
+import { Atom, AtomRegistry } from "effect/reactivity";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
   buildWorkspaceThreadPickerItems,
   countRunningWorkspaceSubagents,
+  createWorkspaceRunningSubagentsAtomFamily,
   filterWorkspaceThreadPickerItems,
   mergeWorkspaceRunningSubagents,
   runningWorkspaceSubagentsByParent,
@@ -340,8 +342,53 @@ describe("subagents in workspace lists", () => {
         providerInstanceId: remote.providerInstanceId,
       },
     ]);
-    expect(mergeWorkspaceRunningSubagents([remote], [task])).toEqual([remote]);
-    expect(mergeWorkspaceRunningSubagents([], [task], [remote])).toEqual([]);
+    expect(mergeWorkspaceRunningSubagents([remote], [task])).toEqual([
+      {
+        id: remote.id,
+        environmentId: remote.environmentId,
+        title: remote.title,
+        providerInstanceId: remote.providerInstanceId,
+      },
+    ]);
+    expect(mergeWorkspaceRunningSubagents([], [task], () => remote)).toEqual([]);
     expect(mergeWorkspaceRunningSubagents([], [{ ...task, status: "completed" }])).toEqual([]);
+  });
+
+  it("only notifies the pane that owns a changed running subagent", () => {
+    const parentA = thread("parent-a", projectA);
+    const parentB = thread("parent-b", projectA);
+    const childA = child("child-a", parentA.id);
+    const childB = child("child-b", parentB.id);
+    const threads = Atom.make<readonly EnvironmentThreadShell[]>([
+      parentA,
+      parentB,
+      childA,
+      childB,
+    ]);
+    const remoteSubagents = Atom.make<readonly OrchestrationV2Subagent[]>([]);
+    const paneAgents = createWorkspaceRunningSubagentsAtomFamily({
+      threads,
+      remoteSubagents: () => remoteSubagents,
+    });
+    const atomA = paneAgents(scopeThreadRef(environmentId, parentA.id));
+    const atomB = paneAgents(scopeThreadRef(environmentId, parentB.id));
+    const registry = AtomRegistry.make();
+    const notifyA = vi.fn();
+    const notifyB = vi.fn();
+    try {
+      registry.subscribe(atomA, notifyA);
+      registry.subscribe(atomB, notifyB);
+      registry.set(threads, [parentA, parentB, { ...childA, updatedAt: "2026-09-05" }, childB]);
+      expect(notifyA).not.toHaveBeenCalled();
+      expect(notifyB).not.toHaveBeenCalled();
+
+      registry.set(threads, [parentA, parentB, childA, { ...childB, title: "New title" }]);
+      expect(notifyA).not.toHaveBeenCalled();
+      expect(notifyB).toHaveBeenCalledExactlyOnceWith([
+        expect.objectContaining({ id: childB.id, title: "New title" }),
+      ]);
+    } finally {
+      registry.dispose();
+    }
   });
 });

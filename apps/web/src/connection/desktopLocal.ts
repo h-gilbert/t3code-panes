@@ -26,7 +26,7 @@ export function desktopLocalBackendId(target: ConnectionTarget): string | null {
     : null;
 }
 
-export type DesktopSecondaryBootstrapsRead =
+export type DesktopLocalBootstrapsRead =
   | {
       readonly _tag: "Success";
       readonly bootstraps: ReadonlyArray<DesktopEnvironmentBootstrap>;
@@ -36,48 +36,57 @@ export type DesktopSecondaryBootstrapsRead =
       readonly cause: unknown;
     };
 
+export type DesktopSecondaryBootstrapsRead = DesktopLocalBootstrapsRead;
+
+type BootstrapsBridge = Pick<DesktopBridge, "getLocalEnvironmentBootstraps">;
+
+/** One synchronous IPC read of every desktop-local bootstrap, primary included. */
+export function readDesktopLocalBootstrapsFrom(
+  bridge: BootstrapsBridge | undefined,
+): DesktopLocalBootstrapsRead {
+  if (bridge === undefined) return { _tag: "Success", bootstraps: [] };
+  try {
+    return { _tag: "Success", bootstraps: bridge.getLocalEnvironmentBootstraps() };
+  } catch (cause) {
+    return { _tag: "Failure", cause };
+  }
+}
+
 export interface DesktopSecondaryBootstrapsReader {
-  readonly readResult: () => DesktopSecondaryBootstrapsRead;
+  /** Pass a read already made this tick to avoid another IPC round trip. */
+  readonly readResult: (read?: DesktopLocalBootstrapsRead) => DesktopSecondaryBootstrapsRead;
   readonly readSnapshot: () => ReadonlyArray<DesktopEnvironmentBootstrap>;
 }
 
 /** Empty reads clear the snapshot; failed reads retain platform registrations. */
 export function createDesktopSecondaryBootstrapsReader(
-  resolveBridge: () => Pick<DesktopBridge, "getLocalEnvironmentBootstraps"> | undefined,
+  resolveBridge: () => BootstrapsBridge | undefined,
 ): DesktopSecondaryBootstrapsReader {
   let snapshot: ReadonlyArray<DesktopEnvironmentBootstrap> = [];
 
-  const readResult = (): DesktopSecondaryBootstrapsRead => {
-    const bridge = resolveBridge();
-    if (bridge === undefined) {
-      if (snapshot.length > 0) snapshot = [];
-      return { _tag: "Success", bootstraps: snapshot };
+  const readResult = (
+    read: DesktopLocalBootstrapsRead = readDesktopLocalBootstrapsFrom(resolveBridge()),
+  ): DesktopSecondaryBootstrapsRead => {
+    if (read._tag === "Failure") return read;
+    const next = read.bootstraps.filter((entry) => entry.id !== PRIMARY_LOCAL_ENVIRONMENT_ID);
+    if (
+      next.length !== snapshot.length ||
+      next.some((entry, index) => {
+        const previous = snapshot[index];
+        return (
+          previous === undefined ||
+          entry.id !== previous.id ||
+          entry.label !== previous.label ||
+          entry.runningDistro !== previous.runningDistro ||
+          entry.httpBaseUrl !== previous.httpBaseUrl ||
+          entry.wsBaseUrl !== previous.wsBaseUrl ||
+          entry.bootstrapToken !== previous.bootstrapToken
+        );
+      })
+    ) {
+      snapshot = next;
     }
-    try {
-      const next = bridge
-        .getLocalEnvironmentBootstraps()
-        .filter((entry) => entry.id !== PRIMARY_LOCAL_ENVIRONMENT_ID);
-      if (
-        next.length !== snapshot.length ||
-        next.some((entry, index) => {
-          const previous = snapshot[index];
-          return (
-            previous === undefined ||
-            entry.id !== previous.id ||
-            entry.label !== previous.label ||
-            entry.runningDistro !== previous.runningDistro ||
-            entry.httpBaseUrl !== previous.httpBaseUrl ||
-            entry.wsBaseUrl !== previous.wsBaseUrl ||
-            entry.bootstrapToken !== previous.bootstrapToken
-          );
-        })
-      ) {
-        snapshot = next;
-      }
-      return { _tag: "Success", bootstraps: snapshot };
-    } catch (cause) {
-      return { _tag: "Failure", cause };
-    }
+    return { _tag: "Success", bootstraps: snapshot };
   };
 
   return {
@@ -93,8 +102,14 @@ const desktopSecondaryBootstrapsReader = createDesktopSecondaryBootstrapsReader(
   () => window.desktopBridge,
 );
 
-export function readDesktopSecondaryBootstrapsResult(): DesktopSecondaryBootstrapsRead {
-  return desktopSecondaryBootstrapsReader.readResult();
+export function readDesktopLocalBootstraps(): DesktopLocalBootstrapsRead {
+  return readDesktopLocalBootstrapsFrom(window.desktopBridge);
+}
+
+export function readDesktopSecondaryBootstrapsResult(
+  read?: DesktopLocalBootstrapsRead,
+): DesktopSecondaryBootstrapsRead {
+  return desktopSecondaryBootstrapsReader.readResult(read);
 }
 
 export function readDesktopSecondaryBootstraps(): ReadonlyArray<DesktopEnvironmentBootstrap> {

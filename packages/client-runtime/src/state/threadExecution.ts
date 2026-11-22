@@ -480,6 +480,12 @@ const PROVIDER_LIMIT_NOTICE =
 export function deriveUsageLimitNoticeRows(
   projection: ThreadStructure,
 ): UsageLimitNoticeRows | null {
+  // The notice requires a root failure on one of these runs.
+  if (
+    latestUnheldRun(projection.runs)?.status !== "failed" &&
+    latestExecutedRun(projection.runs)?.status !== "failed"
+  )
+    return null;
   const runtime = deriveThreadStructureRuntime(projection);
   const run = presentedLatestRun(projection);
   if (runtime?.status !== "failed" || runtime.lastErrorClass !== "usage_limit" || run === null) {

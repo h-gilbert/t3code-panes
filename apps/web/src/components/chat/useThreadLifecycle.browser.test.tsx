@@ -37,7 +37,7 @@ vi.mock(import("../../state/entities"), async (importOriginal) => ({
   useChildThreadInputs: (() => state.childThreadInputs) as never,
 }));
 
-import { render } from "../../../test/render";
+import { act, render } from "../../../test/render";
 import { useThreadLifecycle } from "./useThreadLifecycle";
 
 const environmentId = EnvironmentId.make("environment:test");
@@ -85,7 +85,6 @@ it.each([
     <RestoreBranchHarness
       thread={parent}
       currentRouteThreadKeyRef={{ current: parent.routeThreadKey }}
-      refreshGitStatus={() => undefined}
       focusComposer={() => undefined}
     />,
     { router: "/environment:test/parent" },
@@ -101,7 +100,6 @@ it.each([
 function RestoreBranchHarness(props: {
   readonly thread: ThreadInput;
   readonly currentRouteThreadKeyRef: { readonly current: string | null };
-  readonly refreshGitStatus: () => void;
   readonly focusComposer: () => void;
 }) {
   const lifecycle = useThreadLifecycle({
@@ -122,7 +120,6 @@ function RestoreBranchHarness(props: {
     turnItems: [],
     activePendingApproval: null as never,
     activePendingUserInput: null as never,
-    gitStatusQuery: { refresh: props.refreshGitStatus },
     nowMinute: "",
     composerRef: { current: { focusAtEnd: props.focusComposer } } as never,
     composerDraftTarget: { kind: "thread", ref: props.thread.activeThreadRef } as never,
@@ -162,13 +159,11 @@ it.each(["a", "b", "navigation"] as const)(
     const threadA = threadInput("thread:a", "feature-a");
     const threadB = threadInput("thread:b", "feature-b");
     const currentRouteThreadKeyRef = { current: threadA.routeThreadKey };
-    const refreshGitStatus = vi.fn();
     const focusComposer = vi.fn();
     const harness = (thread: ThreadInput) => (
       <RestoreBranchHarness
         thread={thread}
         currentRouteThreadKeyRef={currentRouteThreadKeyRef}
-        refreshGitStatus={refreshGitStatus}
         focusComposer={focusComposer}
       />
     );
@@ -202,11 +197,12 @@ it.each(["a", "b", "navigation"] as const)(
     const pending = first === "a" ? threadB : threadA;
     currentRouteThreadKeyRef.current = pending.routeThreadKey;
     await screen.rerender(harness(pending));
-    completions[first === "a" ? 0 : 1]!({
-      _tag: "Success",
-      value: { refName: completed.localCheckoutBranchMismatch.threadBranch },
+    await act(async () => {
+      completions[first === "a" ? 0 : 1]!({
+        _tag: "Success",
+        value: { refName: completed.localCheckoutBranchMismatch.threadBranch },
+      });
     });
-    await vi.waitFor(() => expect(refreshGitStatus).toHaveBeenCalledOnce());
     expect(focusComposer).not.toHaveBeenCalled();
     await expect.element(page.getByRole("button", { name: "Restoring..." })).toBeDisabled();
     expect(switchRef).toHaveBeenCalledTimes(2);
@@ -216,7 +212,6 @@ it.each(["a", "b", "navigation"] as const)(
       value: { refName: pending.localCheckoutBranchMismatch.threadBranch },
     });
     await expect.element(page.getByRole("button", { name: "Restore branch" })).toBeEnabled();
-    expect(refreshGitStatus).toHaveBeenCalledTimes(2);
     expect(focusComposer).not.toHaveBeenCalled();
     expect(focusFrames).toHaveLength(1);
     if (scenario === "navigation") {
@@ -241,7 +236,6 @@ it.each(["Success", "Failure"] as const)(
       <RestoreBranchHarness
         thread={thread}
         currentRouteThreadKeyRef={currentRouteThreadKeyRef}
-        refreshGitStatus={() => undefined}
         focusComposer={() => undefined}
       />
     );

@@ -2,10 +2,22 @@ import {
   ConnectionTransientError,
   PrimaryConnectionTarget,
 } from "@t3tools/client-runtime/connection";
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { ConnectionCatalogDocument, Persistence } from "@t3tools/client-runtime/platform";
+import {
+  EnvironmentId,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+  type OrchestrationV2ThreadProjection,
+} from "@t3tools/contracts";
+import {
+  ConnectionCatalogDocument,
+  ORCHESTRATION_THREAD_CACHE_SCHEMA_VERSION,
+  Persistence,
+  StoredOrchestrationThreadSnapshot,
+} from "@t3tools/client-runtime/platform";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -13,6 +25,51 @@ import * as Stream from "effect/Stream";
 import { afterEach, vi } from "vite-plus/test";
 
 import * as ConnectionStorage from "./storage";
+
+const v2Now = DateTime.makeUnsafe("2026-06-20T00:00:00.000Z");
+const v2ThreadId = ThreadId.make("thread-v2");
+const v2Projection: OrchestrationV2ThreadProjection = {
+  thread: {
+    id: v2ThreadId,
+    projectId: ProjectId.make("project-v2"),
+    title: "Thread",
+    providerInstanceId: ProviderInstanceId.make("codex"),
+    modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    branch: null,
+    worktreePath: null,
+    activeProviderThreadId: null,
+    lineage: { rootThreadId: v2ThreadId, parentThreadId: null, relationshipToParent: null },
+    forkedFrom: null,
+    createdBy: "user",
+    creationSource: "web",
+    createdAt: v2Now,
+    updatedAt: v2Now,
+    archivedAt: null,
+    settledOverride: null,
+    settledAt: null,
+    lastVisitedAt: null,
+    deletedAt: null,
+  },
+  runs: [],
+  attempts: [],
+  nodes: [],
+  subagents: [],
+  providerSessions: [],
+  providerThreads: [],
+  providerTurns: [],
+  runtimeRequests: [],
+  messages: [],
+  plans: [],
+  turnItems: [],
+  checkpointScopes: [],
+  checkpoints: [],
+  contextHandoffs: [],
+  contextTransfers: [],
+  visibleTurnItems: [],
+  updatedAt: v2Now,
+};
 
 const emptyCatalog = {
   schemaVersion: 1,
@@ -94,6 +151,34 @@ describe("ConnectionStorage.makeCatalogBackend", () => {
       expect(error.message).toContain("QuotaExceededError");
     }),
   );
+});
+
+describe("IndexedDB thread cache upgrade", () => {
+  it("keeps a recent readable snapshot and rejects stale, oversized, and obsolete rows", () => {
+    const encodeThread = Schema.encodeSync(
+      Schema.fromJsonString(StoredOrchestrationThreadSnapshot),
+    );
+    const key = `env:${v2ThreadId}`;
+    const raw = encodeThread({
+      schemaVersion: ORCHESTRATION_THREAD_CACHE_SCHEMA_VERSION,
+      environmentId: EnvironmentId.make("env"),
+      threadId: v2ThreadId,
+      snapshot: { snapshotSequence: 10, projection: v2Projection },
+    });
+    const now = DateTime.toEpochMillis(v2Now);
+    expect(ConnectionStorage.migrateLegacyThreadCacheRow(key, raw, now)).toEqual({
+      payload: raw,
+      updatedAt: now,
+      bytes: raw.length * 2,
+    });
+    const obsolete = JSON.stringify({ ...JSON.parse(raw), schemaVersion: 4 });
+    expect(ConnectionStorage.migrateLegacyThreadCacheRow(key, obsolete, now)).toBeUndefined();
+    expect(ConnectionStorage.migrateLegacyThreadCacheRow(key, "{broken", now)).toBeUndefined();
+    const oversized = raw.padEnd(4 * 1024 * 1024 + 1);
+    expect(ConnectionStorage.migrateLegacyThreadCacheRow(key, oversized, now)).toBeUndefined();
+    const expired = now + 31 * 24 * 60 * 60_000;
+    expect(ConnectionStorage.migrateLegacyThreadCacheRow(key, raw, expired)).toBeUndefined();
+  });
 });
 
 describe("IndexedDB connection recovery", () => {

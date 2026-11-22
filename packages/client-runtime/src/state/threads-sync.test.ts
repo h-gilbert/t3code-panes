@@ -1012,6 +1012,90 @@ describe("EnvironmentThreads", () => {
           hasMoreHistory: nextCursor !== null,
         }),
       );
+    it.effect(
+      "skips a stale window, then rebases on the server cursor and loads trimmed rows",
+      () =>
+        Effect.gen(function* () {
+          const work = Array.from({ length: 1_256 }, (_, index) =>
+            command(`live-work-${index}`, "completed", 0, index + 2),
+          );
+          const tail = work.at(-1)!;
+          const sequence = CACHED_SNAPSHOT_SEQUENCE + 1;
+          const cached = {
+            ...PROJECTION_WITH_QUESTION,
+            turnItems: [QUESTION_CARD, ...work.slice(0, 999)],
+            visibleTurnItems: work.slice(0, 999).map(localRow),
+          };
+          const bounded = (
+            item: OrchestrationV2TurnItem,
+            snapshotSequence: number,
+            historyCursor: string,
+          ): ThreadSnapshotLoadResult => ({
+            _tag: "present",
+            snapshot: { projection: cachedItem(item), snapshotSequence },
+            history: {
+              historyCursor,
+              hasMoreHistory: true,
+              latestLocalTurnOrdinal: item.ordinal,
+            },
+          });
+          const harness = yield* makeHarness({
+            cached,
+            httpSnapshots: [
+              bounded(work[998]!, sequence - 1, "stale-boundary"),
+              bounded(tail, sequence + 256, "server-window-boundary"),
+            ],
+            historyHttpClient: HttpClient.make((request, url) => {
+              expect(url.searchParams.get("cursor")).toBe("server-window-boundary");
+              return Effect.succeed(historyPage(request, [localRow(work[0]!, 0)], null));
+            }),
+          });
+          const append = (item: OrchestrationV2TurnItem, sequence: number) =>
+            Queue.offer(harness.inputs, {
+              kind: "event",
+              sequence,
+              event: {
+                id: EventId.make(`live-work-appended-${sequence}`),
+                type: "turn-item.updated",
+                threadId: THREAD_ID,
+                occurredAt: at,
+                payload: item,
+              },
+            });
+          yield* awaitThreadState(harness.observed, (current) => current.status === "live");
+          yield* append(work[999]!, sequence);
+          yield* awaitThreadState(harness.observed, (current) => current.sequence === sequence);
+          yield* Effect.forEach(work.slice(1_000), (item, index) =>
+            append(item, sequence + index + 1),
+          );
+
+          const current = yield* awaitThreadState(
+            harness.observed,
+            (current) => current.history.historyCursor !== null,
+          );
+          expect(current.history).toMatchObject({
+            historyCursor: "server-window-boundary",
+            hasMoreHistory: true,
+            latestLocalTurnOrdinal: tail.ordinal,
+          });
+          const projection = Option.getOrThrow(current.data);
+          expect(projection.visibleTurnItems.map((row) => row.item.id)).toEqual([tail.id]);
+          expect(projection.turnItems).toEqual([tail, QUESTION_CARD]);
+          expect(projection.runtimeRequests).toEqual([PENDING_QUESTION]);
+
+          expect(yield* harness.loadEarlier()).toEqual({ _tag: "loaded" });
+          const expanded = yield* SubscriptionRef.get(harness.threadState);
+          expect(expanded.history).toMatchObject({
+            expanded: true,
+            historyCursor: null,
+            hasMoreHistory: false,
+          });
+          expect(
+            Option.getOrThrow(expanded.data).visibleTurnItems.map((row) => row.item.id),
+          ).toEqual([work[0]!.id, tail.id]);
+        }),
+    );
+
     it.effect("loads a long unwrapped turn through its user message and resumes failed pages", () =>
       Effect.gen(function* () {
         const prompt = {

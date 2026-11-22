@@ -64,6 +64,8 @@ import {
 } from "./threadState.ts";
 
 const THREAD_SUBSCRIPTION_RETRY_DELAY = "250 millis";
+const LIVE_THREAD_WINDOW_ROWS = 1_000;
+const LIVE_THREAD_WINDOW_RETRY_ROWS = 256;
 
 function statusWithoutLiveData(
   data: Option.Option<OrchestrationV2ThreadProjection>,
@@ -101,6 +103,10 @@ function formatHistoryError(error: unknown): string {
     return error.message;
   }
   return HISTORY_LOAD_ERROR;
+}
+
+function historyRowKey(row: OrchestrationV2ThreadProjection["visibleTurnItems"][number]) {
+  return JSON.stringify([row.sourceThreadId, row.sourceItemId]);
 }
 
 // Steers join a running turn; every other user message opens one. The timeline shows every
@@ -462,6 +468,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     options?: {
       readonly resetHistory?: boolean;
       readonly history?: ThreadHistoryMeta;
+      readonly canReplace?: (current: EnvironmentThreadState) => boolean;
     },
   ) {
     const waiting = yield* Ref.get(awaitingCompletion);
@@ -470,6 +477,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     // state when only the projection changes. Bounded installs pass history so
     // projection + cursor persist together in one enqueue.
     const next = yield* SubscriptionRef.updateAndGet(state, (previous) => {
+      if (options?.canReplace !== undefined && !options.canReplace(previous)) return previous;
       const history =
         options?.history !== undefined
           ? options.history
@@ -492,6 +500,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     // Active projections can update many times per second and retain large tool
     // payloads. Persist once the run settles so cache encoding stays off the
     // streaming path. Progressive meta rides along when the window is incomplete.
+    if (Option.getOrNull(next.data) !== thread) return false;
     if (shouldPersistThread(thread, next.history)) {
       const snapshotSequence = yield* SubscriptionRef.get(lastSequence);
       yield* queuePersist(
@@ -503,6 +512,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
         ),
       );
     }
+    return true;
   });
 
   const patchHistoryMeta = (patch: (history: ThreadHistoryMeta) => ThreadHistoryMeta) =>
@@ -510,6 +520,117 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       ...current,
       history: patch(current.history),
     }));
+
+  const refreshLiveWindow = yield* Queue.sliding<void>(1);
+  let nextWindowRefreshAt = LIVE_THREAD_WINDOW_ROWS;
+  let historyLoadsInProgress = 0;
+
+  function canRefreshLiveWindow(current: EnvironmentThreadState) {
+    return (
+      canLoadHistory &&
+      current.status === "live" &&
+      !current.history.expanded &&
+      !current.history.loading &&
+      historyLoadsInProgress === 0
+    );
+  }
+
+  const rebaseLiveWindow = Effect.fn("EnvironmentThreadState.rebaseLiveWindow")(function* () {
+    if (!canRefreshLiveWindow(yield* SubscriptionRef.get(state))) return;
+    const prepared = yield* SubscriptionRef.get(supervisor.prepared);
+    if (Option.isNone(prepared)) return;
+    const result = yield* snapshotLoader.load(prepared.value, threadId);
+    if (
+      result._tag !== "present" ||
+      !result.history?.hasMoreHistory ||
+      !result.history.historyCursor
+    )
+      return;
+    const { snapshot, history } = result;
+    yield* applyLock.withPermits(1)(
+      Effect.gen(function* () {
+        const latest = yield* SubscriptionRef.get(state);
+        const sequence = yield* SubscriptionRef.get(lastSequence);
+        if (
+          !canRefreshLiveWindow(latest) ||
+          Option.isNone(latest.data) ||
+          snapshot.snapshotSequence !== sequence
+        )
+          return;
+        const previous = latest.data.value;
+        if (snapshot.projection.visibleTurnItems.length >= previous.visibleTurnItems.length) return;
+
+        // Only the server knows the canonical positions behind its history cursor.
+        // Swap the timeline at the same sequence, keeping live control and replay bodies.
+        const retainedItems = new Map(snapshot.projection.turnItems.map((item) => [item.id, item]));
+        const retainedRows = new Map(
+          snapshot.projection.visibleTurnItems.map((row) => [historyRowKey(row), row]),
+        );
+        const keepLiveBody = (live: OrchestrationV2TurnItem, bounded: OrchestrationV2TurnItem) => {
+          if (bounded.deferredWork === live.deferredWork) return live;
+          const { deferredWork: _previous, ...item } = live;
+          return bounded.deferredWork === undefined
+            ? item
+            : { ...item, deferredWork: bounded.deferredWork };
+        };
+        const previousLocalRows = new Set<string>();
+        for (const row of previous.visibleTurnItems) {
+          if (row.visibility === "local") previousLocalRows.add(row.sourceItemId);
+          const key = historyRowKey(row);
+          const retained = retainedRows.get(key);
+          if (retained !== undefined) {
+            retainedRows.set(key, { ...retained, item: keepLiveBody(row.item, retained.item) });
+          } else if (isOrchestrationV2WorkActive(row.item.status)) {
+            return;
+          }
+        }
+        for (const item of previous.turnItems) {
+          const retained = retainedItems.get(item.id);
+          if (retained !== undefined) {
+            retainedItems.set(item.id, keepLiveBody(item, retained));
+          } else if (!previousLocalRows.has(item.id)) {
+            retainedItems.set(item.id, item);
+          } else if (
+            item.type === "error" ||
+            item.type === "run_interrupt_request" ||
+            item.type === "run_interrupt_result"
+          ) {
+            // A paged-away control item could change error, Stop, or retry state.
+            return;
+          }
+        }
+        const turnItems = [...retainedItems.values()];
+        const visibleTurnItems = [...retainedRows.values()];
+        const projection = { ...previous, turnItems, visibleTurnItems };
+        if (hasMissingPendingQuestionCard(projection)) return;
+        const replaced = yield* setThread(projection, {
+          canReplace: canRefreshLiveWindow,
+          history: {
+            ...latest.history,
+            historyCursor: history.historyCursor,
+            hasMoreHistory: true,
+            latestLocalTurnOrdinal:
+              history.latestLocalTurnOrdinal ?? latest.history.latestLocalTurnOrdinal,
+          },
+        });
+        if (replaced) {
+          nextWindowRefreshAt = Math.max(
+            LIVE_THREAD_WINDOW_ROWS,
+            Math.max(turnItems.length, projection.visibleTurnItems.length) +
+              LIVE_THREAD_WINDOW_RETRY_ROWS,
+          );
+          yield* remember;
+        }
+      }),
+    );
+  });
+  if (canLoadHistory) {
+    yield* Queue.take(refreshLiveWindow).pipe(
+      Effect.andThen(rebaseLiveWindow()),
+      Effect.forever,
+      Effect.forkScoped,
+    );
+  }
 
   const setDeleted = Effect.fn("EnvironmentThreadState.setDeleted")(function* () {
     yield* Ref.set(awaitingCompletion, false);
@@ -647,6 +768,16 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       yield* setDeleted();
       return;
     }
+    if (result._tag === "applied" && canLoadHistory && !result.history.expanded && !waiting) {
+      const rows = Math.max(
+        result.projection.turnItems.length,
+        result.projection.visibleTurnItems.length,
+      );
+      if (rows >= nextWindowRefreshAt) {
+        nextWindowRefreshAt = rows + LIVE_THREAD_WINDOW_RETRY_ROWS;
+        yield* Queue.offer(refreshLiveWindow, undefined);
+      }
+    }
     if (result._tag === "applied" && shouldPersistThread(result.projection, result.history)) {
       const snapshotSequence = yield* SubscriptionRef.get(lastSequence);
       yield* queuePersist(
@@ -674,6 +805,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     }
 
     if (item.kind === "snapshot") {
+      nextWindowRefreshAt = LIVE_THREAD_WINDOW_ROWS;
       yield* SubscriptionRef.set(lastSequence, item.snapshotSequence);
       const hasProgressiveHistory =
         item.historyCursor !== undefined ||
@@ -950,10 +1082,16 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     const scope = yield* Scope.Scope;
     const registration = yield* historyController.value.register(environmentId, threadId, {
       loadEarlier: (throughEntryId, workAnchorId) =>
-        loadEarlier(throughEntryId, workAnchorId).pipe(
-          Effect.forkIn(scope),
-          Effect.flatMap(Fiber.join),
-        ),
+        Effect.acquireUseRelease(
+          Effect.sync(() => {
+            historyLoadsInProgress += 1;
+          }),
+          () => loadEarlier(throughEntryId, workAnchorId),
+          () =>
+            Effect.sync(() => {
+              historyLoadsInProgress -= 1;
+            }),
+        ).pipe(Effect.forkIn(scope), Effect.flatMap(Fiber.join)),
       reconcilePendingWork: () =>
         reconcilePendingWork().pipe(
           Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),

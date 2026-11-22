@@ -145,10 +145,14 @@ describe("project snapshot readiness", () => {
 
 it("expects a primary environment only on desktops with the local environment enabled", () => {
   const desktop = (enabled: boolean) => {
-    vi.stubGlobal("window", { desktopBridge: { getLocalEnvironmentEnabled: () => enabled } });
+    // Toggling relaunches the app, so each bridge is read over sync IPC at most once.
+    const getLocalEnvironmentEnabled = vi.fn(() => enabled);
+    vi.stubGlobal("window", { desktopBridge: { getLocalEnvironmentEnabled } });
     try {
+      expectsPrimaryEnvironment();
       return expectsPrimaryEnvironment();
     } finally {
+      expect(getLocalEnvironmentEnabled).toHaveBeenCalledTimes(1);
       vi.unstubAllGlobals();
     }
   };

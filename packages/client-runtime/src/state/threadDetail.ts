@@ -41,13 +41,18 @@ import {
   type PendingThreadRequests,
 } from "./threadRequests.ts";
 import { arrayElementsEqual, parseThreadKey, threadKey } from "./entities.ts";
-import { getProjectionArrayReplacementIndex } from "./orchestrationV2Projection.ts";
+import {
+  getProjectionArrayChangeIndex,
+  getProjectionArrayReplacementIndex,
+  setProjectionArrayChange,
+} from "./orchestrationV2Projection.ts";
 
 const EMPTY_VISIBLE_TURN_ITEMS: OrchestrationV2ThreadProjection["visibleTurnItems"] = Object.freeze(
   [],
 );
 const EMPTY_THREAD_STRUCTURE_TURN_ITEMS: ReadonlyArray<ThreadStructureVisibleTurnItem> =
   Object.freeze([]);
+const EMPTY_TURN_ITEMS: ReadonlyArray<TurnItem> = Object.freeze([]);
 const EMPTY_CHECKPOINT_SUMMARIES: ReadonlyArray<ThreadCheckpointSummary> = Object.freeze([]);
 
 /**
@@ -148,13 +153,46 @@ function toThreadStructureThread(thread: AppThread): ThreadStructureThread {
   return structure;
 }
 
-function toThreadStructure(projection: OrchestrationV2ThreadProjection): ThreadStructure {
+function mapProjectionRows<Row, Result>(
+  rows: ReadonlyArray<Row>,
+  previousRows: ReadonlyArray<Row> | undefined,
+  previousResult: ReadonlyArray<Result> | undefined,
+  mapRow: (row: Row) => Result,
+): ReadonlyArray<Result> {
+  if (previousRows === undefined || previousResult === undefined) return rows.map(mapRow);
+  if (rows === previousRows) return previousResult;
+  const index = getProjectionArrayChangeIndex(previousRows, rows);
+  if (index === undefined) return rows.map(mapRow);
+  const result = previousResult.slice();
+  result[index] = mapRow(rows[index]!);
+  setProjectionArrayChange(previousResult, result, index);
+  return result;
+}
+
+function toThreadStructure(
+  projection: OrchestrationV2ThreadProjection,
+  previous: OrchestrationV2ThreadProjection | null,
+  structureBefore: ThreadStructure | undefined,
+): ThreadStructure {
   const { updatedAt: _updatedAt, ...structure } = projection;
   return {
     ...structure,
-    thread: toThreadStructureThread(projection.thread),
-    turnItems: projection.turnItems.map(toThreadStructureTurnItem),
-    visibleTurnItems: projection.visibleTurnItems.map(toThreadStructureVisibleTurnItem),
+    thread:
+      previous?.thread === projection.thread && structureBefore !== undefined
+        ? structureBefore.thread
+        : toThreadStructureThread(projection.thread),
+    turnItems: mapProjectionRows(
+      projection.turnItems,
+      previous?.turnItems,
+      structureBefore?.turnItems,
+      toThreadStructureTurnItem,
+    ),
+    visibleTurnItems: mapProjectionRows(
+      projection.visibleTurnItems,
+      previous?.visibleTurnItems,
+      structureBefore?.visibleTurnItems,
+      toThreadStructureVisibleTurnItem,
+    ),
   };
 }
 
@@ -284,6 +322,20 @@ export function sameThreadStructure(
   );
 }
 
+function createTurnItemFilter(keep: (item: TurnItem) => boolean) {
+  let previous: ReadonlyArray<TurnItem> | undefined;
+  let value: ReadonlyArray<TurnItem> = [];
+  return (rows: ReadonlyArray<TurnItem>) => {
+    if (rows === previous) return value;
+    const index =
+      previous === undefined ? undefined : getProjectionArrayChangeIndex(previous, rows);
+    if (index === undefined || keep(rows[index]!) || (previous![index] && keep(previous![index]!)))
+      value = rows.filter(keep);
+    previous = rows;
+    return value;
+  };
+}
+
 export function createEnvironmentThreadDetailAtoms<E>(
   threadStateAtom: (
     environmentId: ScopedThreadRef["environmentId"],
@@ -330,7 +382,7 @@ export function createEnvironmentThreadDetailAtoms<E>(
       ) {
         previous = {
           environmentId: next.environmentId,
-          projection: toThreadStructure(next.projection),
+          projection: toThreadStructure(next.projection, previousProjection, previous?.projection),
         };
       }
       // Comparing the latest projection lets consecutive replacements bypass history scans.
@@ -390,10 +442,12 @@ export function createEnvironmentThreadDetailAtoms<E>(
   // each streaming message reads its text through assistantMessageTextAtom.
   const timelineVisibleTurnItemsAtomFamily = Atom.family((key: string) => {
     let previous = EMPTY_VISIBLE_TURN_ITEMS;
+    let value = EMPTY_VISIBLE_TURN_ITEMS;
     return Atom.make((get) => {
       const next = get(visibleTurnItemsAtomFamily(key));
-      if (!sameApartFromStreamedAssistantText(previous, next)) previous = next;
-      return previous;
+      if (!sameApartFromStreamedAssistantText(previous, next)) value = next;
+      previous = next;
+      return value;
     }).pipe(
       Atom.setIdleTTL(0),
       Atom.withLabel(`environment-thread-timeline-visible-turn-items:${key}`),
@@ -442,6 +496,9 @@ export function createEnvironmentThreadDetailAtoms<E>(
     }).pipe(Atom.setIdleTTL(0), Atom.withLabel(`environment-thread-queue:${key}`));
   });
   const runStopAtomFamily = Atom.family((key: string) => {
+    const interrupts = createTurnItemFilter(
+      (item) => item.type === "run_interrupt_request" || item.type === "run_interrupt_result",
+    );
     let previous: Pick<OrchestrationV2ThreadProjection, "runs" | "turnItems"> | null = null;
     let stop: RunStopPresentation | null = null;
     return Atom.make((get) => {
@@ -449,20 +506,21 @@ export function createEnvironmentThreadDetailAtoms<E>(
       if (projection === null) {
         previous = null;
         stop = null;
-      } else if (
-        projection.runs !== previous?.runs ||
-        projection.turnItems !== previous?.turnItems
-      ) {
-        const { runs, turnItems } = projection;
-        previous = { runs, turnItems };
-        const next = presentRunStop(previous);
-        if (
-          next?.state !== stop?.state ||
-          next?.runId !== stop?.runId ||
-          next?.requestedAt !== stop?.requestedAt ||
-          next?.background !== stop?.background
-        )
-          stop = next;
+        interrupts(EMPTY_TURN_ITEMS);
+      } else {
+        const runs = projection.runs;
+        const turnItems = interrupts(projection.turnItems);
+        if (runs !== previous?.runs || turnItems !== previous?.turnItems) {
+          previous = { runs, turnItems };
+          const next = presentRunStop(previous);
+          if (
+            next?.state !== stop?.state ||
+            next?.runId !== stop?.runId ||
+            next?.requestedAt !== stop?.requestedAt ||
+            next?.background !== stop?.background
+          )
+            stop = next;
+        }
       }
       return stop;
     }).pipe(Atom.setIdleTTL(0), Atom.withLabel(`environment-thread-run-stop:${key}`));
@@ -550,6 +608,9 @@ export function createEnvironmentThreadDetailAtoms<E>(
     ).pipe(Atom.setIdleTTL(0), Atom.withLabel(`environment-thread-worktree:${key}`)),
   );
   const pendingRequestsAtomFamily = Atom.family((key: string) => {
+    const requestCards = createTurnItemFilter(
+      (item) => item.type === "approval_request" || item.type === "user_input_request",
+    );
     let previous: Pick<OrchestrationV2ThreadProjection, "runtimeRequests" | "turnItems"> | null =
       null;
     let value: PendingThreadRequests | null = null;
@@ -558,6 +619,7 @@ export function createEnvironmentThreadDetailAtoms<E>(
       if (projection === null) {
         previous = null;
         value = null;
+        requestCards(EMPTY_TURN_ITEMS);
         return value;
       }
       const runtimeRequests = projection.runtimeRequests.filter(
@@ -566,8 +628,8 @@ export function createEnvironmentThreadDetailAtoms<E>(
       const ids = new Set(runtimeRequests.map((request) => request.id));
       const turnItems =
         ids.size === 0
-          ? []
-          : projection.turnItems.filter(
+          ? requestCards(EMPTY_TURN_ITEMS)
+          : requestCards(projection.turnItems).filter(
               (item) =>
                 (item.type === "approval_request" || item.type === "user_input_request") &&
                 ids.has(item.requestId),

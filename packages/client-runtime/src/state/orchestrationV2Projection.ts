@@ -24,35 +24,67 @@ export type ApplyOrchestrationV2ProjectionEventOptions = {
   readonly latestLocalTurnOrdinal?: number | null;
 };
 
-// Only this exact pair differs at one index. Both keys are weak so hints
-// neither retain streaming history nor apply to replacement snapshots.
-const arrayReplacements = new WeakMap<
-  ReadonlyArray<unknown>,
-  WeakMap<ReadonlyArray<unknown>, number>
->();
+// Hints apply only to the exact pair. Weak keys let either version be collected.
+const arrayChanges = new WeakMap<ReadonlyArray<unknown>, WeakMap<ReadonlyArray<unknown>, number>>();
+
+export function getProjectionArrayChangeIndex(
+  previous: ReadonlyArray<unknown>,
+  next: ReadonlyArray<unknown>,
+): number | undefined {
+  return arrayChanges.get(previous)?.get(next);
+}
 
 export function getProjectionArrayReplacementIndex(
   previous: ReadonlyArray<unknown>,
   next: ReadonlyArray<unknown>,
 ): number | undefined {
-  return arrayReplacements.get(previous)?.get(next);
+  return previous.length === next.length
+    ? getProjectionArrayChangeIndex(previous, next)
+    : undefined;
 }
 
-function replaceProjectionArrayItem<T>(
-  items: ReadonlyArray<T>,
+export function setProjectionArrayChange(
+  previous: ReadonlyArray<unknown>,
+  next: ReadonlyArray<unknown>,
   index: number,
-  item: T,
-): ReadonlyArray<T> {
-  const next = items.slice();
-  next[index] = item;
-  let replacements = arrayReplacements.get(items);
-  if (replacements === undefined) {
-    replacements = new WeakMap();
-    arrayReplacements.set(items, replacements);
+) {
+  let changes = arrayChanges.get(previous);
+  if (changes === undefined) {
+    changes = new WeakMap();
+    arrayChanges.set(previous, changes);
   }
-  replacements.set(next, index);
-  return next;
+  changes.set(next, index);
 }
+
+// Transfer the index to the latest immutable array. Reusing an older array
+// rebuilds its own index; a retained projection never keeps the live index alive.
+function createRowIndex<Row>(keyOf: (row: Row) => string) {
+  const indices = new WeakMap<ReadonlyArray<Row>, Map<string, number>>();
+  return {
+    find(rows: ReadonlyArray<Row>, key: string): number {
+      let index = indices.get(rows);
+      if (index === undefined) {
+        index = new Map();
+        rows.forEach((row, position) => index!.set(keyOf(row), position));
+        indices.set(rows, index);
+      }
+      return index.get(key) ?? -1;
+    },
+    record(previous: ReadonlyArray<Row>, next: ReadonlyArray<Row>, position: number) {
+      setProjectionArrayChange(previous, next, position);
+      const index = indices.get(previous);
+      if (index === undefined) return;
+      indices.delete(previous);
+      index.set(keyOf(next[position]!), position);
+      indices.set(next, index);
+    },
+  };
+}
+
+const turnItemIndex = createRowIndex((item: OrchestrationV2TurnItem) => item.id);
+const visibleItemIndex = createRowIndex(
+  (row: OrchestrationV2ThreadProjection["visibleTurnItems"][number]) => row.sourceItemId,
+);
 
 function upsertEntity<T extends { readonly id: unknown }>(
   items: ReadonlyArray<T>,
@@ -150,7 +182,7 @@ function shouldDropMissingPartialTurnItem(
   item: OrchestrationV2TurnItem,
   latestLocalTurnOrdinal: number | null | undefined,
 ): boolean {
-  if (projection.visibleTurnItems.some((row) => row.sourceItemId === item.id)) {
+  if (visibleItemIndex.find(projection.visibleTurnItems, item.id) !== -1) {
     return false;
   }
   if (item.runId === null) {
@@ -165,17 +197,13 @@ function shouldDropMissingPartialTurnItem(
   ) {
     return false;
   }
-  if (
-    projection.visibleTurnItems.some(
-      (row) =>
-        row.visibility === "local" &&
-        row.item.runId === item.runId &&
-        row.item.ordinal <= item.ordinal,
-    )
-  ) {
-    return false;
-  }
-  return isBelowPartialWindow(projection, item, latestLocalTurnOrdinal);
+  if (!isBelowPartialWindow(projection, item, latestLocalTurnOrdinal)) return false;
+  return !projection.visibleTurnItems.some(
+    (row) =>
+      row.visibility === "local" &&
+      row.item.runId === item.runId &&
+      row.item.ordinal <= item.ordinal,
+  );
 }
 
 function isBelowPartialWindow(
@@ -194,6 +222,34 @@ function isBelowPartialWindow(
   return oldest !== null && item.ordinal < oldest;
 }
 
+type VisibleRow = OrchestrationV2ThreadProjection["visibleTurnItems"][number];
+const orderedLocalTails = new WeakMap<ReadonlyArray<VisibleRow>, VisibleRow | undefined | false>();
+
+function lastOrderedLocalRow(rows: ReadonlyArray<VisibleRow>) {
+  if (orderedLocalTails.has(rows)) return orderedLocalTails.get(rows);
+  let tail: VisibleRow | undefined;
+  let ordered = true;
+  for (const [position, row] of rows.entries()) {
+    if (row.position !== position) {
+      ordered = false;
+      break;
+    }
+    if (row.visibility !== "local") continue;
+    if (
+      tail !== undefined &&
+      (tail.item.ordinal > row.item.ordinal ||
+        (tail.item.ordinal === row.item.ordinal && tail.item.id.localeCompare(row.item.id) > 0))
+    ) {
+      ordered = false;
+      break;
+    }
+    tail = row;
+  }
+  const result = ordered ? tail : false;
+  orderedLocalTails.set(rows, result);
+  return result;
+}
+
 function upsertVisibleTurnItem(
   projection: OrchestrationV2ThreadProjection,
   item: OrchestrationV2TurnItem,
@@ -201,10 +257,11 @@ function upsertVisibleTurnItem(
   latestLocalTurnOrdinal: number | null | undefined,
 ): OrchestrationV2ThreadProjection["visibleTurnItems"] {
   const rows = projection.visibleTurnItems;
-  // Streamed updates land on the newest rows. Item ids are unique, so the
-  // search can start there.
-  let index = rows.length - 1;
-  while (index >= 0 && rows[index]!.sourceItemId !== item.id) index -= 1;
+  const index = visibleItemIndex.find(rows, item.id);
+  const comesAfter = (row: (typeof rows)[number]) =>
+    row.visibility === "local" &&
+    (row.item.ordinal > item.ordinal ||
+      (row.item.ordinal === item.ordinal && row.item.id.localeCompare(item.id) > 0));
   const next = {
     position: 0,
     visibility: "local" as const,
@@ -220,7 +277,14 @@ function upsertVisibleTurnItem(
   ) {
     if (previous.item === item) return rows;
     if (previous.item.ordinal === item.ordinal) {
-      return replaceProjectionArrayItem(rows, index, { ...next, position: previous.position });
+      const updated = rows.slice();
+      updated[index] = { ...next, position: previous.position };
+      visibleItemIndex.record(rows, updated, index);
+      if (orderedLocalTails.has(rows)) {
+        const tail = orderedLocalTails.get(rows);
+        orderedLocalTails.set(updated, tail === previous ? updated[index] : tail);
+      }
+      return updated;
     }
   }
   if (
@@ -230,19 +294,21 @@ function upsertVisibleTurnItem(
   ) {
     return rows;
   }
+  const tail = lastOrderedLocalRow(rows);
+  if (index === -1 && tail !== false && (tail === undefined || !comesAfter(tail))) {
+    const updated = rows.slice();
+    updated.push({ ...next, position: rows.length });
+    visibleItemIndex.record(rows, updated, rows.length);
+    orderedLocalTails.set(updated, updated.at(-1));
+    return updated;
+  }
   // The item goes before the first later local row, as if its old row were
   // removed first. Inserts, reorders, and inherited-to-local changes need
   // this ordering pass; replacements above preserve every other row.
   let insertion = rows.length;
   for (let candidate = 0; candidate < rows.length; candidate += 1) {
     const row = rows[candidate]!;
-    if (
-      candidate !== index &&
-      row.visibility === "local" &&
-      (row.item.ordinal > item.ordinal ||
-        (row.item.ordinal === item.ordinal &&
-          String(row.item.id).localeCompare(String(item.id)) > 0))
-    ) {
+    if (candidate !== index && comesAfter(row)) {
       insertion = candidate;
       break;
     }
@@ -419,11 +485,7 @@ export function applyOrchestrationV2ProjectionEvent(
       return { ...base, plans: upsertEntity(base.plans, event.payload) };
     case "turn-item.updated": {
       let payload = restoreTurnItemBodies(event.payload, latestBodies(projection));
-      // Streamed updates land on the newest items, so search from the end.
-      let itemIndex = projection.turnItems.length - 1;
-      while (itemIndex >= 0 && projection.turnItems[itemIndex]!.id !== payload.id) {
-        itemIndex -= 1;
-      }
+      const itemIndex = turnItemIndex.find(projection.turnItems, payload.id);
       const deferredWork =
         itemIndex === -1 ? undefined : projection.turnItems[itemIndex]?.deferredWork;
       if (deferredWork !== undefined) payload = { ...payload, deferredWork };
@@ -434,10 +496,10 @@ export function applyOrchestrationV2ProjectionEvent(
       ) {
         return projection;
       }
-      const turnItems =
-        itemIndex === -1
-          ? [...projection.turnItems, payload]
-          : replaceProjectionArrayItem(projection.turnItems, itemIndex, payload);
+      const turnItems = projection.turnItems.slice();
+      const position = itemIndex === -1 ? turnItems.length : itemIndex;
+      turnItems[position] = payload;
+      turnItemIndex.record(projection.turnItems, turnItems, position);
       const next = { ...base, turnItems };
       // Only interrupt requests can change another item's visibility. Streaming
       // text/tool updates must not recheck every row against every run.

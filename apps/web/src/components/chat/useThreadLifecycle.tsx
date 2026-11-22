@@ -124,7 +124,6 @@ interface ThreadLifecycleInput {
     readonly threadBranch: string;
     readonly currentBranch: string;
   } | null;
-  readonly gitStatusQuery: { readonly refresh: () => void };
   readonly nowMinute: string;
   readonly composerRef: ComposerHandleRef;
   readonly composerDraftTarget: ComposerThreadTarget;
@@ -174,7 +173,6 @@ export function useThreadLifecycle(input: ThreadLifecycleInput) {
     activePendingApproval,
     activePendingUserInput,
     localCheckoutBranchMismatch,
-    gitStatusQuery,
     nowMinute,
     composerRef,
     composerDraftTarget,
@@ -409,11 +407,9 @@ export function useThreadLifecycle(input: ThreadLifecycleInput) {
             }),
           );
         }
-        gitStatusQuery.refresh();
         return;
       }
     }
-    gitStatusQuery.refresh();
     finishRestore();
     if (currentRouteThreadKeyRef.current === routeThreadKey) {
       window.requestAnimationFrame(() => {

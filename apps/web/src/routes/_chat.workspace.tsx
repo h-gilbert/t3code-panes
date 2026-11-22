@@ -20,7 +20,6 @@ import {
   scopeProjectRef,
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { canSettle, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
 import { createFileRoute } from "@tanstack/react-router";
@@ -30,7 +29,6 @@ import {
   type ScopedProjectRef,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
-import type { OrchestrationV2Subagent } from "@t3tools/contracts";
 import {
   ArrowLeftIcon,
   BotIcon,
@@ -48,11 +46,12 @@ import {
   XIcon,
 } from "lucide-react";
 import {
+  memo,
   useEffectEvent,
   useEffect,
   useRef,
   useState,
-  type CSSProperties,
+  type ComponentProps,
   type RefObject,
 } from "react";
 
@@ -99,7 +98,6 @@ import {
   useProjects,
   useServerConfigs,
   useThreadRefs,
-  useThreadShell,
   useThreadShellExists,
   useThreadShells,
   useThreadStatus,
@@ -143,8 +141,7 @@ import {
 import { resolveWorkspaceDraftThreadRef } from "../workspacePaneTitle";
 import {
   buildWorkspaceThreadPickerItems,
-  mergeWorkspaceRunningSubagents,
-  runningWorkspaceSubagentsByParent,
+  createWorkspaceRunningSubagentsAtomFamily,
   type WorkspaceRunningSubagent,
   type WorkspaceThreadPickerItem,
 } from "../workspacePaneThreadPicker";
@@ -388,8 +385,14 @@ function WorkspaceDraftPane({
   );
 }
 
-const EMPTY_PANE_THREAD_ATOM = Atom.make(null);
-const EMPTY_PANE_SUBAGENTS: readonly OrchestrationV2Subagent[] = [];
+const workspaceRunningSubagentsAtom = createWorkspaceRunningSubagentsAtomFamily({
+  threads: environmentThreadShells.threadShellsAtom,
+  remoteSubagents: (ref) =>
+    Atom.map(
+      environmentThreadDetails.threadAtom(ref),
+      (thread) => thread?.projection.subagents ?? [],
+    ).pipe(Atom.setIdleTTL(0)),
+});
 
 function RunningSubagentProviderIcon({ agent }: { readonly agent: WorkspaceRunningSubagent }) {
   const providers = useEnvironmentProviders();
@@ -414,35 +417,87 @@ function RunningSubagentProviderIcon({ agent }: { readonly agent: WorkspaceRunni
   );
 }
 
-function WorkspacePane({
+const WorkspacePaneRunningSubagents = memo(function WorkspacePaneRunningSubagents({
+  threadRef,
+  openRelated,
+}: {
+  readonly threadRef: ScopedThreadRef;
+  readonly openRelated: (ref: ScopedThreadRef) => void;
+}) {
+  const gt = useGT();
+  const runningSubagents = useAtomValue(workspaceRunningSubagentsAtom(threadRef));
+  return runningSubagents.length === 1 ? (
+    <Button
+      size="xs"
+      variant="ghost"
+      aria-label={gt("Open running agent: {agentTitle}", {
+        agentTitle: runningSubagents[0]!.title,
+      })}
+      onClick={() => {
+        const agent = runningSubagents[0]!;
+        openRelated(scopeThreadRef(agent.environmentId, agent.id));
+      }}
+    >
+      <RunningSubagentProviderIcon agent={runningSubagents[0]!} />
+      <T>1 running</T>
+    </Button>
+  ) : runningSubagents.length > 1 ? (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={<Button size="xs" variant="ghost" />}
+        aria-label={gt(
+          "{count, plural, one {{count} running agent} other {{count} running agents}}",
+          { count: runningSubagents.length },
+        )}
+      >
+        <T>
+          <Var>{runningSubagents.length}</Var> running
+        </T>
+        <ChevronDownIcon className="size-3" aria-hidden />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-72">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>
+            <T>Running agents</T>
+          </DropdownMenuLabel>
+          {runningSubagents.map((agent) => (
+            <DropdownMenuItem
+              key={scopedThreadKey(scopeThreadRef(agent.environmentId, agent.id))}
+              onClick={() => openRelated(scopeThreadRef(agent.environmentId, agent.id))}
+            >
+              <RunningSubagentProviderIcon agent={agent} />
+              <span className="truncate">{agent.title}</span>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  ) : null;
+});
+
+const WorkspacePane = memo(function WorkspacePane({
   workspaceKey,
   index,
   paneTarget,
   projectKey,
   projects,
-  availableThreads,
   focused,
   maximized,
   rearrangeable,
-  style,
+  leadPaneRowSpan,
   composerHandleRef,
   settleThread,
-  runningSubagents: runningThreadSubagents,
-  knownThreads,
 }: {
   readonly workspaceKey: string;
   readonly index: WorkspacePaneIndex;
   readonly paneTarget: WorkspacePaneTarget | null;
   readonly projectKey: string | null;
   readonly projects: readonly SidebarProjectSnapshot[];
-  readonly availableThreads: readonly WorkspaceThreadPickerItem[];
   readonly focused: boolean;
   readonly maximized: boolean;
   readonly rearrangeable: boolean;
-  readonly style: CSSProperties;
+  readonly leadPaneRowSpan: number;
   readonly composerHandleRef: RefObject<ChatComposerHandle | null>;
-  readonly runningSubagents: readonly EnvironmentThreadShell[];
-  readonly knownThreads: readonly EnvironmentThreadShell[];
   readonly settleThread: ReturnType<typeof useThreadActions>["settleThread"];
 }) {
   const gt = useGT();
@@ -482,18 +537,7 @@ function WorkspacePane({
   const [headerControls, setHeaderControls] = useState<HTMLDivElement | null>(null);
   const draftRequestVersionRef = useRef(0);
   const serverThreadRef = paneTarget && "threadId" in paneTarget ? paneTarget : null;
-  const serverThreadShell = useThreadShell(serverThreadRef);
-  const remoteSubagents = useAtomValue(
-    serverThreadRef === null
-      ? EMPTY_PANE_THREAD_ATOM
-      : environmentThreadDetails.threadAtom(serverThreadRef),
-    (thread) => thread?.projection.subagents ?? EMPTY_PANE_SUBAGENTS,
-  );
-  const runningSubagents = mergeWorkspaceRunningSubagents(
-    runningThreadSubagents,
-    remoteSubagents,
-    knownThreads,
-  );
+  const serverThreadShell = useQuietThreadShell(serverThreadRef);
   const openFreshDraft = useStableCallback((projectRef: ScopedProjectRef) => {
     const requestVersion = ++draftRequestVersionRef.current;
     const freshDraft = { draftId: newDraftId(), threadId: newThreadId() };
@@ -606,7 +650,10 @@ function WorkspacePane({
         "relative flex min-h-0 min-w-0 flex-col overflow-hidden border bg-background",
         focused ? "z-10 border-primary ring-1 ring-primary/50" : "border-border",
       )}
-      style={style}
+      style={{
+        order: index,
+        gridRow: index === 0 && leadPaneRowSpan > 1 ? `span ${leadPaneRowSpan}` : undefined,
+      }}
       aria-label={gt("Workspace pane {paneNumber}", { paneNumber })}
       data-workspace-pane={index}
       data-focused={focused ? "true" : "false"}
@@ -910,52 +957,8 @@ function WorkspacePane({
         )}
         <div className="ml-auto flex items-center gap-0.5">
           <div ref={setHeaderControls} className="flex shrink-0 items-center" />
-          {runningSubagents.length === 1 ? (
-            <Button
-              size="xs"
-              variant="ghost"
-              aria-label={gt("Open running agent: {agentTitle}", {
-                agentTitle: runningSubagents[0]!.title,
-              })}
-              onClick={() => {
-                const agent = runningSubagents[0]!;
-                openRelated(scopeThreadRef(agent.environmentId, agent.id));
-              }}
-            >
-              <RunningSubagentProviderIcon agent={runningSubagents[0]!} />
-              <T>1 running</T>
-            </Button>
-          ) : runningSubagents.length > 1 ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={<Button size="xs" variant="ghost" />}
-                aria-label={gt(
-                  "{count, plural, one {{count} running agent} other {{count} running agents}}",
-                  { count: runningSubagents.length },
-                )}
-              >
-                <T>
-                  <Var>{runningSubagents.length}</Var> running
-                </T>
-                <ChevronDownIcon className="size-3" aria-hidden />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-72">
-                <DropdownMenuGroup>
-                  <DropdownMenuLabel>
-                    <T>Running agents</T>
-                  </DropdownMenuLabel>
-                  {runningSubagents.map((agent) => (
-                    <DropdownMenuItem
-                      key={scopedThreadKey(scopeThreadRef(agent.environmentId, agent.id))}
-                      onClick={() => openRelated(scopeThreadRef(agent.environmentId, agent.id))}
-                    >
-                      <RunningSubagentProviderIcon agent={agent} />
-                      <span className="truncate">{agent.title}</span>
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
+          {serverThreadRef ? (
+            <WorkspacePaneRunningSubagents threadRef={serverThreadRef} openRelated={openRelated} />
           ) : null}
           {canGoBack ? (
             <Button
@@ -1023,7 +1026,9 @@ function WorkspacePane({
               composerHandleRef={composerHandleRef}
             />
           ) : (
-            <EmptyWorkspacePane
+            <WorkspacePaneThreadBrowser
+              workspaceKey={workspaceKey}
+              projectGroups={projects}
               projects={menuProjects}
               hiddenProjects={hiddenMenuProjects}
               onShowAll={() => setPaneProject(workspaceKey, index, null)}
@@ -1032,7 +1037,6 @@ function WorkspacePane({
                 if (project.projectKey === projectKey) setPaneProject(workspaceKey, index, null);
               }}
               selectedProjectKey={selectedProject?.projectKey ?? null}
-              threads={availableThreads}
               onSelectProject={(project) =>
                 selectProject(scopeProjectRef(project.environmentId, project.id))
               }
@@ -1046,6 +1050,44 @@ function WorkspacePane({
       </WorkspacePaneNavigationContext>
     </section>
   );
+});
+
+function WorkspacePaneThreadBrowser({
+  workspaceKey,
+  projectGroups,
+  ...props
+}: Omit<ComponentProps<typeof EmptyWorkspacePane>, "threads"> & {
+  readonly workspaceKey: string;
+  readonly projectGroups: readonly SidebarProjectSnapshot[];
+}) {
+  const threads = useThreadShells();
+  const environments = useEnvironmentIdentities();
+  const serverConfigs = useServerConfigs();
+  const nowMinute = useNowMinute();
+  const { panes, paneCount } = useWorkspacePaneStore((state) =>
+    selectProjectWorkspaceLayout(state, workspaceKey),
+  );
+  const now = `${nowMinute}:00.000Z`;
+  const settledThreadKeys = new Set(
+    threads.flatMap((thread) => {
+      const capabilities = serverConfigs.get(thread.environmentId)?.environment.capabilities;
+      if (capabilities?.threadSettlement !== true) return [];
+      if (capabilities.threadSnooze === true && effectiveSnoozed(thread, { now })) return [];
+      const threadRef = scopeThreadRef(thread.environmentId, thread.id);
+      const threadKey = scopedThreadKey(threadRef);
+      return thread.settledOverride === "settled" ? [threadKey] : [];
+    }),
+  );
+  const availableThreads = buildWorkspaceThreadPickerItems({
+    threads,
+    projects: projectGroups,
+    paneTargets: panes.slice(0, paneCount),
+    environmentLabels: new Map(
+      environments.map((environment) => [environment.environmentId, environment.label]),
+    ),
+    settledThreadKeys,
+  });
+  return <EmptyWorkspacePane {...props} threads={availableThreads} />;
 }
 
 export function ProjectPaneWorkspace({
@@ -1060,23 +1102,17 @@ export function ProjectPaneWorkspace({
   const resetLabel = gt("Reset workspace");
   const newWindowLabel = gt("Open workspace in new window");
   const projects = useProjects();
-  const environments = useEnvironmentIdentities();
-  const threads = useThreadShells();
-  const runningAgents = (() => runningWorkspaceSubagentsByParent(threads))();
-  const serverConfigs = useServerConfigs();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { isMacosDesktop, isWindowFullscreen } = useDesktopFullscreen();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
-  const nowMinute = useNowMinute();
-  const projectGroups = (() =>
-    buildSidebarProjectSnapshots({
-      projects,
-      settings: projectGroupingSettings,
-      groupScratchProjects: true,
-      primaryEnvironmentId,
-      resolveEnvironmentLabel: () => null,
-    }))();
+  const projectGroups = buildSidebarProjectSnapshots({
+    projects,
+    settings: projectGroupingSettings,
+    groupScratchProjects: true,
+    primaryEnvironmentId,
+    resolveEnvironmentLabel: () => null,
+  });
   const layout = useWorkspacePaneStore((state) =>
     selectProjectWorkspaceLayout(state, workspaceKey),
   );
@@ -1084,6 +1120,7 @@ export function ProjectPaneWorkspace({
   const setLayoutMode = useWorkspacePaneStore((state) => state.setLayoutMode);
   const resetWorkspace = useWorkspacePaneStore((state) => state.resetWorkspace);
   const { settleThread } = useThreadActions();
+  const settlePaneThread = useStableCallback(settleThread);
   const { panes, projectKeys, paneCount, layoutMode, focusedPaneIndex, maximizedPaneIndex } =
     layout;
   const leadPaneRowSpan =
@@ -1100,29 +1137,6 @@ export function ProjectPaneWorkspace({
       key: `${workspacePaneRenderKey(paneTarget, index)}:${panes.slice(0, index).filter((target) => target && paneTarget && "threadId" in target && "threadId" in paneTarget && scopedThreadKey(target) === scopedThreadKey(paneTarget)).length}`,
     }))
     .toSorted((left, right) => left.key.localeCompare(right.key));
-  const settledThreadKeys = (() => {
-    const now = `${nowMinute}:00.000Z`;
-    return new Set(
-      threads.flatMap((thread) => {
-        const capabilities = serverConfigs.get(thread.environmentId)?.environment.capabilities;
-        if (capabilities?.threadSettlement !== true) return [];
-        if (capabilities.threadSnooze === true && effectiveSnoozed(thread, { now })) return [];
-        const threadRef = scopeThreadRef(thread.environmentId, thread.id);
-        const threadKey = scopedThreadKey(threadRef);
-        return thread.settledOverride === "settled" ? [threadKey] : [];
-      }),
-    );
-  })();
-  const availableThreads = (() =>
-    buildWorkspaceThreadPickerItems({
-      threads,
-      projects: projectGroups,
-      paneTargets: panes.slice(0, paneCount),
-      environmentLabels: new Map(
-        environments.map((environment) => [environment.environmentId, environment.label]),
-      ),
-      settledThreadKeys,
-    }))();
   const [paneComposerHandleRefs] = useState(() =>
     Array.from(
       { length: WORKSPACE_PANE_COUNT },
@@ -1319,12 +1333,6 @@ export function ProjectPaneWorkspace({
           if (maximizedPaneIndex !== null && maximizedPaneIndex !== index) return null;
           return (
             <WorkspacePane
-              knownThreads={threads}
-              runningSubagents={
-                paneTarget && "threadId" in paneTarget
-                  ? (runningAgents.get(scopedThreadKey(paneTarget)) ?? [])
-                  : []
-              }
               key={key}
               workspaceKey={workspaceKey}
               index={index}
@@ -1335,16 +1343,12 @@ export function ProjectPaneWorkspace({
                 settings: projectGroupingSettings,
               })}
               projects={projectGroups}
-              availableThreads={availableThreads}
               focused={active && focusedPaneIndex === index}
               maximized={maximizedPaneIndex === index}
               rearrangeable={maximizedPaneIndex === null && paneCount > 1}
-              style={{
-                order: index,
-                gridRow: index === 0 && leadPaneRowSpan > 1 ? `span ${leadPaneRowSpan}` : undefined,
-              }}
+              leadPaneRowSpan={index === 0 ? leadPaneRowSpan : 1}
               composerHandleRef={paneComposerHandleRefs[index]!}
-              settleThread={settleThread}
+              settleThread={settlePaneThread}
             />
           );
         })}

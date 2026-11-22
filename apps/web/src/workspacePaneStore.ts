@@ -5,6 +5,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 
 import type { DraftId } from "./composerDraftStore";
 import { resolveStorage } from "./lib/storage";
+import { stripDelegatedCaptureSuffix } from "./workspaceRouteSearch";
 
 export const WORKSPACE_PANE_COUNTS = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
 export const WORKSPACE_PANE_COUNT = 9;
@@ -84,18 +85,19 @@ export interface WorkspacePaneState {
 
 export function migratePersistedWorkspacePaneState(
   persistedState: unknown,
-): Pick<WorkspacePaneState, "layoutsByProjectKey"> {
+): Pick<WorkspacePaneState, "layoutsByProjectKey" | "hiddenPickerProjectKeys"> {
   if (!persistedState || typeof persistedState !== "object") {
-    return { layoutsByProjectKey: {} };
+    return { layoutsByProjectKey: {}, hiddenPickerProjectKeys: [] };
   }
-  const rawLayouts = (persistedState as { layoutsByProjectKey?: unknown }).layoutsByProjectKey;
-  if (!rawLayouts || typeof rawLayouts !== "object" || Array.isArray(rawLayouts)) {
-    return { layoutsByProjectKey: {} };
-  }
-
-  const layoutsByProjectKey = {
-    ...(rawLayouts as Record<string, ProjectWorkspaceLayout>),
-  };
+  const { layoutsByProjectKey: rawLayouts, hiddenPickerProjectKeys: hiddenProjects } =
+    persistedState as { layoutsByProjectKey?: unknown; hiddenPickerProjectKeys?: unknown };
+  const hiddenPickerProjectKeys = Array.isArray(hiddenProjects)
+    ? hiddenProjects.filter((key): key is string => typeof key === "string")
+    : [];
+  const layoutsByProjectKey =
+    rawLayouts && typeof rawLayouts === "object" && !Array.isArray(rawLayouts)
+      ? { ...(rawLayouts as Record<string, ProjectWorkspaceLayout>) }
+      : {};
   for (const [storedKey, layout] of Object.entries(layoutsByProjectKey)) {
     const markerIndex = storedKey.indexOf("?workspace=");
     if (markerIndex <= 0) continue;
@@ -115,7 +117,17 @@ export function migratePersistedWorkspacePaneState(
     layoutsByProjectKey[canonicalKey] = layout;
     delete layoutsByProjectKey[storedKey];
   }
-  return { layoutsByProjectKey };
+  // Each navigation could append another suffix. Prefer the deepest alias when several exist.
+  const captureAliases = Object.entries(layoutsByProjectKey).sort(
+    ([left], [right]) => left.length - right.length,
+  );
+  for (const [storedKey, layout] of captureAliases) {
+    const canonicalKey = stripDelegatedCaptureSuffix(storedKey);
+    if (canonicalKey === storedKey || canonicalKey.length === 0) continue;
+    layoutsByProjectKey[canonicalKey] = layout;
+    delete layoutsByProjectKey[storedKey];
+  }
+  return { layoutsByProjectKey, hiddenPickerProjectKeys };
 }
 
 export function assignWorkspaceThread(
@@ -521,7 +533,7 @@ export const useWorkspacePaneStore = create<WorkspacePaneState>()(
     }),
     {
       name: WORKSPACE_PANE_STORAGE_KEY,
-      version: 1,
+      version: 2,
       storage: createJSONStorage(() =>
         resolveStorage(typeof localStorage === "undefined" ? null : localStorage),
       ),
@@ -529,10 +541,7 @@ export const useWorkspacePaneStore = create<WorkspacePaneState>()(
         layoutsByProjectKey,
         hiddenPickerProjectKeys,
       }),
-      migrate: (persistedState) => ({
-        ...migratePersistedWorkspacePaneState(persistedState),
-        hiddenPickerProjectKeys: [],
-      }),
+      migrate: migratePersistedWorkspacePaneState,
     },
   ),
 );

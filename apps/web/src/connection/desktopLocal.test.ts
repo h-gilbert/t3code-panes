@@ -1,7 +1,10 @@
 import { type DesktopEnvironmentBootstrap, PRIMARY_LOCAL_ENVIRONMENT_ID } from "@t3tools/contracts";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
-import { createDesktopSecondaryBootstrapsReader } from "./desktopLocal";
+import {
+  createDesktopSecondaryBootstrapsReader,
+  readDesktopLocalBootstrapsFrom,
+} from "./desktopLocal";
 
 describe("desktop local topology reads", () => {
   it("reuses snapshots when polling returns fresh objects for the same topology", () => {
@@ -76,6 +79,25 @@ describe("desktop local topology reads", () => {
     }));
 
     expect(reader.readResult()).toEqual({ _tag: "Success", bootstraps: [secondary] });
+  });
+
+  it("reuses a bootstrap read already made this tick instead of reading the bridge again", () => {
+    const secondary = {
+      id: "wsl:Ubuntu",
+      label: "WSL: Ubuntu",
+      httpBaseUrl: "http://127.0.0.1:4000",
+      wsBaseUrl: "ws://127.0.0.1:4000",
+    };
+    const getLocalEnvironmentBootstraps = vi.fn(() => [secondary]);
+    const reader = createDesktopSecondaryBootstrapsReader(() => ({
+      getLocalEnvironmentBootstraps,
+    }));
+
+    const read = readDesktopLocalBootstrapsFrom({ getLocalEnvironmentBootstraps });
+    expect(reader.readResult(read)).toEqual({ _tag: "Success", bootstraps: [secondary] });
+    const cause = new Error("IPC unavailable");
+    expect(reader.readResult({ _tag: "Failure", cause })).toEqual({ _tag: "Failure", cause });
+    expect(getLocalEnvironmentBootstraps).toHaveBeenCalledTimes(1);
   });
 
   it("retains the last successful snapshot only until another read succeeds", () => {

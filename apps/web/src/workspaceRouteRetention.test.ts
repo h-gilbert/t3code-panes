@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest";
 
 import { DEFAULT_WORKSPACE_KEY } from "./workspacePaneStore";
 import { resolveRetainedWorkspaceKey } from "./workspaceRouteRetention";
+import { parseDelegatedDesktopSearch } from "./workspaceRouteSearch";
 
 describe("resolveRetainedWorkspaceKey", () => {
   it("retains the current named workspace throughout settings navigation", () => {
@@ -72,4 +73,26 @@ describe("resolveRetainedWorkspaceKey", () => {
       ).toBe("window-b");
     }
   });
+});
+
+it("keeps the macOS capture role out of workspace navigation and restores old links", () => {
+  for (const search of [
+    "?workspace=window-a?browserCapture=delegated",
+    "?workspace=window-a%3FbrowserCapture%3Ddelegated?browserCapture=delegated",
+    "?workspace=window-a&other=kept?browserCapture=delegated",
+  ]) {
+    const parsed = parseDelegatedDesktopSearch(search);
+    expect(
+      resolveRetainedWorkspaceKey({
+        pathname: "/workspace",
+        workspaceSearch: parsed.workspace,
+        previousWorkspaceKey: null,
+      }),
+    ).toBe("window-a");
+  }
+
+  expect(
+    parseDelegatedDesktopSearch("?workspace=window-a&other=kept?browserCapture=delegated"),
+  ).toEqual({ workspace: "window-a", other: "kept" });
+  expect(parseDelegatedDesktopSearch("?browserCapture=delegated")).toEqual({});
 });

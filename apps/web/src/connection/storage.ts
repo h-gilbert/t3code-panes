@@ -32,6 +32,7 @@ import {
 } from "@t3tools/client-runtime/connection";
 import { EnvironmentQueryStore } from "@t3tools/client-runtime/state/query-persistence";
 import { EnvironmentId, ServerConfig, ThreadId, VcsListRefsResult } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -46,10 +47,18 @@ import { m } from "../i18n/messages";
 import { projectFaviconCache } from "../assets/projectFaviconCache";
 
 const DATABASE_NAME = "t3code:connection-runtime";
-const DATABASE_VERSION = 5;
+const DATABASE_VERSION = 6;
 const CATALOG_STORE_NAME = "catalog";
 const SHELL_STORE_NAME = "shell";
 const THREAD_STORE_NAME = "thread";
+const THREAD_UPDATED_INDEX_NAME = "updated";
+const THREAD_MAX_ROWS = 128;
+const THREAD_MAX_BYTES = 48 * 1024 * 1024;
+const THREAD_MAX_PAYLOAD_LENGTH = 4 * 1024 * 1024;
+const THREAD_MAX_AGE_MS = 30 * 24 * 60 * 60_000;
+const THREAD_PRUNE_BATCH_ROWS = 8;
+const THREAD_PRUNE_BATCH_BYTES = 4 * 1024 * 1024;
+const THREAD_BATCH_KEY = 0;
 const SERVER_CONFIG_STORE_NAME = "server-config";
 const VCS_REFS_STORE_NAME = "vcs-refs";
 const QUERY_STORE_NAME = "query";
@@ -84,11 +93,15 @@ const StoredVcsRefsJson = Schema.fromJsonString(StoredVcsRefs);
 const isStoredQuery = Schema.is(
   Schema.Struct({ environmentId: Schema.String, payload: Schema.String, updatedAt: Schema.Number }),
 );
-const isQueryBatch = Schema.is(Schema.Struct({ rows: Schema.Number, bytes: Schema.Number }));
+const isPruneBatch = Schema.is(Schema.Struct({ rows: Schema.Number, bytes: Schema.Number }));
 const ConnectionCatalogDocumentJson = Schema.fromJsonString(ConnectionCatalogDocument);
 const decodeConnectionCatalogDocument = Schema.decodeUnknownEffect(ConnectionCatalogDocumentJson);
 const encodeConnectionCatalogDocument = Schema.encodeEffect(ConnectionCatalogDocumentJson);
 const decodeStoredShellSnapshot = Schema.decodeUnknownEffect(StoredShellSnapshotJson);
+const decodeLegacyThreadSnapshot = Schema.decodeUnknownOption(StoredThreadSnapshotJson);
+const isThreadCacheRow = Schema.is(
+  Schema.Struct({ payload: Schema.String, updatedAt: Schema.Number, bytes: Schema.Number }),
+);
 const decodeStoredThreadSnapshot = Schema.decodeUnknownEffect(StoredThreadSnapshotJson);
 const decodeStoredServerConfig = Schema.decodeUnknownEffect(StoredServerConfigJson);
 const encodeStoredServerConfig = Schema.encodeEffect(StoredServerConfigJson);
@@ -144,7 +157,83 @@ function persistenceError(operation: keyof typeof PERSISTENCE_FAILURE, cause: un
   });
 }
 
+function threadCacheRow(payload: string, updatedAt: number) {
+  const bytes = Math.max(new TextEncoder().encode(payload).length, payload.length * 2);
+  return { payload, updatedAt, bytes };
+}
+
+export function migrateLegacyThreadCacheRow(key: IDBValidKey, raw: unknown, now: number) {
+  if (typeof raw !== "string" || raw.length > THREAD_MAX_PAYLOAD_LENGTH) return undefined;
+  const decoded = decodeLegacyThreadSnapshot(raw);
+  if (Option.isNone(decoded)) return undefined;
+  const { environmentId, threadId, snapshot } = decoded.value;
+  if (key !== threadCacheKey(environmentId, threadId) || snapshot.projection.thread.id !== threadId)
+    return undefined;
+  const updatedAt = DateTime.toEpochMillis(snapshot.projection.updatedAt);
+  return updatedAt >= now - THREAD_MAX_AGE_MS ? threadCacheRow(raw, updatedAt) : undefined;
+}
+
+function pruneThreadCache(store: IDBObjectStore, now: number) {
+  const request = store.index(THREAD_UPDATED_INDEX_NAME).openKeyCursor(null, "prev");
+  let rows = 0;
+  let bytes = 0;
+  request.addEventListener("success", () => {
+    const cursor = request.result;
+    if (cursor === null) return;
+    const [updatedAt, rowBytes] = cursor.key as [number, number];
+    rows += 1;
+    bytes += rowBytes;
+    if (
+      rows > THREAD_MAX_ROWS - THREAD_PRUNE_BATCH_ROWS ||
+      bytes > THREAD_MAX_BYTES - THREAD_PRUNE_BATCH_BYTES ||
+      updatedAt < now - THREAD_MAX_AGE_MS
+    ) {
+      store.delete(cursor.primaryKey);
+    }
+    cursor.continue();
+  });
+}
+
+function upgradeThreadCache(store: IDBObjectStore, now: number) {
+  store.createIndex(THREAD_UPDATED_INDEX_NAME, ["updatedAt", "bytes"]);
+  const candidates: Array<{ key: IDBValidKey; updatedAt: number; bytes: number }> = [];
+  let bytes = 0;
+  const request = store.openCursor();
+  request.addEventListener("success", () => {
+    const cursor = request.result;
+    if (cursor === null) {
+      // Re-read only the survivors so a large legacy cache does not get rewritten.
+      for (const row of candidates) {
+        const read = store.get(row.key);
+        read.addEventListener("success", () => {
+          const { key, ...metadata } = row;
+          store.put({ ...metadata, payload: read.result }, key);
+        });
+      }
+      return;
+    }
+    const row = migrateLegacyThreadCacheRow(cursor.primaryKey, cursor.value, now);
+    if (row === undefined) {
+      cursor.delete();
+    } else {
+      candidates.push({ key: cursor.primaryKey, updatedAt: row.updatedAt, bytes: row.bytes });
+      candidates.sort((left, right) => right.updatedAt - left.updatedAt);
+      bytes += row.bytes;
+      while (
+        candidates.length > THREAD_MAX_ROWS - THREAD_PRUNE_BATCH_ROWS ||
+        bytes > THREAD_MAX_BYTES - THREAD_PRUNE_BATCH_BYTES
+      ) {
+        const discarded = candidates.pop()!;
+        bytes -= discarded.bytes;
+        store.delete(discarded.key);
+      }
+    }
+    cursor.continue();
+  });
+}
+
 const openDatabase = Effect.fn("web.connectionStorage.openDatabase")(function* () {
+  const now = yield* Clock.currentTimeMillis;
   return yield* Effect.callback<IDBDatabase, ConnectionTransientError>((resume) => {
     if (typeof indexedDB === "undefined") {
       resume(
@@ -164,7 +253,12 @@ const openDatabase = Effect.fn("web.connectionStorage.openDatabase")(function* (
           request.result.createObjectStore(SHELL_STORE_NAME);
         }
         if (!request.result.objectStoreNames.contains(THREAD_STORE_NAME)) {
-          request.result.createObjectStore(THREAD_STORE_NAME);
+          request.result
+            .createObjectStore(THREAD_STORE_NAME)
+            .createIndex(THREAD_UPDATED_INDEX_NAME, ["updatedAt", "bytes"]);
+        } else {
+          const store = request.transaction!.objectStore(THREAD_STORE_NAME);
+          if (!store.indexNames.contains(THREAD_UPDATED_INDEX_NAME)) upgradeThreadCache(store, now);
         }
         if (!request.result.objectStoreNames.contains(SERVER_CONFIG_STORE_NAME)) {
           request.result.createObjectStore(SERVER_CONFIG_STORE_NAME);
@@ -311,6 +405,7 @@ function removeDatabaseValueOnConnection(
   database: IDBDatabase,
   storeName: string,
   key: IDBValidKey,
+  shouldRemove?: (current: unknown) => boolean,
 ) {
   return Effect.callback<void, ConnectionTransientError>((resume) => {
     try {
@@ -325,7 +420,15 @@ function removeDatabaseValueOnConnection(
       transaction.addEventListener("complete", () => {
         resume(Effect.void);
       });
-      transaction.objectStore(storeName).delete(key);
+      const store = transaction.objectStore(storeName);
+      if (shouldRemove === undefined) {
+        store.delete(key);
+      } else {
+        const request = store.get(key);
+        request.addEventListener("success", () => {
+          if (shouldRemove(request.result)) store.delete(key);
+        });
+      }
     } catch (cause) {
       resume(Effect.fail(catalogError("remove", cause)));
     }
@@ -376,6 +479,57 @@ function removeDatabaseValuesInRangeOnConnection(
   }).pipe(Effect.withSpan("web.connectionStorage.removeDatabaseValuesInRange"));
 }
 
+function saveThreadOnConnection(
+  database: IDBDatabase,
+  key: string,
+  row: ReturnType<typeof threadCacheRow> | undefined,
+  isLatest: () => boolean,
+) {
+  return Effect.callback<void, ConnectionTransientError>((resume) => {
+    if (!isLatest()) {
+      resume(Effect.void);
+      return;
+    }
+    try {
+      const transaction = database.transaction(THREAD_STORE_NAME, "readwrite");
+      transaction.addEventListener("abort", () => {
+        resume(
+          Effect.fail(
+            catalogError("write", transaction.error ?? m(msg("Unknown IndexedDB write error"))),
+          ),
+        );
+      });
+      transaction.addEventListener("complete", () => resume(Effect.void));
+      const store = transaction.objectStore(THREAD_STORE_NAME);
+      if (row === undefined) {
+        // An older copy of a thread now too large to keep would paint stale on reopen.
+        store.delete(key);
+        return;
+      }
+      store.put(row, key);
+      // Keep the counter in the transaction so tabs share the budget between scans.
+      const request = store.get(THREAD_BATCH_KEY);
+      request.addEventListener("success", () => {
+        const batch: unknown = request.result;
+        const rows = (isPruneBatch(batch) ? batch.rows : 0) + 1;
+        const bytes = (isPruneBatch(batch) ? batch.bytes : 0) + row.bytes;
+        if (
+          isPruneBatch(batch) &&
+          rows < THREAD_PRUNE_BATCH_ROWS &&
+          bytes < THREAD_PRUNE_BATCH_BYTES
+        ) {
+          store.put({ rows, bytes }, THREAD_BATCH_KEY);
+          return;
+        }
+        store.put({ rows: 0, bytes: 0 }, THREAD_BATCH_KEY);
+        pruneThreadCache(store, row.updatedAt);
+      });
+    } catch (cause) {
+      resume(Effect.fail(catalogError("write", cause)));
+    }
+  }).pipe(Effect.withSpan("web.connectionStorage.saveThread"));
+}
+
 // Mirrors mobile's pull-request cache bounds, per environment.
 function saveQueryOnConnection(
   database: IDBDatabase,
@@ -409,10 +563,10 @@ function saveQueryOnConnection(
       const batchRequest = store.get(batchKey);
       batchRequest.addEventListener("success", () => {
         const batch: unknown = batchRequest.result;
-        const rows = (isQueryBatch(batch) ? batch.rows : 0) + 1;
-        const written = (isQueryBatch(batch) ? batch.bytes : 0) + bytes;
+        const rows = (isPruneBatch(batch) ? batch.rows : 0) + 1;
+        const written = (isPruneBatch(batch) ? batch.bytes : 0) + bytes;
         if (
-          isQueryBatch(batch) &&
+          isPruneBatch(batch) &&
           rows < QUERY_PRUNE_BATCH_ROWS &&
           written < QUERY_PRUNE_BATCH_BYTES
         ) {
@@ -951,35 +1105,39 @@ export const layer = Layer.effectContext(
         ),
       ),
       loadThread: Effect.fn("Persistence.EnvironmentCacheStore.loadThread")(
-        function (environmentId, threadId) {
-          return readDatabaseValue(
-            database,
-            THREAD_STORE_NAME,
-            threadCacheKey(environmentId, threadId),
-          ).pipe(
-            Effect.flatMap((raw) => {
-              if (typeof raw !== "string") {
-                return Effect.succeedNone;
-              }
-              return decodeOrDiscardOrchestrationCache(
-                decodeStoredThreadSnapshot(raw).pipe(
-                  Effect.mapError((cause) => persistenceError("load-thread", cause)),
-                  Effect.map((stored) =>
-                    stored.environmentId === environmentId && stored.threadId === threadId
-                      ? Option.some(stored.snapshot)
-                      : Option.none(),
-                  ),
-                ),
-                removeDatabaseValue(
-                  database,
-                  THREAD_STORE_NAME,
-                  threadCacheKey(environmentId, threadId),
-                ),
-              );
-            }),
-            Effect.mapError((cause) => persistenceError("load-thread", cause)),
+        function* (environmentId, threadId) {
+          const key = threadCacheKey(environmentId, threadId);
+          const raw = yield* readDatabaseValue(database, THREAD_STORE_NAME, key);
+          const now = yield* Clock.currentTimeMillis;
+          if (!isThreadCacheRow(raw)) return Option.none();
+          const discard = withDatabase(database, (opened) =>
+            removeDatabaseValueOnConnection(
+              opened,
+              THREAD_STORE_NAME,
+              key,
+              (current) =>
+                isThreadCacheRow(current) &&
+                current.updatedAt === raw.updatedAt &&
+                current.payload === raw.payload,
+            ),
+          );
+          if (raw.updatedAt < now - THREAD_MAX_AGE_MS) {
+            return yield* discard.pipe(Effect.as(Option.none()));
+          }
+          return yield* decodeOrDiscardOrchestrationCache(
+            decodeStoredThreadSnapshot(raw.payload).pipe(
+              Effect.map((stored) =>
+                stored.environmentId === environmentId &&
+                stored.threadId === threadId &&
+                stored.snapshot.projection.thread.id === threadId
+                  ? Option.some(stored.snapshot)
+                  : Option.none(),
+              ),
+            ),
+            discard,
           );
         },
+        Effect.mapError((cause) => persistenceError("load-thread", cause)),
       ),
       saveThread: Effect.fn("storage.saveThread")(
         function* (environmentId, snapshot) {
@@ -991,11 +1149,13 @@ export const layer = Layer.effectContext(
             snapshot,
           }).pipe(Effect.mapError((cause) => persistenceError("save-thread", cause)));
           if (!isLatest()) return;
-          // An older copy of a thread now too large to keep would paint stale on reopen.
-          yield* Option.match(encoded, {
-            onNone: () => removeDatabaseValue(database, THREAD_STORE_NAME, key),
-            onSome: (payload) => writeDatabaseValue(database, THREAD_STORE_NAME, key, payload),
-          });
+          const now = yield* Clock.currentTimeMillis;
+          const row = Option.getOrUndefined(
+            Option.map(encoded, (payload) => threadCacheRow(payload, now)),
+          );
+          yield* withDatabase(database, (opened) =>
+            saveThreadOnConnection(opened, key, row, isLatest),
+          );
         },
         Effect.mapError((cause) =>
           cause._tag === "ConnectionPersistenceError"

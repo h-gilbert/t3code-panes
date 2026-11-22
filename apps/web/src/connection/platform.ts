@@ -58,6 +58,7 @@ import { appAtomRegistry } from "../rpc/atomRegistry";
 import { acknowledgeRpcRequest, trackRpcRequestSent } from "../rpc/requestLatencyState";
 import {
   desktopLocalConnectionId,
+  readDesktopLocalBootstraps,
   readDesktopSecondaryBootstrapsResult,
   type DesktopSecondaryBootstrapsRead,
 } from "./desktopLocal";
@@ -685,7 +686,14 @@ const layerPlatformConnectionSource = Layer.effect(
       const next = new Map<string, CachedPlatformRegistration>();
       const registrations: Array<PlatformConnectionRegistration> = [];
 
-      const primaryTopologyRead = readPrimaryEnvironmentTargetResult();
+      // One bridge read per tick serves both the primary and the secondary backends.
+      const localBootstrapsRead = readDesktopLocalBootstraps();
+      const primaryTopologyRead: PrimaryEnvironmentTargetRead =
+        localBootstrapsRead._tag === "Failure"
+          ? localBootstrapsRead
+          : readPrimaryEnvironmentTargetResult(() =>
+              readPrimaryEnvironmentTarget(localBootstrapsRead.bootstraps),
+            );
       const retainedPrimary = primaryRegistrationToRetainAfterTopologyRead(
         previous,
         primaryTopologyRead,
@@ -724,7 +732,7 @@ const layerPlatformConnectionSource = Layer.effect(
         }
       }
 
-      const topologyRead = readDesktopSecondaryBootstrapsResult();
+      const topologyRead = readDesktopSecondaryBootstrapsResult(localBootstrapsRead);
       for (const [id, cached] of secondaryRegistrationsToRetainAfterTopologyRead(
         previous,
         topologyRead,

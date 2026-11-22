@@ -1,11 +1,14 @@
 import { createRouter, RouterHistory } from "@tanstack/react-router";
 
+import { delegatesStreamedTabs } from "./env";
+import { parseDelegatedDesktopSearch } from "./workspaceRouteSearch";
 import { routeTree } from "./routeTree.gen";
 
 export function getRouter(history: RouterHistory) {
   return createRouter({
     routeTree,
     history,
+    ...(delegatesStreamedTabs ? { parseSearch: parseDelegatedDesktopSearch } : {}),
     context: {},
     defaultPreload: "intent",
   });
