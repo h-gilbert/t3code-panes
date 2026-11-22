@@ -61,6 +61,42 @@ describe("subagent shell events", () => {
       false,
     );
     expect(
+      shouldPublishShellApplicationEvent(
+        {
+          event: {
+            threadId: "child",
+            type: "node.updated",
+            payload: { runId: null, kind: "root_turn" },
+          },
+        } as ApplicationStoredEvent,
+        subagents,
+      ),
+    ).toBe(true);
+    expect(
+      shouldPublishShellApplicationEvent(
+        {
+          event: {
+            threadId: "child",
+            type: "node.updated",
+            payload: { runId: "run-1", kind: "root_turn" },
+          },
+        } as ApplicationStoredEvent,
+        subagents,
+      ),
+    ).toBe(false);
+    expect(
+      shouldPublishShellApplicationEvent(
+        {
+          event: {
+            threadId: "child",
+            type: "node.updated",
+            payload: { runId: null, kind: "tool_call" },
+          },
+        } as ApplicationStoredEvent,
+        subagents,
+      ),
+    ).toBe(false);
+    expect(
       shouldPublishShellApplicationEvent(stored("child", "runtime-request.updated"), subagents),
     ).toBe(true);
     expect(shouldPublishShellApplicationEvent(stored("child", "run.updated"), subagents)).toBe(

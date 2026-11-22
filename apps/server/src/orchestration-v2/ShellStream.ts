@@ -552,6 +552,15 @@ export function shouldPublishShellApplicationEvent(
   if (event.type === "turn-item.updated" && turnItemCanChangeUserWait(event.payload)) {
     return true;
   }
+  // Native provider subagents have no app-owned run; their shell status comes from their
+  // runless root_turn node, so lifecycle transitions on that node must reach shell streams.
+  if (
+    event.type === "node.updated" &&
+    event.payload.runId === null &&
+    event.payload.kind === "root_turn"
+  ) {
+    return true;
+  }
   return !(
     subagentThreadIds.has(event.threadId) &&
     (event.type === "node.updated" ||
