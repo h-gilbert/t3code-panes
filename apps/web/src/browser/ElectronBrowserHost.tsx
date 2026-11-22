@@ -15,11 +15,11 @@ import {
 } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { runAtomCommand } from "@t3tools/client-runtime/state/runtime";
-import { type ComponentProps, useState, useEffect, useEffectEvent } from "react";
+import { type ComponentProps, useState, useEffect, useEffectEvent, useRef } from "react";
 
 import { primaryEnvironmentIdAtom } from "~/state/primaryEnvironment";
 
-import { isBrowserCaptureHost, isElectron } from "~/env";
+import { delegatesStreamedTabs, isBrowserCaptureHost, isElectron } from "~/env";
 import { useClientSettingsHydrated } from "~/hooks/useSettings";
 import { useDesktopHostedPreviewSessions } from "~/components/preview/usePreviewSession";
 import {
@@ -124,15 +124,11 @@ function openLinkInPreview({ tabId, url, background }: DesktopPreviewOpenLinkEve
   });
 }
 
-/** App-lifetime listeners for the desktop preview bridge: annotation theme, agent pointer, links. */
-export function startElectronBrowserHost(): () => void {
+/** Minimal listeners for the hidden capture host window: links and loopback tunnels only. */
+export function startCaptureHostBrowserListeners(): () => void {
   const preview = window.desktopBridge?.preview;
   if (!preview) return () => {};
   const disposers = [
-    startAnnotationThemeSync(preview),
-    preview.onPointerEvent((event) => {
-      useBrowserPointerStore.getState().apply(event);
-    }),
     preview.onOpenLink(openLinkInPreview),
     preview.onTunnelAccessRequest(({ requestId, environmentId }) => {
       void readPreviewTunnelUrl(environmentId).then((url) =>
@@ -143,6 +139,72 @@ export function startElectronBrowserHost(): () => void {
   return () => {
     for (const dispose of disposers) dispose();
   };
+}
+
+/** App-lifetime listeners for the desktop preview bridge: annotation theme, agent pointer, links. */
+export function startElectronBrowserHost(): () => void {
+  const preview = window.desktopBridge?.preview;
+  if (!preview) return () => {};
+  const disposers = [
+    startAnnotationThemeSync(preview),
+    preview.onPointerEvent((event) => {
+      useBrowserPointerStore.getState().apply(event);
+    }),
+    startCaptureHostBrowserListeners(),
+  ];
+  return () => {
+    for (const dispose of disposers) dispose();
+  };
+}
+
+function BrowserCaptureHostDemand({
+  primaryEnvironmentId,
+  previewByThreadKey,
+}: {
+  readonly primaryEnvironmentId: EnvironmentId | null;
+  readonly previewByThreadKey: Record<string, ThreadPreviewState>;
+}) {
+  const configs = useServerConfigs();
+  const lastSyncRef = useRef<{ ensure: boolean; keepAlive: boolean } | null>(null);
+  const needsRemoteHost =
+    primaryEnvironmentId !== null &&
+    [...configs].some(
+      ([id, config]) =>
+        id !== primaryEnvironmentId &&
+        config.settings.browserHostEnvironmentId === primaryEnvironmentId,
+    );
+  const needsLocalServerTab =
+    primaryEnvironmentId !== null &&
+    Object.entries(previewByThreadKey).some(([threadKey, previewState]) => {
+      const threadRef = parseScopedThreadKey(threadKey);
+      if (!threadRef) return false;
+      const hostEnvironmentId =
+        configs.get(threadRef.environmentId)?.settings.browserHostEnvironmentId ??
+        threadRef.environmentId;
+      if (hostEnvironmentId !== primaryEnvironmentId) return false;
+      return Object.values(previewState.sessions).some(
+        (snapshot) => snapshot.runtime === "server" && !snapshot.headless,
+      );
+    });
+  const ensure = needsRemoteHost || needsLocalServerTab;
+  const keepAlive = needsRemoteHost;
+  const ready = primaryEnvironmentId !== null && configs.size > 0;
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- wakes or releases the lazy desktop browser capture host via IPC
+  useEffect(() => {
+    if (!ready) return;
+    const syncCaptureHost = window.desktopBridge?.preview?.syncCaptureHost;
+    if (!syncCaptureHost) return;
+    const previous = lastSyncRef.current;
+    if (previous === null && !ensure && !keepAlive) return;
+    if (previous?.ensure === ensure && previous.keepAlive === keepAlive) return;
+    lastSyncRef.current = { ensure, keepAlive };
+    void syncCaptureHost({ ensure, keepAlive }).catch(() => {
+      lastSyncRef.current = null;
+    });
+  }, [ensure, keepAlive, ready]);
+
+  return null;
 }
 
 export function ElectronBrowserHost() {
@@ -173,7 +235,14 @@ export function ElectronBrowserHost() {
   if (!isElectron) return null;
   return (
     <div className="contents" data-electron-browser-host>
-      <RemoteBrowserHosts />
+      {delegatesStreamedTabs ? (
+        <BrowserCaptureHostDemand
+          primaryEnvironmentId={primaryEnvironmentId}
+          previewByThreadKey={previewByThreadKey}
+        />
+      ) : (
+        <RemoteBrowserHosts />
+      )}
       {sessions.map(({ threadRef, snapshot, runtimeTabId, pictureInPicture, zoomFactor }) => {
         const url = snapshot.navStatus._tag === "Idle" ? null : snapshot.navStatus.url;
         return (

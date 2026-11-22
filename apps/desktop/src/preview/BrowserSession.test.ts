@@ -14,6 +14,8 @@ const { fromPartition, sessions } = vi.hoisted(() => ({
     string,
     {
       readonly clearCache: ReturnType<typeof vi.fn>;
+      readonly clearCodeCaches?: ReturnType<typeof vi.fn>;
+      readonly getCacheSize?: ReturnType<typeof vi.fn<() => Promise<number>>>;
       readonly clearStorageData: ReturnType<typeof vi.fn>;
       readonly closeAllConnections: ReturnType<typeof vi.fn>;
       readonly storagePath: string | null;
@@ -144,7 +146,9 @@ describe("BrowserSession", () => {
     fromPartition.mockImplementation((partition: string) => {
       const browserSession = {
         setProxy: vi.fn(() => Promise.resolve()),
+        getCacheSize: vi.fn(() => Promise.resolve(0)),
         clearCache: vi.fn(() => Promise.resolve()),
+        clearCodeCaches: vi.fn(() => Promise.resolve()),
         clearStorageData: vi.fn(() => Promise.resolve()),
         closeAllConnections: vi.fn(() => Promise.resolve()),
         // Like Electron, only a `persist:` partition has storage on disk.
@@ -683,5 +687,56 @@ describe("BrowserSession", () => {
       yield* browserSessions.clearCookies([partition]);
       assert.isFalse(yield* fileSystem.exists(file));
     }).pipe(Effect.scoped, Effect.provide(Layer.merge(layer, NodeServices.layer))),
+  );
+
+  it.effect(
+    "prunes oversized persistent partition caches without clearing cookies or storage",
+    () =>
+      Effect.gen(function* () {
+        const cacheSizes = new Map<string, number>();
+        fromPartition.mockImplementation((partition: string) => {
+          const browserSession = {
+            setProxy: vi.fn(() => Promise.resolve()),
+            getCacheSize: vi.fn(() => Promise.resolve(cacheSizes.get(partition) ?? 0)),
+            clearCache: vi.fn(() => Promise.resolve()),
+            clearCodeCaches: vi.fn(() => Promise.resolve()),
+            clearStorageData: vi.fn(() => Promise.resolve()),
+            closeAllConnections: vi.fn(() => Promise.resolve()),
+            storagePath: null,
+            getUserAgent: vi.fn(() => "Mozilla/5.0 Electron/41.5.0 t3code/0.0.27"),
+            setPermissionRequestHandler: vi.fn(),
+            setPermissionCheckHandler: vi.fn(),
+            setUserAgent: vi.fn(),
+            webRequest: { onBeforeSendHeaders: vi.fn() },
+          };
+          sessions.set(partition, browserSession);
+          return browserSession;
+        });
+        const browserSessions = yield* BrowserSession.BrowserSession;
+        const oversizedPartition = yield* browserSessions.getPartition("oversized");
+        const smallPartition = yield* browserSessions.getPartition("small");
+        const ephemeralPartition = yield* browserSessions.getPartition("ephemeral", false);
+        cacheSizes.set(oversizedPartition, BrowserSession.MAX_PREVIEW_PARTITION_CACHE_BYTES + 1);
+        cacheSizes.set(smallPartition, BrowserSession.MAX_PREVIEW_PARTITION_CACHE_BYTES);
+        cacheSizes.set(ephemeralPartition, BrowserSession.MAX_PREVIEW_PARTITION_CACHE_BYTES + 1);
+
+        yield* browserSessions.getSession("oversized");
+        yield* browserSessions.getSession("small");
+        yield* browserSessions.getSession("ephemeral", false);
+        yield* Effect.yieldNow;
+        yield* Effect.promise(() => Promise.resolve());
+        yield* Effect.yieldNow;
+
+        const oversized = sessions.get(oversizedPartition)!;
+        assert.strictEqual(oversized.clearCache.mock.calls.length, 1);
+        assert.strictEqual(oversized.clearCodeCaches?.mock.calls.length, 1);
+        assert.strictEqual(oversized.clearStorageData.mock.calls.length, 0);
+
+        const small = sessions.get(smallPartition)!;
+        assert.strictEqual(small.clearCache.mock.calls.length, 0);
+
+        const ephemeral = sessions.get(ephemeralPartition)!;
+        assert.strictEqual(ephemeral.clearCache.mock.calls.length, 0);
+      }).pipe(Effect.scoped, Effect.provide(layer)),
   );
 });

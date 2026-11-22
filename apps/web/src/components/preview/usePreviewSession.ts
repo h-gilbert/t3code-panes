@@ -101,7 +101,7 @@ const inactiveAtom = Atom.make(() => undefined);
 // Discover background tabs without listing every thread at startup. Keep each
 // sync while the thread has tabs so later events still arrive while chat is
 // absent, then release it so closed previews stop costing a list and a fan-out.
-const desktopHostedPreviewSyncAtom = Atom.family((environmentId: EnvironmentId) => {
+export const desktopHostedPreviewSyncAtom = Atom.family((environmentId: EnvironmentId) => {
   const eventsAtom = previewEnvironment.events({ environmentId, input: {} });
   return Atom.make((get) => {
     const releaseByThreadId = new Map<string, () => void>();
@@ -136,6 +136,7 @@ const desktopHostedPreviewSyncAtom = Atom.family((environmentId: EnvironmentId) 
       },
       { immediate: true },
     );
+    get.mount(eventsAtom);
   }).pipe(Atom.withLabel(`preview:desktop-hosted-sync:${environmentId}`));
 });
 

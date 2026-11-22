@@ -108,6 +108,10 @@ export const DesktopBrowserCommand = Schema.Union([
     threadId: TrimmedNonEmptyString,
     active: Schema.Boolean,
   }),
+  /** Request that the local desktop ensures its browser capture host is running. */
+  Schema.Struct({
+    type: Schema.Literal("ensureHost"),
+  }),
 ]);
 export type DesktopBrowserCommand = typeof DesktopBrowserCommand.Type;
 

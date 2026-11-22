@@ -5,13 +5,16 @@ import "@fontsource-variable/inter";
 import "./index.css";
 
 import { hasCloudPublicConfig } from "./cloud/publicConfig";
-import { isElectron } from "./env";
-import { startAppServices } from "./appInit";
+import { isBrowserCaptureHost, isElectron } from "./env";
+import { startAppServices, startBrowserCaptureHostServices } from "./appInit";
 import { AppRoot } from "./AppRoot";
 import { whenLocaleReady } from "./i18n/runtime";
 import { reloadOnceForChunkLoadError } from "./lib/chunkReloadGuard";
 
-const router = startAppServices();
+const router = isBrowserCaptureHost ? undefined : startAppServices();
+if (isBrowserCaptureHost) {
+  startBrowserCaptureHostServices();
+}
 
 const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string | undefined;
 
@@ -23,7 +26,7 @@ window.addEventListener("vite:preloadError", (event) => {
   }
 });
 
-const app = <AppRoot router={router} />;
+const app = router ? <AppRoot router={router} /> : <AppRoot />;
 
 // Split by runtime to keep Clerk out of local startup and clerk-js out of browser builds.
 const managedAuthShellModule =
@@ -36,7 +39,7 @@ const managedAuthShellModule =
 export const startup = Promise.all([
   managedAuthShellModule?.then((module) => module.default) ?? null,
   // Chained so settings have usually hydrated; English resolves without a chunk load.
-  router.load().then(whenLocaleReady),
+  router ? router.load().then(whenLocaleReady) : Promise.resolve(),
 ])
   .then(([ManagedAuthShell]) => {
     // Route chunk failures resolve router.load() and surface later through the error boundary.

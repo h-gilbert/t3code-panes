@@ -18,7 +18,6 @@ import * as DesktopClerk from "./DesktopClerk.ts";
 import * as DesktopCliShim from "./DesktopCliShim.ts";
 import * as DesktopCliCommand from "./DesktopCliCommand.ts";
 import * as DesktopApplicationMenu from "../window/DesktopApplicationMenu.ts";
-import * as DesktopBrowserCaptureHost from "../window/DesktopBrowserCaptureHost.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 import * as DesktopWindowSession from "../window/DesktopWindowSession.ts";
 import * as PreviewPasskeys from "../preview/Passkeys.ts";
@@ -199,9 +198,6 @@ const startLocalBackend = Effect.gen(function* () {
   yield* (yield* DesktopLegacyLocalStorage.DesktopLegacyLocalStorage).load(
     yield* (yield* DesktopAppIdentity.DesktopAppIdentity).resolveUserDataPath,
   );
-
-  // Draws the tabs this desktop hosts for remote viewers; app windows stream them instead.
-  yield* (yield* DesktopBrowserCaptureHost.DesktopBrowserCaptureHost).ensure;
 
   if (!settings.localEnvironmentEnabled) {
     yield* logBootstrapInfo("bootstrap skipping local environment (disabled in settings)");

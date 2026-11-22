@@ -28,6 +28,10 @@ const PREVIEW_PARTITION_PREFIX = "persist:t3code-preview-";
 const PREVIEW_EPHEMERAL_PARTITION_PREFIX = "t3code-preview-ephemeral-";
 const PROFILE_PARTITION_MARKER = "profile-";
 
+/** Cap each persistent preview partition's HTTP/code disk cache without touching logins or storage. */
+export const MAX_PREVIEW_PARTITION_CACHE_BYTES = 128 * 1024 * 1024;
+const PREVIEW_PARTITION_CACHE_PRUNE_INTERVAL = "30 minutes";
+
 export type BrowserSessionPartitionNamespace = "profile";
 
 // Electron's clipboard API uses clipboard-sanitized-write and checks both permission handlers.
@@ -590,6 +594,66 @@ export const make = Effect.gen(function* BrowserSessionMake() {
 
   const sessionsRef = yield* SynchronizedRef.make<ReadonlyMap<string, Session>>(new Map());
 
+  const pruneOversizedCache = Effect.fn("BrowserSession.pruneOversizedCache")(function* (
+    partition: string,
+    browserSession: Session,
+  ) {
+    if (!partition.startsWith(PREVIEW_PARTITION_PREFIX)) return;
+    if (typeof browserSession.getCacheSize !== "function") return;
+    const size = yield* Effect.tryPromise({
+      try: () => browserSession.getCacheSize(),
+      catch: (cause) => new BrowserSessionCacheClearError({ partition, cause }),
+    }).pipe(
+      Effect.catch((cause) =>
+        Effect.logWarning("Failed to measure preview partition cache size.", {
+          partition,
+          cause,
+        }).pipe(Effect.as(-1)),
+      ),
+    );
+    if (size <= MAX_PREVIEW_PARTITION_CACHE_BYTES) return;
+    yield* Effect.tryPromise({
+      try: async () => {
+        await browserSession.clearCache();
+        if (typeof browserSession.clearCodeCaches === "function") {
+          await browserSession.clearCodeCaches({});
+        }
+      },
+      catch: (cause) => new BrowserSessionCacheClearError({ partition, cause }),
+    }).pipe(
+      Effect.andThen(
+        Effect.logInfo("Pruned oversized preview partition HTTP cache.", {
+          partition,
+          cacheBytes: size,
+          limitBytes: MAX_PREVIEW_PARTITION_CACHE_BYTES,
+        }),
+      ),
+      Effect.catch((cause) =>
+        Effect.logWarning("Failed to prune oversized preview partition HTTP cache.", {
+          partition,
+          cacheBytes: size,
+          cause,
+        }),
+      ),
+    );
+  });
+
+  yield* Effect.sleep(PREVIEW_PARTITION_CACHE_PRUNE_INTERVAL).pipe(
+    Effect.andThen(
+      SynchronizedRef.get(sessionsRef).pipe(
+        Effect.flatMap((sessions) =>
+          Effect.forEach(
+            [...sessions.entries()],
+            ([partition, browserSession]) => pruneOversizedCache(partition, browserSession),
+            { concurrency: 1, discard: true },
+          ),
+        ),
+      ),
+    ),
+    Effect.forever,
+    Effect.forkScoped,
+  );
+
   const getPartition = Effect.fn("BrowserSession.getPartition")(function* (
     scope = "shared",
     persistent = !scope.includes("ephemeral:"),
@@ -750,6 +814,7 @@ export const make = Effect.gen(function* BrowserSessionMake() {
         certificateTrust.set(browserSession, yield* loadCertificateTrust(browserSession));
         const next = new Map(sessions);
         next.set(partition, browserSession);
+        runFork(pruneOversizedCache(partition, browserSession));
         return [browserSession, next] as const;
       }),
     );

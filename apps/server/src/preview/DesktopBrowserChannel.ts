@@ -421,6 +421,11 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const subscription = yield* PubSub.subscribe(changes);
           if (attachedTabs.has(keyOf(key))) return true;
+          const selected = (yield* settings.getSettings.pipe(Effect.orDie))
+            .browserHostEnvironmentId;
+          if (controlFd !== undefined && (!selected || selected === ownEnvironment)) {
+            yield* command({ type: "ensureHost" });
+          }
           return yield* Stream.fromSubscription(subscription).pipe(
             Stream.filter((change) => change.attached && keyOf(change.key) === keyOf(key)),
             Stream.runHead,

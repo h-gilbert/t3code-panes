@@ -174,8 +174,10 @@ export const COMPLETE_LEGACY_LOCAL_STORAGE_CHANNEL = "desktop:complete-legacy-lo
 
 export const PREVIEW_REMOTE_HOST_CONNECT_CHANNEL = "desktop:preview-remote-host-connect";
 export const PREVIEW_REMOTE_HOST_DISCONNECT_CHANNEL = "desktop:preview-remote-host-disconnect";
-export const PREVIEW_REMOTE_HOST_COMMAND_CHANNEL = "desktop:preview-remote-host-command";
-export const PREVIEW_REMOTE_HOST_EVENT_CHANNEL = "desktop:preview-remote-host-event";
+export const PREVIEW_REMOTE_HOST_FETCH_COMMAND_CHANNEL =
+  "desktop:preview-remote-host-fetch-command";
+export const PREVIEW_REMOTE_HOST_ERROR_CHANNEL = "desktop:preview-remote-host-error";
+export const PREVIEW_SYNC_CAPTURE_HOST_CHANNEL = "desktop:preview-sync-capture-host";
 
 export const CONNECTED_UPDATES_CHANNEL = "desktop:connected-updates";
 export const RESTART_AUDIO_SERVICE_CHANNEL = "desktop:restart-audio-service";

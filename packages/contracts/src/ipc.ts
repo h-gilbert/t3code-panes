@@ -1,5 +1,4 @@
 import type { PreviewCaptureFailureEncoded } from "./previewCapture.ts";
-import { DesktopBrowserCommand, DesktopBrowserEvent } from "./desktopBrowser.ts";
 import * as Schema from "effect/Schema";
 import {
   PreviewAutomationClickInput,
@@ -1452,15 +1451,25 @@ export interface DesktopBridge {
 /** Renderer callback invoked by Electron with a fresh user gesture before display-media capture. */
 export const DESKTOP_PREVIEW_RECORDING_CAPTURE_TRIGGER = "__t3DesktopPreviewRecordingCapture";
 
-export const DesktopRemoteBrowserCommandInput = Schema.Struct({
+export const DesktopRemoteBrowserConnectInput = Schema.Struct({
   environmentId: Schema.String,
-  command: DesktopBrowserCommand,
+  httpBaseUrl: Schema.String,
+  lease: Schema.String,
 });
-export const DesktopRemoteBrowserEvent = Schema.Struct({
+export type DesktopRemoteBrowserConnectInput = typeof DesktopRemoteBrowserConnectInput.Type;
+
+export const DesktopRemoteBrowserFetchCommandInput = Schema.Struct({
   environmentId: Schema.String,
-  event: DesktopBrowserEvent,
+  commandId: Schema.String,
 });
-export type DesktopRemoteBrowserEvent = typeof DesktopRemoteBrowserEvent.Type;
+export type DesktopRemoteBrowserFetchCommandInput =
+  typeof DesktopRemoteBrowserFetchCommandInput.Type;
+
+export const DesktopPreviewSyncCaptureHostInput = Schema.Struct({
+  ensure: Schema.Boolean,
+  keepAlive: Schema.Boolean,
+});
+export type DesktopPreviewSyncCaptureHostInput = typeof DesktopPreviewSyncCaptureHostInput.Type;
 /**
  * Dictation for the annotation editor drawn inside a preview guest. The guest only shows
  * controls and forwards trusted user gestures; the renderer records, with its consent
@@ -1535,10 +1544,11 @@ export const DesktopPreviewPickElementInputSchema = Schema.Struct({
 });
 
 export interface DesktopPreviewBridge {
-  connectRemoteHost?: (environmentId: string) => Promise<void>;
+  connectRemoteHost?: (input: DesktopRemoteBrowserConnectInput) => Promise<void>;
   disconnectRemoteHost?: (environmentId: string) => Promise<void>;
-  sendRemoteHostCommand?: (input: typeof DesktopRemoteBrowserCommandInput.Type) => Promise<void>;
-  onRemoteHostEvent?: (listener: (input: DesktopRemoteBrowserEvent) => void) => () => void;
+  fetchRemoteHostCommand?: (input: DesktopRemoteBrowserFetchCommandInput) => Promise<void>;
+  onRemoteHostError?: (listener: (environmentId: string) => void) => () => void;
+  syncCaptureHost?: (input: DesktopPreviewSyncCaptureHostInput) => Promise<void>;
   setForwardedShortcuts?: (shortcuts: ReadonlyArray<PreviewForwardedShortcut>) => Promise<void>;
   createTab: (tabId: string, defaults?: DesktopPreviewTabDefaults) => Promise<void>;
   closeTab: (tabId: string) => Promise<void>;

@@ -95,11 +95,16 @@ remains available, with pane markers for settled threads still visible in a pane
   keychain-backed saved logins with the existing autofill/script isolation.
   An explicitly selected shared desktop host uses that host environment's existing
   profile partitions. Disconnection must fail rather than launch headless with
-  different logins. The host lives in the desktop renderer, so a hidden window
+  different logins. The host lease lives in the desktop renderer, so a hidden window
   must keep its connections: keep Chromium's `IntensiveWakeUpThrottling` disabled
   (`apps/desktop/src/app/DesktopPreReadyPlatform.ts`), or the heartbeat drops it
-  each minute. The host must also render tabs of threads nobody has open; it follows
-  the hosted environment's preview events in `apps/web/src/browser/RemoteBrowserHosts.tsx`.
+  each minute. Bulk remote browser CDP frames and command payloads cross directly
+  between Electron's main process and the remote server's private HTTP endpoints
+  (`apps/desktop/src/preview/RemoteBrowserTransfer.ts`) instead of bouncing through
+  renderer IPC. Only the single browser-hosting renderer mounts `RemoteBrowserHosts`
+  (`apps/web/src/browser/RemoteBrowserHosts.tsx`), and followed threads release when
+  their preview tabs close. Persistent preview partitions cap Chromium HTTP/code disk
+  caches without clearing cookies, logins, or site storage.
   Browser proxy settings apply only to preview sessions, with no direct fallback,
   including for localhost destinations.
 - Keep explicit viewport controls and native guest layering, hidden-preview
@@ -120,7 +125,9 @@ remains available, with pane markers for settled threads still visible in a pane
   guest shrunk to fit a smaller window at the shrunk scale, so streaming from the app window
   blurred full-screen viewers. App windows get `?browserCapture=delegated` and stream those
   tabs like a remote client (`rendersServerTabNatively`); the host gets
-  `?browserCapture=host` and renders only them.
+  `?browserCapture=host`, uses a minimal bootstrap (`startBrowserCaptureHostServices` without
+  the router or app-wide coordinators), is created lazily only when this desktop hosts server
+  tabs or remote browser environments, and closes after idle when unused.
 
 Simulator and emulator previews open inset inside their owning thread, including embedded panes.
 Physical devices stay hidden; their automation sessions and screenshots remain available.
@@ -198,6 +205,13 @@ already contains text. Preserve this when integrating upstream composer changes.
   has cleanup left to do. Settled threads and subagents still end quietly. See `merged` in
   `apps/server/src/orchestration-v2/PullRequestWatchReactor.ts` and its test in
   `runtimeLayer.test.ts`.
+- Antigravity (`agy`) silently drops eager MCP tools whose serialized declaration exceeds
+  ~2 KiB (`preview_open`, `preview_navigate`, `preview_act`, `schedule_task`,
+  `t3_thread_launch`, `t3_settings_update`). Keep `compactToolSchemas: true` on
+  `AntigravityAdapterV2` and Antigravity ACP registry entries (`t3-tool-schema-budget: compact`
+  header + `T3_ACP_MCP_TOOL_SCHEMA_BUDGET=compact` stdio env), and keep `advertisedJsonSchema.ts`
+  flattening annotation-only `allOf` wrappers and compacting oversized `tools/list` entries under
+  the Antigravity byte ceiling while preserving full server-side decode validation.
 - Updating source does not authorize replacing or restarting the installed app.
   Follow `docs/operations/fork-releases.md` for an authorized release and
   `docs/operations/local-desktop-promotion.md` for a requested one-off local install.

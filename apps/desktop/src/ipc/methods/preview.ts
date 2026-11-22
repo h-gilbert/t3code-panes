@@ -1,5 +1,10 @@
-import { DesktopRemoteBrowserCommandInput } from "@t3tools/contracts";
-import * as DesktopBrowserHost from "../../preview/DesktopBrowserHost.ts";
+import {
+  DesktopPreviewSyncCaptureHostInput,
+  DesktopRemoteBrowserConnectInput,
+  DesktopRemoteBrowserFetchCommandInput,
+} from "@t3tools/contracts";
+import * as RemoteBrowserTransfer from "../../preview/RemoteBrowserTransfer.ts";
+import * as DesktopBrowserCaptureHost from "../../window/DesktopBrowserCaptureHost.ts";
 import * as Stream from "effect/Stream";
 // @effect-diagnostics nodeBuiltinImport:off -- Preserve synchronous browser partition hashing at the Electron boundary.
 import { PreviewAutomationSnapshot } from "@t3tools/contracts";
@@ -78,10 +83,16 @@ export const installPreviewEventForwarding = Effect.fn(
 )(function* () {
   const electronWindow = yield* ElectronWindow.ElectronWindow;
   const manager = yield* PreviewManager.PreviewManager;
-  const browserHost = yield* DesktopBrowserHost.DesktopBrowserHost;
-  yield* browserHost.remoteEvents.pipe(
-    Stream.runForEach((event) =>
-      electronWindow.sendAll(IpcChannels.PREVIEW_REMOTE_HOST_EVENT_CHANNEL, event),
+  const remoteTransfer = yield* RemoteBrowserTransfer.RemoteBrowserTransfer;
+  yield* remoteTransfer.errors.pipe(
+    Stream.runForEach(({ environmentId, ownerWebContentsId }) =>
+      Effect.sync(() => {
+        if (ownerWebContentsId === undefined) return;
+        const owner = webContents.fromId(ownerWebContentsId);
+        if (owner && !owner.isDestroyed()) {
+          owner.send(IpcChannels.PREVIEW_REMOTE_HOST_ERROR_CHANNEL, environmentId);
+        }
+      }),
     ),
     Effect.forkScoped,
   );
@@ -119,32 +130,60 @@ const setForwardedShortcuts = DesktopIpc.makeIpcMethod({
   }),
 });
 
+const watchedRemoteHostOwners = new Set<number>();
+
 export const connectRemoteHost = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_REMOTE_HOST_CONNECT_CHANNEL,
-  payload: Schema.String,
+  payload: DesktopRemoteBrowserConnectInput,
   result: Schema.Void,
-  handler: (environmentId) =>
-    Effect.flatMap(DesktopBrowserHost.DesktopBrowserHost, (host) =>
-      host.connectRemote(environmentId),
-    ),
+  handler: Effect.fn("desktop.ipc.preview.connectRemoteHost")(function* (input, event) {
+    const transfer = yield* RemoteBrowserTransfer.RemoteBrowserTransfer;
+    const ownerId = event?.sender.id;
+    const owner = ownerId === undefined ? undefined : webContents.fromId(ownerId);
+    if (owner && !owner.isDestroyed() && !watchedRemoteHostOwners.has(owner.id)) {
+      const watchedId = owner.id;
+      watchedRemoteHostOwners.add(watchedId);
+      const runFork = Effect.runForkWith(yield* Effect.context<never>());
+      owner.once("destroyed", () => {
+        watchedRemoteHostOwners.delete(watchedId);
+        runFork(transfer.disconnectOwner(watchedId));
+      });
+    }
+    yield* transfer.connect({
+      ...input,
+      ownerWebContentsId: ownerId,
+    });
+  }),
 });
 export const disconnectRemoteHost = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_REMOTE_HOST_DISCONNECT_CHANNEL,
   payload: Schema.String,
   result: Schema.Void,
   handler: (environmentId) =>
-    Effect.flatMap(DesktopBrowserHost.DesktopBrowserHost, (host) =>
-      host.disconnectRemote(environmentId),
+    Effect.flatMap(RemoteBrowserTransfer.RemoteBrowserTransfer, (transfer) =>
+      transfer.disconnect(environmentId),
     ),
 });
-export const remoteHostCommand = DesktopIpc.makeIpcMethod({
-  channel: IpcChannels.PREVIEW_REMOTE_HOST_COMMAND_CHANNEL,
-  payload: DesktopRemoteBrowserCommandInput,
+export const fetchRemoteHostCommand = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_REMOTE_HOST_FETCH_COMMAND_CHANNEL,
+  payload: DesktopRemoteBrowserFetchCommandInput,
   result: Schema.Void,
-  handler: ({ environmentId, command }) =>
-    Effect.flatMap(DesktopBrowserHost.DesktopBrowserHost, (host) =>
-      host.remoteCommand(environmentId, command),
+  handler: (input) =>
+    Effect.flatMap(RemoteBrowserTransfer.RemoteBrowserTransfer, (transfer) =>
+      transfer.fetchCommand(input),
     ),
+});
+export const syncCaptureHost = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_SYNC_CAPTURE_HOST_CHANNEL,
+  payload: DesktopPreviewSyncCaptureHostInput,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.preview.syncCaptureHost")(function* ({ ensure, keepAlive }) {
+    const captureHost = yield* DesktopBrowserCaptureHost.DesktopBrowserCaptureHost;
+    yield* captureHost.setKeepAlive(keepAlive);
+    if (ensure) {
+      yield* captureHost.ensure;
+    }
+  }),
 });
 
 const createTab = DesktopIpc.makeIpcMethod({

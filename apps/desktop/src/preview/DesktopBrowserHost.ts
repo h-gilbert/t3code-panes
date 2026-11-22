@@ -156,6 +156,12 @@ export class DesktopBrowserHost extends Context.Service<
       readonly key: DesktopBrowserTabKey;
       readonly active: boolean;
     }>;
+    /** Local backend requested that a lazy browser capture host be ensured. */
+    readonly hostRequests: Stream.Stream<void>;
+    /** Fires whenever attached tabs or connected remote hosts change. */
+    readonly activityChanged: Stream.Stream<void>;
+    /** True while any server tab is attached or any remote environment is hosted. */
+    readonly hasActiveWork: Effect.Effect<boolean>;
   }
 >()("@t3tools/desktop/preview/DesktopBrowserHost") {}
 
@@ -176,8 +182,12 @@ export const make = Effect.gen(function* () {
     readonly key: DesktopBrowserTabKey;
     readonly active: boolean;
   }>();
+  const hostRequests = yield* PubSub.sliding<void>(1);
+  const activityChanged = yield* PubSub.sliding<void>(1);
   const runFork = Effect.runForkWith(yield* Effect.context<never>());
   const tabs = new Map<string, AttachedTab>();
+  const connectedRemotes = new Set<string>();
+  const notifyActivityChanged = () => runFork(PubSub.publish(activityChanged, undefined));
   /** Threads whose agent turn runs, by the server's account. */
   const agentTurns = new Set<string>();
   const emit = (event: DesktopBrowserEventType & { readonly environmentId?: string | undefined }) =>
@@ -577,6 +587,7 @@ export const make = Effect.gen(function* () {
     const tab = tabs.get(id);
     if (!tab) return;
     tabs.delete(id);
+    notifyActivityChanged();
     tab.relay?.dispose();
     void tab.uploads.dispose().catch(() => {});
     if (tab.temporaryDirectory)
@@ -634,6 +645,7 @@ export const make = Effect.gen(function* () {
       stopWaiting: null,
     };
     tabs.set(id, tab);
+    notifyActivityChanged();
     debuggee.debugger.on("message", tab.onMessage);
     debuggee.webContents.on("did-navigate", tab.onNewDocument);
     const announce = () => {
@@ -710,6 +722,10 @@ export const make = Effect.gen(function* () {
     Effect.sync(() => {
       const command = decodeCommand(line);
       if (Option.isNone(command)) return;
+      if (command.value.type === "ensureHost") {
+        runFork(PubSub.publish(hostRequests, undefined));
+        return;
+      }
       if (command.value.type === "turn") {
         if (command.value.active) agentTurns.add(turnKey(command.value.threadId, environmentId));
         else endAgentTurn(command.value.threadId, environmentId);
@@ -814,21 +830,29 @@ export const make = Effect.gen(function* () {
     frameRequests: Stream.fromPubSub(frameRequests),
     remoteEvents: Stream.fromPubSub(outbox).pipe(
       Stream.filter((event) => event.environmentId !== undefined),
-      Stream.map((event) => ({ environmentId: event.environmentId!, event })),
+      Stream.map(({ environmentId, ...event }) => ({
+        environmentId: environmentId!,
+        event: event as DesktopBrowserEventType,
+      })),
     ),
     connectRemote: Effect.fn("DesktopBrowserHost.connectRemote")((environmentId) =>
-      Effect.forEach(
-        [...tabs.values()].filter((tab) => tab.key.environmentId === environmentId),
-        (tab) => {
-          tab.relay?.dispose();
-          dropRelay(tab);
-          return PubSub.publish(outbox, { type: "attached", ...tab.key });
-        },
-        { discard: true },
-      ),
+      Effect.gen(function* () {
+        connectedRemotes.add(environmentId);
+        notifyActivityChanged();
+        yield* Effect.forEach(
+          [...tabs.values()].filter((tab) => tab.key.environmentId === environmentId),
+          (tab) => {
+            tab.relay?.dispose();
+            dropRelay(tab);
+            return PubSub.publish(outbox, { type: "attached", ...tab.key });
+          },
+          { discard: true },
+        );
+      }),
     ),
     disconnectRemote: Effect.fn("DesktopBrowserHost.disconnectRemote")((environmentId) =>
       Effect.sync(() => {
+        if (connectedRemotes.delete(environmentId)) notifyActivityChanged();
         for (const tab of tabs.values())
           if (tab.key.environmentId === environmentId) {
             tab.relay?.dispose();
@@ -842,6 +866,9 @@ export const make = Effect.gen(function* () {
       handleCommandLine(JSON.stringify(command), environmentId),
     ),
     painting: Stream.fromPubSub(painting),
+    hostRequests: Stream.fromPubSub(hostRequests),
+    activityChanged: Stream.fromPubSub(activityChanged),
+    hasActiveWork: Effect.sync(() => tabs.size > 0 || connectedRemotes.size > 0),
     // Subscribes before announcing, so no attach falls between the two.
     events: Stream.unwrap(
       Effect.gen(function* () {

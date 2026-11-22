@@ -12,7 +12,10 @@ import * as Schema from "effect/Schema";
 
 import { applyAppearanceContrast } from "./appearanceContrast";
 import { applyAppearanceFontVariables, TYPOGRAPHY_ADVANCED_STORAGE_KEY } from "./appearanceFonts";
-import { startElectronBrowserHost } from "./browser/ElectronBrowserHost";
+import {
+  startCaptureHostBrowserListeners,
+  startElectronBrowserHost,
+} from "./browser/ElectronBrowserHost";
 import { startBrowserProfileReporting } from "./browser/BrowserProfileReporter";
 import { startPreviewTitleRecording } from "./browserHistoryStore";
 import { retainThreadOverlaysForThread } from "./components/chat/threadOverlayRetention";
@@ -43,6 +46,7 @@ import { startThemeBackground } from "./themeBackground";
 import { readLocalStorageValue, subscribeLocalStorageKey } from "./hooks/useLocalStorage";
 import { startHostEnvironmentLookup } from "./state/primaryEnvironment";
 import {
+  ensureClientSettingsHydrated,
   getClientSettings,
   startModelPreferencesMigration,
   subscribeClientSettings,
@@ -257,6 +261,16 @@ function startThreadOverlayRetention(router: AppRouter): void {
           : null;
     retainThreadOverlaysForThread(threadRef ? scopedThreadKey(threadRef) : null);
   });
+}
+
+/**
+ * Minimal bootstrap for the hidden `?browserCapture=host` window: skips router, themes,
+ * notifications, toasts, and draft/thread-shell coordinators so it only hosts streamed webviews.
+ */
+export function startBrowserCaptureHostServices(): void {
+  startI18n();
+  void ensureClientSettingsHydrated().catch(() => undefined);
+  if (isElectron) startCaptureHostBrowserListeners();
 }
 
 /**

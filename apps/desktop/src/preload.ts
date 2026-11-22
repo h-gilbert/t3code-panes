@@ -473,21 +473,21 @@ contextBridge.exposeInMainWorld("desktopBridge", {
         profileId,
         browserScope,
       }),
-    connectRemoteHost: (environmentId) =>
-      ipcRenderer.invoke(IpcChannels.PREVIEW_REMOTE_HOST_CONNECT_CHANNEL, environmentId),
+    connectRemoteHost: (input) =>
+      ipcRenderer.invoke(IpcChannels.PREVIEW_REMOTE_HOST_CONNECT_CHANNEL, input),
     disconnectRemoteHost: (environmentId) =>
       ipcRenderer.invoke(IpcChannels.PREVIEW_REMOTE_HOST_DISCONNECT_CHANNEL, environmentId),
-    sendRemoteHostCommand: (input) =>
-      ipcRenderer.invoke(IpcChannels.PREVIEW_REMOTE_HOST_COMMAND_CHANNEL, input),
-    onRemoteHostEvent: (listener) => {
-      const wrapped = (
-        _event: Electron.IpcRendererEvent,
-        input: import("@t3tools/contracts").DesktopRemoteBrowserEvent,
-      ) => listener(input);
-      ipcRenderer.on(IpcChannels.PREVIEW_REMOTE_HOST_EVENT_CHANNEL, wrapped);
+    fetchRemoteHostCommand: (input) =>
+      ipcRenderer.invoke(IpcChannels.PREVIEW_REMOTE_HOST_FETCH_COMMAND_CHANNEL, input),
+    onRemoteHostError: (listener) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, environmentId: string) =>
+        listener(environmentId);
+      ipcRenderer.on(IpcChannels.PREVIEW_REMOTE_HOST_ERROR_CHANNEL, wrapped);
       return () =>
-        ipcRenderer.removeListener(IpcChannels.PREVIEW_REMOTE_HOST_EVENT_CHANNEL, wrapped);
+        ipcRenderer.removeListener(IpcChannels.PREVIEW_REMOTE_HOST_ERROR_CHANNEL, wrapped);
     },
+    syncCaptureHost: (input) =>
+      ipcRenderer.invoke(IpcChannels.PREVIEW_SYNC_CAPTURE_HOST_CHANNEL, input),
     getPreviewConfig: (environmentId, profileId, browserScopeOrTunnelLoopback, tunnelLoopback) =>
       ipcRenderer.invoke(IpcChannels.PREVIEW_GET_CONFIG_CHANNEL, {
         environmentId,

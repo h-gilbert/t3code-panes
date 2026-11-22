@@ -1,6 +1,7 @@
 import * as DesktopBrowserCaptureHost from "../window/DesktopBrowserCaptureHost.ts";
 import * as DesktopWindowSession from "../window/DesktopWindowSession.ts";
 import * as DesktopBrowserHost from "../preview/DesktopBrowserHost.ts";
+import * as RemoteBrowserTransfer from "../preview/RemoteBrowserTransfer.ts";
 import { assert, it } from "@effect/vitest";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -207,8 +208,10 @@ const runStubbedDesktop = (stub: StubbedDesktop) =>
         Layer.mergeAll(
           DesktopWindowSession.layerTest(),
           DesktopBrowserHost.layer,
+          RemoteBrowserTransfer.layer.pipe(Layer.provide(DesktopBrowserHost.layer)),
           Layer.succeed(DesktopBrowserCaptureHost.DesktopBrowserCaptureHost, {
             ensure: Effect.void,
+            setKeepAlive: () => Effect.void,
           }),
           Layer.mock(BrowserImport.BrowserImport, {}),
           Layer.mock(ChildProcessSpawner.ChildProcessSpawner, {}),

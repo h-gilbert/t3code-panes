@@ -1750,3 +1750,29 @@ it.effect("selects transferred remote files through CDP and isolates uploads by 
     yield* host.disconnectRemote(remoteKey.environmentId);
   }).pipe(Effect.scoped),
 );
+
+it.effect("emits hostRequests on ensureHost and tracks active work across tabs and remotes", () =>
+  Effect.gen(function* () {
+    const host = yield* DesktopBrowserHost.make;
+    expect(yield* host.hasActiveWork).toBe(false);
+    const requestFiber = yield* host.hostRequests.pipe(
+      Stream.take(1),
+      Stream.runCollect,
+      Effect.forkScoped,
+    );
+    yield* Effect.yieldNow;
+    yield* host.handleCommandLine(encodeJson({ type: "ensureHost" }));
+    expect(yield* Fiber.join(requestFiber)).toHaveLength(1);
+
+    yield* host.connectRemote("fred");
+    expect(yield* host.hasActiveWork).toBe(true);
+    yield* host.disconnectRemote("fred");
+    expect(yield* host.hasActiveWork).toBe(false);
+
+    const debuggee = makeDebuggee();
+    host.attach(key, debuggee.tab);
+    expect(yield* host.hasActiveWork).toBe(true);
+    host.detach(key);
+    expect(yield* host.hasActiveWork).toBe(false);
+  }).pipe(Effect.scoped),
+);

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import type { DesktopBrowserEvent } from "@t3tools/contracts";
-import { createRemoteBrowserEventQueue } from "./remoteBrowserEventQueue";
+import { createRemoteBrowserEventQueue } from "./remoteBrowserEventQueue.ts";
 
 const deferred = <A>() => {
   let resolve!: (value: A | PromiseLike<A>) => void;
