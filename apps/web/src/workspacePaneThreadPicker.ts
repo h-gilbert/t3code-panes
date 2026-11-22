@@ -33,6 +33,7 @@ export interface WorkspaceThreadPickerItem {
   readonly projectKey: string;
   readonly projectName: string;
   readonly status: "open" | "settled";
+  readonly scheduled: boolean;
   readonly runningSubagentCount: number;
   readonly paneIndex: number | null;
   readonly environmentLabel: string;
@@ -114,6 +115,7 @@ export function buildWorkspaceThreadPickerItems(input: {
   readonly projects: readonly WorkspaceThreadPickerProject[];
   readonly paneTargets: readonly (WorkspacePaneTarget | null)[];
   readonly settledThreadKeys?: ReadonlySet<string>;
+  readonly scheduledThreadKeys?: ReadonlySet<string>;
   readonly environmentLabels?: ReadonlyMap<string, string>;
 }): WorkspaceThreadPickerItem[] {
   const paneByThread = new Map<string, number>();
@@ -167,6 +169,8 @@ export function buildWorkspaceThreadPickerItems(input: {
         projectKey: project.projectKey,
         projectName: project.displayName,
         status,
+        scheduled:
+          thread.scheduled === true || (input.scheduledThreadKeys?.has(threadKey) ?? false),
       },
     ];
   });
@@ -178,11 +182,15 @@ export function filterWorkspaceThreadPickerItems(
     readonly projectKey: string | null;
     readonly status: "all" | "open" | "settled";
     readonly query: string;
+    readonly scheduled?: boolean;
   },
 ) {
+  const wantScheduled = filter.scheduled ?? false;
   const terms = filter.query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   return items.filter((item) => {
-    if (filter.projectKey !== null && item.projectKey !== filter.projectKey) return false;
+    if (item.scheduled !== wantScheduled) return false;
+    if (!wantScheduled && filter.projectKey !== null && item.projectKey !== filter.projectKey)
+      return false;
     if (filter.status !== "all" && item.status !== filter.status) return false;
     const text = `${item.title} ${item.projectName} ${item.environmentLabel}`.toLowerCase();
     return terms.every((term) => text.includes(term));

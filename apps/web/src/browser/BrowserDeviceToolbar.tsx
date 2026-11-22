@@ -1,4 +1,5 @@
 import {
+  FILL_PREVIEW_VIEWPORT,
   PREVIEW_VIEWPORT_MAX_AREA,
   PREVIEW_VIEWPORT_MAX_DIMENSION,
   PREVIEW_VIEWPORT_MIN_DIMENSION,
@@ -27,9 +28,16 @@ import { BROWSER_DEVICE_TOOLBAR_HEIGHT, resizeFreeformViewport } from "./browser
 import { commitViewportAndAspectRatio } from "./browserDeviceToolbarState";
 import { ScreenRotationIcon } from "./ScreenRotationIcon";
 
+const FILL_VALUE = "fill";
 const RESPONSIVE_VALUE = "responsive";
 const MOBILE_PRESET_ID = "iphone-12-pro";
 const SELECT_ITEMS = [
+  {
+    value: FILL_VALUE,
+    label: msg("Fit window", {
+      $context: "browser viewport option that matches the viewing window",
+    }),
+  },
   {
     value: RESPONSIVE_VALUE,
     label: msg("Responsive", { $context: "browser viewport preset that follows the panel size" }),
@@ -154,6 +162,10 @@ export function BrowserDeviceToolbar({
 
   const selectViewport = (value: string | null) => {
     if (!value) return;
+    if (value === FILL_VALUE) {
+      apply(FILL_PREVIEW_VIEWPORT, null);
+      return;
+    }
     if (value === RESPONSIVE_VALUE) {
       if (setting._tag === "freeform") return;
       apply({ _tag: "freeform", width: setting.width, height: setting.height });
@@ -195,7 +207,7 @@ export function BrowserDeviceToolbar({
 
   return (
     <div
-      className="sticky left-0 top-0 z-50 flex items-center gap-0.5 overflow-x-auto border-b border-border/70 bg-background/95 px-1.5 shadow-xs backdrop-blur-md [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="sticky left-0 top-0 z-50 flex items-center gap-1.5 overflow-x-auto border-b border-border/70 bg-background/95 px-2.5 shadow-xs backdrop-blur-md [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       style={{ width, height: BROWSER_DEVICE_TOOLBAR_HEIGHT }}
       role="toolbar"
       aria-label={gt("Browser device toolbar")}
@@ -216,7 +228,7 @@ export function BrowserDeviceToolbar({
       }}
     >
       {width >= 560 ? (
-        <span className="mr-0.5 shrink-0 text-2xs font-medium text-muted-foreground">
+        <span className="shrink-0 text-2xs font-medium text-muted-foreground">
           <T>Dimensions</T>
         </span>
       ) : null}
@@ -236,7 +248,8 @@ export function BrowserDeviceToolbar({
           <SelectValue />
         </SelectTrigger>
         <SelectPopup align="start" alignItemWithTrigger={false}>
-          <SelectItem value={RESPONSIVE_VALUE}>{m(SELECT_ITEMS[0]!.label)}</SelectItem>
+          <SelectItem value={FILL_VALUE}>{m(SELECT_ITEMS[0]!.label)}</SelectItem>
+          <SelectItem value={RESPONSIVE_VALUE}>{m(SELECT_ITEMS[1]!.label)}</SelectItem>
           <SelectGroup>
             <SelectGroupLabel>
               <T context="group of phone sizes">Phones</T>
@@ -275,7 +288,7 @@ export function BrowserDeviceToolbar({
       </Select>
 
       <form
-        className="m-0 flex min-w-0 shrink-0 items-center gap-0.5 border-0 p-0"
+        className="m-0 flex min-w-0 shrink-0 items-center gap-1 border-0 p-0"
         aria-label={gt("Viewport dimensions")}
         onSubmit={(event) => {
           event.preventDefault();
@@ -304,7 +317,7 @@ export function BrowserDeviceToolbar({
           onChange={(event) => updateCustomDimension("width", event.target.value)}
           aria-label={gt("Viewport width")}
           aria-invalid={!customValid}
-          className={width >= 360 ? "w-14" : "w-13"}
+          className={width >= 360 ? "w-16" : "w-14"}
         />
         <span className="text-xs text-muted-foreground">×</span>
         <Input
@@ -329,7 +342,7 @@ export function BrowserDeviceToolbar({
           onChange={(event) => updateCustomDimension("height", event.target.value)}
           aria-label={gt("Viewport height")}
           aria-invalid={!customValid}
-          className={width >= 360 ? "w-14" : "w-13"}
+          className={width >= 360 ? "w-16" : "w-14"}
         />
       </form>
 
@@ -338,7 +351,8 @@ export function BrowserDeviceToolbar({
           render={
             <Button
               variant={aspectRatio === null ? "ghost" : "secondary"}
-              size="icon-xs"
+              size={width >= 660 ? "xs" : "icon-xs"}
+              className="shrink-0"
               type="button"
               aria-label={
                 aspectRatio === null
@@ -373,6 +387,7 @@ export function BrowserDeviceToolbar({
             <Button
               variant={mobileViewport ? "secondary" : "ghost"}
               size={width >= 740 ? "xs" : "icon-xs"}
+              className="shrink-0"
               type="button"
               aria-label={mobileViewportLabel}
               aria-pressed={mobileViewport}
@@ -390,29 +405,49 @@ export function BrowserDeviceToolbar({
         </TooltipTrigger>
         <TooltipPopup side="top">{mobileViewportLabel}</TooltipPopup>
       </Tooltip>
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        type="button"
-        aria-label={gt("Rotate viewport")}
-        disabled={pending}
-        onClick={rotate}
-      >
-        <ScreenRotationIcon />
-      </Button>
-      <span className="sticky right-0 ml-auto flex bg-background/95">
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          type="button"
-          aria-label={gt("Close device toolbar")}
-          disabled={pending}
-          onClick={() => {
-            apply({ _tag: "fill" }, null);
-          }}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className="shrink-0"
+              type="button"
+              aria-label={gt("Rotate viewport")}
+              disabled={pending}
+              onClick={rotate}
+            />
+          }
         >
-          <X />
-        </Button>
+          <ScreenRotationIcon />
+        </TooltipTrigger>
+        <TooltipPopup side="top">
+          <T>Rotate viewport</T>
+        </TooltipPopup>
+      </Tooltip>
+      <span className="sticky right-0 ml-auto flex shrink-0 bg-background/95">
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="shrink-0"
+                type="button"
+                aria-label={gt("Close device toolbar")}
+                disabled={pending}
+                onClick={() => {
+                  apply(FILL_PREVIEW_VIEWPORT, null);
+                }}
+              />
+            }
+          >
+            <X />
+          </TooltipTrigger>
+          <TooltipPopup side="top">
+            <T>Fit window</T>
+          </TooltipPopup>
+        </Tooltip>
       </span>
     </div>
   );

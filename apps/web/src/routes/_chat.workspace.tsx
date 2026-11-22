@@ -9,8 +9,12 @@ import {
   threadFamilies,
   useEnvironmentThread,
 } from "../state/threads";
-import { Atom } from "effect/reactivity";
-import { useEnvironmentIdentities, useEnvironmentProviders } from "../state/environments";
+import { AsyncResult, Atom } from "effect/reactivity";
+import {
+  useConnectedEnvironmentIds,
+  useEnvironmentIdentities,
+  useEnvironmentProviders,
+} from "../state/environments";
 import { shouldTypeToFocusComposer } from "../components/chat/composerFocusRedirect";
 // @effect-diagnostics cryptoRandomUUID:off -- Synchronous workspace drag-and-drop allocates local view identities.
 import { useAtomValue } from "@effect/atom-react";
@@ -105,7 +109,8 @@ import {
 } from "../state/entities";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { environmentPresentations } from "../state/presentation";
-import { primaryServerKeybindingsAtom } from "../state/server";
+import { environmentAtomList, environmentIdsKey } from "../state/environmentAtomList";
+import { primaryServerKeybindingsAtom, serverEnvironment } from "../state/server";
 import { useClientSettings } from "../hooks/useSettings";
 import { useDesktopFullscreen } from "../hooks/useDesktopFullscreen";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
@@ -1052,6 +1057,11 @@ const WorkspacePane = memo(function WorkspacePane({
   );
 });
 
+const workspaceScheduledTasksAtom = environmentAtomList(
+  "web-workspace-scheduled-tasks",
+  (environmentId) => serverEnvironment.scheduledTasksLive({ environmentId, input: {} }),
+);
+
 function WorkspacePaneThreadBrowser({
   workspaceKey,
   projectGroups,
@@ -1062,7 +1072,14 @@ function WorkspacePaneThreadBrowser({
 }) {
   const threads = useThreadShells();
   const environments = useEnvironmentIdentities();
+  const connectedEnvironmentIds = useConnectedEnvironmentIds();
   const serverConfigs = useServerConfigs();
+  const scheduledEnvironmentIds = connectedEnvironmentIds.filter((environmentId) =>
+    serverConfigs.has(environmentId),
+  );
+  const scheduledTaskQueries = useAtomValue(
+    workspaceScheduledTasksAtom(environmentIdsKey(scheduledEnvironmentIds)),
+  );
   const nowMinute = useNowMinute();
   const { panes, paneCount } = useWorkspacePaneStore((state) =>
     selectProjectWorkspaceLayout(state, workspaceKey),
@@ -1078,6 +1095,16 @@ function WorkspacePaneThreadBrowser({
       return thread.settledOverride === "settled" ? [threadKey] : [];
     }),
   );
+  const scheduledThreadKeys = new Set<string>();
+  scheduledEnvironmentIds.forEach((environmentId, index) => {
+    const query = scheduledTaskQueries[index];
+    const data = query ? AsyncResult.getOrElse(query, () => null) : null;
+    for (const task of data?.tasks ?? []) {
+      if (task.threadId !== null) {
+        scheduledThreadKeys.add(scopedThreadKey(scopeThreadRef(environmentId, task.threadId)));
+      }
+    }
+  });
   const availableThreads = buildWorkspaceThreadPickerItems({
     threads,
     projects: projectGroups,
@@ -1086,6 +1113,7 @@ function WorkspacePaneThreadBrowser({
       environments.map((environment) => [environment.environmentId, environment.label]),
     ),
     settledThreadKeys,
+    scheduledThreadKeys,
   });
   return <EmptyWorkspacePane {...props} threads={availableThreads} />;
 }

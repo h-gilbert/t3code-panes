@@ -27,7 +27,11 @@ const projectB = ProjectId.make("project-b");
 function thread(
   id: string,
   projectId: ProjectId,
-  options: { readonly archived?: boolean; readonly createdAt?: string } = {},
+  options: {
+    readonly archived?: boolean;
+    readonly createdAt?: string;
+    readonly scheduled?: boolean;
+  } = {},
 ): EnvironmentThreadShell {
   return {
     id: ThreadId.make(id),
@@ -38,6 +42,7 @@ function thread(
     runtime: null,
     createdAt: options.createdAt ?? "2026-09-01T00:00:00.000Z",
     archivedAt: options.archived ? "2026-09-02T00:00:00.000Z" : null,
+    ...(options.scheduled ? { scheduled: true } : {}),
   } as EnvironmentThreadShell;
 }
 
@@ -140,6 +145,69 @@ describe("workspace pane thread picker", () => {
       { title: "Thread open", status: "open" },
       { title: "Thread settled", status: "settled" },
     ]);
+  });
+
+  it("separates scheduled threads from regular all-thread and project views", () => {
+    const remoteId = EnvironmentId.make("remote");
+    const items = buildWorkspaceThreadPickerItems({
+      threads: [
+        thread("manual-a", projectA),
+        thread("started-sched", projectA, { scheduled: true }),
+        thread("bound-sched", projectB),
+        thread("open-in-pane-sched", projectA, { scheduled: true }),
+        { ...thread("settled-sched", projectA, { scheduled: true }), environmentId: remoteId },
+      ],
+      projects: [
+        {
+          ...projects[0]!,
+          memberProjectRefs: [
+            ...projects[0]!.memberProjectRefs,
+            { environmentId: remoteId, projectId: projectA },
+          ],
+        },
+        projects[1]!,
+      ],
+      paneTargets: [scopeThreadRef(environmentId, ThreadId.make("open-in-pane-sched"))],
+      settledThreadKeys: new Set([`${remoteId}:settled-sched`]),
+      scheduledThreadKeys: new Set([`${environmentId}:bound-sched`]),
+      environmentLabels: new Map([
+        [environmentId, "Jeff"],
+        [remoteId, "Fred"],
+      ]),
+    });
+
+    expect(
+      filterWorkspaceThreadPickerItems(items, { projectKey: null, status: "all", query: "" }).map(
+        (item) => item.threadRef.threadId,
+      ),
+    ).toEqual(["manual-a"]);
+    expect(
+      filterWorkspaceThreadPickerItems(items, {
+        projectKey: "group-b",
+        status: "all",
+        query: "",
+      }),
+    ).toEqual([]);
+    expect(
+      filterWorkspaceThreadPickerItems(items, {
+        projectKey: null,
+        scheduled: true,
+        status: "all",
+        query: "",
+      }).map((item) => [item.threadRef.threadId, item.status]),
+    ).toEqual([
+      ["bound-sched", "open"],
+      ["settled-sched", "settled"],
+      ["started-sched", "open"],
+    ]);
+    expect(
+      filterWorkspaceThreadPickerItems(items, {
+        projectKey: null,
+        scheduled: true,
+        status: "settled",
+        query: "fred project a",
+      }).map((item) => item.threadRef.threadId),
+    ).toEqual(["settled-sched"]);
   });
 });
 

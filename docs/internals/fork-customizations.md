@@ -42,11 +42,15 @@ the current checkout too. Preserve explicit branch selections, existing worktree
 and the full chat view's worktree controls.
 
 Empty panes use one project and thread browser, without a duplicate header picker.
-Selecting a project shows its open threads and settled history; All open threads
-spans connected projects and environments. Keep search, project hiding and
-restoration, and new-thread creation available. Open threads already visible in a pane are excluded from the browser and its
-counts. They become available again when that pane is cleared. Settled history
-remains available, with pane markers for settled threads still visible in a pane.
+Selecting a project shows its open threads and settled history; All threads
+spans connected projects and environments. Scheduled threads (started by or
+bound to scheduled tasks) appear in a separate Scheduled area across connected
+projects and environments, excluded from All threads, project lists, and their
+counts. Keep search, project hiding and restoration, and new-thread creation
+available. Open threads already visible in a pane are excluded from the browser
+and its counts. They become available again when that pane is cleared. Settled
+history remains available, with pane markers for settled threads still visible in
+a pane.
 
 ## Collaborative browser
 

@@ -1,4 +1,4 @@
-import type * as DateTime from "effect/DateTime";
+import * as DateTime from "effect/DateTime";
 import { msg } from "gt-react";
 import { useAtomValue } from "@effect/atom-react";
 import type {
@@ -402,6 +402,17 @@ export function presentThreadShellFromProjection(
   const runtime = deriveThreadRuntime({ ...projection, updatedAt });
   const pendingRuntimeRequest =
     projection.runtimeRequests.findLast((request) => request.status === "pending") ?? null;
+  const earliestUserMessage = projection.messages
+    .filter((message) => message.role === "user")
+    .toSorted(
+      (left, right) =>
+        DateTime.toEpochMillis(left.createdAt) - DateTime.toEpochMillis(right.createdAt) ||
+        (left.id < right.id ? -1 : left.id > right.id ? 1 : 0),
+    )[0];
+  const scheduled =
+    earliestUserMessage !== undefined &&
+    (earliestUserMessage.scheduledTaskId !== undefined ||
+      earliestUserMessage.id.startsWith("scheduled-task-message:"));
   // Direct links can hydrate detail before the thread enters the shell index.
   return {
     ...presentThreadShell(environmentId, {
@@ -414,6 +425,7 @@ export function presentThreadShellFromProjection(
       latestVisibleMessage: null,
       latestUserMessageAt:
         projection.messages.findLast((message) => message.role === "user")?.updatedAt ?? null,
+      ...(scheduled ? { scheduled: true } : {}),
       hasActionableProposedPlan: projection.plans.some(
         (plan) => plan.kind === "proposed_plan" && plan.status === "active",
       ),

@@ -27,6 +27,7 @@ import {
   RuntimeRequestId,
   RunAttemptId,
   RunId,
+  ScheduledTaskId,
   ThreadId,
   TurnItemId,
   type ThreadPullRequestLink,
@@ -12113,4 +12114,101 @@ it.effect("memory shell follows native subagent work without inventing an app ru
 );
 it.effect("SQLite shell follows native subagent work without loading its transcript", () =>
   nativeSubagentShellStatus.pipe(Effect.provide(layerTest)),
+);
+
+const scheduledThreadShellFlag = Effect.gen(function* () {
+  const store = yield* ProjectionStore.ProjectionStoreV2;
+  const now = yield* DateTime.now;
+  const templateId = yield* addRolledBackRecoveryCandidate("scheduled-shell-template");
+  const template = (yield* store.getThreadProjection(templateId)).thread;
+  const createThread = (id: string) => {
+    const threadId = ThreadId.make(id);
+    return store
+      .apply({
+        id: EventId.make(`event:${id}:created`),
+        type: "thread.created",
+        threadId,
+        occurredAt: now,
+        payload: { ...template, id: threadId, title: id },
+      })
+      .pipe(Effect.as(threadId));
+  };
+  const appendUserMessage = (input: {
+    readonly threadId: ThreadId;
+    readonly id: string;
+    readonly offsetSeconds: number;
+    readonly scheduledTaskId?: ScheduledTaskId;
+  }) => {
+    const at = DateTime.add(now, { seconds: input.offsetSeconds });
+    return store.apply({
+      id: EventId.make(`event:${input.threadId}:${input.id}`),
+      type: "message.updated",
+      threadId: input.threadId,
+      occurredAt: at,
+      payload: {
+        id: MessageId.make(input.id),
+        threadId: input.threadId,
+        runId: null,
+        nodeId: null,
+        createdBy: "user",
+        creationSource: "web",
+        role: "user",
+        text: "prompt",
+        attachments: [],
+        streaming: false,
+        createdAt: at,
+        updatedAt: at,
+        ...(input.scheduledTaskId === undefined ? {} : { scheduledTaskId: input.scheduledTaskId }),
+      },
+    });
+  };
+
+  const manualThread = yield* createThread("thread:manual-shell");
+  yield* appendUserMessage({ threadId: manualThread, id: "msg:manual:1", offsetSeconds: 1 });
+
+  const scheduledThread = yield* createThread("thread:scheduled-shell");
+  yield* appendUserMessage({
+    threadId: scheduledThread,
+    id: "msg:sched:1",
+    offsetSeconds: 1,
+    scheduledTaskId: ScheduledTaskId.make("task:weekly"),
+  });
+  // A later manual reply keeps the thread marked as scheduled.
+  yield* appendUserMessage({ threadId: scheduledThread, id: "msg:sched:2", offsetSeconds: 2 });
+
+  const legacyScheduledThread = yield* createThread("thread:legacy-scheduled-shell");
+  yield* appendUserMessage({
+    threadId: legacyScheduledThread,
+    id: "scheduled-task-message:task-legacy:1700000000000:scheduled",
+    offsetSeconds: 1,
+  });
+
+  const snapshot = yield* store.getShellSnapshot();
+  const snapshotById = new Map(snapshot.threads.map((thread) => [thread.id, thread]));
+  for (const [threadId, expected] of [
+    [manualThread, undefined],
+    [scheduledThread, true],
+    [legacyScheduledThread, true],
+  ] as const) {
+    const projection = yield* store.getThreadProjection(threadId);
+    const shells = [
+      yield* store.getThreadShell(threadId),
+      snapshotById.get(threadId),
+      ProjectionStore.threadShellFromProjection(projection),
+    ];
+    assert.deepEqual(
+      shells.map((shell) => shell?.scheduled),
+      [expected, expected, expected],
+      threadId,
+    );
+  }
+});
+
+it.effect("memory shell marks threads started by scheduled tasks", () =>
+  scheduledThreadShellFlag.pipe(
+    Effect.provide(ProjectionStore.layer.pipe(Layer.provide(SqlitePersistence.layerMemory))),
+  ),
+);
+it.effect("SQLite shell marks threads started by scheduled tasks", () =>
+  scheduledThreadShellFlag.pipe(Effect.provide(layerTest)),
 );

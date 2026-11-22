@@ -3,6 +3,7 @@ import { useState } from "react";
 import { expect, it } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
 
+import "~/index.css";
 import { render } from "../../test/render";
 import { BrowserDeviceToolbar } from "./BrowserDeviceToolbar";
 
@@ -13,18 +14,19 @@ function Viewport({ width = 1920, height = 1080 }: { width?: number; height?: nu
     height,
   });
   const [aspectRatio, setAspectRatio] = useState<number | null>(width / height);
-  if (setting._tag === "fill") throw new Error("Expected fixed viewport");
   return (
     <>
-      <BrowserDeviceToolbar
-        setting={setting}
-        width={800}
-        aspectRatio={aspectRatio}
-        onAspectRatioChange={setAspectRatio}
-        onChange={async (next) => setSetting(next)}
-      />
+      {setting._tag !== "fill" ? (
+        <BrowserDeviceToolbar
+          setting={setting}
+          width={800}
+          aspectRatio={aspectRatio}
+          onAspectRatioChange={setAspectRatio}
+          onChange={async (next) => setSetting(next)}
+        />
+      ) : null}
       <output aria-label="Saved viewport">
-        {setting.width} × {setting.height}
+        {setting._tag === "fill" ? "fill" : `${setting.width} × ${setting.height}`}
       </output>
       <button type="button">Leave toolbar</button>
     </>
@@ -68,4 +70,22 @@ it("still limits a completed locked size to the viewport area cap", async () => 
   await expect
     .element(screen.getByRole("status", { name: "Saved viewport" }))
     .toHaveTextContent("2880 × 2880");
+});
+
+it("keeps labeled Ratio and Mobile buttons from overlapping and lets Fit window return to fill", async () => {
+  await using screen = await render(<Viewport width={1020} height={760} />);
+  const ratioButton = screen.getByRole("button", { name: "Unlock viewport aspect ratio" });
+  const mobileButton = screen.getByRole("button", { name: "Use mobile viewport" });
+  await expect.element(ratioButton).toBeVisible();
+  await expect.element(mobileButton).toBeVisible();
+
+  const ratioRect = ratioButton.element().getBoundingClientRect();
+  const mobileRect = mobileButton.element().getBoundingClientRect();
+  expect(ratioRect.right).toBeLessThanOrEqual(mobileRect.left);
+
+  await screen.getByRole("combobox", { name: "Browser device preset" }).click();
+  await screen.getByRole("option", { name: "Fit window" }).click();
+  await expect
+    .element(screen.getByRole("status", { name: "Saved viewport" }))
+    .toHaveTextContent("fill");
 });

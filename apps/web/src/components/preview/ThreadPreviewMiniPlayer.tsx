@@ -7,10 +7,11 @@ import { observeResize } from "~/lib/observeResize";
 import { DeviceMiniPlayer } from "./DeviceMiniPlayer";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 
-import { type ScopedThreadRef } from "@t3tools/contracts";
+import { FILL_PREVIEW_VIEWPORT, type ScopedThreadRef } from "@t3tools/contracts";
 import { Maximize2Icon, Minimize2Icon, PictureInPicture2, XIcon } from "lucide-react";
 import { type PointerEvent as ReactPointerEvent, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { commitBrowserViewportChange } from "~/browser/browserViewportActions";
 import type { BrowserViewportResizeDirection } from "~/browser/browserViewportLayout";
 import {
   findActiveBrowserRecordingRuntimeTabId,
@@ -189,12 +190,22 @@ function BrowserMiniPlayer({ threadRef, tabId }: BrowserProps) {
     });
   };
 
+  const resetViewportToWindow = () => {
+    if ((snapshot?.viewport ?? FILL_PREVIEW_VIEWPORT)._tag === "fill") return;
+    void commitBrowserViewportChange(
+      { threadRef, tabId, runtimeTabId },
+      FILL_PREVIEW_VIEWPORT,
+    ).catch(() => undefined);
+  };
+
   const toggleMaximized = () => {
+    if (compact && !maximized) resetViewportToWindow();
     usePreviewMiniPlayerStore.getState().setMaximized(threadRef, tabId, !maximized);
   };
 
   const toggleFloating = () => {
     const store = usePreviewMiniPlayerStore.getState();
+    if (compact && !floating) resetViewportToWindow();
     if (!floating && !miniPlayer?.size) {
       store.resize(threadRef, tabId, { width: 800, height: 560 });
     }
