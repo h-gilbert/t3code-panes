@@ -8,6 +8,7 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import { discardResponseBody, responsePayloads } from "@t3tools/shared/mcpResponsePayloads";
+import { MCP_TOOL_SCHEMA_BUDGET_HEADER } from "@t3tools/provider-core/server/mcpSession";
 
 /** ACP mandates stdio MCP support; HTTP/SSE support varies. */
 
@@ -40,6 +41,7 @@ const MCP_PROTOCOL_VERSION = "2025-06-18";
 export interface AcpMcpStdioBridgeOptions {
   readonly endpoint: string;
   readonly authorization: string;
+  readonly toolSchemaBudget?: string | undefined;
   readonly input: NodeJS.ReadableStream;
   readonly output: { write(chunk: string): unknown };
   readonly fetchImplementation?: (url: string, init?: RequestInit) => Promise<Response>;
@@ -236,6 +238,9 @@ export function runAcpMcpStdioBridge(options: AcpMcpStdioBridgeOptions): Effect.
                 "content-type": "application/json",
                 accept: "application/json, text/event-stream",
                 authorization: options.authorization,
+                ...(options.toolSchemaBudget === undefined
+                  ? {}
+                  : { [MCP_TOOL_SCHEMA_BUDGET_HEADER]: options.toolSchemaBudget }),
                 ...(sessionId === null ? {} : { "mcp-session-id": sessionId }),
                 ...(protocolVersion === null ? {} : { "mcp-protocol-version": protocolVersion }),
               },
@@ -359,6 +364,7 @@ export async function runAcpMcpCliFastPath(
       runAcpMcpStdioBridge({
         endpoint,
         authorization,
+        toolSchemaBudget: process.env.T3_ACP_MCP_TOOL_SCHEMA_BUDGET,
         input: process.stdin,
         output: process.stdout,
       }),

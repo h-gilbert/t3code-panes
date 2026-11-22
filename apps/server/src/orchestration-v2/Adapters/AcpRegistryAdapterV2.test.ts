@@ -1641,6 +1641,24 @@ describe("AcpRegistryAdapterV2", () => {
         ),
         { new: stdio("Bearer opened-token"), load: stdio("Bearer rotated-token") },
       );
+      // Local agy requests compact MCP tool schemas so Antigravity does not drop tools over ~2 KiB.
+      const compactStdio = (authorization: string) => [
+        {
+          ...stdio(authorization)[0]!,
+          env: [
+            ...stdio(authorization)[0]!.env,
+            { name: "T3_ACP_MCP_TOOL_SCHEMA_BUDGET", value: "compact" },
+          ],
+        },
+      ];
+      assert.deepEqual(
+        yield* sessionMcpServers({
+          source: "local",
+          commandPath: "/usr/local/bin/agy",
+          commandArgs: ["acp"],
+        }),
+        { new: compactStdio("Bearer opened-token"), load: compactStdio("Bearer rotated-token") },
+      );
     }).pipe(Effect.provide(layerTest)),
   );
 

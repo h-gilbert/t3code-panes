@@ -16,7 +16,7 @@ import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import type * as Types from "effect/Types";
 import { AiError, McpProtocol, McpSchema, McpServer, Tool, Toolkit } from "effect/ai";
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
+import { Headers, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import {
   DeviceToolError,
   OrchestratorMcpFailure,
@@ -49,11 +49,14 @@ import {
   MAX_REPORTED_DEPTH,
   toolOutcome,
 } from "../telemetry/ProviderDimensions.ts";
-import { advertisedJsonSchema } from "./advertisedJsonSchema.ts";
+import { advertisedJsonSchema, compactToolsListResponseText } from "./advertisedJsonSchema.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as McpToolAccess from "./McpToolAccess.ts";
 import * as McpToolExposure from "./McpToolExposure.ts";
-import { MCP_TOOL_EXPOSURE_HEADER } from "@t3tools/provider-core/server/mcpSession";
+import {
+  MCP_TOOL_EXPOSURE_HEADER,
+  MCP_TOOL_SCHEMA_BUDGET_HEADER,
+} from "@t3tools/provider-core/server/mcpSession";
 import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
 import { PreviewControlsToolkit } from "./toolkits/previewControls/tools.ts";
 import * as PreviewControlsHandlers from "./toolkits/previewControls/handlers.ts";
@@ -160,6 +163,43 @@ type McpAuthMiddleware = (
   Types.unhandled,
   HttpServerRequest.HttpServerRequest
 >;
+
+const mcpTextEncoder = new TextEncoder();
+const mcpTextDecoder = new TextDecoder();
+
+const compactToolsListHttpResponse = (
+  response: HttpServerResponse.HttpServerResponse,
+): HttpServerResponse.HttpServerResponse => {
+  const baseOptions = {
+    status: response.status,
+    ...(response.statusText === undefined ? {} : { statusText: response.statusText }),
+    headers: Headers.remove(response.headers, "content-length"),
+    cookies: response.cookies,
+  };
+  if (response.body._tag === "Uint8Array") {
+    const rewritten = compactToolsListResponseText(mcpTextDecoder.decode(response.body.body));
+    return rewritten === undefined
+      ? response
+      : HttpServerResponse.uint8Array(mcpTextEncoder.encode(rewritten), {
+          ...baseOptions,
+          contentType: response.body.contentType,
+        });
+  }
+  if (response.body._tag === "Stream") {
+    const stream = response.body.stream.pipe(
+      Stream.decodeText(),
+      Stream.splitLines,
+      Stream.map((line) =>
+        mcpTextEncoder.encode(`${compactToolsListResponseText(line) ?? line}\n`),
+      ),
+    );
+    return HttpServerResponse.stream(stream, {
+      ...baseOptions,
+      contentType: response.body.contentType,
+    });
+  }
+  return response;
+};
 
 const normalizeMcpHttpResponse = (
   response: HttpServerResponse.HttpServerResponse,
@@ -361,9 +401,14 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
     if (HttpServerResponse.isHttpServerResponse(admitted)) return admitted;
     if (yield* isUndefinedNotification(request)) return HttpServerResponse.empty({ status: 202 });
     const linkExpiresAt = admitted.client?.linkExpiresAt;
+    const compactToolSchemas =
+      request.method === "POST" && request.headers[MCP_TOOL_SCHEMA_BUDGET_HEADER] === "compact";
     return yield* httpEffect.pipe(
       Effect.provideService(McpInvocationContext.McpInvocationContext, admitted),
       Effect.map(normalizeMcpHttpResponse),
+      Effect.map((response) =>
+        compactToolSchemas ? compactToolsListHttpResponse(response) : response,
+      ),
       Effect.map((response) =>
         linkExpiresAt === undefined
           ? response

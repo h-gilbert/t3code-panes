@@ -411,6 +411,8 @@ export interface AcpAdapterV2Flavor {
   readonly mcpOverHttp?: boolean;
   /** The agent has no tool search of its own, so T3 lists optional tools on demand. */
   readonly deferMcpTools?: boolean;
+  /** The agent drops eager MCP tools over ~2 KiB, so T3 compacts oversized tool schemas. */
+  readonly compactToolSchemas?: boolean;
   readonly normalizeSessionUpdate?: (
     notification: EffectAcpSchema.SessionNotification,
   ) => EffectAcpSchema.SessionNotification;
@@ -998,6 +1000,7 @@ function acpMcpContext(
   self: SelfInvocation,
   mcpOverHttp: boolean | undefined,
   deferMcpTools: boolean | undefined,
+  compactToolSchemas: boolean | undefined,
 ): AcpMcpContext {
   if (session === undefined) {
     return { servers: [], acpServers: [], httpServers: [] };
@@ -1013,6 +1016,9 @@ function acpMcpContext(
           { name: "ELECTRON_RUN_AS_NODE", value: "1" },
           { name: "T3_ACP_MCP_ENDPOINT", value: session.endpoint },
           { name: "T3_ACP_MCP_AUTHORIZATION", value: session.authorizationHeader },
+          ...(compactToolSchemas === true
+            ? [{ name: "T3_ACP_MCP_TOOL_SCHEMA_BUDGET", value: "compact" }]
+            : []),
         ],
       },
     ],
@@ -1028,6 +1034,9 @@ function acpMcpContext(
                 { name: "Authorization", value: session.authorizationHeader },
                 ...(deferMcpTools === true
                   ? [{ name: McpProviderSession.MCP_TOOL_EXPOSURE_HEADER, value: "deferred" }]
+                  : []),
+                ...(compactToolSchemas === true
+                  ? [{ name: McpProviderSession.MCP_TOOL_SCHEMA_BUDGET_HEADER, value: "compact" }]
                   : []),
               ],
             },
@@ -1978,12 +1987,26 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
   const { flavor, selfInvocation: self } = options;
   const readMcpContext = (threadId: ThreadId | null) =>
     threadId === null
-      ? Effect.succeed(acpMcpContext(undefined, self, flavor.mcpOverHttp, flavor.deferMcpTools))
+      ? Effect.succeed(
+          acpMcpContext(
+            undefined,
+            self,
+            flavor.mcpOverHttp,
+            flavor.deferMcpTools,
+            flavor.compactToolSchemas,
+          ),
+        )
       : mcpSessions
           .read(threadId)
           .pipe(
             Effect.map((session) =>
-              acpMcpContext(session, self, flavor.mcpOverHttp, flavor.deferMcpTools),
+              acpMcpContext(
+                session,
+                self,
+                flavor.mcpOverHttp,
+                flavor.deferMcpTools,
+                flavor.compactToolSchemas,
+              ),
             ),
           );
   const driver = flavor.driver;

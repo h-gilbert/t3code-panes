@@ -15,6 +15,11 @@ import { ServerEnvironment } from "../environment/ServerEnvironment.ts";
 import { GitManager } from "../git/GitManager.ts";
 import { GitWorkflowService } from "../git/GitWorkflowService.ts";
 import * as McpHttpServer from "../mcp/McpHttpServer.ts";
+import {
+  COMPACT_MCP_TOOL_MAX_JSON_BYTES,
+  COMPACT_MCP_TOOL_MAX_PARAMS_BYTES,
+  compactMcpToolForSizeBudget,
+} from "../mcp/advertisedJsonSchema.ts";
 import { PreviewAutomationBroker } from "../mcp/PreviewAutomationBroker.ts";
 import {
   CLAUDE_PROVIDER,
@@ -161,5 +166,24 @@ it.effect("agent context matches the committed budget", () =>
       measured,
       "Set agentContextBudget.json to the measured values. Before you cut text to fit, run the evals that cover it (evals/README.md).",
     ).toEqual(budget);
+
+    // Every registered tool must also compact under Antigravity's per-tool schema ceiling.
+    for (const { tool } of mcp.tools) {
+      const compacted = compactMcpToolForSizeBudget(tool);
+      const totalBytes = utf8Bytes(
+        JSON.stringify({
+          name: compacted.name,
+          ...(compacted.description === undefined ? {} : { description: compacted.description }),
+          parameters: compacted.inputSchema,
+        }),
+      );
+      const paramsBytes = utf8Bytes(JSON.stringify(compacted.inputSchema));
+      expect(totalBytes, `${tool.name} compact total bytes`).toBeLessThanOrEqual(
+        COMPACT_MCP_TOOL_MAX_JSON_BYTES,
+      );
+      expect(paramsBytes, `${tool.name} compact params bytes`).toBeLessThanOrEqual(
+        COMPACT_MCP_TOOL_MAX_PARAMS_BYTES,
+      );
+    }
   }).pipe(Effect.provide(layerAdvertisedTools)),
 );

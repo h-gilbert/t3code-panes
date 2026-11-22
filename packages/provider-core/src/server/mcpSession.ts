@@ -7,6 +7,13 @@ import type * as Effect from "effect/Effect";
  */
 export const MCP_TOOL_EXPOSURE_HEADER = "t3-tool-exposure";
 
+/**
+ * Sent by MCP clients (such as Antigravity) that silently drop eager tools
+ * whose serialized declaration exceeds ~2 KiB. The server compacts oversized
+ * tool schemas in `tools/list` while keeping full server-side decode validation.
+ */
+export const MCP_TOOL_SCHEMA_BUDGET_HEADER = "t3-tool-schema-budget";
+
 export interface McpProviderSessionConfig {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;

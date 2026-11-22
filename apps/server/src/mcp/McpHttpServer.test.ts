@@ -54,7 +54,11 @@ import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerHttp from "../http.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { advertisedJsonSchema } from "./advertisedJsonSchema.ts";
+import {
+  advertisedJsonSchema,
+  COMPACT_MCP_TOOL_MAX_JSON_BYTES,
+  COMPACT_MCP_TOOL_MAX_PARAMS_BYTES,
+} from "./advertisedJsonSchema.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
 import * as McpToolAccess from "./McpToolAccess.ts";
 import * as McpToolAccessTestkit from "./McpToolAccess.testkit.ts";
@@ -2560,4 +2564,115 @@ it.effect("lists optional tools to a deferring client only after tool_search loa
       expect(yield* other.listed).toEqual(["delegate_task", "preview_open", "schedule_task"]);
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect(
+  "compacts oversized tools/list schemas only when t3-tool-schema-budget: compact is set",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const scope: McpInvocationContext.McpThreadInvocationScope = {
+          environmentId,
+          requestNamespace: "compact-test",
+          thread: {
+            threadId: ThreadId.make("thread-compact-test"),
+            providerSessionId: "compact-test",
+            providerInstanceId: ProviderInstanceId.make("antigravity"),
+          },
+          client: undefined,
+          capabilities: new Set(["preview", "orchestration"]),
+          issuedAt: 1,
+        };
+        const serverLayer = McpHttpServer.layerMcpTransport(McpHttpServer.layerPreviewToolkit).pipe(
+          Layer.provide(ServerSettings.layerTest()),
+          Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-mcp-compact-" })),
+          Layer.provide(Layer.mock(ServerSecretStore.ServerSecretStore)({})),
+          Layer.provide(McpToolAccessTestkit.liveThreadsLayer),
+          Layer.provide(Layer.mock(PreviewAutomationBroker.PreviewAutomationBroker)({})),
+          Layer.provide(
+            Layer.mock(McpSessionRegistry.McpSessionRegistry)({
+              resolve: () => Effect.succeed(scope),
+            }),
+          ),
+          Layer.provide(NodeCrypto.layer),
+          Layer.provide(NodeServices.layer),
+        );
+        yield* HttpRouter.serve(serverLayer, { disableListenLog: true, disableLogger: true }).pipe(
+          Layer.build,
+        );
+        const httpClient = yield* HttpClient.HttpClient;
+        const listTools = (compact: boolean) =>
+          Effect.gen(function* () {
+            const headers = {
+              accept: "application/json, text/event-stream",
+              authorization: "Bearer compact-test",
+              ...(compact ? { "t3-tool-schema-budget": "compact" } : {}),
+            };
+            const initialize = yield* httpClient.post("/mcp", {
+              headers,
+              body: HttpBody.text(
+                `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"antigravity","version":"1.5.14"}}}`,
+                "application/json",
+              ),
+            });
+            const response = yield* httpClient.post("/mcp", {
+              headers: {
+                ...headers,
+                "mcp-session-id": initialize.headers["mcp-session-id"]!,
+                "mcp-protocol-version": "2025-06-18",
+              },
+              body: HttpBody.text(
+                JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
+                "application/json",
+              ),
+            });
+            const contentType = response.headers["content-type"] ?? "";
+            const text = yield* response.text;
+            const message = text
+              .split("\n")
+              .filter((line) => line.startsWith("data: ") || line.startsWith("{"))
+              .map((line) => JSON.parse(line.replace(/^data: /u, "")) as { id?: number })
+              .find((entry) => entry.id === 2) as {
+              result: {
+                tools: ReadonlyArray<{ name: string; description?: string; inputSchema: unknown }>;
+              };
+            };
+            return { contentType, tools: message.result.tools };
+          });
+
+        const full = yield* listTools(false);
+        const compact = yield* listTools(true);
+        expect(compact.contentType).toBe(full.contentType);
+        const fullOpen = full.tools.find((entry) => entry.name === "preview_open")!;
+        const compactOpen = compact.tools.find((entry) => entry.name === "preview_open")!;
+        expect(
+          Buffer.byteLength(
+            JSON.stringify({
+              name: fullOpen.name,
+              description: fullOpen.description,
+              parameters: fullOpen.inputSchema,
+            }),
+            "utf8",
+          ),
+        ).toBeGreaterThan(COMPACT_MCP_TOOL_MAX_JSON_BYTES);
+        for (const tool of compact.tools) {
+          expect(
+            Buffer.byteLength(
+              JSON.stringify({
+                name: tool.name,
+                description: tool.description,
+                parameters: tool.inputSchema,
+              }),
+              "utf8",
+            ),
+            `${tool.name} total bytes`,
+          ).toBeLessThanOrEqual(COMPACT_MCP_TOOL_MAX_JSON_BYTES);
+          expect(
+            Buffer.byteLength(JSON.stringify(tool.inputSchema), "utf8"),
+            `${tool.name} params bytes`,
+          ).toBeLessThanOrEqual(COMPACT_MCP_TOOL_MAX_PARAMS_BYTES);
+        }
+        expect(compactOpen.description).toBe(fullOpen.description);
+      }),
+    ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );

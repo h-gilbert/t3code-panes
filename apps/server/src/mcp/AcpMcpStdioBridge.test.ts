@@ -12,12 +12,14 @@ import { mcpToolSession, runAcpMcpCliFastPath, runAcpMcpStdioBridge } from "./Ac
 function makeHarness(
   responder: (request: Request) => Promise<Response> | Response,
   input = new NodeStream.PassThrough(),
+  options?: { readonly toolSchemaBudget?: string },
 ) {
   const written: Array<string> = [];
   const requests: Array<{ readonly headers: Headers; readonly body: string }> = [];
   const bridge = runAcpMcpStdioBridge({
     endpoint: "http://127.0.0.1:1/mcp",
     authorization: "Bearer bridge-test",
+    ...options,
     input,
     output: {
       write: (chunk: string) => {
@@ -91,21 +93,25 @@ describe("AcpMcpStdioBridge", () => {
 
   it.effect("forwards requests and replays the session id and protocol version", () =>
     Effect.gen(function* () {
-      const { input, written, requests, bridge } = makeHarness((request) => {
-        const body = JSON.parse(String(requests.at(-1)?.body ?? "{}")) as { id?: number };
-        void request;
-        return new Response(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id: body.id ?? null,
-            result: body.id === 1 ? { protocolVersion: "2025-06-18" } : { ok: true },
-          }),
-          {
-            status: 200,
-            headers: { "content-type": "application/json", "mcp-session-id": "session-42" },
-          },
-        );
-      });
+      const { input, written, requests, bridge } = makeHarness(
+        (request) => {
+          const body = JSON.parse(String(requests.at(-1)?.body ?? "{}")) as { id?: number };
+          void request;
+          return new Response(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: body.id ?? null,
+              result: body.id === 1 ? { protocolVersion: "2025-06-18" } : { ok: true },
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json", "mcp-session-id": "session-42" },
+            },
+          );
+        },
+        undefined,
+        { toolSchemaBudget: "compact" },
+      );
       const fiber = yield* Effect.forkChild(bridge);
 
       input.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize" })}\n`);
@@ -117,7 +123,9 @@ describe("AcpMcpStdioBridge", () => {
       expect(JSON.parse(written[0]!)).toMatchObject({ id: 1 });
       expect(JSON.parse(written[1]!)).toMatchObject({ id: 2, result: { ok: true } });
       expect(requests[0]?.headers.get("authorization")).toBe("Bearer bridge-test");
+      expect(requests[0]?.headers.get("t3-tool-schema-budget")).toBe("compact");
       expect(requests[1]?.headers.get("mcp-session-id")).toBe("session-42");
+      expect(requests[1]?.headers.get("t3-tool-schema-budget")).toBe("compact");
       expect(requests[1]?.headers.get("mcp-protocol-version")).toBe("2025-06-18");
     }),
   );
