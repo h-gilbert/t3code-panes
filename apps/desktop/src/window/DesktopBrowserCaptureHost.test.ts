@@ -19,6 +19,12 @@ import * as DesktopBrowserCaptureHost from "./DesktopBrowserCaptureHost.ts";
 function makeFakeWindow(id: number) {
   let destroyed = false;
   const closedListeners: Array<() => void> = [];
+  const contentsListeners = new Map<string, () => void>();
+  const destroy = () => {
+    if (destroyed) return;
+    destroyed = true;
+    for (const listener of closedListeners) listener();
+  };
   const win = {
     excludedFromShownWindowsMenu: false,
     setIgnoreMouseEvents: vi.fn(),
@@ -27,17 +33,17 @@ function makeFakeWindow(id: number) {
     showInactive: vi.fn(),
     loadURL: vi.fn(async () => undefined),
     isDestroyed: () => destroyed,
-    close: vi.fn(() => {
-      if (destroyed) return;
-      destroyed = true;
-      for (const listener of closedListeners) listener();
-    }),
+    close: vi.fn(destroy),
+    destroy: vi.fn(destroy),
+    emitContents: (event: string) => contentsListeners.get(event)?.(),
     once: vi.fn((event: string, listener: () => void) => {
       if (event === "closed") closedListeners.push(listener);
     }),
     webContents: {
       id,
-      on: vi.fn(),
+      on: vi.fn((event: string, listener: () => void) => {
+        contentsListeners.set(event, listener);
+      }),
       setWindowOpenHandler: vi.fn(),
     },
   };
@@ -144,6 +150,24 @@ describe("DesktopBrowserCaptureHost", () => {
         yield* TestClock.adjust("2 minutes");
         expect(createdWindows[0]!.isDestroyed()).toBe(true);
         expect(Option.isNone(Option.none())).toBe(true);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("replaces a host whose renderer died", () =>
+    Effect.gen(function* () {
+      const { layer, createdWindows } = makeTestLayer("darwin");
+      yield* Effect.gen(function* () {
+        const captureHost = yield* DesktopBrowserCaptureHost.DesktopBrowserCaptureHost;
+        yield* captureHost.setKeepAlive(true);
+        yield* captureHost.ensure;
+        expect(createdWindows).toHaveLength(1);
+
+        createdWindows[0]!.emitContents("render-process-gone");
+        expect(createdWindows[0]!.isDestroyed()).toBe(true);
+        yield* TestClock.adjust("1 second");
+        expect(createdWindows).toHaveLength(2);
+        expect(createdWindows[1]!.isDestroyed()).toBe(false);
       }).pipe(Effect.provide(layer));
     }),
   );

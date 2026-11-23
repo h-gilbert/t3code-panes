@@ -21,6 +21,7 @@ import { delegatesStreamedTabs, hardenWebviewGuests } from "./webviewGuests.ts";
 
 const { logInfo, logWarning } = makeComponentLogger("desktop-browser-capture-host");
 const IDLE_CLOSE_DELAY = "2 minutes";
+const RENDERER_GONE_RECREATE_DELAY = "1 second";
 
 /**
  * A transparent, unfocusable window parked left of every display. It draws the tabs that viewers
@@ -124,6 +125,12 @@ const make = Effect.gen(function* () {
     window.once("closed", () => {
       if (host === window) host = null;
       runFork(cancelIdleClose);
+    });
+    // A window outlives its dead renderer, and ensure() reuses any open window, so tabs would
+    // never attach again. Replace it; the new one still closes after idle if nothing needs it.
+    window.webContents.on("render-process-gone", () => {
+      if (!window.isDestroyed()) window.destroy();
+      runFork(ensure.pipe(Effect.delay(RENDERER_GONE_RECREATE_DELAY)));
     });
     yield* Effect.sync(() => {
       window.excludedFromShownWindowsMenu = true;
