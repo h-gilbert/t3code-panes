@@ -183,11 +183,12 @@ export const advertisedJsonSchema = (tool: Tool.Any) =>
   compact(Tool.getJsonSchema(tool), false) as ReturnType<typeof Tool.getJsonSchema>;
 
 /**
- * Antigravity (`agy`) silently drops eager MCP tools whose serialized JSON exceeds ~2 KiB.
- * Stay strictly below the largest tool verified to load (`delegate_task`: 1,937 B / 1,692 B params).
+ * Antigravity (`agy`) silently drops eager MCP tools near 2 KiB once it adds its own prefix and
+ * `toolSummary` parameter (~290 B). Measured as {@link mcpToolWireBytes}, 1,757 B loaded and
+ * 1,842 B was dropped.
  */
-export const COMPACT_MCP_TOOL_MAX_JSON_BYTES = 1_900;
-export const COMPACT_MCP_TOOL_MAX_PARAMS_BYTES = 1_650;
+export const COMPACT_MCP_TOOL_MAX_JSON_BYTES = 1_700;
+export const COMPACT_MCP_TOOL_MAX_PARAMS_BYTES = 1_600;
 
 const VALIDATION_CONSTRAINT_KEYS: ReadonlySet<string> = new Set([
   "pattern",
@@ -202,6 +203,23 @@ const VALIDATION_CONSTRAINT_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 const utf8Bytes = (text: string) => Buffer.byteLength(text, "utf8");
+// Antigravity re-encodes tools with Go's encoding/json, which writes these as six-byte escapes.
+const jsonWireBytes = (value: unknown) =>
+  utf8Bytes(JSON.stringify(value).replace(/[<>&\u2028\u2029]/gu, "\\u0000"));
+
+/** A tool's declaration size as Antigravity counts it, in total and for its parameters. */
+export const mcpToolWireBytes = (tool: {
+  readonly name: string;
+  readonly description?: string | undefined;
+  readonly inputSchema?: unknown;
+}) => ({
+  total: jsonWireBytes(
+    tool.description === undefined
+      ? { name: tool.name, parameters: tool.inputSchema }
+      : { name: tool.name, description: tool.description, parameters: tool.inputSchema },
+  ),
+  params: jsonWireBytes(tool.inputSchema),
+});
 
 const stripValidationConstraints = (value: Json): Json => {
   if (Array.isArray(value)) return value.map(stripValidationConstraints);
@@ -267,15 +285,16 @@ const findLargestNestedObject = (
   return best;
 };
 
-const trimUtf8Text = (text: string, maxBytes: number): string => {
-  if (maxBytes <= 0) return "";
-  if (utf8Bytes(text) <= maxBytes) return text;
+/** Trims text so its encoded JSON string, quotes included, fits `maxBytes`. */
+const trimJsonText = (text: string, maxBytes: number): string => {
+  if (jsonWireBytes("") >= maxBytes) return "";
+  if (jsonWireBytes(text) <= maxBytes) return text;
   let low = 0;
   let high = text.length;
   while (low < high) {
     const mid = Math.ceil((low + high) / 2);
     const slice = text.slice(0, mid);
-    if (utf8Bytes(`${slice}…`) <= maxBytes) low = mid;
+    if (jsonWireBytes(`${slice}…`) <= maxBytes) low = mid;
     else high = mid - 1;
   }
   if (low === 0) return "";
@@ -291,13 +310,8 @@ const toolMatchesBudget = (
   maxToolBytes: number,
   maxParamsBytes: number,
 ): boolean => {
-  if (utf8Bytes(JSON.stringify(inputSchema)) > maxParamsBytes) return false;
-  const serialized = JSON.stringify(
-    description === undefined
-      ? { name, parameters: inputSchema }
-      : { name, description, parameters: inputSchema },
-  );
-  return utf8Bytes(serialized) <= maxToolBytes;
+  const bytes = mcpToolWireBytes({ name, description, inputSchema });
+  return bytes.params <= maxParamsBytes && bytes.total <= maxToolBytes;
 };
 
 export interface CompactMcpToolBudget {
@@ -357,10 +371,8 @@ export const compactMcpToolForSizeBudget = <
     !toolMatchesBudget(tool.name, description, schema, maxToolBytes, maxParamsBytes) &&
     description !== undefined
   ) {
-    const overhead = utf8Bytes(
-      JSON.stringify({ name: tool.name, description: "", parameters: schema }),
-    );
-    description = trimUtf8Text(description, Math.max(0, maxToolBytes - overhead));
+    const overhead = jsonWireBytes({ name: tool.name, description: "", parameters: schema });
+    description = trimJsonText(description, maxToolBytes - overhead + jsonWireBytes(""));
   }
   return { ...tool, ...(description === undefined ? {} : { description }), inputSchema: schema };
 };

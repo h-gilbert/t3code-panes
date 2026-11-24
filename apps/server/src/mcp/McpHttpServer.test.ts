@@ -58,6 +58,7 @@ import {
   advertisedJsonSchema,
   COMPACT_MCP_TOOL_MAX_JSON_BYTES,
   COMPACT_MCP_TOOL_MAX_PARAMS_BYTES,
+  mcpToolWireBytes,
 } from "./advertisedJsonSchema.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
 import * as McpToolAccess from "./McpToolAccess.ts";
@@ -2695,32 +2696,15 @@ it.effect(
         expect(compact.contentType).toBe(full.contentType);
         const fullOpen = full.tools.find((entry) => entry.name === "preview_open")!;
         const compactOpen = compact.tools.find((entry) => entry.name === "preview_open")!;
-        expect(
-          Buffer.byteLength(
-            JSON.stringify({
-              name: fullOpen.name,
-              description: fullOpen.description,
-              parameters: fullOpen.inputSchema,
-            }),
-            "utf8",
-          ),
-        ).toBeGreaterThan(COMPACT_MCP_TOOL_MAX_JSON_BYTES);
+        expect(mcpToolWireBytes(fullOpen).total).toBeGreaterThan(COMPACT_MCP_TOOL_MAX_JSON_BYTES);
         for (const tool of compact.tools) {
-          expect(
-            Buffer.byteLength(
-              JSON.stringify({
-                name: tool.name,
-                description: tool.description,
-                parameters: tool.inputSchema,
-              }),
-              "utf8",
-            ),
-            `${tool.name} total bytes`,
-          ).toBeLessThanOrEqual(COMPACT_MCP_TOOL_MAX_JSON_BYTES);
-          expect(
-            Buffer.byteLength(JSON.stringify(tool.inputSchema), "utf8"),
-            `${tool.name} params bytes`,
-          ).toBeLessThanOrEqual(COMPACT_MCP_TOOL_MAX_PARAMS_BYTES);
+          const bytes = mcpToolWireBytes(tool);
+          expect(bytes.total, `${tool.name} total bytes`).toBeLessThanOrEqual(
+            COMPACT_MCP_TOOL_MAX_JSON_BYTES,
+          );
+          expect(bytes.params, `${tool.name} params bytes`).toBeLessThanOrEqual(
+            COMPACT_MCP_TOOL_MAX_PARAMS_BYTES,
+          );
         }
         expect(compactOpen.description).toBe(fullOpen.description);
       }),

@@ -8,6 +8,7 @@ import {
   COMPACT_MCP_TOOL_MAX_PARAMS_BYTES,
   compactMcpToolForSizeBudget,
   compactToolsListResponseText,
+  mcpToolWireBytes,
 } from "./advertisedJsonSchema.ts";
 import { EnvironmentToolkit } from "./toolkits/environment/tools.ts";
 import { OrchestratorToolkit } from "./toolkits/orchestrator/tools.ts";
@@ -107,6 +108,7 @@ it("compacts oversized tools under Antigravity's per-tool byte budget without al
     OrchestratorToolkit.tools.schedule_task,
     ProjectToolkit.tools.t3_thread_launch,
     EnvironmentToolkit.tools.t3_settings_update,
+    OrchestratorToolkit.tools.request_secret,
   ];
   for (const tool of oversizedTools) {
     const raw = {
@@ -115,22 +117,19 @@ it("compacts oversized tools under Antigravity's per-tool byte budget without al
       inputSchema: advertisedJsonSchema(tool),
     };
     const compacted = compactMcpToolForSizeBudget(raw);
-    const totalBytes = Buffer.byteLength(
-      JSON.stringify({
-        name: compacted.name,
-        description: compacted.description,
-        parameters: compacted.inputSchema,
-      }),
-      "utf8",
-    );
-    const paramsBytes = Buffer.byteLength(JSON.stringify(compacted.inputSchema), "utf8");
+    const { total: totalBytes, params: paramsBytes } = mcpToolWireBytes(compacted);
     expect(totalBytes, `${tool.name} total bytes`).toBeLessThanOrEqual(
       COMPACT_MCP_TOOL_MAX_JSON_BYTES,
     );
     expect(paramsBytes, `${tool.name} params bytes`).toBeLessThanOrEqual(
       COMPACT_MCP_TOOL_MAX_PARAMS_BYTES,
     );
-    expect(compacted.description, `${tool.name} keeps top-level description`).toBe(raw.description);
+    // Only a description longer than the budget allows loses its end.
+    const kept = (compacted.description ?? "").replace(/…$/u, "");
+    expect(raw.description?.startsWith(kept), `${tool.name} keeps a description prefix`).toBe(true);
+    expect(kept.length, `${tool.name} keeps most of its description`).toBeGreaterThanOrEqual(
+      Math.floor((raw.description?.length ?? 0) * 0.8),
+    );
     const compactedProps = (compacted.inputSchema as { properties?: Record<string, unknown> })
       .properties;
     const rawProps = (raw.inputSchema as { properties?: Record<string, unknown> }).properties;
@@ -166,16 +165,9 @@ it("compacts oversized tools under Antigravity's per-tool byte budget without al
     result: { tools: Array<{ name: string; description: string; inputSchema: unknown }> };
   };
   expect(parsed.result.tools[0]?.name).toBe("preview_open");
-  expect(
-    Buffer.byteLength(
-      JSON.stringify({
-        name: parsed.result.tools[0]!.name,
-        description: parsed.result.tools[0]!.description,
-        parameters: parsed.result.tools[0]!.inputSchema,
-      }),
-      "utf8",
-    ),
-  ).toBeLessThanOrEqual(COMPACT_MCP_TOOL_MAX_JSON_BYTES);
+  expect(mcpToolWireBytes(parsed.result.tools[0]!).total).toBeLessThanOrEqual(
+    COMPACT_MCP_TOOL_MAX_JSON_BYTES,
+  );
   expect(
     compactToolsListResponseText(`data: {"jsonrpc":"2.0","id":2,"result":{"ok":true}}\n\n`),
   ).toBeUndefined();

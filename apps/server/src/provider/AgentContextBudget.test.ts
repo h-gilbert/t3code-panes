@@ -20,6 +20,7 @@ import * as McpHttpServer from "../mcp/McpHttpServer.ts";
 import {
   COMPACT_MCP_TOOL_MAX_JSON_BYTES,
   COMPACT_MCP_TOOL_MAX_PARAMS_BYTES,
+  mcpToolWireBytes,
   compactMcpToolForSizeBudget,
 } from "../mcp/advertisedJsonSchema.ts";
 import { PreviewAutomationBroker } from "../mcp/PreviewAutomationBroker.ts";
@@ -180,14 +181,7 @@ it.effect("agent context matches the committed budget", () =>
     // Every registered tool must also compact under Antigravity's per-tool schema ceiling.
     for (const { tool } of mcp.tools) {
       const compacted = compactMcpToolForSizeBudget(tool);
-      const totalBytes = utf8Bytes(
-        JSON.stringify({
-          name: compacted.name,
-          ...(compacted.description === undefined ? {} : { description: compacted.description }),
-          parameters: compacted.inputSchema,
-        }),
-      );
-      const paramsBytes = utf8Bytes(JSON.stringify(compacted.inputSchema));
+      const { total: totalBytes, params: paramsBytes } = mcpToolWireBytes(compacted);
       expect(totalBytes, `${tool.name} compact total bytes`).toBeLessThanOrEqual(
         COMPACT_MCP_TOOL_MAX_JSON_BYTES,
       );
