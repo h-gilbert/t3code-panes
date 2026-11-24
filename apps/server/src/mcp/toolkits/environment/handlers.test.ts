@@ -1,6 +1,12 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { expect, it } from "@effect/vitest";
-import { EnvironmentId, ProviderInstanceId, ThreadId, type RuntimeMode } from "@t3tools/contracts";
+import {
+  DEFAULT_SERVER_SETTINGS,
+  EnvironmentId,
+  ProviderInstanceId,
+  ThreadId,
+  type RuntimeMode,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
@@ -121,3 +127,15 @@ it.effect.each(["approval-required", "full-access"] satisfies RuntimeMode[])(
       ),
     ),
 );
+
+it("keeps agent feedback out of the preferences agents read and write", () => {
+  expect(
+    EnvironmentHandlers.preferences({
+      ...DEFAULT_SERVER_SETTINGS,
+      agentFeedback: { mode: "auto" },
+    }),
+  ).not.toHaveProperty("agentFeedback");
+  expect(
+    Object.keys(EnvironmentToolkit.tools.t3_environment_preferences_update.parametersSchema.fields),
+  ).not.toContain("agentFeedback");
+});

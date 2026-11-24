@@ -794,18 +794,6 @@ export const PreviewAutomationDownloadArtifact = Schema.Struct({
 });
 export type PreviewAutomationDownloadArtifact = typeof PreviewAutomationDownloadArtifact.Type;
 
-export const PreviewAutomationElement = Schema.Struct({
-  tag: Schema.String,
-  role: Schema.NullOr(Schema.String),
-  name: Schema.String,
-  selector: Schema.String,
-  x: Schema.Number,
-  y: Schema.Number,
-  width: Schema.Number,
-  height: Schema.Number,
-});
-export type PreviewAutomationElement = typeof PreviewAutomationElement.Type;
-
 export const PreviewAutomationConsoleEntry = Schema.Struct({
   level: Schema.String,
   text: Schema.String.annotate({ description: "Literal text to insert." }),
@@ -840,7 +828,6 @@ export const PreviewAutomationSnapshot = Schema.Struct({
   loading: Schema.Boolean,
   loadError: Schema.optional(PreviewAutomationLoadError),
   visibleText: Schema.String,
-  interactiveElements: Schema.Array(PreviewAutomationElement),
   accessibilityTree: Schema.Unknown,
   consoleEntries: Schema.Array(PreviewAutomationConsoleEntry),
   networkEntries: Schema.Array(PreviewAutomationNetworkEntry),

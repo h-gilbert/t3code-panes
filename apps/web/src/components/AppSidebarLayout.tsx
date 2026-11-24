@@ -55,6 +55,7 @@ import {
 } from "../workspacePaneStore";
 import { resolveRetainedWorkspaceKey } from "../workspaceRouteRetention";
 import { ProjectPaneWorkspace } from "../routes/_chat.workspace";
+import { HiddenThreadContext } from "./chat/backgroundThread";
 import { useEnvironmentIdentificationMode } from "../hooks/useSettings";
 import { useDesktopFullscreen } from "../hooks/useDesktopFullscreen";
 import {
@@ -570,10 +571,13 @@ export function AppSidebarLayout({
               hidden={!showWorkspace}
               className={showWorkspace ? "flex min-h-0 min-w-0 flex-1" : "hidden"}
             >
-              <ProjectPaneWorkspace
-                workspaceKey={retainedWorkspaceKey}
-                active={showWorkspace && !isUtility}
-              />
+              {/* Settings and Usage overlay the panes; their composer menus must not stay open above. */}
+              <HiddenThreadContext value={appModalOpen}>
+                <ProjectPaneWorkspace
+                  workspaceKey={retainedWorkspaceKey}
+                  active={showWorkspace && !isUtility}
+                />
+              </HiddenThreadContext>
             </div>
             {threadTarget?.kind === "server" ? (
               <ThreadLinkPrompt threadRef={threadTarget.threadRef} />

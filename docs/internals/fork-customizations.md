@@ -193,8 +193,9 @@ already contains text. Preserve this when integrating upstream composer changes.
 - In compact web and desktop composers, offer the planning shortcut when the selected provider
   advertises `/plan` for the workspace. Insert it as a provider command so the user can edit the
   request before sending and the provider controls its planning semantics.
-- Preserve retained terminal sessions and reconnect behavior described in
-  `docs/internals/terminal-runtime.md`.
+- Preserve retained terminal sessions and reconnect behavior: the environment server owns PTYs,
+  session lifetime and retained output (`apps/server/src/terminal/Manager.ts`), so clients can
+  reconnect to or share a running session.
 - Preserve the separate private iOS branch and its normal push notifications for approval, input,
   and failure only. Completion alerts stay off, including for turns submitted from iOS, with no
   Live Activities or Dynamic Island integration. Follow

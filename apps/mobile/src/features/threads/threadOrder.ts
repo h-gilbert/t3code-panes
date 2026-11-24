@@ -1,8 +1,10 @@
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import {
+  activeThreadSortKey,
   generateSpreadPinOrderKeys,
   pinOrderKeyBetween,
   planPinnedReorder,
+  sortActiveThreadsByOrderKey,
 } from "@t3tools/client-runtime/state/thread-sort";
 import { effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
 import type { EnvironmentId } from "@t3tools/contracts";
@@ -55,9 +57,59 @@ export type OrderRow = Pick<
   | "pinOrderKey"
   | "activeOrderKey"
   | "createdAt"
+  | "latestRun"
+  | "latestUserMessageAt"
   | "unsettledAt"
   | "pinnedAt"
 >;
+
+type ThreadActivityInput = {
+  readonly activeOrderKey?: string | null;
+  readonly environmentId?: string;
+  readonly createdAt: string;
+  readonly latestRun?: { readonly completedAt: string | null } | null;
+  readonly latestUserMessageAt?: string | null;
+  readonly unsettledAt?: string | null;
+};
+
+/** Only user prompts, completed turns and explicit un-settle can update a row's activity time. */
+export function threadListV2ActivityTimestamp(thread: ThreadActivityInput): string {
+  let latest = thread.createdAt;
+  let latestMs = Date.parse(latest) || 0;
+  for (const candidate of [
+    thread.latestUserMessageAt,
+    thread.latestRun?.completedAt,
+    thread.unsettledAt,
+  ]) {
+    if (candidate == null) continue;
+    const timestamp = Date.parse(candidate);
+    if (timestamp > latestMs) {
+      latest = candidate;
+      latestMs = timestamp;
+    }
+  }
+  return latest;
+}
+
+function mobileActiveOrderInput(thread: ThreadActivityInput) {
+  return {
+    createdAt: threadListV2ActivityTimestamp(thread),
+    activeOrderKey: thread.activeOrderKey,
+  };
+}
+
+export function sortThreadsForListV2<T extends ThreadActivityInput & { readonly id: string }>(
+  threads: readonly T[],
+): T[] {
+  return sortActiveThreadsByOrderKey(
+    threads.map((thread) => ({
+      id: thread.id,
+      environmentId: thread.environmentId,
+      ...mobileActiveOrderInput(thread),
+      thread,
+    })),
+  ).map(({ thread }) => thread);
+}
 
 export interface PendingThreadOrder {
   readonly section: "pinned" | "active";
@@ -72,9 +124,16 @@ function rowId(row: OrderRow): string {
   return `${row.environmentId}:${row.id}`;
 }
 
+function storedKey(row: OrderRow, section: PendingThreadOrder["section"]) {
+  return (section === "pinned" ? row.pinOrderKey : row.activeOrderKey) ?? null;
+}
+
 function rowOrder(row: OrderRow, section: PendingThreadOrder["section"]) {
   return {
-    key: (section === "pinned" ? row.pinOrderKey : row.activeOrderKey) ?? null,
+    key:
+      section === "pinned"
+        ? storedKey(row, section)
+        : activeThreadSortKey(mobileActiveOrderInput(row)),
     anchor: section === "pinned" ? (row.pinnedAt ?? "") : (row.unsettledAt ?? row.createdAt),
   };
 }
@@ -86,12 +145,13 @@ export function createThreadMovePlanner(input: {
   readonly reorderableEnvironmentIds: ReadonlySet<EnvironmentId>;
 }) {
   const orderedIds = input.ordered.map(rowId);
-  const keysById = new Map(
-    (input.allThreads ?? input.ordered).map((row) => [
-      rowId(row),
-      rowOrder(row, input.section).key,
-    ]),
-  );
+  // Hidden rows keep their stored key: only stored keys can collide with a write.
+  const keysById = new Map([
+    ...(input.allThreads ?? input.ordered).map(
+      (row) => [rowId(row), storedKey(row, input.section)] as const,
+    ),
+    ...input.ordered.map((row) => [rowId(row), rowOrder(row, input.section).key] as const),
+  ]);
   const writableIds = new Set(
     (input.allThreads ?? input.ordered)
       .filter((row) => input.reorderableEnvironmentIds.has(row.environmentId))
@@ -141,9 +201,10 @@ export function computeThreadMoveAvailability(input: {
   const writableIds = new Set<string>();
   for (const row of input.allThreads ?? input.ordered) {
     const id = rowId(row);
-    keysById.set(id, rowOrder(row, input.section).key);
+    keysById.set(id, storedKey(row, input.section));
     if (input.reorderableEnvironmentIds.has(row.environmentId)) writableIds.add(id);
   }
+  for (const row of rows) keysById.set(rowId(row), rowOrder(row, input.section).key);
   const reservedKeys = new Set<string>();
   keysById.forEach((key, id) => {
     if (key != null && !indexById.has(id)) reservedKeys.add(key);

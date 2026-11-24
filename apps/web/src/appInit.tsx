@@ -68,6 +68,7 @@ import { installChatRouteCommands } from "./shortcuts/chatRouteCommands";
 import { startWorkspaceFocus } from "./lib/workspaceFocus";
 import { m } from "./i18n/messages";
 import { startI18n, subscribeI18n } from "./i18n/runtime";
+import { guardDomAgainstPageTranslation } from "./lib/pageTranslationGuard";
 import { installCommandPaletteCommands } from "./shortcuts/commandPaletteCommands";
 import { registerOpenFavoriteEditorCommand } from "./components/chat/OpenInPickerShortcut";
 import { environmentThreadShells, threadEnvironment } from "./state/threads";
@@ -94,6 +95,9 @@ function startClientAppearance(): void {
     }
     if (previous?.chatWidth !== settings.chatWidth) {
       root.dataset.chatWidth = settings.chatWidth;
+    }
+    if (previous?.htmlPreviewWidth !== settings.htmlPreviewWidth) {
+      root.dataset.htmlPreviewWidth = settings.htmlPreviewWidth;
     }
     if (previous?.appearanceContrast !== settings.appearanceContrast) {
       applyAppearanceContrast(root, settings.appearanceContrast);
@@ -293,6 +297,7 @@ export function startAppServices(): AppRouter {
   }
 
   installDesktopPasteAsText(window.desktopBridge, window);
+  guardDomAgainstPageTranslation();
 
   startClientAppearance();
   startI18n();

@@ -8,7 +8,3 @@ const browserCaptureRole = isElectron
 export const isBrowserCaptureHost = browserCaptureRole === "host";
 /** The desktop's hidden host draws streamed tabs, so this window shows them as a stream. */
 export const delegatesStreamedTabs = browserCaptureRole === "delegated";
-
-export const isSecretsFeatureEnabled = ["1", "true"].includes(
-  import.meta.env.T3CODE_FEATURE_SECRETS?.trim().toLowerCase() ?? "",
-);

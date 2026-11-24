@@ -32,6 +32,46 @@ describe("secretRequestDisplay", () => {
   });
 });
 
+describe("secretRequestAnswerInput", () => {
+  const single = { id: "item", threadId: "thread", label: "Token" } as const;
+  const login = {
+    ...single,
+    delivery: "file",
+    fields: [
+      { name: "email", label: "Email", secret: false },
+      { name: "password", label: "Password" },
+    ],
+  } as const;
+  const ids = { threadId: "thread", turnItemId: "item" };
+
+  it("answers a single request with its exact secret", () => {
+    expect(
+      secretRequestAnswerInput(single as never, { type: "save", values: { "": " t " } }),
+    ).toEqual({ ...ids, answer: { type: "save", secret: " t " } });
+    expect(secretRequestAnswerInput(single as never, { type: "save", values: { "": " " } })).toBe(
+      null,
+    );
+  });
+
+  it("answers a fields request only once every field has a value, keyed by name", () => {
+    expect(
+      secretRequestAnswerInput(login as never, {
+        type: "save",
+        values: { email: "a@acme.dev ", password: "pw" },
+      }),
+    ).toEqual({
+      ...ids,
+      answer: { type: "save", values: { email: "a@acme.dev", password: "pw" } },
+    });
+    expect(
+      secretRequestAnswerInput(login as never, { type: "save", values: { email: "a@acme.dev" } }),
+    ).toBe(null);
+    // An unset field named like an Object.prototype member is empty, not that member.
+    const named = { ...single, fields: [{ name: "constructor", label: "Key" }] } as const;
+    expect(secretRequestAnswerInput(named as never, { type: "save", values: {} })).toBe(null);
+  });
+});
+
 describe("secretRequestPrivacyNote", () => {
   it("does not promise to hide a value that the agent's commands can read", () => {
     expect(secretRequestPrivacyNote({})).toBe("Stored securely, never shown to the agent");
@@ -125,7 +165,11 @@ describe("secretRequestSources", () => {
   it("answers with a reference only in the provider's syntax", () => {
     const [source] = secretRequestSources({ secretRequestReferences: true }, providers);
     if (source === undefined) throw new Error("expected a source");
-    const item = { id: TurnItemId.make("item-1"), threadId: ThreadId.make("thread-1") };
+    const item = {
+      id: TurnItemId.make("item-1"),
+      threadId: ThreadId.make("thread-1"),
+      label: "Deploy token",
+    };
     expect(
       secretRequestAnswerInput(item, {
         type: "reference",
@@ -145,12 +189,21 @@ describe("secretRequestSources", () => {
         { type: "reference", source, reference: "op://vault/item/field" },
       ),
     ).toBeNull();
+    // A reference answers one value, never a card with fields.
+    const fields = [{ name: "password", label: "Password" }];
+    expect(
+      secretRequestAnswerInput(
+        { ...item, fields },
+        { type: "reference", source, reference: "op://vault/item/field" },
+      ),
+    ).toBeNull();
   });
 
   it("preserves the typed credential bytes and vault fields across the RPC schema", () => {
     const item = {
       id: TurnItemId.make("item-1"),
       threadId: ThreadId.make("thread-1"),
+      label: "Example login",
       credential: { name: "Example", kind: "login" as const },
     };
     const answer = {
@@ -161,5 +214,8 @@ describe("secretRequestSources", () => {
     } as const;
     const input = secretRequestAnswerInput(item, answer);
     expect(decodeAnswerInput(input).answer).toEqual(answer);
+    // Cards that key their inputs send the same answer.
+    const { secret, ...choice } = answer;
+    expect(secretRequestAnswerInput(item, { ...choice, values: { "": secret } })).toEqual(input);
   });
 });

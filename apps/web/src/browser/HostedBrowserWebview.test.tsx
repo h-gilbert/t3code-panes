@@ -2,6 +2,9 @@ vi.mock("./useBrowserLayoutZoomFactor", () => ({
   useBrowserLayoutZoomFactor: (factor: number) => factor,
   useWindowSize: () => ({ width: 3840, height: 2160 }),
 }));
+vi.mock("~/hooks/useViewportSize", () => ({
+  useViewportSize: () => ({ width: 3840, height: 2160 }),
+}));
 import {
   DEFAULT_CLIENT_SETTINGS,
   EnvironmentId,
@@ -79,6 +82,7 @@ vi.mock("~/components/preview/previewBridge", () => ({
     claimTab: mocks.claimTab,
     getPreviewConfig: mocks.getPreviewConfig,
     automation: { status: mocks.status },
+    onStateChange: () => () => {},
   },
 }));
 

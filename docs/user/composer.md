@@ -76,6 +76,10 @@ Messages that exceed the attachment limit stay held in the queue.
 When Enter sends, `Cmd+Enter` on macOS or `Ctrl+Enter` on Windows and Linux uses
 the opposite action: it steers when your default is Queue and queues when your
 default is Steer.
+A slash command such as `/compact` or `/context` waits for the current turn to
+finish, because a command steered into a turn would replace the agent's task.
+Sending a queued command now moves it to the front of the queue. [Goal](#goals)
+commands are the exception: some can stop the current turn.
 If your **Send shortcut** requires `Cmd+Enter` or `Ctrl+Enter`, that shortcut uses
 your default follow-up behavior; add **Shift** to use the opposite action. This
 applies only to multiline messages when you choose the multiline send option.
@@ -84,7 +88,17 @@ Use `Cmd+Shift+Enter` on macOS or `Ctrl+Shift+Enter` on Windows and Linux to sen
 the oldest queued message as a steer. This leaves the current draft intact and
 requires an active turn that supports steering. If that shortcut sends the opposite
 action for your draft, move focus outside the composer to steer the queued message. Change
-`thread.steerQueuedMessage` in **Settings → Keybindings** to use another shortcut.
+`thread.steerQueuedMessage` in **Settings → Keybindings** to use another shortcut. To make
+`Cmd+Enter` or `Ctrl+Enter` steer the oldest queued message when the composer is empty, add
+this rule to your [keybindings file](keybindings.md#edit-the-configuration-file):
+
+```json
+{
+  "key": "mod+enter",
+  "command": "thread.steerQueuedMessage",
+  "when": "composerFocus && turnRunning && composerEmpty"
+}
+```
 
 Press `Option+Up` on macOS or `Alt+Up` on Windows and Linux with the cursor at the
 start of the composer to edit the most recently queued message. Change
@@ -234,8 +248,9 @@ and use **Attach again** or remove the missing file before sending.
 ## Voice input on web and desktop
 
 Use the composer's microphone or `mod+shift+d` to dictate into your draft. Audio
-is transcribed on an environment you choose in **Settings → Voice**; nothing is
-sent until you choose one. See [Voice input](./voice-input.md).
+is transcribed on an environment you choose in **Settings → Voice**, or on the Mac
+with Apple Speech in the macOS desktop app; nothing is sent until you choose one.
+See [Voice input](./voice-input.md).
 
 ## Voice input on mobile
 
@@ -287,7 +302,8 @@ Steer. Click it or press your send shortcut to use that action. Hold `Cmd` on ma
 Windows and Linux to switch the button to the opposite action, then click, or use the opposite-action
 shortcut described above.
 
-Queued follow-ups wait for the next completed tool call or the end of the turn.
+Queued follow-ups wait for the next completed tool call or the end of the turn. While a turn
+runs, a slash command moves to the front of the queue instead.
 
 Queued messages appear at the end of the thread on web and desktop. Each shows its text and any
 attached images. Use **Send now** to send it into the running turn, or edit it in the composer.

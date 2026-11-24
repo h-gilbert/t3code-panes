@@ -5,7 +5,11 @@ import {
   EnvironmentHttpApi,
 } from "@t3tools/contracts";
 import { isDevProxiedPath } from "@t3tools/shared/devProxy";
-import { injectMcpAppCookieBootstrap, injectMcpAppThemeBootstrap } from "@t3tools/shared/mcpApp";
+import {
+  injectMcpAppCookieBootstrap,
+  injectMcpAppDocumentBootstrap,
+  injectMcpAppThemeBootstrap,
+} from "@t3tools/shared/mcpApp";
 import { FILE_PREVIEW_SCROLL_SCRIPT } from "@t3tools/shared/htmlRender";
 import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
 import * as ByteSize from "effect/ByteSize";
@@ -22,12 +26,14 @@ import { cast, pipe } from "effect/Function";
 import {
   HttpClient,
   HttpClientResponse,
+  HttpEffect,
   HttpMiddleware,
   HttpRouter,
   HttpServerResponse,
   HttpServerRequest,
   HttpServerRespondable,
 } from "effect/http";
+import * as HttpIncomingMessage from "effect/http/HttpIncomingMessage";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 import { OtlpTracer, OtlpSerialization } from "effect/observability";
 
@@ -50,7 +56,6 @@ import {
   failEnvironmentInternal,
 } from "./auth/http.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
-import { WEBHOOK_ROUTE_PREFIX } from "./scheduledTasks/ScheduledTaskService.ts";
 import {
   browserApiCorsAllowedHeaders,
   browserApiCorsAllowedMethods,
@@ -76,6 +81,13 @@ const isSafeInlineMediaMimeType = (mimeType: string): boolean =>
   DOWNLOAD_MIME_TYPE_PATTERN.test(mimeType) && /^(?:audio|video)\//i.test(mimeType);
 const isSafeInlineDocumentMimeType = (mimeType: string): boolean =>
   mimeType.toLowerCase() === "application/pdf" || mimeType.toLowerCase() === "text/html";
+
+// XML types render as documents, so they get the same policy as SVG.
+const isScriptableXmlPath = (filePath: string): boolean =>
+  Option.match(Mime.getType(filePath), {
+    onNone: () => false,
+    onSome: (mimeType) => /(?:\/xml(?:$|-)|\+xml$)/.test(mimeType),
+  });
 
 export function downloadContentDisposition(fileName?: string): string {
   if (fileName === undefined) {
@@ -134,7 +146,7 @@ export function assetResponseHeaders(
                 "Content-Security-Policy": HTML_CONTENT_SECURITY_POLICY,
               }
             : {}),
-    ...(!options?.download && lowerPath.endsWith(".svg")
+    ...(!options?.download && isScriptableXmlPath(lowerPath)
       ? { "Content-Security-Policy": SVG_CONTENT_SECURITY_POLICY }
       : {}),
   };
@@ -189,6 +201,8 @@ export const assetFileResponse = Effect.fn("assetFileResponse")(function* (
       new TextDecoder().decode(bytes),
       injectMcpAppThemeBootstrap,
       injectMcpAppCookieBootstrap,
+      // Applied last so it is the document's first script.
+      injectMcpAppDocumentBootstrap,
       (html) => new TextEncoder().encode(html),
     );
     headers["Content-Length"] = String(body.byteLength);
@@ -271,9 +285,32 @@ export const assetFileResponse = Effect.fn("assetFileResponse")(function* (
   return yield* HttpServerResponse.file(asset.path, { status, offset, bytesToRead, headers });
 });
 
+// The default body limit for API routes. Routes that take more set their own limit.
+export const API_MAX_BODY_BYTES = 1024 * 1024;
+export const layerApiBodyLimit = HttpRouter.middleware(
+  Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(API_MAX_BODY_BYTES)),
+).layer;
+
 export const layerHttpCompression = HttpRouter.middleware(HttpMiddleware.compression(), {
   global: true,
 });
+
+function withVaryOrigin(
+  response: HttpServerResponse.HttpServerResponse,
+): HttpServerResponse.HttpServerResponse {
+  const existing = response.headers.vary;
+  if (
+    existing !== undefined &&
+    existing.split(",").some((token) => token.trim().toLowerCase() === "origin")
+  ) {
+    return response;
+  }
+  return HttpServerResponse.setHeader(
+    response,
+    "vary",
+    existing ? `${existing}, Origin` : "Origin",
+  );
+}
 
 export const layerBrowserApiCors = Layer.unwrap(
   Effect.gen(function* () {
@@ -295,15 +332,27 @@ export const layerBrowserApiCors = Layer.unwrap(
     });
     const publicCors = HttpMiddleware.cors(options);
     return HttpRouter.middleware(
-      (httpEffect) =>
-        Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) =>
-          request.url.split("?", 1)[0] === MCP_HTTP_PATH
-            ? httpEffect
-            : (devOrigin ||
-                DESKTOP_RENDERER_ORIGINS.some((origin) => origin === request.headers.origin)
-                ? desktopCors
-                : publicCors)(httpEffect),
-        ),
+      (httpEffect) => {
+        const withPublicCors = publicCors(httpEffect);
+        const withDesktopCors = desktopCors(httpEffect);
+        return Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) => {
+          if (request.url.split("?", 1)[0] === MCP_HTTP_PATH) return httpEffect;
+          const origin = request.headers.origin;
+          if (
+            origin !== undefined &&
+            (devOrigin || DESKTOP_RENDERER_ORIGINS.some((allowed) => allowed === origin))
+          ) {
+            return withDesktopCors;
+          }
+          // Desktop and dev origins get a credentialed answer, so the wildcard one varies by Origin.
+          if (request.method === "OPTIONS") {
+            return Effect.map(withPublicCors, withVaryOrigin);
+          }
+          return HttpEffect.appendPreResponseHandler((_request, response) =>
+            Effect.succeed(withVaryOrigin(response)),
+          ).pipe(Effect.andThen(withPublicCors));
+        });
+      },
       { global: true },
     );
   }),
@@ -423,33 +472,18 @@ export const layerOtlpTracesProxyRoute = HttpRouter.add(
   ),
 );
 
-const requestPath = (request: HttpServerRequest.HttpServerRequest) => {
-  const queryIndex = request.url.indexOf("?");
-  return queryIndex === -1 ? request.url : request.url.slice(0, queryIndex);
-};
-
-// Signed URLs carry bearer tokens in the path, which URL param redaction cannot reach.
-const isSignedUrlRequest = (request: HttpServerRequest.HttpServerRequest) => {
-  const path = requestPath(request);
-  return (
-    path.startsWith(`${WEBHOOK_ROUTE_PREFIX}/`) ||
-    path.startsWith(`${ASSET_ROUTE_PREFIX}/`) ||
-    path.startsWith(`${ATTACHMENT_UPLOAD_ROUTE_PREFIX}/`)
-  );
-};
+const UNTRACED_REQUEST_PATHS: ReadonlySet<string> = new Set([OTLP_TRACES_PROXY_PATH]);
 
 // HttpRouter.serve builds routes privately; provide the server-wide TracerDisabledWhen to the served layer.
-const layerUntracedRequests = Layer.succeed(HttpMiddleware.TracerDisabledWhen)(
-  (request) => requestPath(request) === OTLP_TRACES_PROXY_PATH || isSignedUrlRequest(request),
-);
+const layerUntracedRequests = Layer.succeed(HttpMiddleware.TracerDisabledWhen)((request) => {
+  const queryIndex = request.url.indexOf("?");
+  return UNTRACED_REQUEST_PATHS.has(
+    queryIndex === -1 ? request.url : request.url.slice(0, queryIndex),
+  );
+});
 
-export const layerUnloggedSignedRequests = HttpRouter.middleware(
-  (httpEffect) =>
-    Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) =>
-      isSignedUrlRequest(request) ? HttpMiddleware.withLoggerDisabled(httpEffect) : httpEffect,
-    ),
-  { global: true },
-);
+// Signed URLs carry their bearer token in the path; spans and request logs record it as REDACTED.
+const SIGNED_URL_ROUTE_OPTIONS = { redactedParams: ["*"] };
 
 export const withUntracedRequests = Layer.provide(layerUntracedRequests);
 
@@ -521,6 +555,7 @@ export const layerAssetRoute = HttpRouter.add(
       Effect.orElseSucceed(() => HttpServerResponse.text("Internal Server Error", { status: 500 })),
     );
   }),
+  SIGNED_URL_ROUTE_OPTIONS,
 );
 
 export const layerAttachmentUploadRoute = HttpRouter.add(
@@ -560,6 +595,7 @@ export const layerAttachmentUploadRoute = HttpRouter.add(
       ? HttpServerResponse.empty({ status: 204 })
       : HttpServerResponse.text(stored.detail, { status: stored.status });
   }),
+  SIGNED_URL_ROUTE_OPTIONS,
 );
 
 const decodeBuildManifest = Schema.decodeUnknownEffect(

@@ -72,6 +72,7 @@ import * as DesktopUpdates from "./updates/DesktopUpdates.ts";
 import * as BrowserCredentials from "./preview/BrowserCredentials.ts";
 import * as BrowserImport from "./preview/BrowserImport/BrowserImport.ts";
 import * as LinuxBrowserSecret from "./preview/BrowserImport/LinuxBrowserSecret.ts";
+import * as AppleSpeech from "./speech/AppleSpeech.ts";
 import * as BrowserSession from "./preview/BrowserSession.ts";
 import * as DesktopBrowserHost from "./preview/DesktopBrowserHost.ts";
 import * as RemoteBrowserTransfer from "./preview/RemoteBrowserTransfer.ts";
@@ -164,6 +165,7 @@ const layerDesktopFoundation = Layer.mergeAll(
   DesktopPrimaryPaste.layer,
   DesktopObservability.layer,
   DesktopRendererHistory.layer,
+  AppleSpeech.layer,
 ).pipe(Layer.provideMerge(layerDesktopEnvironment));
 
 const layerDesktopSsh = layerDesktopSshEnvironment.pipe(

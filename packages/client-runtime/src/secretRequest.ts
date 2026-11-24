@@ -21,7 +21,7 @@ export type SecretRequestItem = Extract<
 
 /** A `file` request lets the agent's commands read the value, so its card must not promise more. */
 export const secretRequestPrivacyNote = (
-  item: Pick<SecretRequestItem, "delivery" | "credential">,
+  item: Pick<SecretRequestItem, "delivery" | "credential" | "fields">,
   resolve: MFunctionType = mFallback,
 ) =>
   item.credential !== undefined
@@ -34,12 +34,47 @@ export const secretRequestPrivacyNote = (
       : resolve(
           msg("Saved credentials can be reused by authorized agents. Values stay out of chat."),
         )
-    : item.delivery === "file"
-      ? resolve(
-          msg("Kept out of chat, in a private file this agent's commands can read for 24 hours"),
-        )
-      : resolve(msg("Stored securely, never shown to the agent"));
-export const SECRET_REQUEST_DEFAULT_PLACEHOLDER = msg("Paste the secret");
+    : item.delivery !== "file"
+      ? resolve(msg("Stored securely, never shown to the agent"))
+      : item.fields === undefined
+        ? resolve(
+            msg("Kept out of chat, in a private file this agent's commands can read for 24 hours"),
+          )
+        : resolve(
+            msg("Kept out of chat, in private files this agent's commands can read for 24 hours"),
+          );
+const SECRET_REQUEST_DEFAULT_PLACEHOLDER = msg("Paste the secret");
+
+export interface SecretRequestInput {
+  /** Key in the card's values: the field name, or "" for a request without fields. */
+  readonly key: string;
+  readonly label: string;
+  readonly placeholder: string;
+  /** Masked, with a toggle to show it. */
+  readonly secret: boolean;
+}
+
+export function secretRequestInputs(
+  item: Pick<SecretRequestItem, "label" | "placeholder" | "fields">,
+  resolve: MFunctionType = mFallback,
+): ReadonlyArray<SecretRequestInput> {
+  if (item.fields === undefined) {
+    return [
+      {
+        key: "",
+        label: item.label,
+        placeholder: item.placeholder ?? resolve(SECRET_REQUEST_DEFAULT_PLACEHOLDER),
+        secret: true,
+      },
+    ];
+  }
+  return item.fields.map((field) => ({
+    key: field.name,
+    label: field.label,
+    placeholder: field.placeholder ?? "",
+    secret: field.secret !== false,
+  }));
+}
 
 // Backticks, <angle brackets> and markdown link targets (balanced parentheses allowed) keep their
 // exact text; a bare link drops trailing sentence punctuation.
@@ -222,29 +257,73 @@ export function secretRequestReference(
     : undefined;
 }
 
-/** Credential saves carry the fork's username and vault scope; secrets keep their exact bytes. */
+/** A card value by input key. Own keys only: a field may be named `constructor`. */
+export const secretRequestValue = (values: Readonly<Record<string, string>>, key: string) =>
+  Object.hasOwn(values, key) ? (values[key] ?? "") : "";
+
+/** What a credential card adds to its save; ignored for other cards. */
+interface SecretRequestVaultChoice {
+  /** A login's username or email, trimmed before saving. */
+  readonly username?: string;
+  /** Who may reuse the saved credential. */
+  readonly scope?: "project" | "environment";
+}
+
 export type SecretRequestReply =
-  | Extract<SecretRequestAnswerInput["answer"], { readonly type: "save" }>
+  /** Keyed by `SecretRequestInput.key`. */
+  | ({
+      readonly type: "save";
+      readonly values: Readonly<Record<string, string>>;
+    } & SecretRequestVaultChoice)
+  /** The one value of a card without fields, such as a credential card. */
+  | ({ readonly type: "save"; readonly secret: string } & SecretRequestVaultChoice)
+  /** Single-value cards only, never credential cards: the server reads it through `source`. */
   | { readonly type: "reference"; readonly source: SecretRequestSource; readonly reference: string }
   | { readonly type: "decline" };
 
+/** Null until every input has a value, or while a reference is not `source`'s syntax. */
 export function secretRequestAnswerInput(
-  item: Pick<SecretRequestItem, "id" | "threadId" | "credential">,
+  item: Pick<
+    SecretRequestItem,
+    "id" | "threadId" | "label" | "placeholder" | "fields" | "credential"
+  >,
   answer: SecretRequestReply,
 ): SecretRequestAnswerInput | null {
-  if (answer.type === "decline") {
-    return { threadId: item.threadId, turnItemId: item.id, answer: { type: "decline" } };
-  }
+  const base = { threadId: item.threadId, turnItemId: item.id };
+  if (answer.type === "decline") return { ...base, answer: { type: "decline" } };
   if (answer.type === "reference") {
-    if (item.credential !== undefined) return null;
-    const reference = secretRequestReference(answer.source, answer.reference);
-    return reference === undefined
-      ? null
-      : { threadId: item.threadId, turnItemId: item.id, answer: { type: "reference", reference } };
+    const reference =
+      item.fields === undefined && item.credential === undefined
+        ? secretRequestReference(answer.source, answer.reference)
+        : undefined;
+    return reference === undefined ? null : { ...base, answer: { type: "reference", reference } };
   }
-  const secret = answer.secret;
-  if (secret.length === 0) return null;
-  return { threadId: item.threadId, turnItemId: item.id, answer: { ...answer, secret } };
+  const values = "values" in answer ? answer.values : { "": answer.secret };
+  // Typed secrets keep their exact bytes; visible values such as an email drop stray whitespace.
+  const entries = secretRequestInputs(item).map((input) => {
+    const value = secretRequestValue(values, input.key);
+    return [input.key, input.secret ? value : value.trim()] as const;
+  });
+  // A credential keeps any non-empty value, even all whitespace; one-off cards need visible text.
+  const blank = (value: string) =>
+    (item.credential === undefined ? value.trim() : value).length === 0;
+  if (entries.some(([, value]) => blank(value))) return null;
+  if (item.fields === undefined) {
+    const username = item.credential === undefined ? undefined : answer.username?.trim();
+    return {
+      ...base,
+      answer: {
+        type: "save",
+        secret: entries[0]?.[1] ?? "",
+        ...(username ? { username } : {}),
+        ...(item.credential === undefined || answer.scope === undefined
+          ? {}
+          : { scope: answer.scope }),
+      },
+    };
+  }
+
+  return { ...base, answer: { type: "save", values: Object.fromEntries(entries) } };
 }
 
 const USER_FACING_FAILURE_TAGS = new Set(["SecretRequestError", "EnvironmentAuthorizationError"]);

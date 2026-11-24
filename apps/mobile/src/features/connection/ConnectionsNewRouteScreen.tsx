@@ -31,6 +31,7 @@ import { SymbolView } from "../../components/ui/AppSymbol";
 import { hasCloudPublicConfig } from "../cloud/publicConfig";
 import { CloudEnvironmentRows } from "./CloudEnvironmentRows";
 import { autoConnectReport, devAutoConnectAttemptAtom } from "./devAutoConnect";
+import { linkedEnvironmentPrefillAtom } from "./linkedEnvironmentPrefill";
 import { splitEnvironmentSections } from "./environmentSections";
 import { leaveSettingsPage } from "../settings/settings-navigation";
 import { workspaceHasColumns } from "../layout/workspace/workspace-selection-store";
@@ -41,23 +42,28 @@ type ConnectionsNewRouteParams = {
   readonly pairingUrl?: string;
   readonly autoConnect?: string;
   readonly routeFor?: EnvironmentId;
+  /** A linked machine this app chose to pair with; its details come from app state, never the link. */
+  readonly linked?: string;
 };
 
 export function ConnectionsNewRouteScreen({
   route,
 }: StaticScreenProps<ConnectionsNewRouteParams | undefined>) {
   const params = route.params ?? {};
-  // Dev-only prefill prevents production links from supplying an attacker-chosen host and token.
+  // Stock production links can identify a linked machine but cannot supply a host or code.
+  const known = useAtomValue(linkedEnvironmentPrefillAtom);
+  const linked = known !== null && known.environmentId === params.linked ? known : null;
   const routePairingUrl =
-    __DEV__ || Constants.expoConfig?.extra?.selfHostedBuild === true
+    linked === null && (__DEV__ || Constants.expoConfig?.extra?.selfHostedBuild === true)
       ? (params.pairingUrl?.trim() ?? "")
       : "";
   // A new prefill link replaces whatever the form held.
   return (
     <PairingForm
-      key={routePairingUrl}
+      key={`${routePairingUrl}:${linked?.environmentId ?? ""}`}
       routePairingUrl={routePairingUrl}
-      routeFor={params.routeFor}
+      routeFor={linked?.environmentId ?? params.routeFor}
+      linked={linked}
     />
   );
 }
@@ -65,16 +71,22 @@ export function ConnectionsNewRouteScreen({
 function PairingForm({
   routePairingUrl,
   routeFor,
+  linked,
 }: {
   readonly routePairingUrl: string;
   readonly routeFor: EnvironmentId | undefined;
+  readonly linked: { readonly label: string; readonly host: string | null } | null;
 }) {
   const gt = useGT();
   const { connectionPairingUrl, onChangeConnectionPairingUrl, onConnectPress } =
     useRemoteConnections();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const [initialPairing] = useState(() => parsePairingUrl(routePairingUrl || connectionPairingUrl));
+  const [initialPairing] = useState(() =>
+    linked === null
+      ? parsePairingUrl(routePairingUrl || connectionPairingUrl)
+      : { host: linked.host ?? "", code: "" },
+  );
   const [hostInput, setHostInput] = useState(initialPairing.host);
   const [codeInput, setCodeInput] = useState(initialPairing.code);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -192,7 +204,11 @@ function PairingForm({
 
   return (
     <SettingsScreen
-      title={gt("Add environment")}
+      title={
+        linked
+          ? gt("Connect to {environment}", { environment: linked.label })
+          : gt("Add environment")
+      }
       actions={[
         {
           accessibilityLabel: connecting
@@ -267,9 +283,14 @@ function PairingForm({
               )}
             >
               {pairingConnectionError ??
-                gt(
-                  "For machines on your local network or tailnet. The machine keeps its own provider credentials.",
-                )}
+                (linked
+                  ? gt(
+                      "Create a pairing code on {environment}, in its Settings → Sharing & access or with `t3 auth pairing create`, and enter it here.",
+                      { environment: linked.label },
+                    )
+                  : gt(
+                      "For machines on your local network or tailnet. The machine keeps its own provider credentials.",
+                    ))}
             </Text>
           </View>
 
@@ -417,7 +438,7 @@ function PairingInputRow({
   readonly label: string;
 }) {
   return (
-    <View collapsable={false} className="h-13 flex-row items-center gap-3 px-4">
+    <View collapsable={false} className="min-h-[48px] flex-row items-center gap-3 px-4">
       <Text
         accessibilityElementsHidden
         importantForAccessibility="no-hide-descendants"
@@ -430,7 +451,8 @@ function PairingInputRow({
         accessibilityLabel={label}
         autoCapitalize="none"
         autoCorrect={false}
-        className="min-h-0 flex-1 rounded-none border-0 bg-transparent p-0 text-base leading-[23px]"
+        textAlignVertical="center"
+        className="min-h-[48px] flex-1 self-stretch rounded-none border-0 bg-transparent p-0 text-base leading-[23px]"
       />
     </View>
   );

@@ -1,5 +1,8 @@
 // CDP input follows shared window focus; send directly to unfocused guests to avoid typing into the app.
 
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+
 const FOCUS_ROUTED_INPUT = new Set([
   "Input.insertText",
   "Input.dispatchKeyEvent",
@@ -116,38 +119,6 @@ export const trackFrameTarget = (
 };
 
 type NodeInfo = { readonly node?: { readonly frameId?: string } };
-type BoxModel = { readonly model?: { readonly content?: ReadonlyArray<number> } };
-
-/** The frame session under a point, with the point in that frame's coordinates. */
-const routePoint = async (
-  debuggee: Electron.Debugger,
-  frames: Map<string, string>,
-  sessionId: string | undefined,
-  x: number,
-  y: number,
-  depth = 0,
-): Promise<{ sessionId: string | undefined; x: number; y: number }> => {
-  if (depth > 4) return { sessionId, x, y };
-  const hit = (await debuggee
-    .sendCommand(
-      "DOM.getNodeForLocation",
-      { x: Math.round(x), y: Math.round(y), ignorePointerEventsNone: true },
-      sessionId,
-    )
-    .catch(() => null)) as { readonly backendNodeId?: number } | null;
-  if (!hit?.backendNodeId) return { sessionId, x, y };
-  const described = (await debuggee
-    .sendCommand("DOM.describeNode", { backendNodeId: hit.backendNodeId }, sessionId)
-    .catch(() => null)) as NodeInfo | null;
-  const child = described?.node?.frameId ? frames.get(described.node.frameId) : undefined;
-  if (!child) return { sessionId, x, y };
-  const box = (await debuggee
-    .sendCommand("DOM.getBoxModel", { backendNodeId: hit.backendNodeId }, sessionId)
-    .catch(() => null)) as BoxModel | null;
-  const content = box?.model?.content;
-  if (!content) return { sessionId, x, y };
-  return routePoint(debuggee, frames, child, x - content[0]!, y - content[1]!, depth + 1);
-};
 
 /** The session of the cross-site frame holding focus, if any. */
 const focusedFrameSession = async (
@@ -184,15 +155,10 @@ const HOST_FOCUS = "globalThis.__t3PreviewFocus";
 /** A CDP pointer press focuses the guest's native view even with focus emulation enabled. */
 const sendPointerPress = async (
   webContents: Electron.WebContents,
-  debuggee: Electron.Debugger,
-  method: string,
-  params: Record<string, unknown>,
-  sessionId: string | undefined,
+  dispatch: () => Promise<unknown>,
 ) => {
   const host = webContents.hostWebContents;
-  if (!host || host.isDestroyed() || webContents.focusedFrame) {
-    return debuggee.sendCommand(method, params, sessionId);
-  }
+  if (!host || host.isDestroyed() || webContents.focusedFrame) return dispatch();
   // Focus in a webview with a press in flight came from that press, so keep the earlier save.
   await host.executeJavaScript(`(() => {
     const state = (${HOST_FOCUS} ??= { saved: null, presses: [] });
@@ -207,7 +173,7 @@ const sendPointerPress = async (
     state.presses.push(${webContents.id});
   })()`);
   try {
-    return await debuggee.sendCommand(method, params, sessionId);
+    return await dispatch();
   } finally {
     if (!host.isDestroyed()) {
       // Membership check: a host reload starts a new state without this press.
@@ -227,6 +193,118 @@ const sendPointerPress = async (
   }
 };
 
+/** Calls `listener` once the frame session detaches, at once if it already has; returns a stop. */
+export type FrameDetachWatch = (sessionId: string, listener: () => void) => () => void;
+// App-window tabs track frames without detach events, so a dropped reply waits like any command.
+const ignoreFrameDetach: FrameDetachWatch = () => () => {};
+
+interface FrameRoute {
+  readonly params: Record<string, unknown>;
+  readonly sessionId: string;
+  readonly onDetach: FrameDetachWatch;
+}
+
+/** Moves a page point into the cross-site frame under it, if one has a session; null when none does. */
+export type PointerRoute = (params: Record<string, unknown>) => Promise<FrameRoute | null>;
+
+const FRAME_GONE_MESSAGE =
+  "The frame under the pointer went away before it took this input. Check the page before retrying.";
+
+const MAX_FRAME_DEPTH = 8;
+const ROUTE_DEADLINE = "1 second";
+
+/**
+ * Chromium picks a pointer event's frame by hit-testing what the window composites, so on a
+ * guest the window does not show, input over a cross-site frame lands on the page instead.
+ * That frame's own session takes the event at frame-local coordinates.
+ */
+export const routeMouseToFrame =
+  (
+    debuggee: Electron.Debugger,
+    frameSessions: ReadonlyMap<string, string>,
+    onDetach: FrameDetachWatch,
+  ): PointerRoute =>
+  async (params) => {
+    // A wheel over a frame that cannot scroll would no longer reach the page behind it.
+    if (params["type"] === "mouseWheel" || frameSessions.size === 0) return null;
+    // Chromium never answers a lookup on a frame that detaches mid-navigation; the page takes it.
+    const routed = await Effect.runPromise(
+      Effect.promise(() => locateFrame(debuggee, frameSessions, params)).pipe(
+        Effect.timeoutOption(ROUTE_DEADLINE),
+        Effect.map(Option.getOrNull),
+      ),
+    );
+    if (!routed || ![...frameSessions.values()].includes(routed.sessionId)) return null;
+    return { ...routed, onDetach };
+  };
+
+/** Chromium can drop the reply to input on a frame that detaches before acknowledging it. */
+const sendToFrame = (debuggee: Electron.Debugger, method: string, route: FrameRoute) =>
+  new Promise<unknown>((resolve, reject) => {
+    let gone = false;
+    const stop = route.onDetach(route.sessionId, () => {
+      gone = true;
+      reject(new Error(FRAME_GONE_MESSAGE));
+    });
+    if (gone) return;
+    debuggee.sendCommand(method, route.params, route.sessionId).then(resolve, reject).finally(stop);
+  });
+
+const locateFrame = async (
+  debuggee: Electron.Debugger,
+  frameSessions: ReadonlyMap<string, string>,
+  params: Record<string, unknown>,
+) => {
+  let { x, y } = params;
+  if (typeof x !== "number" || typeof y !== "number") return null;
+  let sessionId: string | undefined;
+  for (let depth = 0; depth < MAX_FRAME_DEPTH; depth++) {
+    try {
+      const { cssLayoutViewport: scroll } = (await debuggee.sendCommand(
+        "Page.getLayoutMetrics",
+        {},
+        sessionId,
+      )) as { readonly cssLayoutViewport: { readonly pageX: number; readonly pageY: number } };
+      // The lookup takes whole document pixels; the event and box model use the viewport.
+      const { backendNodeId } = (await debuggee.sendCommand(
+        "DOM.getNodeForLocation",
+        {
+          x: Math.round(x + scroll.pageX),
+          y: Math.round(y + scroll.pageY),
+          includeUserAgentShadowDOM: true,
+        },
+        sessionId,
+      )) as { readonly backendNodeId: number };
+      const { node } = (await debuggee.sendCommand(
+        "DOM.describeNode",
+        { backendNodeId },
+        sessionId,
+      )) as { readonly node: { readonly frameId?: string } };
+      // A cross-site frame's target id is its frame id; a same-site frame has no session,
+      // and a document's own root element names the frame it is already in.
+      const frameSession = node.frameId === undefined ? undefined : frameSessions.get(node.frameId);
+      if (frameSession === undefined || frameSession === sessionId) break;
+      const { model } = (await debuggee.sendCommand(
+        "DOM.getBoxModel",
+        { backendNodeId },
+        sessionId,
+      )) as { readonly model: { readonly content: ReadonlyArray<number> } };
+      const xs = model.content.filter((_, index) => index % 2 === 0);
+      const ys = model.content.filter((_, index) => index % 2 === 1);
+      const left = Math.min(...xs);
+      const top = Math.min(...ys);
+      // The frame owner's border and padding belong to the page.
+      if (x < left || x >= Math.max(...xs) || y < top || y >= Math.max(...ys)) break;
+      x -= left;
+      y -= top;
+      sessionId = frameSession;
+    } catch {
+      break;
+    }
+  }
+  return sessionId === undefined ? null : { params: { ...params, x, y }, sessionId };
+};
+
 const pointerCommands = new WeakMap<Electron.WebContents, Promise<unknown>>();
 
 /** Focus capture crosses processes; later pointer events must not overtake the press. */
@@ -236,15 +314,20 @@ const sendPointerCommand = async (
   method: string,
   params: Record<string, unknown>,
   sessionId: string | undefined,
+  route: PointerRoute | undefined,
 ) => {
   const previous = pointerCommands.get(webContents) ?? Promise.resolve();
   const current = previous
     .catch(() => {})
-    .then(() =>
-      params["type"] === "mousePressed" || params["type"] === "touchStart"
-        ? sendPointerPress(webContents, debuggee, method, params, sessionId)
-        : debuggee.sendCommand(method, params, sessionId),
-    );
+    .then(async () => {
+      const routed = route && sessionId === undefined ? await route(params) : null;
+      const dispatch = routed
+        ? () => sendToFrame(debuggee, method, routed)
+        : () => debuggee.sendCommand(method, params, sessionId);
+      return params["type"] === "mousePressed" || params["type"] === "touchStart"
+        ? sendPointerPress(webContents, dispatch)
+        : dispatch();
+    });
   pointerCommands.set(webContents, current);
   try {
     return await current;
@@ -260,24 +343,17 @@ export const sendPageCommand = async (
   method: string,
   params: Record<string, unknown>,
   sessionId?: string,
+  routeMouse?: PointerRoute,
 ): Promise<unknown> => {
   const frames = frameSessions.get(debuggee);
-  if (method === "Input.dispatchMouseEvent" && sessionId === undefined && frames?.size) {
-    const x = Number(params["x"]),
-      y = Number(params["y"]);
-    if (Number.isFinite(x) && Number.isFinite(y)) {
-      const route = await routePoint(debuggee, frames, undefined, x, y);
-      return sendPointerCommand(
-        webContents,
-        debuggee,
-        method,
-        { ...params, x: route.x, y: route.y },
-        route.sessionId,
-      );
-    }
+  if (method === "Input.dispatchMouseEvent") {
+    const route =
+      routeMouse ??
+      (frames?.size ? routeMouseToFrame(debuggee, frames, ignoreFrameDetach) : undefined);
+    return sendPointerCommand(webContents, debuggee, method, params, sessionId, route);
   }
-  if (method === "Input.dispatchMouseEvent" || method === "Input.dispatchTouchEvent") {
-    return sendPointerCommand(webContents, debuggee, method, params, sessionId);
+  if (method === "Input.dispatchTouchEvent") {
+    return sendPointerCommand(webContents, debuggee, method, params, sessionId, undefined);
   }
   if (sessionId !== undefined) return debuggee.sendCommand(method, params, sessionId);
   // Electron's debugger routes Page.reload on a webview to its embedder window.

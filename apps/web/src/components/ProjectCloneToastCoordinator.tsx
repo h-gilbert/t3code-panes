@@ -45,6 +45,8 @@ interface TrackedToast {
   readonly toastId: ReturnType<typeof toastManager.add>;
   readonly renderedKey: string;
   readonly phase: ProjectCloneSnapshot["phase"];
+  readonly startedAt: ProjectCloneSnapshot["startedAt"];
+  readonly closed?: true;
 }
 
 function renderKey(clone: ProjectCloneSnapshot): string {
@@ -100,6 +102,7 @@ function EnvironmentCloneToasts({ environmentId }: { environmentId: EnvironmentI
       seen.add(clone.projectId);
       const key = renderKey(clone);
       const tracked = toasts.current.get(clone.projectId);
+      const sameAttempt = tracked?.startedAt === clone.startedAt;
       const name = projectCloneDisplayName(clone);
       const closeToast = () => {
         const current = toasts.current.get(clone.projectId);
@@ -113,7 +116,7 @@ function EnvironmentCloneToasts({ environmentId }: { environmentId: EnvironmentI
         closeToast();
         continue;
       }
-      if (tracked?.renderedKey === key) continue;
+      if (sameAttempt && tracked.renderedKey === key) continue;
       if (
         isProjectCloneToastSilenced(ref) &&
         (clone.phase === "running" || clone.phase === "done")
@@ -121,6 +124,34 @@ function EnvironmentCloneToasts({ environmentId }: { environmentId: EnvironmentI
         closeToast();
         continue;
       }
+      if (
+        sameAttempt &&
+        tracked.closed &&
+        (tracked.phase !== "running" || clone.phase !== "failed")
+      ) {
+        continue;
+      }
+
+      const showToast = (options: ReturnType<typeof stackedThreadToast>) => {
+        const rendered = { renderedKey: key, phase: clone.phase, startedAt: clone.startedAt };
+        if (tracked && !tracked.closed) {
+          toastManager.update(tracked.toastId, options);
+          toasts.current.set(clone.projectId, { toastId: tracked.toastId, ...rendered });
+          return;
+        }
+
+        const toastId = toastManager.add({
+          ...options,
+          // Updates to a closing toast are ignored, even before it has been removed.
+          onClose: () => {
+            const current = toasts.current.get(clone.projectId);
+            if (current?.toastId === toastId) {
+              toasts.current.set(clone.projectId, { ...current, closed: true });
+            }
+          },
+        });
+        toasts.current.set(clone.projectId, { toastId, ...rendered });
+      };
 
       if (clone.phase === "running") {
         const options = stackedThreadToast({
@@ -138,13 +169,7 @@ function EnvironmentCloneToasts({ environmentId }: { environmentId: EnvironmentI
           },
           data: { hideCopyButton: true },
         });
-        if (tracked) {
-          toastManager.update(tracked.toastId, options);
-          toasts.current.set(clone.projectId, { ...tracked, renderedKey: key, phase: "running" });
-        } else {
-          const toastId = toastManager.add(options);
-          toasts.current.set(clone.projectId, { toastId, renderedKey: key, phase: "running" });
-        }
+        showToast(options);
         continue;
       }
 
@@ -163,13 +188,7 @@ function EnvironmentCloneToasts({ environmentId }: { environmentId: EnvironmentI
           },
           data: { hideCopyButton: true },
         });
-        if (tracked) {
-          toastManager.update(tracked.toastId, options);
-          toasts.current.set(clone.projectId, { ...tracked, renderedKey: key, phase: "done" });
-        } else {
-          const toastId = toastManager.add(options);
-          toasts.current.set(clone.projectId, { toastId, renderedKey: key, phase: "done" });
-        }
+        showToast(options);
         continue;
       }
 
@@ -201,13 +220,7 @@ function EnvironmentCloneToasts({ environmentId }: { environmentId: EnvironmentI
           },
         },
       });
-      if (tracked) {
-        toastManager.update(tracked.toastId, options);
-        toasts.current.set(clone.projectId, { ...tracked, renderedKey: key, phase: clone.phase });
-      } else {
-        const toastId = toastManager.add(options);
-        toasts.current.set(clone.projectId, { toastId, renderedKey: key, phase: clone.phase });
-      }
+      showToast(options);
     }
 
     for (const [projectId, tracked] of toasts.current) {

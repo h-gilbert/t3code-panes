@@ -27,7 +27,6 @@ import {
   sortWorkingThreadsBySend,
 } from "@t3tools/client-runtime/state/thread-inbox";
 import {
-  sortActiveThreadsByOrderKey,
   resolveSettledThreadTimestamp,
   sortPinnedThreadsByOrderKey,
   sortSettledThreads,
@@ -46,6 +45,8 @@ import { m, type MessageResolver } from "../../i18n/messages";
 import {
   applyPendingThreadOrder,
   reconcilePendingThreadOrder,
+  sortThreadsForListV2,
+  threadListV2ActivityTimestamp,
   type PendingThreadOrder,
 } from "./threadOrder";
 
@@ -355,48 +356,6 @@ export function resolveThreadListV2RowStatus(
 function parseTimestampMs(isoDate: string): number {
   const parsed = Date.parse(isoDate);
   return Number.isNaN(parsed) ? 0 : parsed;
-}
-
-type ThreadActivityInput = {
-  readonly activeOrderKey?: string | null;
-  readonly environmentId?: string;
-  readonly createdAt: string;
-  readonly latestRun?: { readonly completedAt: string | null } | null;
-  readonly latestUserMessageAt?: string | null;
-  readonly unsettledAt?: string | null;
-};
-
-/** Prompts and turn completions move rows; streaming and tool updates do not.
- * Explicit un-settle still brings a thread back to the top. Labels share this timestamp. */
-export function threadListV2ActivityTimestamp(thread: ThreadActivityInput): string {
-  let latest = thread.createdAt;
-  let latestMs = parseTimestampMs(latest);
-  for (const candidate of [
-    thread.latestUserMessageAt,
-    thread.latestRun?.completedAt,
-    thread.unsettledAt,
-  ]) {
-    if (candidate == null) continue;
-    const timestamp = parseTimestampMs(candidate);
-    if (timestamp > latestMs) {
-      latest = candidate;
-      latestMs = timestamp;
-    }
-  }
-  return latest;
-}
-
-/** Most recently active first, with a stable ID tie-break for equal timestamps. */
-export function sortThreadsForListV2<T extends ThreadActivityInput & { readonly id: string }>(
-  threads: readonly T[],
-): T[] {
-  // Sort a copy: Hermes does not ship Array.toSorted.
-  return sortActiveThreadsByOrderKey(
-    threads,
-    (left, right) =>
-      parseTimestampMs(threadListV2ActivityTimestamp(right)) -
-        parseTimestampMs(threadListV2ActivityTimestamp(left)) || left.id.localeCompare(right.id),
-  );
 }
 
 export function getThreadListV2OrderedSection(input: {

@@ -24,6 +24,7 @@ import { resolveAsset } from "../../../assets/AssetAccess.ts";
 import * as NativeAppIconResolver from "../../../assets/NativeAppIconResolver.ts";
 import * as ServerSecretStore from "../../../auth/ServerSecretStore.ts";
 import * as AssetSigner from "../../../assets/AssetSigner.ts";
+import * as WorkspacePreviewRevisions from "../../../assets/WorkspacePreviewRevisions.ts";
 import * as ServerConfig from "../../../config.ts";
 import * as WorkspacePaths from "../../../workspace/WorkspacePaths.ts";
 import {
@@ -239,6 +240,7 @@ const transferLayer = (prefix: string) => {
     Layer.mock(Orchestrator.OrchestratorV2)({}),
     WorkspacePaths.layer,
     NativeAppIconResolver.layer.pipe(Layer.provide(configLayer)),
+    WorkspacePreviewRevisions.layer,
     AssetSigner.layer.pipe(
       Layer.provideMerge(ServerSecretStore.layer.pipe(Layer.provide(configLayer))),
     ),

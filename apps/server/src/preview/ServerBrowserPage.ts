@@ -198,7 +198,6 @@ const SNAPSHOT_SCRIPT = `(() => {
     title: document.title,
     loading: document.readyState !== "complete",
     visibleText: document.body?.innerText || "",
-    interactiveElements: [],
   };
 })()`;
 
@@ -745,10 +744,7 @@ const capture = async (
       "page state",
       () =>
         input.page.evaluate(SNAPSHOT_SCRIPT) as Promise<
-          Pick<
-            PreviewAutomationSnapshot,
-            "url" | "title" | "loading" | "visibleText" | "interactiveElements"
-          >
+          Pick<PreviewAutomationSnapshot, "url" | "title" | "loading" | "visibleText">
         >,
     ),
     input.includeImage === false
@@ -1019,6 +1015,8 @@ const editTextTarget = (element: BrowserElement, { text, clear }: TextEdit) => {
   return true;
 };
 
+// Native key input can time out in an embedded cross-site form in a desktop guest, so text whose
+// focus sits in a child frame is edited in that frame's DOM instead.
 const editFocusedText = async (page: Page, edit: TextEdit, deadline: number): Promise<boolean> => {
   let frame = page.mainFrame();
   while (Date.now() < deadline) {
@@ -1049,41 +1047,196 @@ const editFocusedText = async (page: Page, edit: TextEdit, deadline: number): Pr
   return false;
 };
 
-export const type = async (page: Page, input: PreviewAutomationTypeInput) => {
-  const timeout = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const deadline = Date.now() + timeout;
-  const locator = targetLocator(page, input);
-  const edit: TextEdit = { text: input.text, clear: input.clear ?? false };
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    const edited =
-      locator === null
-        ? await Promise.race([
-            editFocusedText(page, edit, deadline),
-            new Promise<never>((_, reject) => {
-              timer = setTimeout(
-                () =>
-                  reject(
-                    new ServerBrowserOperationError({
-                      tag: "PreviewAutomationTimeoutError",
-                      message: `The page did not report its focused element within ${timeout}ms, so no text was typed.`,
-                      detail: { timeoutMs: timeout },
-                    }),
-                  ),
-                timeout,
-              );
-            }),
-          ])
-        : await locator.evaluate(editTextTarget, edit, { timeout });
-    if (!edited) {
-      throw new ServerBrowserOperationError({
-        tag: "PreviewAutomationTargetNotEditableError",
-        message: "The target is not an enabled text field, so no text was typed.",
-      });
-    }
-  } finally {
-    clearTimeout(timer);
+// Serialized into the page, so it must not reference module scope.
+const inChildFrame = (element: BrowserElement) => {
+  const view = element.ownerDocument.defaultView;
+  return view != null && view.top !== view;
+};
+
+type FocusCandidate = {
+  readonly tagName: string;
+  readonly type?: string;
+  readonly disabled?: boolean;
+  readonly readOnly?: boolean;
+  readonly isContentEditable?: boolean;
+  readonly shadowRoot?: { readonly activeElement: FocusCandidate | null } | null;
+  readonly focus?: () => void;
+  getRootNode(): { readonly activeElement?: FocusCandidate | null };
+  contains(other: FocusCandidate): boolean;
+};
+
+// Serialized into the page's main world, so it must not reference module scope.
+const focusTextTarget = (target: FocusCandidate | null) => {
+  let element =
+    target ??
+    (globalThis as unknown as { document: { activeElement: FocusCandidate | null } }).document
+      .activeElement;
+  if (target === null) {
+    while (element?.shadowRoot?.activeElement) element = element.shadowRoot.activeElement;
+    // Focus inside a frame cannot be checked from here, and an editable frame would pass as contentEditable.
+    if (element && ["IFRAME", "FRAME", "FENCEDFRAME", "OBJECT", "EMBED"].includes(element.tagName))
+      return false;
   }
+  if (element == null) return false;
+  // Require an enabled, focused text target to avoid losing input or sending it to the previous field.
+  const nonText = [
+    "button",
+    "checkbox",
+    "color",
+    "file",
+    "hidden",
+    "image",
+    "radio",
+    "range",
+    "reset",
+    "submit",
+  ];
+  const textControl =
+    element.tagName === "TEXTAREA" ||
+    (element.tagName === "INPUT" && !nonText.includes(element.type ?? "text"));
+  if (!(textControl || element.isContentEditable) || element.disabled || element.readOnly) {
+    return false;
+  }
+  element.focus?.();
+  const active = element.getRootNode().activeElement;
+  return active != null && (active === element || element.contains(active));
+};
+
+// Playwright's own timeout covers finding the element, not a page that stops answering the evaluation.
+const pageAnswer = async <A>(answer: Promise<A>, timeout: number) => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(
+          new ServerBrowserOperationError({
+            tag: "PreviewAutomationTimeoutError",
+            message: `The page did not answer within ${timeout}ms, so no text was typed.`,
+            detail: { timeoutMs: timeout },
+          }),
+        ),
+      timeout,
+    );
+  });
+  return await Promise.race([answer, expired]).finally(() => clearTimeout(timer));
+};
+
+// Serialized into the page's main world, so it must not reference module scope.
+const lockedControl = (
+  target: FocusCandidate & {
+    closest(selector: string): { readonly control: FocusCandidate | null } | null;
+  },
+) => {
+  // fill would wait out the whole timeout on a readonly or disabled field before failing.
+  const element = ["INPUT", "TEXTAREA"].includes(target.tagName)
+    ? target
+    : target.closest("label")?.control;
+  return element != null && (element.disabled === true || element.readOnly === true);
+};
+
+// Serialized into the page's main world, so it must not reference module scope.
+const valueOnlyInput = (
+  target: FocusCandidate & {
+    closest(selector: string): { readonly control: FocusCandidate | null } | null;
+  },
+) => {
+  // As fill does, a target that is not a control stands for its label's control.
+  const element = target.tagName === "INPUT" ? target : target.closest("label")?.control;
+  return (
+    element?.tagName === "INPUT" &&
+    ["color", "date", "datetime-local", "month", "range", "time", "week"].includes(
+      element.type ?? "",
+    )
+  );
+};
+
+// Keys reach pages that build their value from keydown. Line breaks stay text: Enter would submit the form.
+const typeKeys = async (page: Page, text: string, timeoutMs: number, deadline: number) => {
+  let typed = 0;
+  for (const [index, part] of text.split(/([\r\n]+)/u).entries()) {
+    // Keys cost about a millisecond each, so long text is sent in pieces that stop at the deadline.
+    const pieces = index % 2 === 1 ? [part] : (part.match(/[^]{1,64}/gu) ?? []);
+    for (const piece of pieces) {
+      if (Date.now() >= deadline) {
+        const reason = `Typing stopped after ${typed} of ${text.length} characters, which the field now holds. Type the rest in another call or raise timeoutMs.`;
+        throw new ServerBrowserOperationError({
+          tag: "PreviewAutomationTimeoutError",
+          message: reason,
+          detail: { timeoutMs, reason },
+        });
+      }
+      if (index % 2 === 1) await page.keyboard.insertText(piece);
+      else await page.keyboard.type(piece);
+      typed += piece.length;
+    }
+  }
+};
+
+export const type = async (page: Page, input: PreviewAutomationTypeInput) => {
+  // One deadline across steps keeps the reply inside the broker's grace; Playwright reads 0 as none.
+  const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const deadline = Date.now() + timeoutMs;
+  const remaining = () => Math.max(1, deadline - Date.now());
+  const edit: TextEdit = { text: input.text, clear: input.clear ?? false };
+  const notEditable = () =>
+    new ServerBrowserOperationError({
+      tag: "PreviewAutomationTargetNotEditableError",
+      message: "The target is not an enabled text field, so no text was typed.",
+    });
+  const locator = targetLocator(page, input);
+  if (locator === null) {
+    // A `*:focus` locator needs Playwright's utility world, which some desktop tabs never get.
+    const focused = await pageAnswer(page.evaluate(focusTextTarget, null), remaining());
+    if (focused !== true) {
+      // Focus in a child frame cannot be checked from the top document; edit it there instead.
+      if (await pageAnswer(editFocusedText(page, edit, deadline), remaining())) return;
+      throw notEditable();
+    }
+    if (input.clear) {
+      await page.keyboard.press("ControlOrMeta+A");
+      await page.keyboard.press("Delete");
+    }
+    await typeKeys(page, input.text, timeoutMs, deadline);
+    return;
+  }
+  const frameTimeout = remaining();
+  if (
+    await pageAnswer(
+      locator.evaluate(inChildFrame, undefined, { timeout: frameTimeout }),
+      frameTimeout,
+    )
+  ) {
+    const editTimeout = remaining();
+    const edited = await pageAnswer(
+      locator.evaluate(editTextTarget, edit, { timeout: editTimeout }),
+      editTimeout,
+    );
+    if (!edited) throw notEditable();
+    return;
+  }
+  if (input.clear) {
+    const lockTimeout = remaining();
+    if (
+      await pageAnswer(
+        locator.evaluate(lockedControl, undefined, { timeout: lockTimeout }),
+        lockTimeout,
+      )
+    )
+      throw notEditable();
+    // Pickers and sliders take a value such as 2026-01-31 only from fill, and some reject an empty one.
+    const timeout = remaining();
+    if (await pageAnswer(locator.evaluate(valueOnlyInput, undefined, { timeout }), timeout)) {
+      await locator.fill(input.text, { timeout: remaining() });
+      return;
+    }
+    // fill follows a label to its control and leaves that control focused for the keys.
+    await locator.fill("", { timeout: remaining() });
+    await typeKeys(page, input.text, timeoutMs, deadline);
+    return;
+  }
+  const focused = await locator.evaluate(focusTextTarget, undefined, { timeout: remaining() });
+  if (focused !== true) throw notEditable();
+  await typeKeys(page, input.text, timeoutMs, deadline);
 };
 
 export const hover = async (

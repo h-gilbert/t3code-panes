@@ -24,6 +24,7 @@ import {
   setActivePreviewTab,
 } from "~/previewStateStore";
 
+import { addBrowserSurface } from "./addBrowserSurface";
 import { openPreviewSession } from "./openPreviewSession";
 
 const threadRef = {
@@ -73,6 +74,53 @@ describe("openPreviewSession", () => {
       selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, threadRef)
         ?.source,
     ).toEqual({ kind: "browser", tabId: "tab-1" });
+  });
+
+  it("duplicates a browser into the inset using its URL, profile, viewport and runtime", async () => {
+    const source: PreviewSessionSnapshot = {
+      ...snapshot,
+      profileId: "work",
+      viewport: { _tag: "freeform", width: 800, height: 600 },
+      runtime: "server",
+    };
+    const openPreview = vi.fn(async () =>
+      AsyncResult.success({ ...source, tabId: "duplicate-tab" }),
+    );
+
+    await addBrowserSurface({ threadRef, openPreview, duplicateFrom: source });
+
+    expect(openPreview).toHaveBeenCalledWith({
+      environmentId: threadRef.environmentId,
+      input: {
+        threadId: threadRef.threadId,
+        url: "https://t3.chat/",
+        profileId: "work",
+        viewport: source.viewport,
+        runtime: "server",
+        zoomFactor: 1,
+        colorScheme: "system",
+      },
+    });
+    const miniPlayer = () =>
+      selectThreadPreviewMiniPlayer(usePreviewMiniPlayerStore.getState().byThreadKey, threadRef)
+        ?.source;
+    expect(miniPlayer()).toEqual({ kind: "browser", tabId: "duplicate-tab" });
+
+    const failed = await addBrowserSurface({
+      threadRef,
+      duplicateFrom: source,
+      openPreview: async () => AsyncResult.failure(Cause.fail(new Error("offline"))),
+    });
+    expect(failed._tag).toBe("Failure");
+    expect(miniPlayer()).toEqual({ kind: "browser", tabId: "duplicate-tab" });
+
+    vi.spyOn(previewRuntime, "previewRuntimeFor").mockReturnValue("server");
+    const clientRendered = { ...source, runtime: undefined };
+    await addBrowserSurface({ threadRef, openPreview, duplicateFrom: clientRendered });
+    expect(openPreview).toHaveBeenLastCalledWith({
+      environmentId: threadRef.environmentId,
+      input: expect.not.objectContaining({ runtime: expect.anything() }),
+    });
   });
 
   it.each(["session", "link"] as const)(

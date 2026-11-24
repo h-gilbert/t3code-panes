@@ -40,6 +40,8 @@ export interface ContextMenuItem<T extends string = string> {
   disabled?: boolean;
   header?: boolean;
   icon?: string;
+  /** PNG data URL; takes precedence over `icon`. */
+  iconImage?: string;
   separatorBefore?: boolean;
   checked?: boolean;
   children?: readonly ContextMenuItem<T>[];
@@ -57,6 +59,7 @@ export interface ContextMenuItemSchemaType {
   readonly disabled?: boolean;
   readonly header?: boolean;
   readonly icon?: string;
+  readonly iconImage?: string;
   readonly separatorBefore?: boolean;
   readonly checked?: boolean;
   readonly children?: readonly ContextMenuItemSchemaType[];
@@ -70,6 +73,7 @@ export const ContextMenuItemSchema: Schema.Codec<ContextMenuItemSchemaType> = Sc
   disabled: Schema.optionalKey(Schema.Boolean),
   header: Schema.optionalKey(Schema.Boolean),
   icon: Schema.optionalKey(Schema.String),
+  iconImage: Schema.optionalKey(Schema.String),
   separatorBefore: Schema.optionalKey(Schema.Boolean),
   checked: Schema.optionalKey(Schema.Boolean),
   children: Schema.optionalKey(
@@ -303,6 +307,8 @@ export interface DesktopUpdateState {
   notAppliedVersion?: string;
   /** Off only because a managed policy rules out this channel; switching channels turns it on. */
   channelBlockedByPolicy?: true;
+  /** The check failed only because this build's track differs from the saved `channel`. */
+  trackMismatch?: { readonly buildChannel: DesktopUpdateChannel };
 }
 
 export interface DesktopUpdateReleaseNote {
@@ -347,6 +353,7 @@ export const DesktopUpdateStateSchema = Schema.Struct({
   canRetry: Schema.Boolean,
   notAppliedVersion: Schema.optionalKey(Schema.String),
   channelBlockedByPolicy: Schema.optionalKey(Schema.Literal(true)),
+  trackMismatch: Schema.optionalKey(Schema.Struct({ buildChannel: DesktopUpdateChannelSchema })),
 });
 
 export const DesktopCliCommandStateSchema = Schema.Struct({
@@ -696,7 +703,7 @@ export interface DesktopPreviewRecordingInputEvent {
 
 export interface DesktopPreviewWebviewConfig {
   partition: string;
-  /** Sandboxed with contextIsolation off so the picker preload can read the React DevTools hook. */
+  /** Sandboxed and context-isolated; the picker preload reaches React through a function it runs in the page. */
   webPreferences: string;
   /** Absolute file:// preload URL; null requires disabling element picking. */
   preloadUrl: string | null;
@@ -1294,6 +1301,22 @@ export const DesktopPreviewDownloadedFileSchema = Schema.Struct({
 });
 export type DesktopPreviewDownloadedFile = typeof DesktopPreviewDownloadedFileSchema.Type;
 
+/** `value` is the resolved locale from `prepare` and the transcript from `transcribe`. */
+export const DesktopAppleSpeechResultSchema = Schema.Union([
+  Schema.Struct({ ok: Schema.Literal(true), value: Schema.String }),
+  Schema.Struct({
+    ok: Schema.Literal(false),
+    code: Schema.Literals(["unavailable", "unsupported-locale", "failed"]),
+  }),
+]);
+export type DesktopAppleSpeechResult = typeof DesktopAppleSpeechResultSchema.Type;
+
+export const DesktopAppleSpeechTranscribeInputSchema = Schema.Struct({
+  locale: Schema.String.check(Schema.isMaxLength(64)),
+  // 16 kHz mono Float32 PCM, at most five minutes.
+  pcm: Schema.Uint8Array,
+});
+
 /**
  * A System Settings pane the app can deep-link to. The identifier crosses IPC
  * rather than a URL, so the renderer can only reach these known destinations.
@@ -1446,6 +1469,12 @@ export interface DesktopBridge {
     onRequest: (listener: (request: DesktopAppActivationRequest) => void) => () => void;
   };
   preview: DesktopPreviewBridge;
+  /** On-device dictation through macOS 26 SpeechAnalyzer; absent in older desktop builds. */
+  appleSpeech?: {
+    supportedLocales: () => Promise<readonly string[]>;
+    prepare: (locale: string) => Promise<DesktopAppleSpeechResult>;
+    transcribe: (input: { locale: string; pcm: Uint8Array }) => Promise<DesktopAppleSpeechResult>;
+  };
 }
 
 /** Renderer callback invoked by Electron with a fresh user gesture before display-media capture. */

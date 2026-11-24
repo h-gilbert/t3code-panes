@@ -5,11 +5,14 @@ import type { RelayManagedEndpointRuntimeConfig } from "@t3tools/contracts/relay
 import * as Random from "effect/Random";
 import * as EnvironmentKeys from "./cloud/environmentKeys.ts";
 import * as AssetSigner from "./assets/AssetSigner.ts";
+import * as WorkspacePreviewRevisions from "./assets/WorkspacePreviewRevisions.ts";
 import * as DatabaseStorage from "./persistence/DatabaseStorage.ts";
 import * as StorageCleanup from "./storageCleanup.ts";
 import * as PullRequestSyncReactor from "./orchestration-v2/PullRequestSyncReactor.ts";
 import * as PullRequestWatchReactor from "./orchestration-v2/PullRequestWatchReactor.ts";
 import * as DelegatedTaskQuestionReactor from "./orchestration-v2/DelegatedTaskQuestionReactor.ts";
+import * as MilestoneHub from "./milestones/MilestoneHub.ts";
+import * as OrchestrationMilestones from "./milestones/OrchestrationMilestones.ts";
 // Effect wraps this raw Node HTTP server after its startup and write-error guards attach.
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeHttp from "node:http";
@@ -18,6 +21,7 @@ import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { EnvironmentHttpApi, type RepositoryIdentity } from "@t3tools/contracts";
+import * as FeatureFlags from "@t3tools/shared/FeatureFlags";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Cause from "effect/Cause";
 import * as Duration from "effect/Duration";
@@ -31,7 +35,6 @@ import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as HostPowerMonitor from "./background/HostPowerMonitor.ts";
-import * as NonBlockingSpawner from "./process/NonBlockingSpawner.ts";
 import * as KeepAwake from "./background/KeepAwake.ts";
 import * as ServerConfig from "./config.ts";
 import { withRootRequestSpans, withUntracedRequests } from "./http.ts";
@@ -46,6 +49,7 @@ import { fixPath } from "./os-jank.ts";
 import * as Ws from "./ws.ts";
 import * as AgentScopeLive from "./process/agentScope.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
+import * as ProcessLauncher from "./process/ProcessLauncher.ts";
 import * as SpawnWorker from "./process/SpawnWorker.ts";
 import * as NodePtyAdapter from "./terminal/NodePtyAdapter.ts";
 import * as PullRequestHttp from "./pullRequest/http.ts";
@@ -76,6 +80,7 @@ import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderS
 import * as OpenCodeRuntime from "@t3tools/provider-opencode/server/OpenCodeRuntime";
 import * as OpenCodeServerLedger from "@t3tools/provider-opencode/server/OpenCodeServerLedger";
 import * as ProviderHostLive from "./provider/ProviderHostLive.ts";
+import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import * as DocumentText from "./provider/DocumentText.ts";
 import * as AcpRegistrySupport from "@t3tools/provider-acp-registry/server/AcpRegistrySupport";
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
@@ -88,14 +93,18 @@ import * as TextGeneration from "./textGeneration/TextGeneration.ts";
 import * as SecretCheck from "./secrets/SecretCheck.ts";
 import * as SecretResolver from "./secrets/SecretResolver.ts";
 import * as ProviderInstanceRegistryHydration from "./provider/ProviderInstanceRegistryHydration.ts";
+import * as ProviderHostPathWatcher from "./provider/ProviderHostPathWatcher.ts";
 import * as ProjectSettingsOverrideSweep from "./provider/ProjectSettingsOverrideSweep.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as McpHttpServer from "./mcp/McpHttpServer.ts";
 import * as PeerForwarding from "./peer/PeerForwarding.ts";
 import * as RemoteDelegation from "./peer/RemoteDelegation.ts";
+import * as PeerClientPairing from "./peer/PeerClientPairing.ts";
+import * as PeerClientPairingHttp from "./peer/http.ts";
 import * as PeerLinkRequests from "./peer/PeerLinkRequests.ts";
 import * as PeerLinks from "./peer/PeerLinks.ts";
 import * as PeerMcpClient from "./peer/PeerMcpClient.ts";
+import * as PeerThreadRelay from "./peer/PeerThreadRelay.ts";
 import * as McpSessionRegistry from "./mcp/McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as DeviceService from "./device/DeviceService.ts";
@@ -138,6 +147,9 @@ import * as T3ProjectFileLoader from "./project/T3ProjectFileLoader.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import * as LinkedCredentialVault from "./secrets/LinkedCredentialVault.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
+import * as WorkspaceFolders from "./workspace/WorkspaceFolders.ts";
+import * as TaskFolders from "./workspace/TaskFolders.ts";
+import * as TaskFolderStore from "./workspace/TaskFolderStore.ts";
 import * as KnownWorkspaces from "./workspace/KnownWorkspaces.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
@@ -184,6 +196,7 @@ import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import * as EnvironmentAuthPolicy from "./auth/EnvironmentAuthPolicy.ts";
 import * as CloudHttp from "./cloud/http.ts";
 import * as GuestHttp from "./guest/http.ts";
+import * as LinkThreadHttp from "./peer/linkThreadHttp.ts";
 import * as CloudLink from "./cloud/CloudLink.ts";
 import * as ConnectReachability from "./cloud/ConnectReachability.ts";
 import { pendingServiceUpdateExists } from "./cloud/updateHandoff.ts";
@@ -222,6 +235,7 @@ import * as UsageService from "./usage/UsageService.ts";
 import * as CodexUsageHistory from "./usage/CodexUsageHistory.ts";
 import * as RuntimeLayer from "./orchestration-v2/runtimeLayer.ts";
 import * as ThreadViewers from "./orchestration-v2/ThreadViewers.ts";
+import * as WorkflowForge from "./workflows/WorkflowForge.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as ThreadSearch from "./orchestration-v2/ThreadSearch.ts";
 import * as ThreadSettlementService from "./orchestration-v2/ThreadSettlementService.ts";
@@ -403,11 +417,11 @@ const layerHttpServer = Layer.unwrap(
 ).pipe(
   Layer.provide(ManagedPolicy.layer),
   // NodeHttpServer.layer also outputs NodeServices, whose spawner would shadow the wrapped one.
-  (layer) => NonBlockingSpawner.layer.pipe(Layer.provideMerge(layer)),
+  (layer) => ProcessLauncher.layerServer.pipe(Layer.provideMerge(layer)),
 );
 
 const layerPlatformServices = DocumentText.layer.pipe(
-  Layer.provideMerge(NonBlockingSpawner.layer),
+  Layer.provideMerge(ProcessLauncher.layerServer),
   Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, layerSpawner)),
 );
 
@@ -563,6 +577,9 @@ const layerWorkspace = Layer.mergeAll(
   WorkspacePaths.layer,
   layerWorkspaceEntries,
   layerWorkspaceFileSystem,
+  WorkspaceFolders.layer.pipe(
+    Layer.provide(Layer.merge(ProjectStore.layer, TaskFolderStore.layer)),
+  ),
 );
 
 const layerProjectFaviconResolver = ProjectFaviconResolver.layer.pipe(
@@ -617,8 +634,28 @@ const layerScheduledTaskWebhookOrigin = Layer.effect(
   }),
 );
 
+const layerTaskFolders = TaskFolders.layer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      TaskFolderStore.layer,
+      ProjectStore.layer,
+      ProjectionStoreV2.layer,
+      VcsProcess.layer,
+    ),
+  ),
+  Layer.provide(layerGitWorkflow),
+);
+
 const layerOrchestrationV2Runtime = RuntimeLayer.layerProduction.pipe(
+  Layer.provide(
+    WorkflowForge.layer.pipe(
+      Layer.provide(layerIssueService),
+      Layer.provide(layerPullRequestService),
+      Layer.provide(RuntimeLayer.layerProjectService),
+    ),
+  ),
   Layer.provide(UsageLimitSources.layerResetFallback),
+  Layer.provide(layerTaskFolders),
   Layer.provide(layerScheduledTaskWebhookOrigin),
   Layer.provide(ProviderUsageAnalytics.layer),
   Layer.provide(layerCheckpointStore),
@@ -702,6 +739,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
       notifications.start(),
     ),
   ).pipe(Layer.provide(SelfHostedNotifications.layer.pipe(Layer.provide(ServerSecretStore.layer)))),
+  ProviderHostPathWatcher.layer.pipe(Layer.provide(layerDesktopTelemetryReceiver)),
   // Asks T3 Connect to deliver webhooks it held while this environment was offline.
   HeldHooksWaker.layer,
   layerThreadSettlementWorker,
@@ -741,6 +779,11 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
       yield* service.start();
     }),
   ).pipe(Layer.provide(DelegatedTaskQuestionReactor.layer), Layer.provide(ProjectionStoreV2.layer)),
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      yield* (yield* OrchestrationMilestones.OrchestrationMilestones).start();
+    }),
+  ).pipe(Layer.provide(OrchestrationMilestones.layer), Layer.provide(ProjectionStoreV2.layer)),
   // Subscribes to `account.rate-limits.updated` so usage bars track live
   // telemetry instead of waiting for the next status probe.
   ProviderUsageLimitsIngestion.layer,
@@ -748,47 +791,53 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   ProviderInstallation.layer,
   ReplayMarkers.layer,
   Layer.effectDiscard(ProjectSettingsOverrideSweep.sweep),
-).pipe(
-  Layer.provideMerge(layerOrchestrationApplication),
-  // Shares the browser host's vault when it is a linked environment; one link client for the server.
-  Layer.provideMerge(
-    LinkedCredentialVault.layer.pipe(
-      Layer.provide(PeerMcpClient.layer),
-      Layer.provideMerge(PeerLinks.layer),
-    ),
-  ),
-  Layer.provideMerge(RuntimeLayer.layerEventInfrastructure),
-  Layer.provideMerge(Layer.merge(ProjectStore.layer, ThreadSearch.layer)),
-  Layer.provideMerge(SecretCheck.layer),
-  Layer.provideMerge(SecretResolver.layer),
-  // Above the settings it writes when a theme is applied.
-  Layer.provideMerge(EnvironmentTheme.layer),
-  Layer.provideMerge(layerServerSettings),
-  Layer.provideMerge(layerSourceControlProviderRegistry),
-  Layer.provideMerge(layerGit),
-  Layer.provideMerge(layerVcs),
-  Layer.provideMerge(Layer.mergeAll(layerTerminal, layerPreview, layerDevice)),
-  Layer.provideMerge(layerPersistence),
-  Layer.provideMerge(Layer.mergeAll(Keybindings.layer, UsageLimitSources.layer)),
-  Layer.provideMerge(ProviderRegistry.layer),
-  Layer.provideMerge(
-    ProviderInstanceRegistryHydration.layer.pipe(Layer.provide(SqlitePersistence.layerConfig)),
-  ),
-  // One gate for the server, below hydration so the Claude adapter sees it: layers memoize by
-  // reference, so the runtime layer shares it.
-  Layer.provideMerge(ProviderInstallationGate.layer),
-  // Provider hydration builds the Claude runner, which reports agents to the same scanner the
-  // terminal and preview layers share.
-  Layer.provideMerge(layerPortScanner),
-  Layer.provideMerge(
-    Layer.mergeAll(
-      AntigravityInstallation.AntigravityInstallation.layer.pipe(
-        Layer.provide(layerServerSettings),
+)
+  .pipe(
+    Layer.provideMerge(layerOrchestrationApplication),
+    // Shares the browser host's vault when it is a linked environment; one link client for the server.
+    Layer.provideMerge(
+      LinkedCredentialVault.layer.pipe(
+        Layer.provide(PeerMcpClient.layer),
+        Layer.provideMerge(PeerLinks.layer),
       ),
-      CodexInstallation.CodexInstallation.layer,
     ),
-  ),
-);
+    // One hub, which the feeders above and the workflow store inside the runtime publish to.
+    Layer.provideMerge(MilestoneHub.layer),
+    Layer.provideMerge(layerTaskFolders),
+    Layer.provideMerge(RuntimeLayer.layerEventInfrastructure),
+    Layer.provideMerge(Layer.merge(ProjectStore.layer, ThreadSearch.layer)),
+    Layer.provideMerge(SecretCheck.layer),
+    Layer.provideMerge(SecretResolver.layer),
+    // Above the settings it writes when a theme is applied.
+    Layer.provideMerge(EnvironmentTheme.layer),
+  )
+  .pipe(
+    Layer.provideMerge(layerServerSettings),
+    Layer.provideMerge(layerSourceControlProviderRegistry),
+    Layer.provideMerge(layerGit),
+    Layer.provideMerge(layerVcs),
+    Layer.provideMerge(Layer.mergeAll(layerTerminal, layerPreview, layerDevice)),
+    Layer.provideMerge(layerPersistence),
+    Layer.provideMerge(Layer.mergeAll(Keybindings.layer, UsageLimitSources.layer)),
+    Layer.provideMerge(ProviderRegistry.layer),
+    Layer.provideMerge(
+      ProviderInstanceRegistryHydration.layer.pipe(Layer.provide(SqlitePersistence.layerConfig)),
+    ),
+    // One gate for the server, below hydration so the Claude adapter sees it: layers memoize by
+    // reference, so the runtime layer shares it.
+    Layer.provideMerge(ProviderInstallationGate.layer),
+    // Provider hydration builds the Claude runner, which reports agents to the same scanner the
+    // terminal and preview layers share.
+    Layer.provideMerge(layerPortScanner),
+    Layer.provideMerge(
+      Layer.mergeAll(
+        AntigravityInstallation.AntigravityInstallation.layer.pipe(
+          Layer.provide(layerServerSettings),
+        ),
+        CodexInstallation.CodexInstallation.layer,
+      ),
+    ),
+  );
 
 const layerRuntimeCoreDependencies = layerRuntimeCoreDependenciesBase.pipe(
   Layer.provideMerge(layerPtyAdapter),
@@ -821,7 +870,9 @@ const layerRuntimeCoreDependencies = layerRuntimeCoreDependenciesBase.pipe(
   Layer.provideMerge(CodexManagedTokenBroker.layer),
   Layer.provideMerge(layerServerEnvironment),
   Layer.provideMerge(layerAuth),
-  Layer.provideMerge(Layer.mergeAll(AssetSigner.layer, EnvironmentKeys.layer)),
+  Layer.provideMerge(
+    Layer.mergeAll(AssetSigner.layer, EnvironmentKeys.layer, WorkspacePreviewRevisions.layer),
+  ),
   Layer.provideMerge(ServerSecretStore.layer),
   Layer.provideMerge(
     Layer.mergeAll(
@@ -867,6 +918,7 @@ const layerMakeRoutes = Layer.mergeAll(
     HttpApiBuilder.layer(EnvironmentHttpApi).pipe(
       Layer.provide(AuthHttp.layer),
       Layer.provide(McpOAuthHttp.layer.pipe(Layer.provide(McpOAuth.layer))),
+      Layer.provide(PeerClientPairingHttp.layer.pipe(Layer.provide(PeerClientPairing.layerIssuer))),
       Layer.provide(CloudHttp.layer),
       Layer.provide(OrchestrationHttp.layer),
       Layer.provide(PullRequestHttp.layer),
@@ -880,11 +932,13 @@ const layerMakeRoutes = Layer.mergeAll(
         ),
       ),
       Layer.provide(AuthHttp.layerAuthenticatedAuth),
+      Layer.provide(ServerHttp.layerApiBodyLimit),
     ),
     ServerHttp.layerOtlpTracesProxyRoute,
     ServerHttp.layerAssetRoute,
     ServerHttp.layerAttachmentUploadRoute,
     GuestHttp.layer,
+    LinkThreadHttp.layer,
     DeviceHubProxy.layer,
     ServerBrowserStream.routeLayer,
     DesktopBrowserTransport.routeLayer,
@@ -921,9 +975,9 @@ const layerMakeRoutes = Layer.mergeAll(
     ),
   ),
   Layer.provide(PreviewBrowser.layer),
-  // Links to other environments, shared by Settings (WebSocket) and agents (/mcp).
+  // Links to other environments, shared by clients (WebSocket) and agents (/mcp).
   Layer.provide(
-    PeerForwarding.layer.pipe(
+    Layer.mergeAll(PeerForwarding.layer, PeerThreadRelay.layer, PeerClientPairing.layer).pipe(
       Layer.provideMerge(PeerMcpClient.layer),
       Layer.provideMerge(PeerLinks.layer),
     ),
@@ -938,10 +992,10 @@ const layerMakeRoutes = Layer.mergeAll(
   Layer.provide(layerServerSettings),
   Layer.provide(PreviewAutomationBroker.layer),
   Layer.provide(ServerSelfUpdate.layer.pipe(Layer.provide(layerDesktopAppUpdate))),
+  Layer.provide(ProviderMaintenanceRunner.layer),
   Layer.provide(layerCommandReadiness),
   Layer.provide(ServerHttp.layerBrowserApiCors),
   Layer.provide(ServerHttp.layerHttpCompression),
-  Layer.provide(ServerHttp.layerUnloggedSignedRequests),
 );
 
 const layerMakeServer = Layer.unwrap(
@@ -1422,6 +1476,7 @@ const layerMakeServer = Layer.unwrap(
       Layer.provide(VcsProcess.layer),
       Layer.provideMerge(AgentScopeLive.layer),
       Layer.provideMerge(layerPlatformServices),
+      Layer.provideMerge(FeatureFlags.layer),
       Layer.provide(Layer.succeed(HostProcess.InvokedAs, invokedAs)),
     );
   }),
@@ -1429,5 +1484,7 @@ const layerMakeServer = Layer.unwrap(
 
 export const runServer = Layer.launch(
   // For the layers above whose spawner requirement is not met by one of them.
-  layerMakeServer.pipe(Layer.provide(NonBlockingSpawner.layer.pipe(Layer.provide(layerSpawner)))),
+  layerMakeServer.pipe(
+    Layer.provide(ProcessLauncher.layerServer.pipe(Layer.provide(layerSpawner))),
+  ),
 );

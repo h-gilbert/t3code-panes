@@ -99,6 +99,7 @@ import {
   useAnyEnvironmentHiding,
   useQuietThreadShell,
   useThreadDetailExists,
+  useThreadError,
   useProjects,
   useServerConfigs,
   useThreadRefs,
@@ -245,6 +246,7 @@ function WorkspaceThreadPane({
   const serverThreadShellExists = useThreadShellExists(threadRef);
   const serverThreadDetailExists = useThreadDetailExists(threadRef);
   const serverThreadStatus = useThreadStatus(threadRef);
+  const serverThreadSyncError = useThreadError(threadRef);
   const hiddenKeys = useAtomValue(environmentThreadShells.hiddenThreadKeysAtom);
   const hidingAnywhere = useAnyEnvironmentHiding();
   const unlistedThreadDetail = useEnvironmentThread(
@@ -290,6 +292,7 @@ function WorkspaceThreadPane({
     detailExists: serverThreadDetailExists,
     shellExists: serverThreadShellExists,
     status: serverThreadStatus,
+    hasError: serverThreadSyncError !== null,
   });
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- drops queued file inserts after the environment confirms the thread is missing

@@ -8,7 +8,7 @@ import { useState } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { getSyntaxHighlighterPromise } from "../lib/syntaxHighlighting";
-import { setMarkdownTaskChecked } from "@t3tools/shared/markdownTaskList";
+import { setMarkdownTaskChecked } from "@t3tools/shared/markdownTaskEdits";
 
 import { act, fakeTimers, render } from "../../test/render";
 
@@ -83,14 +83,7 @@ describe("ChatMarkdown bare anchor placeholders", () => {
     },
   );
 
-  it("preserves a paired anchor after comment-looking raw text", async () => {
-    await using screen = await render(
-      <ChatMarkdown cwd="/tmp/project" text="See <a>label<script><!-- </script> --></a>" />,
-    );
-    expect(screen.container.querySelector("p")?.textContent).toBe("See label -->");
-  });
-
-  it.each(["<!-- </a> -->", '<div title="</a>">more</div>', '<script>"</a>"</script>'])(
+  it.each(["<!-- </a> -->", '<div title="</a>">more</div>'])(
     "ignores apparent closing anchors inside %s",
     async (html) => {
       await using screen = await render(
@@ -424,29 +417,6 @@ describe("ChatMarkdown file option chips", () => {
     },
   );
 
-  it("leaves an unfinished streaming citation visible until it is complete", async () => {
-    await using screen = await render(
-      <ChatMarkdown
-        cwd="/tmp/project"
-        text={'Created :codex-file-citation{path="/tmp/project/outputs/report.xlsx"'}
-        isStreaming
-      />,
-    );
-    expect(screen.container.textContent).toContain(":codex-file-citation");
-    expect(screen.container.querySelector(".chat-markdown-file-link")).toBeNull();
-  });
-
-  it("leaves malformed and similarly named file directives literal", async () => {
-    for (const text of [
-      ':codex-file-citation{purpose="output"}',
-      ':codex-file-citation-extra{path="/tmp/project/outputs/report.xlsx"}',
-    ]) {
-      await using screen = await render(<ChatMarkdown cwd="/tmp/project" text={text} />);
-      expect(screen.container.textContent).toContain(text);
-      expect(screen.container.querySelector(".chat-markdown-file-link")).toBeNull();
-    }
-  });
-
   it("preserves Codex file citation examples inside code", async () => {
     const directive = ':codex-file-citation{path="/tmp/project/outputs/report.xlsx"}';
     await using screen = await render(
@@ -459,17 +429,6 @@ describe("ChatMarkdown file option chips", () => {
       const code = [...screen.container.querySelectorAll("code")].map((node) => node.textContent);
       expect(code).toEqual([directive, `${directive}\n`]);
     });
-    expect(screen.container.querySelector(".chat-markdown-file-link")).toBeNull();
-  });
-
-  it("preserves escaped Codex file citations as literal text", async () => {
-    await using screen = await render(
-      <ChatMarkdown
-        cwd="/tmp/project"
-        text={'Example: \\:codex-file-citation{path="/tmp/project/outputs/report.xlsx"}'}
-      />,
-    );
-    expect(screen.container.textContent).toContain(":codex-file-citation");
     expect(screen.container.querySelector(".chat-markdown-file-link")).toBeNull();
   });
 

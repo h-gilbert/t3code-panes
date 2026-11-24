@@ -55,6 +55,11 @@ requests approval in the thread. Review the target environment and proposed chan
 approve or decline. Every request requires approval, including in full access mode. Declining
 keeps settings unchanged. Device and browser access changes may require a new turn.
 
+## Projects with several repositories
+
+A project covers every repository inside its folder, and any folder you add under **Settings →
+Projects → Repositories**; see [Projects with several repositories](multi-repo-projects.md).
+
 ## Pin and archive projects
 
 Pinned projects come first in the project pickers: the project picker on a new thread, the
@@ -105,6 +110,9 @@ project starts a new thread there on its next run.
 
 Deleting a thread also deletes tasks that post into that thread. Tasks that start
 a new thread on each run survive deletion of their previous threads.
+An archived thread refuses messages, so a task that posts into one stays on and fails
+each run until you unarchive the thread or pick another destination. To set a task's thread
+aside without breaking it, settle the thread; see [Settle or archive](thread-sidebar.md#settle-or-archive).
 
 You can edit, pause, resume, run immediately, or delete a task from the list.
 Webhook tasks only run when their URL is called, so they can't be run

@@ -1,4 +1,4 @@
-import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
+import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/assistantInsights";
 import { MessageId, type TurnItemId } from "@t3tools/contracts";
 import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thread-workflows";
 import { agentWorkingDirectories } from "@t3tools/client-runtime/workspace-basename-lookup";
@@ -23,7 +23,6 @@ import { AssistantCitationSource } from "./AssistantCitationSource";
 import { resolveAssistantMessageCopyState } from "./MessagesTimeline.logic";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
-
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../timestampFormat";
 import { useV2ItemSupport } from "../../state/v2ItemSupport";
 import { TimelineRowCtx, TimelineRowActivityCtx, type TimelineRow } from "./timelineRowContext";
@@ -371,7 +370,7 @@ export function HtmlRenderTimelineRow({
     return <div className="min-w-0 px-1">{ctx.renderHtmlRender(row)}</div>;
   }
   return (
-    <div className="min-w-0 px-1">
+    <div className="html-preview-lane min-w-0 px-1">
       <HtmlRenderFrame
         key={row.htmlRender.attachmentId}
         environmentId={ctx.activeThreadEnvironmentId}

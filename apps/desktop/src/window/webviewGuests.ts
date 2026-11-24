@@ -30,7 +30,7 @@ export function hardenWebviewGuests(
     webPreferences.sandbox = true;
     webPreferences.nodeIntegration = false;
     webPreferences.nodeIntegrationInSubFrames = false;
-    webPreferences.contextIsolation = false;
+    webPreferences.contextIsolation = true;
     webPreferences.focusOnNavigation = false;
     webPreferences.disableHtmlFullscreenWindowResize = true;
     if (passkeyBridgeEnabled) {
