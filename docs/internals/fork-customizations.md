@@ -131,7 +131,9 @@ a pane.
   tabs like a remote client (`rendersServerTabNatively`); the host gets
   `?browserCapture=host`, uses a minimal bootstrap (`startBrowserCaptureHostServices` without
   the router or app-wide coordinators), is created lazily only when this desktop hosts server
-  tabs or remote browser environments, and closes after idle when unused.
+  tabs or remote browser environments, and closes after idle when unused. When its renderer
+  dies the host is destroyed and recreated; a window kept open with a dead renderer left
+  every `preview_open` reporting the browser host offline.
 
 Simulator and emulator previews open inset inside their owning thread, including embedded panes.
 Physical devices stay hidden; their automation sessions and screenshots remain available.
