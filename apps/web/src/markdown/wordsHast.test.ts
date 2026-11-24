@@ -112,6 +112,10 @@ const CASES: ReadonlyArray<readonly [markdown: string, html: string]> = [
     '<p dir="ltr"><a href="file:///C:/work/a.ts">file</a> and C:\\Users\\me\\.t3\\shot.png and *kept*</p>',
   ],
   [
+    String.raw`[share](\\wsl.localhost\Ubuntu\.t3\a.md) ![shot](<\\srv\share\my shot.png>)`,
+    String.raw`<p dir="ltr"><a href="\\wsl.localhost\Ubuntu\.t3\a.md">share</a> <img src="\\srv\share\my shot.png" alt="shot"></p>`,
+  ],
+  [
     '```ts title="a.ts"\nconst a = 1;\n```',
     '<pre><code class="language-ts" data-code-meta="title=&#x22;a.ts&#x22;">const a = 1;\n</code></pre>',
   ],

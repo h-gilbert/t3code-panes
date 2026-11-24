@@ -13,7 +13,8 @@ import type { ReferenceAutolink } from "@t3tools/client-runtime/source-control-c
 import { expandGithubEmojiAliases } from "@t3tools/client-runtime/pull-request-markdown";
 import { resolveChangeRequestMediaUrl } from "@t3tools/client-runtime/pull-request-references";
 import { GITHUB_ALERT_MARKER } from "@t3tools/shared/markdownGithubAlerts";
-import { absoluteFilePathMatches } from "@t3tools/shared/markdownLinks";
+import { absoluteFilePathMatches, extractMarkdownLinkHrefs } from "@t3tools/shared/markdownLinks";
+import { isNetworkPath } from "@t3tools/shared/path";
 import {
   rehypeNormalizeLocalEditorLinks,
   rehypePreserveImageSourceMeta,
@@ -304,6 +305,27 @@ const windowsPath = (url: string) => {
   const path = url.replace(/%5C/gi, "\\");
   return /^[A-Za-z]:[\\/]/.test(path) ? path : undefined;
 };
+
+const COMMONMARK_ESCAPE = /\\([!-/:-@[-`{-~])/g;
+
+/**
+ * Words keeps drive paths as written, but reads the `\\` and `\.` in `\\host\share\.t3` as
+ * escapes. A UNC destination keeps its written text when that text is what Words parsed.
+ */
+function writtenUncDestination(node: Element, parsed: string, walk: Walk): string | undefined {
+  // Escapes leave a backslashed UNC destination starting with one backslash; skip the rest.
+  if (!node.position || !/^(?:\\|%5C)/i.test(parsed)) return undefined;
+  const written = extractMarkdownLinkHrefs(
+    walk.source.slice(node.position.start.offset, node.position.end.offset),
+  )[0];
+  if (!written || !isNetworkPath(written) || written.includes("&")) return undefined;
+  try {
+    const unescaped = decodeURIComponent(written.replace(COMMONMARK_ESCAPE, "$1"));
+    return unescaped === decodeURIComponent(parsed) ? written : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 const isElement = (node: unknown, tagName?: string): node is Element =>
   (node as Element | undefined)?.type === "element" &&
@@ -669,13 +691,18 @@ function transform(node: Root | Element, walk: Walk, inLink: boolean, inCode: bo
     } else if (tagName === "a" && typeof props.href === "string") {
       // remarkNormalizeLinksAndTagInlineCode: a Windows drive path links as a file URL.
       const path = windowsPath(props.href);
-      props.href = path ? `file:///${path.replaceAll("\\", "/")}` : normalizeUri(props.href);
+      props.href = path
+        ? `file:///${path.replaceAll("\\", "/")}`
+        : (writtenUncDestination(child, props.href, walk) ?? normalizeUri(props.href));
     } else if (tagName === "img" && typeof props.src === "string") {
       const changeRequest = walk.options.extensions.changeRequest;
       const src = changeRequest
         ? resolveChangeRequestMediaUrl(props.src, changeRequest.repositoryUrl)
         : props.src;
-      props.src = windowsPath(src) ?? normalizeUri(src);
+      props.src =
+        windowsPath(src) ??
+        (changeRequest ? undefined : writtenUncDestination(child, src, walk)) ??
+        normalizeUri(src);
     } else if (tagName === "code" && isElement(node, "pre")) {
       if (props.dataMeta !== undefined) {
         props.dataCodeMeta = props.dataMeta;
