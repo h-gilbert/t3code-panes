@@ -173,15 +173,14 @@ function renderContent(
  * without one become static HTML, which the browser builds without React reconciling each node.
  */
 export function renderHastWithIslands(tree: Root, options: MarkdownIslandOptions): ReactNode {
-  // The same elements again let React skip the block; islands still follow their context.
-  let signature = options.variant;
+  // Not cached by tree: development elements keep their owner's fiber, so a module cache of them
+  // would keep every unmounted view that rendered the tree. Callers memoize per mounted instance.
   const plan: Plan = { islands: new Set(), ancestors: new Set() };
   const visit = (node: Root | Element): boolean => {
     let below = false;
     for (const child of node.children) {
       if (child.type !== "element") continue;
       const island = options.isIsland(child);
-      signature += island ? "1" : "0";
       if (island) {
         plan.islands.add(child);
         below = true;
@@ -195,19 +194,8 @@ export function renderHastWithIslands(tree: Root, options: MarkdownIslandOptions
     return below;
   };
   visit(tree);
-  const cached = renderedTrees.get(tree);
-  if (cached?.signature === signature && cached.components === options.components) {
-    return cached.node;
-  }
-  const node = tree.children.map((child, index) => renderContent(child, index, options, plan));
-  renderedTrees.set(tree, { signature, components: options.components, node });
-  return node;
+  return tree.children.map((child, index) => renderContent(child, index, options, plan));
 }
-
-const renderedTrees = new WeakMap<
-  Root,
-  { signature: string; components: Partial<Components>; node: ReactNode }
->();
 
 export function withProperties(node: Element, properties: Properties): Element {
   return { ...node, properties: { ...node.properties, ...properties } };
