@@ -236,7 +236,8 @@ describe("ChatMarkdown workspace images", () => {
       {
         _tag: "media-file",
         threadId: threadRef.threadId,
-        path: String.raw`C:\Users\shawn\.t3\_build\workspace-image.svg`,
+        // Drive paths resolve with forward slashes, as Windows accepts; `\_` stays a separator.
+        path: "C:/Users/shawn/.t3/_build/workspace-image.svg",
       },
       {
         _tag: "media-file",

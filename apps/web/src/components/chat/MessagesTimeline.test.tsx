@@ -18,7 +18,7 @@ import {
 // oxlint-disable-next-line t3code/require-disposable-render -- The mock LegendList tests drive a Node renderer without browser globals.
 import { act as reactAct } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { create, type ReactTestRenderer } from "react-test-renderer";
+import { create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
 import { shouldUseRestingComposerLayout } from "../composerFooterLayout";
 import { useComposerFocusState } from "./useComposerFocusState";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -310,6 +310,36 @@ async function act(callback: () => unknown) {
     globalThis.IS_REACT_ACT_ENVIRONMENT = previous;
   }
 }
+
+/**
+ * Clicks `node` as a browser would: the event bubbles through its host ancestors, so a header
+ * line whose row owns the click handler toggles like it does for users.
+ */
+function click(node: ReactTestInstance) {
+  const propagation = { stopped: false };
+  const event = {
+    button: 0,
+    metaKey: false,
+    ctrlKey: false,
+    shiftKey: false,
+    altKey: false,
+    target: node,
+    currentTarget: node,
+    nativeEvent: new Event("click"),
+    preventDefault: () => {},
+    stopPropagation: () => {
+      propagation.stopped = true;
+    },
+  };
+  let handled = false;
+  for (let target: ReactTestInstance | null = node; target; target = target.parent) {
+    if (propagation.stopped) break;
+    if (typeof target.type !== "string" || typeof target.props.onClick !== "function") continue;
+    handled = true;
+    target.props.onClick({ ...event, currentTarget: target });
+  }
+  if (!handled) throw new Error("Nothing handles a click on this node");
+}
 function stubDomGlobals() {
   const classList = {
     add: () => {},
@@ -347,6 +377,8 @@ function stubDomGlobals() {
   });
   vi.stubGlobal("document", {
     querySelectorAll: () => [],
+    addEventListener: () => {},
+    removeEventListener: () => {},
     documentElement: {
       classList,
       offsetHeight: 0,
@@ -493,11 +525,11 @@ describe("MessagesTimeline", () => {
         );
       });
       const row = renderer!.root.findByProps({ "aria-label": "Example tool" });
-      await act(() => row.props.onClick());
+      await act(() => click(row));
       const visible = JSON.stringify(renderer!.toJSON());
       expect(visible).toContain("KEEP_TOOL_INPUT");
       expect(visible).not.toContain("RAW_CACHED_TOOL_OUTPUT");
-      await act(() => row.props.onClick());
+      await act(() => click(row));
       expect(JSON.stringify(renderer!.toJSON())).not.toContain("KEEP_TOOL_INPUT");
     } finally {
       await act(() => renderer?.unmount());
@@ -543,7 +575,7 @@ describe("MessagesTimeline", () => {
       const markup = JSON.stringify(renderer!.toJSON());
       // Heading + accessible label.
       expect(markup.match(/Which repository\?/g)).toHaveLength(2);
-      await act(() => questionToggle.props.onClick());
+      await act(() => click(questionToggle));
       // Expanded history adds a third occurrence alongside heading and label.
       expect(JSON.stringify(renderer!.toJSON()).match(/Which repository\?/g)).toHaveLength(3);
     } finally {
@@ -627,13 +659,13 @@ describe("MessagesTimeline", () => {
         // The user scrolled up to read, so the composer is resting.
         await act(() => composerState!.setIsComposerScrollCollapsed(true));
         const toggle = renderer!.root.findByProps({ "aria-expanded": false });
-        await act(() => toggle.props.onClick());
+        await act(() => click(toggle));
         await flushFrame();
         await flushFrame();
         expect(isResting).toBe(true);
 
         timelineIsAtEnd = false;
-        await act(() => toggle.props.onClick());
+        await act(() => click(toggle));
         timelineIsAtEnd = isAtEnd;
         await act(() => legendListTestState.onSize?.());
         await flushFrame();
@@ -817,12 +849,13 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain("&lt;global-agent-instructions scope=&quot;workspace&quot;&gt;");
-    expect(markup).toContain(
-      "Before &lt;nested data-value=&quot;a&amp;b&quot;&gt;inside&lt;/nested&gt; after",
-    );
-    expect(markup).toContain("&lt;/global-agent-instructions&gt; in your context?");
-    expect(markup).toContain("Comparison: 2 &lt; 3 and 5 &gt; 4.");
+    // Markdown islands are HTML strings, which leave quotes in text unescaped.
+    const text = markup.replaceAll("&quot;", '"');
+    expect(text).toContain('&lt;global-agent-instructions scope="workspace"&gt;');
+    expect(text).toContain('Before &lt;nested data-value="a&amp;b"&gt;inside&lt;/nested&gt; after');
+    expect(text).toContain("&lt;/global-agent-instructions&gt; in your context?");
+    expect(text).toContain("Comparison: 2 &lt; 3 and 5 &gt; 4.");
+    expect(markup).not.toMatch(/<(?:global-agent-instructions|nested)(?:\s|>)/);
   });
 
   it("preserves XML-like source inside user code spans and fences", async () => {
@@ -845,8 +878,9 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toMatch(/<code[^>]*>&lt;tag attr=&quot;x&quot;&gt;<\/code>/);
-    expect(markup).toContain("&lt;root&gt;&lt;child enabled=&quot;true&quot; /&gt;&lt;/root&gt;");
+    const text = markup.replaceAll("&quot;", '"');
+    expect(text).toMatch(/<code[^>]*>&lt;tag attr="x"&gt;<\/code>/);
+    expect(text).toContain('&lt;root&gt;&lt;child enabled="true" /&gt;&lt;/root&gt;');
   });
 
   it("does not render markdown title attributes in user messages", async () => {
@@ -865,8 +899,9 @@ describe("MessagesTimeline", () => {
 
     expect(markup).toContain('href="https://example.com"');
     expect(markup).toContain('src="https://example.com/image.png"');
-    expect(markup).not.toContain('title="link tip"');
-    expect(markup).not.toContain('title="image tip"');
+    // Words keeps an image's title as data-markdown-title for copying, which no tooltip reads.
+    expect(markup).not.toMatch(/\stitle="link tip"/);
+    expect(markup).not.toMatch(/\stitle="image tip"/);
   });
 
   it("renders unsafe user HTML as inert source text", async () => {
@@ -935,7 +970,10 @@ describe("MessagesTimeline", () => {
     expect(markup).not.toContain("onclick=");
     expect(markup).not.toContain("onerror=");
     expect(markup).not.toContain("javascript:");
-    expect(markup).not.toContain("globalThis.__t3Xss");
+    // GFM's tag filter shows a raw <script> as inert text, as GitHub does; no other vector survives.
+    const inertScript = "&lt;script&gt;globalThis.__t3Xss = 2&lt;/script&gt;";
+    expect(markup).toContain(inertScript);
+    expect(markup.replace(inertScript, "")).not.toContain("globalThis.__t3Xss");
   });
   it("renders progressive history controls ahead of the bounded timeline", () => {
     const markup = renderToStaticMarkup(
@@ -2244,8 +2282,8 @@ describe("MessagesTimeline", () => {
         expect(content).not.toContain("Inspect the package");
         if (result?.trim() && result !== preview) expect(content).not.toContain(result);
         if (progress && progress !== preview) expect(content).not.toContain(progress);
-        await act(() => child()[0]!.props.onClick());
-        expect(onOpenThread).toHaveBeenCalledWith("thread-subagent-1");
+        await act(() => click(child()[0]!));
+        expect(onOpenThread).toHaveBeenCalledWith("thread-subagent-1", undefined, "primary");
         if (count > 1) {
           await act(() => group().props.onClick({ nativeEvent: new Event("click") }));
           expect(child()).toHaveLength(0);
@@ -2789,9 +2827,9 @@ describe("MessagesTimeline", () => {
               node.props.role === "button" &&
               typeof node.props["aria-expanded"] === "boolean",
           )[0]!;
-        await act(() => row().props.onClick());
+        await act(() => click(row()));
         expect(renderer!.root.findAllByType("strong")).toHaveLength(strongCount);
-        await act(() => row().props.onClick());
+        await act(() => click(row()));
         expect(previewText()).toContain(expected);
         expect(renderer!.root.findAllByType("strong")).toHaveLength(0);
       } finally {
@@ -2830,12 +2868,12 @@ describe("MessagesTimeline", () => {
           />,
         );
       });
-      await act(() => renderer!.root.findByProps({ "aria-expanded": false }).props.onClick());
+      await act(() => click(renderer!.root.findByProps({ "aria-expanded": false })));
       const expanded = renderer!.root.findAll(
         (node) => node.type === "div" && node.props["aria-expanded"] === true,
       )[0]!;
       expect(expanded).toBeDefined();
-      await act(() => expanded.props.onClick());
+      await act(() => click(expanded));
       expect(
         renderer!.root.findAll(
           (node) => node.type === "div" && node.props["aria-expanded"] === true,
@@ -2963,7 +3001,7 @@ describe("fork timeline behavior", () => {
         // The question leads the collapsed row so the exchange reads as a
         // question and answer without expanding (heading + accessible label).
         expect(JSON.stringify(renderer!.toJSON()).match(/Provide a spec/g)).toHaveLength(2);
-        await act(() => questionToggle.props.onClick());
+        await act(() => click(questionToggle));
         const markup = JSON.stringify(renderer!.toJSON());
         // Expanded, the question also appears in the history: label, heading, history.
         expect(markup.match(/Provide a spec/g)).toHaveLength(3);
@@ -2971,7 +3009,7 @@ describe("fork timeline behavior", () => {
         expect(markup).toContain("Provide a screenshot");
         expect(markup).toContain("shot.png");
         for (const answer of Object.values(answers)) expect(markup).toContain(answer);
-        await act(() => questionToggle.props.onClick());
+        await act(() => click(questionToggle));
         // Collapsing hides the history but keeps the question heading.
         expect(JSON.stringify(renderer!.toJSON())).toContain("Provide a spec");
       } finally {
