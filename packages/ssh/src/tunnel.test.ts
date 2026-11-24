@@ -2307,9 +2307,16 @@ server.listen(Number(flag("--port")), "127.0.0.1", () => {
 
         const script = yield* fs.readFileString(launch);
         assert.include(script, 'wait_ready "60000"');
+        assert.include(script, 'wait_ready "2000"');
+        assert.include(script, '"$1" "1000"');
+        // The stopping check probes before the readiness wait, and a paused server makes every
+        // probe run to its timeout, so shorten the probes too.
         yield* fs.writeFileString(
           launch,
-          script.replaceAll('wait_ready "60000"', 'wait_ready "1500"'),
+          script
+            .replaceAll('wait_ready "60000"', 'wait_ready "1500"')
+            .replaceAll('wait_ready "2000"', 'wait_ready "100"')
+            .replaceAll('"$1" "1000"', '"$1" "250"'),
         );
         process.kill(pid, "SIGSTOP");
         const result = yield* runLaunchScript;

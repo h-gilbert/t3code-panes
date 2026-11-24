@@ -209,7 +209,11 @@ it.effect("runs background Git in its own lane so user commands never queue behi
     yield* Deferred.succeed(gate, undefined);
     assert.equal((yield* Fiber.join(background)).length, 12);
     assert.equal((yield* Fiber.join(foreground)).length, 4);
-  }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+  }).pipe(
+    // macOS looks up git with real file I/O before each spawn, which the test clock cannot settle.
+    Effect.provideService(HostProcess.Platform, "linux"),
+    Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+  ),
 );
 
 describe("Git output collection", () => {
