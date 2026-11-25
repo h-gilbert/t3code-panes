@@ -226,7 +226,7 @@ export function makeAntigravityAcpAdapterFlavor(
     supportsNativeGoals: options.supportsNativeGoals ?? Effect.succeed(false),
     // Agents that advertise HTTP MCP skip the stdio bridge process; others keep stdio.
     mcpOverHttp: true,
-    // Antigravity silently omits eager MCP tools whose serialized declaration exceeds ~2 KiB.
+    // Antigravity silently drops the largest eager MCP tools when the combined list exceeds ~59 KB.
     compactToolSchemas: true,
     sessionCarriesPullRequestLinking: antigravityAppendsSystemPrompt,
     makeRuntime,

@@ -212,13 +212,15 @@ already contains text. Preserve this when integrating upstream composer changes.
   has cleanup left to do. Settled threads and subagents still end quietly. See `merged` in
   `apps/server/src/orchestration-v2/PullRequestWatchReactor.ts` and its test in
   `runtimeLayer.test.ts`.
-- Antigravity (`agy`) silently drops eager MCP tools whose serialized declaration exceeds
-  ~2 KiB (`preview_open`, `preview_navigate`, `preview_act`, `schedule_task`,
-  `t3_thread_launch`, `t3_settings_update`). Keep `compactToolSchemas: true` on
-  `AntigravityAdapterV2` and Antigravity ACP registry entries (`t3-tool-schema-budget: compact`
-  header + `T3_ACP_MCP_TOOL_SCHEMA_BUDGET=compact` stdio env), and keep `advertisedJsonSchema.ts`
-  flattening annotation-only `allOf` wrappers and compacting oversized `tools/list` entries under
-  the Antigravity byte ceiling while preserving full server-side decode validation.
+- Antigravity (`agy`) silently drops the largest eager MCP tools when the combined `tools/list`
+  schema payload exceeds ~59 KB raw JSON (previously misdiagnosed as a ~2 KiB per-tool cap,
+  which left `request_secret`, `preview_act`, `html_render`, `device_open`, and
+  `t3_project_update` dropped). Keep `compactToolSchemas: true` on `AntigravityAdapterV2` and
+  Antigravity ACP registry entries (`t3-tool-schema-budget: compact` header +
+  `T3_ACP_MCP_TOOL_SCHEMA_BUDGET=compact` stdio env), and keep `advertisedJsonSchema.ts`
+  flattening annotation-only `allOf` wrappers and compacting `tools/list` under both the
+  per-tool and aggregate Antigravity byte ceilings while preserving full server-side decode
+  validation.
 - Updating source does not authorize replacing or restarting the installed app.
   Follow `docs/operations/fork-releases.md` for an authorized release and
   `docs/operations/local-desktop-promotion.md` for a requested one-off local install.

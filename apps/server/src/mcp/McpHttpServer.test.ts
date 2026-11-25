@@ -56,6 +56,7 @@ import * as ServerHttp from "../http.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import {
   advertisedJsonSchema,
+  COMPACT_MCP_TOOL_LIST_MAX_JSON_BYTES,
   COMPACT_MCP_TOOL_MAX_JSON_BYTES,
   COMPACT_MCP_TOOL_MAX_PARAMS_BYTES,
   mcpToolWireBytes,
@@ -2697,8 +2698,10 @@ it.effect(
         const fullOpen = full.tools.find((entry) => entry.name === "preview_open")!;
         const compactOpen = compact.tools.find((entry) => entry.name === "preview_open")!;
         expect(mcpToolWireBytes(fullOpen).total).toBeGreaterThan(COMPACT_MCP_TOOL_MAX_JSON_BYTES);
+        let compactListTotalBytes = 0;
         for (const tool of compact.tools) {
           const bytes = mcpToolWireBytes(tool);
+          compactListTotalBytes += bytes.total;
           expect(bytes.total, `${tool.name} total bytes`).toBeLessThanOrEqual(
             COMPACT_MCP_TOOL_MAX_JSON_BYTES,
           );
@@ -2706,6 +2709,7 @@ it.effect(
             COMPACT_MCP_TOOL_MAX_PARAMS_BYTES,
           );
         }
+        expect(compactListTotalBytes).toBeLessThanOrEqual(COMPACT_MCP_TOOL_LIST_MAX_JSON_BYTES);
         expect(compactOpen.description).toBe(fullOpen.description);
       }),
     ).pipe(Effect.provide(NodeHttpServer.layerTest)),

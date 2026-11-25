@@ -18,10 +18,11 @@ import { GitWorkflowService } from "../git/GitWorkflowService.ts";
 import { TaskFolders } from "../workspace/TaskFolders.ts";
 import * as McpHttpServer from "../mcp/McpHttpServer.ts";
 import {
+  COMPACT_MCP_TOOL_LIST_MAX_JSON_BYTES,
   COMPACT_MCP_TOOL_MAX_JSON_BYTES,
   COMPACT_MCP_TOOL_MAX_PARAMS_BYTES,
   mcpToolWireBytes,
-  compactMcpToolForSizeBudget,
+  compactMcpToolsForSizeBudget,
 } from "../mcp/advertisedJsonSchema.ts";
 import { PreviewAutomationBroker } from "../mcp/PreviewAutomationBroker.ts";
 import {
@@ -178,16 +179,21 @@ it.effect("agent context matches the committed budget", () =>
       "Set agentContextBudget.json to the measured values. Before you cut text to fit, run the evals that cover it (evals/README.md).",
     ).toEqual(budget);
 
-    // Every registered tool must also compact under Antigravity's per-tool schema ceiling.
-    for (const { tool } of mcp.tools) {
-      const compacted = compactMcpToolForSizeBudget(tool);
+    // The full registered tool list must compact under Antigravity's aggregate and per-tool ceilings.
+    const compactedTools = compactMcpToolsForSizeBudget(mcp.tools.map(({ tool }) => tool));
+    let compactListTotalBytes = 0;
+    for (const compacted of compactedTools) {
       const { total: totalBytes, params: paramsBytes } = mcpToolWireBytes(compacted);
-      expect(totalBytes, `${tool.name} compact total bytes`).toBeLessThanOrEqual(
+      compactListTotalBytes += totalBytes;
+      expect(totalBytes, `${compacted.name} compact total bytes`).toBeLessThanOrEqual(
         COMPACT_MCP_TOOL_MAX_JSON_BYTES,
       );
-      expect(paramsBytes, `${tool.name} compact params bytes`).toBeLessThanOrEqual(
+      expect(paramsBytes, `${compacted.name} compact params bytes`).toBeLessThanOrEqual(
         COMPACT_MCP_TOOL_MAX_PARAMS_BYTES,
       );
     }
+    expect(compactListTotalBytes, "compact tools/list total bytes").toBeLessThanOrEqual(
+      COMPACT_MCP_TOOL_LIST_MAX_JSON_BYTES,
+    );
   }).pipe(Effect.provide(layerAdvertisedTools)),
 );

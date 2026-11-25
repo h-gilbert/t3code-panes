@@ -4,9 +4,11 @@ import { Tool } from "effect/ai";
 
 import {
   advertisedJsonSchema,
+  COMPACT_MCP_TOOL_LIST_MAX_JSON_BYTES,
   COMPACT_MCP_TOOL_MAX_JSON_BYTES,
   COMPACT_MCP_TOOL_MAX_PARAMS_BYTES,
   compactMcpToolForSizeBudget,
+  compactMcpToolsForSizeBudget,
   compactToolsListResponseText,
   mcpToolWireBytes,
 } from "./advertisedJsonSchema.ts";
@@ -171,4 +173,42 @@ it("compacts oversized tools under Antigravity's per-tool byte budget without al
   expect(
     compactToolsListResponseText(`data: {"jsonrpc":"2.0","id":2,"result":{"ok":true}}\n\n`),
   ).toBeUndefined();
+});
+
+it("compacts an aggregate tools/list under Antigravity's total eager MCP budget", () => {
+  const tools = Array.from({ length: 6 }, (_, index) => ({
+    name: `tool_${index}`,
+    description: `Keep full top-level description for tool ${index}.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        target: {
+          type: "string",
+          minLength: 1,
+          maxLength: 500,
+          description:
+            `Verbose parameter guidance that repeats the top-level summary for tool ${index}. `.repeat(
+              4,
+            ),
+        },
+        flag: { type: "boolean", description: "Short hint." },
+      },
+      required: ["target"],
+    },
+  }));
+  const rawTotal = tools.reduce((sum, tool) => sum + mcpToolWireBytes(tool).total, 0);
+  const targetBudget = Math.floor(rawTotal * 0.55);
+
+  const compacted = compactMcpToolsForSizeBudget(tools, { maxListBytes: targetBudget });
+  const compactedTotal = compacted.reduce((sum, tool) => sum + mcpToolWireBytes(tool).total, 0);
+
+  expect(compactedTotal).toBeLessThanOrEqual(targetBudget);
+  expect(compacted.map((tool) => tool.description)).toEqual(tools.map((tool) => tool.description));
+  for (const tool of compacted) {
+    const props = (tool.inputSchema as { properties: Record<string, unknown> }).properties;
+    expect(Object.keys(props)).toEqual(["target", "flag"]);
+  }
+  expect(
+    compactMcpToolsForSizeBudget(tools, { maxListBytes: COMPACT_MCP_TOOL_LIST_MAX_JSON_BYTES }),
+  ).toBe(tools);
 });
